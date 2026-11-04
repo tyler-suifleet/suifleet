@@ -14,166 +14,643 @@
     {
       "step": "sign-in",
       "file": "sign-in.webm",
-      "file_sha256": "d8689050af05d40f57c0b07bdfca8df55aa8616cfc17c846776b6c7c08682433",
+      "file_sha256": "8477a36b50706afdf102fedd53a7c3f4ee1feb3e1aca492eeea2dd3b44302b26",
       "fallback": "sign-in.mp4",
-      "fallback_sha256": "aaf0653deb75746ef24089aca1b6782aaa52b461726bdcda1ea51063e10e3426",
+      "fallback_sha256": "9a225b0fd60f6ccfc44fb8f27f756527dd3d665ded0abd35aaf9c7da8a7bfe0f",
       "poster": "sign-in.jpg",
       "poster_sha256": "03dfbcf9ba2c7561ae38efdb17fcff063ca86327806cc4e4e5b2ed6244aea9f9",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 19.6,
+      "duration_seconds": 28.04,
       "caption": "Screencast: Sign in.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "8R7FPNTUT8ghdhWwmdQFtXfc1FSo5JZHAs7HV6gRptj6"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "d8689050af05d40f57c0b07bdfca8df55aa8616cfc17c846776b6c7c08682433",
+        "cues": [
+          {
+            "text": "Welcome to SuiFleet. Click Connect Wallet and choose Slush, an extension, or Google where available.",
+            "source_start": 0,
+            "source_end": 4.607,
+            "start": 0,
+            "duration": 6.88,
+            "speech_start": 0.2,
+            "speech_end": 6.344
+          },
+          {
+            "text": "This recording uses a scripted test wallet in place of Slush; approve the connection.",
+            "source_start": 4.607,
+            "source_end": 6.027,
+            "start": 6.88,
+            "duration": 5.64,
+            "speech_start": 7.08,
+            "speech_end": 11.986666666666666
+          },
+          {
+            "text": "Connected: the card shows your address and the network (Testnet).",
+            "source_start": 6.027,
+            "source_end": 8.676,
+            "start": 12.52,
+            "duration": 4.0,
+            "speech_start": 12.719999999999999,
+            "speech_end": 16.005333333333333
+          },
+          {
+            "text": "First time only: create your default fleet, then approve the transaction.",
+            "source_start": 8.676,
+            "source_end": 14.932,
+            "start": 16.52,
+            "duration": 6.28,
+            "speech_start": 16.72,
+            "speech_end": 21.050666666666665
+          },
+          {
+            "text": "Your fleet is selected in the Fleet switcher. Next: fund its network budget.",
+            "source_start": 14.932,
+            "source_end": 19.64,
+            "start": 22.8,
+            "duration": 5.24,
+            "speech_start": 23.0,
+            "speech_end": 27.522666666666666
+          }
+        ]
+      }
     },
     {
       "step": "fund",
       "file": "fund.webm",
-      "file_sha256": "9c74621b836568659c88aaab697ac0d59c43b5d1114957af6f3b7f5628c2e1cc",
+      "file_sha256": "a9cccd9dec0a9af672933954fe133e8fa74de712406c6037ab145d49ddba6807",
       "fallback": "fund.mp4",
-      "fallback_sha256": "80dd8cf18dc7f6db5de10b86cc678d32de940999cde1a981791b72dc90a7f021",
+      "fallback_sha256": "fec24dc45698e77d456378a3a0a621ffdd0cd79496b7c86b2647b2e4348b2e05",
       "poster": "fund.jpg",
       "poster_sha256": "8605a18fad95037099c85493788e106928720e7e3d08e7935ed1794187613aa6",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 15.2,
+      "duration_seconds": 22.64,
       "caption": "Screencast: Fund the network budget.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "5eWdwvw1cJAPxptFiV7V57t6RNhb5eXNf8CoYrnahSbG"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "9c74621b836568659c88aaab697ac0d59c43b5d1114957af6f3b7f5628c2e1cc",
+        "cues": [
+          {
+            "text": "Choose Network budget in the sidebar.",
+            "source_start": 0,
+            "source_end": 3.856,
+            "start": 0,
+            "duration": 3.88,
+            "speech_start": 0.2,
+            "speech_end": 2.248
+          },
+          {
+            "text": "Enter a deposit in Sui. Devices draw report and storage fees from this budget, within your limits.",
+            "source_start": 3.856,
+            "source_end": 6.362,
+            "start": 3.88,
+            "duration": 7.0,
+            "speech_start": 4.08,
+            "speech_end": 10.352
+          },
+          {
+            "text": "Approve the deposit in your wallet. A budget is created only if your fleet needs one.",
+            "source_start": 6.362,
+            "source_end": 11.129,
+            "start": 10.879999999999999,
+            "duration": 5.88,
+            "speech_start": 11.079999999999998,
+            "speech_end": 16.221333333333334
+          },
+          {
+            "text": "Confirmed. The balance under Keep devices reporting now covers device activity.",
+            "source_start": 11.129,
+            "source_end": 15.28,
+            "start": 16.759999999999998,
+            "duration": 5.88,
+            "speech_start": 16.959999999999997,
+            "speech_end": 22.122666666666664
+          }
+        ]
+      }
     },
     {
       "step": "register-device",
       "file": "register-device.webm",
-      "file_sha256": "3d3bf8110188d9deede3a70b55b63f437b87ada746eb0949c66def854fdee7be",
+      "file_sha256": "4146573a69e8eb84f4230397e24adfcbee1915ad04ba12178621a8dddbf0b5a9",
       "fallback": "register-device.mp4",
-      "fallback_sha256": "17ea70e6e9bf86f9bcd7df6690b1e502ddb9fef72e4dd71c09925028a00ff8c5",
+      "fallback_sha256": "faa5b16d568d8a00ea0b8eea6d91bb593d6cea6fbea97edda32ffee668e94620",
       "poster": "register-device.jpg",
       "poster_sha256": "4885706ecab4d544cceb753911d291d8ca88bbc54da5c68a9867ca4e747017bf",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 19.3,
+      "duration_seconds": 21.04,
       "caption": "Screencast: Register a device.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "Dgcmu9q7RYr7i4s7qTtQNEzjJuaPjJ8xVugGQjJUqAeS"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "3d3bf8110188d9deede3a70b55b63f437b87ada746eb0949c66def854fdee7be",
+        "cues": [
+          {
+            "text": "Choose Devices in the sidebar.",
+            "source_start": 0,
+            "source_end": 2.882,
+            "start": 0,
+            "duration": 2.92,
+            "speech_start": 0.2,
+            "speech_end": 2.056
+          },
+          {
+            "text": "Click Register by address. The address comes from the device: the client\u2019s derive-address command.",
+            "source_start": 2.882,
+            "source_end": 9.52,
+            "start": 2.92,
+            "duration": 6.64,
+            "speech_start": 3.12,
+            "speech_end": 8.815999999999999
+          },
+          {
+            "text": "Click Register and approve the transaction.",
+            "source_start": 9.52,
+            "source_end": 16.0,
+            "start": 9.559999999999999,
+            "duration": 6.48,
+            "speech_start": 9.759999999999998,
+            "speech_end": 12.255999999999998
+          },
+          {
+            "text": "Your device is registered. Health reports begin when its client starts.",
+            "source_start": 16.0,
+            "source_end": 19.36,
+            "start": 16.04,
+            "duration": 5.0,
+            "speech_start": 16.24,
+            "speech_end": 20.506666666666664
+          }
+        ]
+      }
     },
     {
       "step": "enroll-batch",
       "file": "enroll-batch.webm",
-      "file_sha256": "0ee0276ac63b941f226e4e16bc52fe2cc09634e89c60f9fe88d2c454567c26b7",
+      "file_sha256": "0c56b9366e88986b127bb0b24654956d9449dcbd842c528827b9f3645e641bd9",
       "fallback": "enroll-batch.mp4",
-      "fallback_sha256": "05fd7b9c8ab42c55e9bbb09cf2e988e3dd1676c4d811dad674f999fcb554f2af",
+      "fallback_sha256": "e4d1d3389027ea9a99199a775207fa28cae5324e12f6fdcff3d5070706458f93",
       "poster": "enroll-batch.jpg",
       "poster_sha256": "13d60a668984f3631500b6780482c2f02d6643a9e6d30e55ecd602db3f6244ac",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 29.7,
+      "duration_seconds": 37.04,
       "caption": "Screencast: Enroll a batch.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "4xvwDsUdq6qf4RtsscimwfygjeRenUrNp19n4PqFKus7",
         "EkEUpoA3ocKcwYWg3WAXXKJ1Kc8j6JYehGHHWePV7r1d"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "0ee0276ac63b941f226e4e16bc52fe2cc09634e89c60f9fe88d2c454567c26b7",
+        "cues": [
+          {
+            "text": "For a production batch, choose Enrollment in the sidebar.",
+            "source_start": 0,
+            "source_end": 2.832,
+            "start": 0,
+            "duration": 3.8,
+            "speech_start": 0.2,
+            "speech_end": 3.2933333333333334
+          },
+          {
+            "text": "First, create a batch policy: how many devices may enroll, and for how long.",
+            "source_start": 2.832,
+            "source_end": 12.119,
+            "start": 3.8,
+            "duration": 9.32,
+            "speech_start": 4.0,
+            "speech_end": 8.906666666666666
+          },
+          {
+            "text": "Next, reserve names and serial numbers: paste a roster CSV and click Check.",
+            "source_start": 12.119,
+            "source_end": 16.417,
+            "start": 13.120000000000001,
+            "duration": 5.92,
+            "speech_start": 13.32,
+            "speech_end": 18.504
+          },
+          {
+            "text": "Download the credentials: the only copy of the claim keys, for your factory provisioning media.",
+            "source_start": 16.417,
+            "source_end": 18.282,
+            "start": 19.04,
+            "duration": 6.48,
+            "speech_start": 19.24,
+            "speech_end": 25.0
+          },
+          {
+            "text": "Then register the claims in your fleet. Each device then enrolls itself at first boot.",
+            "source_start": 18.282,
+            "source_end": 29.8,
+            "start": 25.52,
+            "duration": 11.52,
+            "speech_start": 25.72,
+            "speech_end": 30.712
+          }
+        ]
+      }
     },
     {
       "step": "publish-version",
       "file": "publish-version.webm",
-      "file_sha256": "0f50277dac8e473884f585b0b4b7ca3b4707ba19fab19fe28dd703edc200d4f2",
+      "file_sha256": "2e04234c429b818ccfdc05fdab30eb7c69a43b1d87458b14c4ba6754c14e2069",
       "fallback": "publish-version.mp4",
-      "fallback_sha256": "9abf2be4d41296fe889732c266c3a4aac14302eda969334e70147c7f67d6a397",
+      "fallback_sha256": "d8e547639564d78c624ecfee27996d46f1f434a0bc5bff969c30596c3270a19c",
       "poster": "publish-version.jpg",
       "poster_sha256": "d7c29d137ab9fb951ab20a5ab722916a1c5981a1807926ad6c216d796f52ca36",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 77.6,
+      "duration_seconds": 84.8,
       "caption": "Screencast: Publish a version.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "96wTg5aQPAGJC2gVzxUybPu8h7cHh1DVauGWJZuMX13S",
         "BpDtwLRLfA4XhVK8kJqJe66pHHRzfEskeK83gPpiLaL8"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "0f50277dac8e473884f585b0b4b7ca3b4707ba19fab19fe28dd703edc200d4f2",
+        "cues": [
+          {
+            "text": "Choose Components in the sidebar to publish software.",
+            "source_start": 0,
+            "source_end": 5.625,
+            "start": 0,
+            "duration": 5.64,
+            "speech_start": 0.2,
+            "speech_end": 3.144
+          },
+          {
+            "text": "First time only: set up your publisher catalog and approve the transaction.",
+            "source_start": 5.625,
+            "source_end": 13.684,
+            "start": 5.64,
+            "duration": 8.08,
+            "speech_start": 5.84,
+            "speech_end": 10.384
+          },
+          {
+            "text": "Name the component and give the release a semantic version.",
+            "source_start": 13.684,
+            "source_end": 18.73,
+            "start": 13.719999999999999,
+            "duration": 5.08,
+            "speech_start": 13.919999999999998,
+            "speech_end": 17.333333333333332
+          },
+          {
+            "text": "Choose the platform and attach the artifact for it.",
+            "source_start": 18.73,
+            "source_end": 19.3,
+            "start": 18.799999999999997,
+            "duration": 3.44,
+            "speech_start": 18.999999999999996,
+            "speech_end": 21.70933333333333
+          },
+          {
+            "text": "Delivery: choose Confidential for proprietary software. This public demo artifact is published unencrypted.",
+            "source_start": 19.3,
+            "source_end": 23.087,
+            "start": 22.24,
+            "duration": 7.64,
+            "speech_start": 22.439999999999998,
+            "speech_end": 29.37333333333333
+          },
+          {
+            "text": "Review, then upload to Walrus and register the version. Approve the transaction.",
+            "source_start": 23.087,
+            "source_end": 73.541,
+            "start": 29.88,
+            "duration": 50.48,
+            "speech_start": 30.08,
+            "speech_end": 34.83733333333333
+          },
+          {
+            "text": "Version published. It is now in the library, ready to deploy.",
+            "source_start": 73.541,
+            "source_end": 77.68,
+            "start": 80.36,
+            "duration": 4.44,
+            "speech_start": 80.56,
+            "speech_end": 84.29333333333334
+          }
+        ]
+      }
     },
     {
       "step": "deploy-group",
       "file": "deploy-group.webm",
-      "file_sha256": "985b48dca00f4bc2154a949ca43e74b05ab5911c0ddcae4d0b78629440f46066",
+      "file_sha256": "b1f32d5361dd19559880d7ebf91bfcfb7525dac34f42fbc7d1bf4b176a26afa9",
       "fallback": "deploy-group.mp4",
-      "fallback_sha256": "1d966695baa51e7044c9be1d2d1143fc26b78709711852c30c5d82cb9543271f",
+      "fallback_sha256": "b8e121bf4d567133ad8e76960551bef951ddaf54da2fccc8eefabbcbb94bcb27",
       "poster": "deploy-group.jpg",
       "poster_sha256": "9a73055f1f8a0f199432522e177c35a15910d434be7b553c43eb18f9356d2a50",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 43.6,
+      "duration_seconds": 45.0,
       "caption": "Screencast: Deploy to a group.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "12qjJyk9JXvW1eeFP83og2PMQGc1dbrBQSfW7SQDgPFo",
         "DtSZShLbfWz3xoky2GEVPmty656tpteCfBtEEAjebNeK",
         "5icNZXRYoesVafsZ9DE6M3aS8RjxvgnAo2JDrsYQSJgN"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "985b48dca00f4bc2154a949ca43e74b05ab5911c0ddcae4d0b78629440f46066",
+        "cues": [
+          {
+            "text": "On Devices, open the Device groups tab and create a group.",
+            "source_start": 0,
+            "source_end": 12.201,
+            "start": 0,
+            "duration": 12.24,
+            "speech_start": 0.2,
+            "speech_end": 3.762666666666667
+          },
+          {
+            "text": "Click Manage and add the device to the group.",
+            "source_start": 12.201,
+            "source_end": 20.878,
+            "start": 12.24,
+            "duration": 8.68,
+            "speech_start": 12.44,
+            "speech_end": 14.914666666666665
+          },
+          {
+            "text": "In the component library, choose Deploy this version.",
+            "source_start": 20.878,
+            "source_end": 24.456,
+            "start": 20.92,
+            "duration": 3.68,
+            "speech_start": 21.12,
+            "speech_end": 24.064
+          },
+          {
+            "text": "Select the group as the target. This catalog release creates a one-shot deployment.",
+            "source_start": 24.456,
+            "source_end": 28.927,
+            "start": 24.6,
+            "duration": 5.72,
+            "speech_start": 24.8,
+            "speech_end": 29.813333333333333
+          },
+          {
+            "text": "Click Deploy and approve. Each device in the group checks its membership and applies it.",
+            "source_start": 28.927,
+            "source_end": 37.605,
+            "start": 30.32,
+            "duration": 8.68,
+            "speech_start": 30.52,
+            "speech_end": 35.49066666666667
+          },
+          {
+            "text": "Deployment created. Devices report signed results under Deployments.",
+            "source_start": 37.605,
+            "source_end": 43.6,
+            "start": 39.0,
+            "duration": 6.0,
+            "speech_start": 39.2,
+            "speech_end": 43.42400000000001
+          }
+        ]
+      }
     },
     {
       "step": "staged-rollout",
       "file": "staged-rollout.webm",
-      "file_sha256": "e2418d8ccc2e1c5e1ce4102f1e477c3791829fe25b3c1ded617f33a0bceadca6",
+      "file_sha256": "634cf4e5a83164c141dddd862ae53318c65e587e9423a68cd65003fdc1a04a6f",
       "fallback": "staged-rollout.mp4",
-      "fallback_sha256": "5fc04019fde4b84438df9a0a4052f15a3829ac94f2cf1d28b63a83c644a5280e",
+      "fallback_sha256": "c87cacb0ccd929ea16520d2fae1bd07201132a0f536bf5322b966c85dae19e78",
       "poster": "staged-rollout.jpg",
       "poster_sha256": "02987ae63282faf8f461dc0145171f109b2a465de446607c1f8c8cfb232ff6ae",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 35.4,
+      "duration_seconds": 39.0,
       "caption": "Screencast: Run a staged rollout.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "KgrEoJvvvhPEsWGMeoDSYFX4UMsXNXtbQaBWNtVYUof",
         "4WXdPcFmuz77L9WrHsE8hHvMcvahGTaHkSyeQtKwtYHU"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "e2418d8ccc2e1c5e1ce4102f1e477c3791829fe25b3c1ded617f33a0bceadca6",
+        "cues": [
+          {
+            "text": "Choose Rollouts in the sidebar to release in stages.",
+            "source_start": 0,
+            "source_end": 3.85,
+            "start": 0,
+            "duration": 3.88,
+            "speech_start": 0.2,
+            "speech_end": 3.2293333333333334
+          },
+          {
+            "text": "Open Create a gradual rollout and fill in the version, recipe and digests.",
+            "source_start": 3.85,
+            "source_end": 13.466,
+            "start": 3.88,
+            "duration": 9.64,
+            "speech_start": 4.08,
+            "speech_end": 8.773333333333333
+          },
+          {
+            "text": "List the cohorts, one line each; the first cohort goes first.",
+            "source_start": 13.466,
+            "source_end": 15.143,
+            "start": 13.52,
+            "duration": 4.48,
+            "speech_start": 13.719999999999999,
+            "speech_end": 17.496
+          },
+          {
+            "text": "Set the pacing, bake period and abort threshold, then create the rollout.",
+            "source_start": 15.143,
+            "source_end": 22.877,
+            "start": 18.0,
+            "duration": 7.76,
+            "speech_start": 18.2,
+            "speech_end": 22.57333333333333
+          },
+          {
+            "text": "Select the rollout, then admit the first devices after checking device health.",
+            "source_start": 22.877,
+            "source_end": 29.852,
+            "start": 25.759999999999998,
+            "duration": 7.0,
+            "speech_start": 25.959999999999997,
+            "speech_end": 30.503999999999998
+          },
+          {
+            "text": "The rollout advances only on healthy signed reports. Pause or abort at any time.",
+            "source_start": 29.852,
+            "source_end": 35.4,
+            "start": 32.76,
+            "duration": 6.24,
+            "speech_start": 32.96,
+            "speech_end": 38.464
+          }
+        ]
+      }
     },
     {
       "step": "access-policy",
       "file": "access-policy.webm",
-      "file_sha256": "50aabdc0c20fe01c55872ecb72f1aec748c967e224a43180673460ea6e2198dd",
+      "file_sha256": "a7e2a16f5f62ad599a643bd9a2bfc80e84b7d7d28af1ebe084892d5287ed0950",
       "fallback": "access-policy.mp4",
-      "fallback_sha256": "f5ad8c8ec65bfe9d3e211984f0333c5bd17d4f8b0e7c6ee4567e444ed796a6d1",
+      "fallback_sha256": "59be84215957831c6697a2a7dfde0c623b4a299fd266808aeaa44993433c0a8b",
       "poster": "access-policy.jpg",
       "poster_sha256": "f5692badce30331b685c7b50296a5d2f690ec57e76cf0b8605dae804d5f09838",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 18.1,
+      "duration_seconds": 21.44,
       "caption": "Screencast: Grant decryption.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "9TrsXUCruMUqSq6ZcXxiP2sjpdMU1iJiPpcshgKWTyDr",
         "HdTjG89yh3PLoyVLJuo934mRwYKn5HWKFDVdrPzPZ8CQ"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "50aabdc0c20fe01c55872ecb72f1aec748c967e224a43180673460ea6e2198dd",
+        "cues": [
+          {
+            "text": "Open Access policies. A policy controls decryption for confidential releases.",
+            "source_start": 0,
+            "source_end": 8.966,
+            "start": 0,
+            "duration": 9.0,
+            "speech_start": 0.2,
+            "speech_end": 5.362666666666667
+          },
+          {
+            "text": "Choose Group and select guide-pilot. Membership determines which devices may request keys.",
+            "source_start": 8.966,
+            "source_end": 14.0,
+            "start": 9.0,
+            "duration": 6.24,
+            "speech_start": 9.2,
+            "speech_end": 14.725333333333332
+          },
+          {
+            "text": "Revoking access stops future requests. It cannot recall software already decrypted.",
+            "source_start": 14.0,
+            "source_end": 18.08,
+            "start": 15.24,
+            "duration": 6.2,
+            "speech_start": 15.44,
+            "speech_end": 20.901333333333334
+          }
+        ]
+      }
     },
     {
       "step": "fleet-settings",
       "file": "fleet-settings.webm",
-      "file_sha256": "128d3d0977b1ddcd8757b62371492b5455315708788dffbc63adf9be80d4b537",
+      "file_sha256": "70f54275ad94a729fbae2ce6b432e26fa43939f91372027f4a16dd11c9360430",
       "fallback": "fleet-settings.mp4",
-      "fallback_sha256": "a70a303cf5a45001e7e708050814558f94cffb8ec08ddb11d3b0c4ae41408441",
+      "fallback_sha256": "7d403b9487f7818956ac738e7126415301b70ddde4db3074802b89ede072edad",
       "poster": "fleet-settings.jpg",
       "poster_sha256": "4e9ad34a8d6d3bf09c4b55f10cc6c60825d765b9a93d8ce115b0b3706b36724b",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 14.1,
+      "duration_seconds": 23.44,
       "caption": "Screencast: Choose fleet settings.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
         "9mWy3tAw8ofr6kuguDKzM4uAm3D7qSJfoM3naf7n6Z3Z"
-      ]
+      ],
+      "narration": {
+        "voice": "af_heart",
+        "language": "en-us",
+        "synthetic": true,
+        "source_sha256": "128d3d0977b1ddcd8757b62371492b5455315708788dffbc63adf9be80d4b537",
+        "cues": [
+          {
+            "text": "Open Fleet settings to choose reporting and update intervals.",
+            "source_start": 0,
+            "source_end": 1.931,
+            "start": 0,
+            "duration": 4.16,
+            "speech_start": 0.2,
+            "speech_end": 3.656
+          },
+          {
+            "text": "Review the estimate, then save. Saving settings does not add money to the budget.",
+            "source_start": 1.931,
+            "source_end": 3.815,
+            "start": 4.16,
+            "duration": 5.48,
+            "speech_start": 4.36,
+            "speech_end": 9.138666666666667
+          },
+          {
+            "text": "This small demo budget does not cover the estimate. Save anyway records settings only; it adds no funds.",
+            "source_start": 3.815,
+            "source_end": 7.875,
+            "start": 9.64,
+            "duration": 7.44,
+            "speech_start": 9.84,
+            "speech_end": 16.56
+          },
+          {
+            "text": "Devices apply settings at their next check. Network budget holds their funds separately.",
+            "source_start": 7.875,
+            "source_end": 14.2,
+            "start": 17.080000000000002,
+            "duration": 6.36,
+            "speech_start": 17.28,
+            "speech_end": 22.485333333333333
+          }
+        ]
+      }
     }
   ],
   "recording_tools_commit": "88012a7aa227019200861545933366facfac0059",
   "pointer_overlay": {
     "kind": "DOM pointer follows actual recording pointer events",
     "sha256": "fcae517e86af35d9cddf828db9ab9084147f3453633a678dad3b4e5a99bec4c1"
+  },
+  "narration": {
+    "engine": "kokoro-onnx",
+    "engine_version": "0.4.9",
+    "voice": "af_heart",
+    "voice_description": "Female, American English; synthetic Kokoro Heart voice",
+    "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+    "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+    "script_sha256": "d3a86243d5d425840749ad4db448e98a28f29f7ab3de2d34938af7cb838addbc"
   }
 }
