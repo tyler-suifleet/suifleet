@@ -22,6 +22,7 @@ const lines = readline.createInterface({ input: process.stdin })[Symbol.asyncIte
     const { moveType, verifyDeployment } = loader()('lib/deployment-manifest.ts');
     await verifyDeployment(client);
     let cursor, customerId = null;
+    const explicitCustomer = process.argv[6];
     do {
       const page = await client.listDynamicFields({ parentId: m.shared_objects.registry.id, cursor, limit: 100, include: { value: true } });
       for (const f of page.dynamicFields) {
@@ -32,6 +33,7 @@ const lines = readline.createInterface({ input: process.stdin })[Symbol.asyncIte
       if (page.hasNextPage && (!page.cursor || page.cursor === cursor)) throw Error('Incomplete customer discovery');
       cursor = page.hasNextPage ? page.cursor : undefined;
     } while (cursor);
+    if (explicitCustomer && explicitCustomer !== '-') customerId = normalizeSuiAddress(explicitCustomer);
     const existing = customerId ? await sub.customerAccount(client, customerId) : null;
     let offer = null, eligibleAt = null, reason = null;
     if (offerId !== '-') {
@@ -59,14 +61,19 @@ const lines = readline.createInterface({ input: process.stdin })[Symbol.asyncIte
       if ((net > 0n ? net : 0n) !== BigInt(entry.gas_mist)) throw Error('Gas ledger differs from effects');
       effects.push({ digest: entry.digest, gas, signed_net_gas_mist: net.toString() });
       for (const e of result.Transaction.events ?? []) {
-        for (const name of ['Deposited', 'Refunded']) if (e.eventType === `${m.type_origins['subscription::' + name]}::subscription::${name}`) {
+        for (const name of ['Deposited', 'PlanChanged', 'Collected', 'Refunded']) if (e.eventType === `${m.type_origins['subscription::' + name]}::subscription::${name}`) {
           const value = protocol['subscription_' + name + 'Bcs'].parse(e.bcs);
-          if (value.account_id !== expected || value.amount !== '1000') throw Error('Unexpected deposit/refund receipt');
+          if (value.account_id !== expected) continue;
+          if (name !== 'PlanChanged' && value.amount !== (name === 'Collected' || entry.digest === evidence.checkout.digests?.opened ? evidence.checkout.account.fee : '1000')) throw Error('Unexpected subscription receipt amount');
           events.push({ kind: name, digest: entry.digest, ...value });
         }
       }
     }
-    if (events.length !== 2 || events[0].kind !== 'Deposited' || events[1].kind !== 'Refunded') throw Error('Missing deposit or refund event');
+    if (evidence.checkout.digests) {
+      if (events.map(e => e.kind).join(',') !== 'Deposited,PlanChanged,Deposited,Collected,Refunded') throw Error('Missing checkout lifecycle event');
+      await sub.verifyPlan(client, evidence.checkout.digests.opened, evidence.checkout.account.customer_id, evidence.checkout.quote);
+      await sub.verifyDeposit(client, evidence.checkout.digests.deposited, sub.parsePayment(new URL(evidence.checkout.uri).hash));
+    } else if (events.length !== 2 || events[0].kind !== 'Deposited' || events[1].kind !== 'Refunded') throw Error('Missing deposit or refund event');
     const final = await sub.readAccount(client, expected, 'USDC');
     if (!final.cancelled || final.balance.value !== '0' || final.remaining !== '0') throw Error('Fixture was not restored to cancelled/empty');
     evidence.independent_grpc = { effects, events, final_account: final };

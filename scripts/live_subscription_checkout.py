@@ -26,12 +26,17 @@ def main():
     p.add_argument('--evidence', type=Path, required=True)
     p.add_argument('--build-sui', default='sui')
     p.add_argument('--existing-account', help='Explicit verified disposable fixture account; exercise deposit/receipt only')
+    p.add_argument('--customer', help='Explicit isolated customer; verified by frontend before signing')
     p.add_argument('--offer', help='Explicit compatible disposable offer; required for a bound customer')
     p.add_argument('--inspect-only', action='store_true', help='Read fixture and offer eligibility without signing or acquiring a lease')
     args = p.parse_args()
     if not args.inspect_only and not os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):
         raise RuntimeError('global machine-session lease required')
     retained = json.loads(args.state.read_text()) if args.state.exists() else None
+    if args.customer:
+        fixture = (retained or {}).get('isolated_fixture', {})
+        if not args.offer or not fixture.get('ready') or dm.object_id(args.customer) != fixture.get('customer'):
+            raise RuntimeError('Explicit customer requires the reconciled isolated fixture and selected offer')
     if retained and (any(t.get('status') != 'success' for t in retained['transactions']) or retained.get('prepay_started')) and not args.inspect_only:
         raise RuntimeError('Interrupted or completed checkout requires reconciliation; refusing replay')
     if args.existing_account and retained and len(retained['transactions']) != 1:
@@ -59,7 +64,7 @@ def main():
                     selected_offer = offers[0]
     discovery = json.loads(subprocess.check_output([
         'node', str(ROOT / 'scripts/live_subscription_checkout.cjs'), str(args.manifest),
-        '--discover', selected_offer or '-', AGENT], cwd=ROOT, text=True))
+        '--discover', selected_offer or '-', AGENT, args.customer or '-'], cwd=ROOT, text=True))
     if args.inspect_only or (discovery['reason'] and not args.existing_account):
         args.evidence.write_text(json.dumps({'fixture_preflight': discovery,
             'prior_allowance_used_mist': (retained or {}).get('allowance_used_mist', 0),

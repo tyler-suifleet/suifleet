@@ -38,6 +38,18 @@ class CheckoutPreflight(unittest.TestCase):
                 self.assertEqual(json.loads(ledger.read_text()), state)
             return json.loads(evidence.read_text()) if evidence.exists() else None
 
+    def test_explicit_customer_requires_recorded_ready_isolated_fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / 'state.json'
+            state.write_text(json.dumps({'transactions': [], 'allowance_used_mist': 5952761}))
+            argv = ['checkout', '--wallet', 'unused', '--manifest', 'unused',
+                    '--state', str(state), '--evidence', 'unused',
+                    '--customer', '0x1', '--offer', '0x2']
+            with patch('sys.argv', argv), patch.dict('os.environ', {'SUIFLEET_TESTNET_LOCK_TOKEN': 'offline'}), patch.object(checkout, 'Live') as live:
+                with self.assertRaisesRegex(RuntimeError, 'reconciled isolated fixture'):
+                    checkout.main()
+                live.assert_not_called()
+
     def test_bound_customer_stops_without_setup_or_payment(self):
         result = self.run_case()
         self.assertEqual(result['transactions_submitted'], 0)
