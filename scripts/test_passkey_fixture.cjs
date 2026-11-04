@@ -5,7 +5,8 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'sf198-fixture-'));
 const keys=path.join(root,'keys.json');
 const run=(extra={})=>spawnSync(process.execPath,['scripts/passkey_transaction.cjs'],{input:JSON.stringify({operation:'info',keys,...extra}),encoding:'utf8'});
 try {
- const missing=run({requireExistingKeys:true});assert.equal(missing.status,1);assert(!fs.existsSync(keys));
+ // Verify refusal left no files without a path-existence check before opening keys.
+ const missing=run({requireExistingKeys:true});assert.equal(missing.status,1);assert.deepEqual(fs.readdirSync(root),[]);
  const first=run();assert.equal(first.status,0,first.stderr);
  const metadata=JSON.parse(first.stdout);assert.equal(metadata.length,2);
  assert(metadata.every(k=>k.address.startsWith('0x')&&!('privateKey' in k)));

@@ -84,3 +84,27 @@ claimed. Physical/manual-wallet acceptance remains unrun in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32), and
 mainnet/production-provider acceptance in
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## PR #607 CodeQL repair
+
+Failed run `41923125540`, job `126900457902`, completed JavaScript analysis
+successfully but its SARIF gate reported one HIGH `js/file-system-race` at
+`scripts/test_passkey_fixture.cjs:14`. The earlier missing-key assertion used
+`existsSync(keys)` before the subsequent open of that path. Replace that
+check with an empty-directory assertion in the private temporary directory.
+The test still requires missing retained keys to fail without creating files;
+permission inspection and mutations still use the same open descriptor.
+No security gate or production fixture behavior changed.
+
+Repair verification:
+- `python3 -m unittest discover -s scripts/tests -p test_live_passkey.py -v`:
+  15 passed.
+- `node scripts/test_passkey_fixture.cjs` and
+  `node scripts/test_passkey_payment.cjs`: both PASS in `suifleet-sf221:localtest`
+  with `--network none`, read-only checkout and the locked SDK 2.36.0 mounted
+  from `/tmp/sf182-container-inspect/dapp/node_modules`.
+- Initial direct host Node attempts failed because this worktree has no installed
+  SDK; those attempts are not passed tests.
+- `git diff --check`: passed. Local CodeQL is unavailable; a fresh hosted scan
+  remains pending on the pushed repair, along with fresh independent review.
+  No hosted checks were rerun or polled by this repair worker.
