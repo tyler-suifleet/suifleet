@@ -1,3 +1,4 @@
+const {abortSite} = require('./abort_site.cjs');
 // SF-127: existing-object receipt migration, real old-package attacks (including
 // catalog handover), 1000-target storage measurement and bounded cleanup.
 // Run through scripts/test_protocol_localnet.py --receipt-shards (network none).
@@ -60,7 +61,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
       await client.waitForTransaction({ digest: result.FailedTransaction.digest });
       failures[label] = { digest: result.FailedTransaction.digest, status: result.FailedTransaction.status.error?.message ?? status };
     }
-    const code = (n, fn) => new RegExp(`abort code: ${n}, in '[^']*::${fn}'`);
+    const code = (n, fn) => new RegExp(`abort code: ${n}, in '[^']*::deployment_manager::${fn}'`);
     const shared = async (tx, id, mutable) => {
       const object = (await client.getObject({ objectId: id })).object;
       return tx.sharedObjectRef({ objectId: id, initialSharedVersion: object.owner.Shared.initialSharedVersion, mutable });
@@ -118,7 +119,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const handover = created(await execute("propose base catalog handover",tx),"::fleet_handover::Handover");
     tx = new Transaction();tx.moveCall({target:`${old}::fleet_handover::confirm`,arguments:[tx.object(handover),tx.object("0x6")]});await execute("confirm base catalog handover",tx,stranger);
     const oldHandover = async t => t.moveCall({target:`${old}::fleet_handover::deployment`,arguments:[await shared(t,handover,true),await shared(t,catalogDeployment,true),await shared(t,"0x6",false)]});
-    await attack("unsharded catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    await attack("unsharded catalog rejects old handover",owner,oldHandover,code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "handover", 5)));
     const tree = path.join(tmp, "head"); await fs.mkdir(tree);
     await fs.cp(path.join(root, "contracts/sources"), path.join(tree, "sources"), { recursive: true });
     for (const name of ["Move.toml", "Move.lock"]) await fs.copyFile(path.join(root, "contracts", name), path.join(tree, name));
@@ -145,41 +146,41 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const protocol = load("lib/fleet-protocol.ts");
     const call = (t, fn, args) => t.moveCall({ target: `${head}::deployment_manager::${fn}`, arguments: args });
     tx = new Transaction(); tx.moveCall({target:`${head}::component_catalog::begin_sharded_receipts`,arguments:[tx.object(catalogDeployment)]});await execute("shard catalog with inline schema 2",tx);
-    await attack("sharded catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    await attack("sharded catalog rejects old handover",owner,oldHandover,code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "handover", 5)));
     await attack("sharded catalog rejects old catalog delete",owner,async t => t.moveCall({target:`${old}::component_catalog::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),/dynamic_field/);
-    await attack("sharded catalog rejects old ordinary delete",owner,async t => t.moveCall({target:`${old}::deployment_manager::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),code(5,"delete_as"));
-    await attack("sharded catalog rejects old reports",owner,async t => t.moveCall({target:`${old}::deployment_manager::report_verified_status`,arguments:[await shared(t,catalogDeployment,true),await shared(t,registry,false),await owned(t,caps[0]),t.pure.u8(1)]}),code(5,"receipts_mut"));
+    await attack("sharded catalog rejects old ordinary delete",owner,async t => t.moveCall({target:`${old}::deployment_manager::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "delete_as", 5)));
+    await attack("sharded catalog rejects old reports",owner,async t => t.moveCall({target:`${old}::deployment_manager::report_verified_status`,arguments:[await shared(t,catalogDeployment,true),await shared(t,registry,false),await owned(t,caps[0]),t.pure.u8(1)]}),code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "receipts_mut", 5)));
     const catalogDirectory = await shards.readReceiptDirectory(client,catalogDeployment);
     assert.equal(catalogDirectory.original_schema,"2");assert.equal(catalogDirectory.ready,false);
     assert.equal((await app.readReceipts(client,catalogDeployment)).verified,false);
     tx = new Transaction();for (const root of catalogDirectory.roots) call(tx,"migrate_receipt_chunk",[tx.object(catalogDeployment),tx.object(root),tx.pure.u64(64)]);
     call(tx,"finish_receipt_migration",[tx.object(catalogDeployment)]);await execute("finish populated catalog migration",tx);
-    await attack("ready catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    await attack("ready catalog rejects old handover",owner,oldHandover,code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "handover", 5)));
     const listed = (await app.fetchDeploymentEvents(client,owner.toSuiAddress())).find(d=>d.deploymentId===catalogDeployment);
     assert.equal(listed.schemaVersion,"2");assert.deepEqual(listed.targetDevices,[devices[0]]);assert.deepEqual(listed.targetGroups,[]);assert.equal(listed.receiptsVerified,true);
     tx = new Transaction();call(tx,"report_status_v3",[tx.object(catalogDeployment),tx.object(catalogDirectory.roots[shards.receiptShardIndex(devices[0])]),tx.object(registry),tx.object(caps[0]),tx.pure.u8(1)]);await execute("catalog v3 report",tx);
     assert.equal((await app.readReceipts(client,catalogDeployment)).statuses[devices[0]],1);
     tx = new Transaction();call(tx,"begin_receipt_cleanup",[tx.object(catalogDeployment)]);await execute("retire catalog barrier",tx);
-    await attack("retiring catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    await attack("retiring catalog rejects old handover",owner,oldHandover,code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "handover", 5)));
     tx = new Transaction();for (const root of catalogDirectory.roots) {call(tx,"cleanup_receipt_chunk",[tx.object(catalogDeployment),tx.object(root),tx.pure.u64(64)]);call(tx,"retire_receipt_shard",[tx.object(catalogDeployment),tx.object(root)]);}
     tx.moveCall({target:`${head}::component_catalog::delete_deployment`,arguments:[tx.object(catalogDeployment)]});await execute("delete catalog after bounded retirement",tx);
     tx = new Transaction(); call(tx, "begin_sharded_receipts", [tx.object(deployment)]); await execute("begin v3 barrier", tx);
     const directory = await shards.readReceiptDirectory(client, deployment), roots = directory.roots;
     assert.equal(roots.length, 16); assert.equal(directory.ready, false);
-    await attack("old package report blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::report_verified_status`, arguments: [await shared(t, deployment, true), await shared(t, registry, false), await owned(t, caps[0]), t.pure.u8(2)] }), code(5, "receipts_mut"));
-    await attack("old delete blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::delete_deployment`, arguments: [await shared(t, deployment, true)] }), code(5, "delete_as"));
-    await attack("legacy read rejects v3", owner, async t => call(t, "receipt_status", [await shared(t, deployment, false), t.pure.id(devices[0])]), code(5, "receipt_status"));
+    await attack("old package report blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::report_verified_status`, arguments: [await shared(t, deployment, true), await shared(t, registry, false), await owned(t, caps[0]), t.pure.u8(2)] }), code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "receipts_mut", 5)));
+    await attack("old delete blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::delete_deployment`, arguments: [await shared(t, deployment, true)] }), code(5, abortSite(path.join(oldTree,"contracts"), "deployment_manager", "delete_as", 5)));
+    await attack("legacy read rejects v3", owner, async t => call(t, "receipt_status", [await shared(t, deployment, false), t.pure.id(devices[0])]), code(5, abortSite(path.join(root,"contracts"), "deployment_manager", "receipt_status", 5)));
     assert.equal((await app.readReceipts(client, deployment)).verified, false);
     tx = new Transaction();
     for (const root of roots) call(tx, "migrate_receipt_chunk", [tx.object(deployment), tx.object(root), tx.pure.u64(64)]);
     await execute("migration first bounded chunk", tx);
-    await attack("partial migration cannot finish", owner, async t => call(t, "finish_receipt_migration", [await shared(t, deployment, true)]), code(15, "finish_receipt_migration"));
+    await attack("partial migration cannot finish", owner, async t => call(t, "finish_receipt_migration", [await shared(t, deployment, true)]), code(15, abortSite(path.join(root,"contracts"), "deployment_manager", "finish_receipt_migration", 15)));
     tx = new Transaction();
     for (const root of roots) call(tx, "migrate_receipt_chunk", [tx.object(deployment), tx.object(root), tx.pure.u64(64)]);
     call(tx, "finish_receipt_migration", [tx.object(deployment)]); await execute("migration resume and finish", tx);
     assert.equal(Object.keys((await app.readReceipts(client, deployment)).statuses).length, 70);
     tx = new Transaction(); call(tx, "begin_sharded_receipts", [tx.object(deployment)]); call(tx, "finish_receipt_migration", [tx.object(deployment)]); await execute("idempotent migration retry", tx);
-    await attack("wrong shard rejected", owner, async t => call(t, "report_status_v3", [await shared(t, deployment, false), await shared(t, roots[(shards.receiptShardIndex(devices[0]) + 1) % 16], true), await shared(t, registry, false), await owned(t, caps[0]), t.pure.u8(1)]), code(14, "record_sharded"));
+    await attack("wrong shard rejected", owner, async t => call(t, "report_status_v3", [await shared(t, deployment, false), await shared(t, roots[(shards.receiptShardIndex(devices[0]) + 1) % 16], true), await shared(t, registry, false), await owned(t, caps[0]), t.pure.u8(1)]), code(14, abortSite(path.join(root,"contracts"), "deployment_manager", "record_sharded", 14)));
     // Independently signed, effects-checked PTBs with a float-sized gas budget.
     // First and last are single-receipt writes; intervening batches contain at most 5.
     const gas = [];
@@ -198,7 +199,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     assert.equal(statuses.verified, true); assert.equal(Object.keys(statuses.statuses).length, 1000);
     assert.ok(Object.values(statuses.statuses).every(s => s === 1));
     // The previous browser's direct final delete must fail on the real chain.
-    await attack("old browser skips retirement", owner, async t => call(t, "delete_deployment", [await shared(t, deployment, true)]), code(17, "finish_receipt_cleanup"));
+    await attack("old browser skips retirement", owner, async t => call(t, "delete_deployment", [await shared(t, deployment, true)]), code(17, abortSite(path.join(root,"contracts"), "deployment_manager", "finish_receipt_cleanup", 17)));
     await require('./receipt_test_helpers.cjs').deleteDeployment(client, t => execute('browser phased cleanup ' + Object.keys(digests).length, t), deployment);
     // Legacy unsharded deployments still take the final-delete path directly.
     tx = new Transaction(); call(tx, "create_deployment_verified", [tx.pure.string('legacy cleanup'), tx.pure.string('1'), tx.pure.string('recipe'), tx.pure.string('aa'.repeat(32)), tx.pure.string('bb'.repeat(32)), tx.pure.vector('id', []), tx.pure.vector('id', [devices[0]]), tx.object('0x6')]);

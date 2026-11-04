@@ -8,6 +8,7 @@ module sui_edge::security_policy {
     // and avoid repeated immediate loads or casts without changing numeric types.
     const SMALL_0: u64 = 0;
     const SMALL_1: u64 = 1;
+    const SMALL_2: u64 = 2;
     const SMALL_4: u64 = 4;
     const SMALL_7: u64 = 7;
     const SMALL_32: u64 = 32;
@@ -24,8 +25,8 @@ module sui_edge::security_policy {
     const EFactor: u64 = 1;
     const EUnavailable: u64 = 2;
     const ACTIONS: u64 = 7;
-    // Native multisig, second-person and delay; passkey remains unavailable.
-    const AVAILABLE: u8 = 13;
+    // Native multisig, passkey, second-person and delay are available.
+    const AVAILABLE: u8 = 15;
 
     // Separate fields preserve the published Policy and Action layouts/origins.
     public struct DelayKey has copy, drop, store {}
@@ -36,23 +37,26 @@ module sui_edge::security_policy {
     public struct DelayGrant has copy, drop, store { elapsed_ms: u64, transaction: vector<u8>, pause: bool }
     const EDelay: u64 = 3;
     /// One second through six days; expiry is independently bounded to seven days.
-    public(package) fun configure_delays(uid: &mut UID, milliseconds: vector<u64>, ctx: &TxContext) {
+    /// Package helper: configure_delays.
+    public(package) fun k0(uid: &mut UID, milliseconds: vector<u64>, ctx: &TxContext) {
         z0(milliseconds.length() == ACTIONS);
         let mut i = SMALL_0;
         while (i < ACTIONS) {
             z1(milliseconds[i] >= SMALL_1000); z1(milliseconds[i] <= SMALL_518400000);
             i = i + SMALL_1;
         };
-        configure_factor(uid, 8, vector[1], ctx);
+        k3(uid, 8, vector[1], ctx);
         if (df::exists(uid, DelayKey {})) {
             df::borrow_mut<DelayKey, Delays>(uid, DelayKey {}).milliseconds = milliseconds;
         } else df::add(uid, DelayKey {}, Delays { milliseconds });
     }
-    public(package) fun delays(uid: &UID): vector<u64> {
+    /// Package helper: delays.
+    public(package) fun k1(uid: &UID): vector<u64> {
         if (df::exists(uid, DelayKey {})) df::borrow<DelayKey, Delays>(uid, DelayKey {}).milliseconds
         else v0()
     }
-    public(package) fun queued_at(a: &Action): u64 {
+    /// Package helper: queued_at.
+    public(package) fun k2(a: &Action): u64 {
         // Legacy queue entries have no trustworthy timestamp and fail closed.
         z1(df::exists(&a.id, QueuedAtKey {}));
         df::borrow<QueuedAtKey, QueuedAt>(&a.id, QueuedAtKey {}).milliseconds
@@ -77,17 +81,21 @@ module sui_edge::security_policy {
     /// Only the future authenticated in-package verifier may enroll a source.
     /// Changing/replacing one uses every currently enforced class, never the
     /// proposed new source, and invalidates outstanding proofs.
-    public(package) fun configure_factor(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
+    /// Package helper: configure_factor.
+    public(package) fun k3(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
         if (!(factor == 1)) { if (!(factor == 2)) { if (!(factor == 4)) { z2(factor == 8); }; }; };
-        check_all(uid, ctx);
-        z0(!binding.is_empty()); z0(binding.length() <= SMALL_4096);
+        k9(uid, ctx);
+        z0(binding.length() <= SMALL_4096);
         let key = FactorKey { factor };
-        if (df::exists(uid, key)) {
+        if (binding.is_empty()) {
+            if (df::exists(uid, key)) { df::remove<FactorKey, FactorConfiguration>(uid, key); };
+        } else if (df::exists(uid, key)) {
             *df::borrow_mut<FactorKey, FactorConfiguration>(uid, key) = FactorConfiguration { binding };
         } else df::add(uid, key, FactorConfiguration { binding });
-        invalidate(uid);
+        k11(uid);
     }
-    public(package) fun factor_configuration(uid: &UID, factor: u8): vector<u8> {
+    /// Package helper: factor_configuration.
+    public(package) fun k4(uid: &UID, factor: u8): vector<u8> {
         let key = FactorKey { factor };
         if (df::exists(uid, key)) df::borrow<FactorKey, FactorConfiguration>(uid, key).binding else v0()
     }
@@ -97,41 +105,74 @@ module sui_edge::security_policy {
 
     public fun available(): u8 { AVAILABLE }
     public fun action_count(): u64 { ACTIONS }
-    public(package) fun initialize(uid: &mut UID) {
+    /// Package helper: initialize.
+    public(package) fun k5(uid: &mut UID) {
         z0(!df::exists(uid, PolicyKey {}));
         df::add(uid, PolicyKey {}, Policy { schema: SMALL_1, generation: SMALL_0,
             requirements: vector[0, 0, 0, 0, 0, 0, 0], transaction: v0(), attested: 0 });
     }
-    public(package) fun check(uid: &UID, action: u64, ctx: &TxContext) {
+    /// Package helper: check.
+    public(package) fun k6(uid: &UID, action: u64, ctx: &TxContext) {
         let p = df::borrow<PolicyKey, Policy>(uid, PolicyKey {});
         z0(p.schema == SMALL_1); z0(action < ACTIONS);
         let needed = p.requirements[action];
-        if (!(needed == 0)) { z2(p.transaction == *ctx.digest()); z2((p.attested & needed) == needed); };
+        let authenticated = h5(uid, ctx);
+        assert!((authenticated & needed) == needed || (p.transaction == *ctx.digest() && ((p.attested | authenticated) & needed) == needed), EFactor);
         if ((needed & 8) != 0) {
             z1(df::exists(uid, DelayGrantKey {}));
             let grant = df::borrow<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {});
-            let durations = delays(uid);
+            let durations = k1(uid);
             z1(grant.transaction == *ctx.digest()); z1(durations.length() == ACTIONS); z1(((grant.pause && action == SMALL_1) || grant.elapsed_ms >= durations[action]));
         };
     }
     /// Capability lending cannot be authorized by a wrapper grant: a caller
     /// could otherwise substitute any operation while holding the capability.
-    public(package) fun assert_unprotected(uid: &UID) {
-        let p = read(uid);
+    /// Package helper: assert_unprotected.
+    public(package) fun k7(uid: &UID) {
+        let p = k23(uid);
         let mut i = SMALL_0;
         while (i < ACTIONS) { z2(p.requirements[i] == 0); i = i + SMALL_1; };
     }
-    public(package) fun check_all(uid: &UID, ctx: &TxContext) {
+    /// Validator-verified same-digest sponsorship proves the enrolled passkey.
+    /// Private helper: passkey_attestation.
+    fun h5(uid: &UID, ctx: &TxContext): u8 {
+        let sponsor = ctx.sponsor();
+        if (sponsor.is_none() || *sponsor.borrow() == ctx.sender()) return 0;
+        let binding = k4(uid, 2);
+        if (binding.is_empty()) return 0;
+        let mut reader = sui::bcs::new(binding);
+        let entries = reader.peel_vec_address();
+        z0(reader.into_remainder_bytes().is_empty()); z0(entries.length() % SMALL_2 == 0);
         let mut i = SMALL_0;
-        while (i < ACTIONS) { check(uid, i, ctx); i = i + SMALL_1; };
+        while (i < entries.length()) {
+            if (entries[i] == ctx.sender() && entries[i + 1] == *sponsor.borrow()) return 2;
+            i = i + SMALL_2;
+        };
+        0
     }
-    public(package) fun update(uid: &mut UID, requirements: vector<u8>, ctx: &TxContext) {
+    /// Package helper: check_capability_loan.
+    public(package) fun k8(uid: &UID, ctx: &TxContext) {
+        let p = k23(uid);
+        let authenticated = h5(uid, ctx);
+        let mut i = SMALL_0;
+        while (i < ACTIONS) {
+            z2((p.requirements[i] & authenticated) == p.requirements[i]);
+            i = i + SMALL_1;
+        };
+    }
+    /// Package helper: check_all.
+    public(package) fun k9(uid: &UID, ctx: &TxContext) {
+        let mut i = SMALL_0;
+        while (i < ACTIONS) { k6(uid, i, ctx); i = i + SMALL_1; };
+    }
+    /// Package helper: update.
+    public(package) fun k10(uid: &mut UID, requirements: vector<u8>, ctx: &TxContext) {
         z0(requirements.length() == ACTIONS);
-        let current = read(uid);
-        check(uid, SMALL_4, ctx);
+        let current = k23(uid);
+        k6(uid, SMALL_4, ctx);
         let mut j = SMALL_0;
         while (j < ACTIONS) {
-            if ((current.requirements[j] & requirements[j]) != current.requirements[j]) check(uid, j, ctx);
+            if ((current.requirements[j] & requirements[j]) != current.requirements[j]) k6(uid, j, ctx);
             j = j + SMALL_1;
         };
         let mut i = SMALL_0;
@@ -140,7 +181,7 @@ module sui_edge::security_policy {
             assert!((requirements[i] & AVAILABLE) == requirements[i], EUnavailable);
             let mut bit = 1;
             while (bit <= 8) {
-                if ((requirements[i] & bit) != 0) z2(!factor_configuration(uid, bit).is_empty());
+                if ((requirements[i] & bit) != 0) z2(!k4(uid, bit).is_empty());
                 bit = bit * 2;
             };
             i = i + SMALL_1;
@@ -154,7 +195,8 @@ module sui_edge::security_policy {
         event::emit(PolicyChanged { customer_id, generation: p.generation, requirements });
     }
     /// Credential/configuration mutation invalidates every queued authorization.
-    public(package) fun invalidate(uid: &mut UID) {
+    /// Package helper: invalidate.
+    public(package) fun k11(uid: &mut UID) {
         if (df::exists(uid, DelayGrantKey {})) { df::remove<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {}); };
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         p.generation = p.generation + SMALL_1;
@@ -170,7 +212,8 @@ module sui_edge::security_policy {
     }
     // Reserved factor 0 is not configurable. On Customer it indexes pending
     // Action IDs; on Action it holds the disclosed public argument bytes.
-    public(package) fun pending(uid: &UID): vector<ID> {
+    /// Package helper: pending.
+    public(package) fun k12(uid: &UID): vector<ID> {
         if (df::exists(uid, FactorKey { factor: 0 })) *df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }) else v0()
     }
     /// Private helper: unindex.
@@ -189,7 +232,8 @@ module sui_edge::security_policy {
     fun h2(uid: &mut UID) {
         if (df::exists(uid, FactorKey { factor: 0 })) { df::remove<FactorKey, FactorConfiguration>(uid, FactorKey { factor: 0 }); };
     }
-    public(package) fun prepare_disclosed(uid: &mut UID, arguments_bcs: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+    /// Package helper: prepare_disclosed.
+    public(package) fun k13(uid: &mut UID, arguments_bcs: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         z0(!arguments_bcs.is_empty()); z0(arguments_bcs.length() <= 16384);
         if (!df::exists(uid, FactorKey { factor: 0 })) df::add(uid, FactorKey { factor: 0 }, vector<ID>[]);
         z0(df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).length() < 64);
@@ -205,14 +249,16 @@ module sui_edge::security_policy {
     }
     public struct ArgumentsKey has copy, drop, store {}
     public struct ActionArguments has copy, drop, store { bytes: vector<u8> }
-    public(package) fun prepare_with_arguments(uid: &UID, bytes: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+    /// Package helper: prepare_with_arguments.
+    public(package) fun k14(uid: &UID, bytes: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         z0(bytes.length() <= 65536);
         let intent = action_intent(uid.to_inner(), bytes);
         let mut a = h3(uid, intent, expires_ms, clock, ctx);
         df::add(&mut a.id, ArgumentsKey {}, ActionArguments { bytes });
         transfer::share_object(a);
     }
-    public(package) fun prepare(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+    /// Package helper: prepare.
+    public(package) fun k15(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         transfer::share_object(h3(uid, intent, expires_ms, clock, ctx));
     }
     /// Private helper: new_action.
@@ -220,7 +266,7 @@ module sui_edge::security_policy {
         z0(intent.length() == SMALL_32);
         let now = clock.timestamp_ms();
         z0(expires_ms > now); z0(expires_ms - now <= SMALL_604800000);
-        let p = read(uid);
+        let p = k23(uid);
         let mut a = Action { id: object::new(ctx), customer_id: uid.to_inner(), generation: p.generation,
             proposer: ctx.sender(), intent, expires_ms, attested: 0 };
         df::add(&mut a.id, QueuedAtKey {}, QueuedAt { milliseconds: now });
@@ -245,28 +291,32 @@ module sui_edge::security_policy {
     /// A child verifier checks its configured cryptographic/approval/timing
     /// evidence, current authority, intent and expiry before marking its bit.
     /// This function is package-only; no public generic witness is accepted.
-    public(package) fun attest(a: &mut Action, factor: u8) {
+    /// Package helper: attest.
+    public(package) fun k16(a: &mut Action, factor: u8) {
         if (!(factor == 1)) { if (!(factor == 2)) { if (!(factor == 4)) { z2(factor == 8); }; }; };
         a.attested = a.attested | factor;
     }
     /// Each protected wrapper computes its own canonical intent, consumes the
     /// action, performs one operation, then clears this internal stack-scoped
     /// grant before returning to the PTB. No public begin/end entry points.
-    public(package) fun begin(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, clock: &Clock, ctx: &TxContext) {
-        begin_scoped(uid, a, arguments, SMALL_7, false, clock, ctx);
+    /// Package helper: begin.
+    public(package) fun k17(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, clock: &Clock, ctx: &TxContext) {
+        k18(uid, a, arguments, SMALL_7, false, clock, ctx);
     }
     /// Class 7 is reserved for changes that require the union of current policy.
     /// Pause skips only delay; it cannot alter schedule, recipients or targets.
-    public(package) fun begin_scoped(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
-        begin_scoped_bytes(uid, a, bcs::to_bytes(&arguments), class, pause, clock, ctx);
+    /// Package helper: begin_scoped.
+    public(package) fun k18(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
+        k19(uid, a, bcs::to_bytes(&arguments), class, pause, clock, ctx);
     }
-    public(package) fun begin_scoped_bytes(uid: &mut UID, a: Action, arguments_bcs: vector<u8>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
+    /// Package helper: begin_scoped_bytes.
+    public(package) fun k19(uid: &mut UID, a: Action, arguments_bcs: vector<u8>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
         z0(class <= ACTIONS); z0((!pause || class == SMALL_1));
         let mut a = a;
-        let current = read(uid);
+        let current = k23(uid);
         let mut delay = SMALL_0;
         let mut required = 0;
-        let durations = delays(uid);
+        let durations = k1(uid);
         let mut j = SMALL_0;
         while (j < ACTIONS) {
             if (class == ACTIONS || class == j) {
@@ -279,7 +329,7 @@ module sui_edge::security_policy {
             j = j + SMALL_1;
         };
         let elapsed_ms = if (df::exists(&a.id, QueuedAtKey {})) {
-            let created = queued_at(&a);
+            let created = k2(&a);
             z1(clock.timestamp_ms() >= created);
             clock.timestamp_ms() - created
         } else { z1(delay == SMALL_0); SMALL_0 };
@@ -293,10 +343,11 @@ module sui_edge::security_policy {
         z0(customer_id == uid.to_inner()); z0(proposer == ctx.sender());
         z0(clock.timestamp_ms() < expires_ms);
         z0(intent == action_intent(uid.to_inner(), arguments_bcs));
+        let authenticated = h5(uid, ctx);
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         z0(p.schema == SMALL_1); z0(p.generation == generation);
         if (pause) required = required & 7;
-        z2((attested & required) == required);
+        z2(((attested | authenticated) & required) == required);
         p.transaction = *ctx.digest();
         p.attested = attested;
         h1(uid, id.to_inner());
@@ -304,12 +355,15 @@ module sui_edge::security_policy {
         h0(&mut id);
         id.delete();
     }
-    public(package) fun finish(uid: &mut UID) { invalidate(uid); }
-    public(package) fun cancel_disclosed(uid: &mut UID, a: Action) {
+    /// Package helper: finish.
+    public(package) fun k20(uid: &mut UID) { k11(uid); }
+    /// Package helper: cancel_disclosed.
+    public(package) fun k21(uid: &mut UID, a: Action) {
         h1(uid, object::id(&a));
         h4(uid.to_inner(), a);
     }
-    public(package) fun cancel(uid: &UID, a: Action) {
+    /// Package helper: cancel.
+    public(package) fun k22(uid: &UID, a: Action) {
         // The legacy immutable route cannot maintain the live pending index.
         z0(!df::exists(&a.id, FactorKey { factor: 0 }));
         h4(uid.to_inner(), a);
@@ -322,7 +376,8 @@ module sui_edge::security_policy {
         h0(&mut id);
         id.delete();
     }
-    public(package) fun read(uid: &UID): Policy { *df::borrow<PolicyKey, Policy>(uid, PolicyKey {}) }
+    /// Package helper: read.
+    public(package) fun k23(uid: &UID): Policy { *df::borrow<PolicyKey, Policy>(uid, PolicyKey {}) }
     public fun generation(p: &Policy): u64 { p.generation }
     public fun requirements(p: &Policy): vector<u8> { p.requirements }
 

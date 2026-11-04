@@ -92,7 +92,7 @@ module sui_edge::device_group {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        share_managed(new_managed(name, description, ctx.sender(), clock, ctx));
+        k3(k1(name, description, ctx.sender(), clock, ctx));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -102,7 +102,7 @@ module sui_edge::device_group {
         ctx: &TxContext,
     ) {
         q(ctx.sender() == group.admin, BNotAdmin);
-        add_managed(group, device_registry::device_id(device));
+        k4(group, device_registry::device_id(device));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -112,7 +112,7 @@ module sui_edge::device_group {
         ctx: &TxContext,
     ) {
         q(ctx.sender() == group.admin, BNotAdmin);
-        remove_managed(group, device_id);
+        k5(group, device_id);
     }
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
@@ -120,7 +120,7 @@ module sui_edge::device_group {
         q(ctx.sender() == group.admin, BNotAdmin);
         // Remaining MemberKey fields are orphaned with the group; remove
         // members first to reclaim their storage.
-        delete_managed(group);
+        k2(group);
     }
 
     /// Move up to `limit` members from `device_ids` into the MemberKey index,
@@ -150,21 +150,24 @@ module sui_edge::device_group {
     }
 
     /// Called only by the recipient-confirmed fleet handover protocol.
-    public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
+    /// Package helper: handover.
+    public(package) fun k0(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
         q(ctx.sender() == group.admin, BNotAdmin);
         group.admin = recipient;
     }
 
     /// Construct a group with the supplied admin. Managed callers use an object
     /// address: no wallet can sign as it through legacy add/remove/handover.
-    public(package) fun new_managed(name: String, description: String, admin: address,
+    /// Package helper: new_managed.
+    public(package) fun k1(name: String, description: String, admin: address,
         clock: &Clock, ctx: &mut TxContext): DeviceGroup {
         let group = DeviceGroup { id: object::new(ctx), name, description, admin,
             device_ids: vector[], created_at: clock.timestamp_ms(), schema_version: SCHEMA_VERSION };
         event::emit(GroupCreated { group_id: object::id(&group), name: group.name, admin });
         group
     }
-    public(package) fun delete_managed(mut group: DeviceGroup) {
+    /// Package helper: delete_managed.
+    public(package) fun k2(mut group: DeviceGroup) {
         if (is_indexed(&group)) {
             let _: GroupIndex = df::remove(&mut group.id, IndexKey {});
         };
@@ -172,8 +175,10 @@ module sui_edge::device_group {
         event::emit(GroupDeleted { group_id: id.to_inner(), admin });
         id.delete();
     }
-    public(package) fun share_managed(group: DeviceGroup) { transfer::share_object(group); }
-    public(package) fun add_managed(group: &mut DeviceGroup, device_id: ID) {
+    /// Package helper: share_managed.
+    public(package) fun k3(group: DeviceGroup) { transfer::share_object(group); }
+    /// Package helper: add_managed.
+    public(package) fun k4(group: &mut DeviceGroup, device_id: ID) {
         assert!(!contains_device(group, device_id), EDeviceAlreadyInGroup);
         if (is_indexed(group)) {
             df::add(&mut group.id, MemberKey { device_id }, true);
@@ -187,7 +192,8 @@ module sui_edge::device_group {
             device_id,
         });
     }
-    public(package) fun remove_managed(group: &mut DeviceGroup, device_id: ID) {
+    /// Package helper: remove_managed.
+    public(package) fun k5(group: &mut DeviceGroup, device_id: ID) {
         // An older package may have added an indexed member to the vector too:
         // remove it from both so it is no longer a member anywhere.
         let indexed = df::exists(&group.id, MemberKey { device_id });

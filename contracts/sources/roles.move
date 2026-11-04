@@ -135,7 +135,7 @@ module sui_edge::roles {
             assert!(role.groups.contains(&target_groups[i]), EOutsideScope);
             i = i + SMALL_1;
         };
-        let deployment_id = deployment_manager::create_delegated(role.operator, component_name, version,
+        let deployment_id = deployment_manager::k5(role.operator, component_name, version,
             recipe_blob_id, artifact_sha256, recipe_sha256, target_groups, clock, ctx);
         event::emit(DelegatedDeployment { deployment_id, role_id: object::id(role), operator: role.operator, delegate: ctx.sender() });
     }

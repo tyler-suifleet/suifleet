@@ -213,7 +213,8 @@ module sui_edge::device_registry {
     /// Explicit managed adoption replaces the owner capability in registry
     /// identity. Every pre-existing gas/data account bound to the old cap then
     /// fails, including accounts in legacy budgets unknown to the new fleet.
-    public(package) fun rebind_owner(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext): DeviceOwnerCap {
+    /// Package helper: rebind_owner.
+    public(package) fun k0(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext): DeviceOwnerCap {
         let device_id = cap.device_id;
         let old_id = object::id(&cap);
         let identity = *p1(registry, device_id);

@@ -234,7 +234,7 @@ module sui_edge::subscription_tests {
         ts::return_shared(c); ts::return_shared(a); ts::return_shared(clock); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let mut a = s.take_shared<Account<SUI>>();
         let mut action = s.take_shared<sui_edge::security_policy::Action>();
-        sui_edge::security_policy::attest(&mut action, 1);
+        sui_edge::security_policy::k16(&mut action, 1);
         let clock = s.take_shared<Clock>();
         let refund = subscription::cancel_secured(&mut a, &mut c, &clock, action, s.ctx());
         coin::burn_for_testing(refund);
@@ -257,7 +257,7 @@ module sui_edge::subscription_tests {
         let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
         let offer = s.take_immutable<Offer<SUI>>(); let clock = s.take_shared<Clock>();
         let mut action = s.take_shared<sui_edge::security_policy::Action>();
-        if (attest) sui_edge::security_policy::attest(&mut action, 1);
+        if (attest) sui_edge::security_policy::k16(&mut action, 1);
         let payment = s.take_from_sender<CoinType<SUI>>();
         let payment = if (substitute) { coin::burn_for_testing(payment); coin::mint_for_testing<SUI>(200, s.ctx()) } else payment;
         subscription::open_secured(&mut c, &r, &offer, payment, &clock, action, s.ctx());
@@ -287,7 +287,7 @@ module sui_edge::subscription_tests {
         let offer = s.take_immutable<Offer<SUI>>(); let mut clock = s.take_shared<Clock>();
         clock::set_for_testing(&mut clock, MONTH);
         let mut action = s.take_shared<sui_edge::security_policy::Action>();
-        sui_edge::security_policy::attest(&mut action, 1);
+        sui_edge::security_policy::k16(&mut action, 1);
         subscription::renew_secured(&mut a, &mut c, &offer, &clock, action, s.ctx());
         ts::return_shared(c); ts::return_shared(a); ts::return_shared(clock); ts::return_immutable(offer);
         s.next_tx(OWNER); collect(&mut s, MONTH); s.end();

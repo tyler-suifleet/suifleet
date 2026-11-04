@@ -1627,26 +1627,16 @@ hand off without merging, installing, replaying wallet work or polling hosted CI
 The 2026-11-01 local infrastructure integration authorization applies to this
 contained coordinator repair and its actual main-combined offline validation.
 
-SF-182's bounded recovery extends that diagnostic recognition to `EUC01006`
-(module missing), with the same unchanged-source-contract proof and all existing
-run, artifact, accounting and stopped-worker fences. Its
-[historical exact-run replay](validation/sf182-stale-base-repair.json) authenticates
-run 41791378072 and its 799,286,156 MIST setup ledger through the repaired reader.
-The replay uses an isolated scheduler fixture; it is not installed routing, a
-current candidate receipt or feature acceptance. The installed generation still
-needs the repair through sole-coordinator merged-only activation. Source/base
-movement requires fresh evidence, and every real combined candidate still needs
-independent review and actual protected testnet acceptance. The checkout fixture
-remains ineligible for renewal until December 4; the recovery does not waive it.
+The reader also recognizes authenticated cache reuse: one `upgrade to head`
+entry marked `not_submitted`, an exact verified/reused base package check, zero
+allowance use and spend, unchanged start/end balance, and no held reservation
+or reconciliation. Fresh setup still requires all three successful, cumulatively
+accounted setup transactions. Partial setup and unverified reuse fail closed.
+Both forms retain exact run/head/base and unchanged source contract-tree proof.
 
-SF-182 also permits the authenticated cache-reuse form of this rejection: one
-`upgrade to head` entry marked `not_submitted`, an exact verified/reused base
-package check, zero allowance use and spend, unchanged start/end balance, no
-held reservation or reconciliation. Fresh setup still requires all three
-successful, cumulatively accounted setup transactions. Partial setup and
-unverified reuse fail closed. The [exact-run cache replay](validation/sf182-cached-base-repair.json)
-authenticates run 41815773181 without replaying its faucet or wallet work.
-This is a reader repair for the existing installed `annotate_stale_base` route;
-only the sole coordinator may activate merged runtime code and collect a source.
-It grants no candidate approval and does not change the bound subscription
-fixtures, original checkout allowance or December 4 renewal eligibility.
+SF-241 extracts this repair from the mixed SF-182 feature PR so the sole
+coordinator can validate a contained infrastructure candidate and activate only
+merged runtime code. This permits source collection only; every real combined
+candidate still requires its actual CI, protected testnet acceptance and review.
+It does not change SF-182's bound subscription fixtures, checkout allowance or
+December 4 renewal eligibility.

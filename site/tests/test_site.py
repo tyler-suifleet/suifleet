@@ -134,6 +134,21 @@ class SiteTest(unittest.TestCase):
         (self.out / "assets" / "style.css").write_text("body{}")
         self.assertTrue(any("SHA256SUMS does not match assets/style.css" in e for e in self.errors()))
 
+    def test_guide_script_is_integrity_pinned_and_page_scoped(self):
+        guide = (self.out / "guide/index.html").read_text()
+        self.assertIn(f'integrity="{build.guide_integrity()}"', guide)
+        self.assertIn(f"script-src '{build.guide_integrity()}'", guide)
+        self.assertNotIn("script-src", (self.out / "index.html").read_text())
+        self.edit("guide/index.html", f'src="{build.guide_script_url()}"', 'src="/assets/unreviewed.js"')
+        self.assertTrue(any("forbidden <script>" in e for e in self.errors()))
+
+    def test_guide_rejects_script_tampering_and_inline_content(self):
+        self.edit("guide/index.html", " defer></script>", " defer>alert('bad')</script>")
+        self.assertTrue(any("inline script content" in e for e in self.errors()))
+        (self.out / "assets/guide.js").write_text("alert('bad')")
+        rewrite_sums(self.out)
+        self.assertTrue(any("does not match reviewed source" in e for e in self.errors()))
+
     def test_csp_meta_required(self):
         self.edit("pricing/index.html", "default-src 'none'", "default-src *")
         self.assertTrue(any("Content-Security-Policy" in e for e in self.errors()))
@@ -155,7 +170,7 @@ class SiteTest(unittest.TestCase):
             self.assertEqual(self.errors(), [])
             guide = (self.out / "guide" / "index.html").read_text()
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
-            self.assertIn('<code>111111111111</code>', guide)
+            self.assertIn('data-console-commit="' + '1' * 40 + '"', guide)
             missing = self.errors(require_videos=True)
             self.assertEqual(len(missing), 10, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")

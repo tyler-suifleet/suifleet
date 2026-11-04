@@ -198,7 +198,9 @@ const commands = (tx) => tx.getData().commands;
   const steps = e.plan(many, e.entryStatuses(many, pSnap), pSnap);
   assert.deepEqual(steps.map((s) => [s.kind, s.entries.length]), [["claims", 250], ["claims", 250], ["claims", 100]]);
   const first = commands(steps[0].build());
-  assert.equal(first.length, 252);
+  assert.equal(first.length, 253); // Includes wallet gas-backed funding intent.
+  assert.equal(first[1].$Intent.data.type, "gas");
+  assert.equal(first[2].SplitCoins.coin.$kind, "Result");
   assert.ok(first.length <= 1024);
   const added = first[0].MoveCall;
   assert.equal(`${added.module}::${added.function}`, "enrollment::add_claims");
@@ -206,7 +208,7 @@ const commands = (tx) => tx.getData().commands;
   const pureArg = firstTx.inputs[added.arguments[1].Input];
   // The already-registered claim is not re-added, only topped up to the job's amount.
   assert.equal(Buffer.from(pureArg.Pure.bytes, "base64").length, 2 + 249 * 32); // ULEB128 length, then addresses
-  const amounts = first[1].SplitCoins.amounts.map((a) => BigInt(appRequire("@mysten/sui/bcs").bcs.u64().parse(Buffer.from(firstTx.inputs[a.Input].Pure.bytes, "base64"))));
+  const amounts = first[2].SplitCoins.amounts.map((a) => BigInt(appRequire("@mysten/sui/bcs").bcs.u64().parse(Buffer.from(firstTx.inputs[a.Input].Pure.bytes, "base64"))));
   assert.equal(amounts[0], fund - BigInt(5_000_000));
   assert.ok(amounts.slice(1).every((a) => a === fund));
   assert.ok(Buffer.from(pureArg.Pure.bytes, "base64").length <= 16 * 1024);

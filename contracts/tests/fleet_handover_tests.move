@@ -68,10 +68,10 @@ module sui_edge::fleet_handover_tests {
     fun catalog_dependency_authority_must_be_superseded() {
         let mut s = ts::begin(SOURCE);
         let clock = clock::create_for_testing(ts::ctx(&mut s));
-        let mut record = deployment_manager::new_catalog_deployment(string::utf8(b"app"),
+        let mut record = deployment_manager::k8(string::utf8(b"app"),
             string::utf8(b"1.0.0"), vector[], vector[object::id_from_address(STRANGER)],
             TestBinding {}, true, &clock, ts::ctx(&mut s));
-        deployment_manager::handover(&mut record, RECIPIENT, ts::ctx(&mut s));
+        deployment_manager::k15(&mut record, RECIPIENT, ts::ctx(&mut s));
         deployment_manager::share_deployment(record);
         clock::destroy_for_testing(clock);
         ts::end(s);
@@ -81,10 +81,10 @@ module sui_edge::fleet_handover_tests {
 
     fun sharded_catalog(s: &mut ts::Scenario): DeploymentRecord {
         let clock = clock::create_for_testing(ts::ctx(s));
-        let mut record = deployment_manager::new_catalog_deployment(string::utf8(b"app"),
+        let mut record = deployment_manager::k8(string::utf8(b"app"),
             string::utf8(b"1.0.0"), vector[], vector[object::id_from_address(STRANGER)],
             TestBinding {}, true, &clock, ts::ctx(s));
-        deployment_manager::begin_catalog_receipts<TestBinding, ShardedTestBinding, bool>(
+        deployment_manager::k17<TestBinding, ShardedTestBinding, bool>(
             &mut record, TestBinding {}, ShardedTestBinding {}, ts::ctx(s));
         assert!(deployment_manager::receipt_schema(&record) == 2);
         assert!(deployment_manager::target_groups(&record).is_empty());
@@ -104,7 +104,7 @@ module sui_edge::fleet_handover_tests {
     fun sharded_catalog_rejects_current_handover() {
         let mut s = ts::begin(SOURCE);
         let mut record = sharded_catalog(&mut s);
-        deployment_manager::handover(&mut record, RECIPIENT, ts::ctx(&mut s));
+        deployment_manager::k15(&mut record, RECIPIENT, ts::ctx(&mut s));
         deployment_manager::share_deployment(record); ts::end(s);
     }
 
@@ -122,7 +122,7 @@ module sui_edge::fleet_handover_tests {
             let root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s, roots[i]);
             deployment_manager::retire_receipt_shard(&mut record, root); i = i + 1;
         };
-        deployment_manager::remove_catalog_binding<ShardedTestBinding, bool>(&mut record, ShardedTestBinding {}, ts::ctx(&mut s));
+        deployment_manager::k10<ShardedTestBinding, bool>(&mut record, ShardedTestBinding {}, ts::ctx(&mut s));
         deployment_manager::delete_deployment(record, ts::ctx(&mut s));
         ts::end(s);
     }

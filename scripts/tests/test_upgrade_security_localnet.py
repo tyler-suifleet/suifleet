@@ -1,9 +1,12 @@
 """Local-only safety and pinned-CLI chain-ID compatibility regressions."""
 import importlib.util
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 SPEC = importlib.util.spec_from_file_location(
     "upgrade_security_localnet", Path(__file__).parents[1] / "upgrade_security_localnet.py")
