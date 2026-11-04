@@ -30,7 +30,7 @@ assert.equal(sub.collectTx(account, 'USDC').getData().commands[0].MoveCall.funct
 assert.ok(sub.warnings({ ...account, balance: { value: '1' }, term_end_ms: String(now + 10) }, now).some(w => w.includes('Low')));
 assert.ok(sub.warnings({ ...account, term_end_ms: String(now - 1) }, now).some(w => w.includes('expired')));
 assert.ok(sub.warnings({ ...account, cancelled: true }, now).some(w => w.includes('cancelled')));
-const csv = sub.receiptsCsv([{ kind: 'Deposited', digest: '=formula', amount: '1', accountId: account.id }], '=company', 'a,"b\ncity', '@tax', 'USDC');
+const csv = sub.receiptsCsv([{ kind: 'Deposited', digest: '=formula', amount: '1', accountId: account.id, checkpoint: '10', eventIndex: 0, timestampMs: 1700000000000, throughMs: null }], '=company', 'a,"b\ncity', '@tax', 'USDC');
 assert.ok(csv.includes('"\'=company"')); assert.ok(csv.includes('a,""b\ncity')); assert.ok(csv.includes('"\'=formula"'));
 let result, signs = 0, funds = '50000000', network = m.network, connected = { address: addr(22), chains: [`sui:${m.network}`] }, rejection = false;
 const client = manifestClient(m), originalGetObject = client.getObject.bind(client);
@@ -46,6 +46,27 @@ client.defaultNameServiceName = async () => ({ data: { name: 'suifleet.sui' } })
 const wallet = { stores: { $connection: { get: () => ({ account: connected }) }, $currentNetwork: { get: () => network } }, signAndExecuteTransaction: async () => { signs++; if (rejection) throw Object.assign(new Error('User rejected the request'), { code: 4001 }); return result; } };
 const hook = loader({ react: { useRef: current => ({ current }) }, './useFleetSelection': { useFleetSelection: () => ({ supported: true, fleet: { administrator: false } }) }, '@tanstack/react-query': { useMutation: o => o, useQueryClient: () => ({ invalidateQueries() {} }) }, '@mysten/dapp-kit-react': { useCurrentClient: () => client, useDAppKit: () => wallet } })('hooks/useFleetTransaction.ts');
 (async () => {
+  const events = {
+    Deposited: [{ checkpoint: '10', eventIndex: 2, transactionDigest: 'deposit', bcs: protocol.subscription_DepositedBcs.serialize({ account_id: account.id, amount: '3' }).toBytes() }],
+    Collected: [{ checkpoint: '9', eventIndex: 0, transactionDigest: 'collect', bcs: protocol.subscription_CollectedBcs.serialize({ account_id: account.id, amount: '2', through_ms: '1700000060000' }).toBytes() }],
+    Refunded: [{ checkpoint: '10', eventIndex: 1, transactionDigest: 'refund', bcs: protocol.subscription_RefundedBcs.serialize({ account_id: account.id, recipient: addr(22), amount: '1' }).toBytes() }],
+  };
+  const historySub = loader({ './event-history': { incrementalEvents: async (_client, type) => events[type.split('::').at(-1)] } })('lib/subscription.ts');
+  client.getTransaction = async () => ({ $kind: 'Transaction', Transaction: { timestampMs: 1700000000000 } });
+  const rows = await historySub.history(client, account.id);
+  assert.deepEqual(rows.map(r => r.kind), ['Collected', 'Refunded', 'Deposited']);
+  assert.equal(rows[0].throughMs, '1700000060000');
+  assert.equal(rows[1].throughMs, null);
+  const datedCsv = historySub.receiptsCsv(rows, 'Company', 'Address', 'Tax', 'USDC');
+  assert.match(datedCsv, /Date \(UTC\).*Checkpoint.*Event index.*Collected through \(UTC\)/);
+  assert.match(datedCsv, /2023-11-14T22:13:20.000Z/);
+  assert.match(datedCsv, /2023-11-14T22:14:20.000Z/);
+  assert.ok(datedCsv.indexOf('Collected",') < datedCsv.indexOf('Refunded",'));
+  client.getTransaction = async () => ({ $kind: 'Transaction', Transaction: { timestampMs: null } });
+  assert.equal((await historySub.history(client, account.id))[0].timestampMs, null);
+  assert.equal(historySub.receiptDate(null), 'Unavailable');
+  client.getTransaction = async () => { throw Error('pruned transaction'); };
+  await assert.rejects(historySub.history(client, account.id), /pruned transaction/);
   result = good();
   const opened = await sub.preparePrepay(client, q, account.customer_id, addr(22));
   assert.equal(opened.getData().commands.at(-1).MoveCall.function, 'open');
@@ -90,14 +111,14 @@ const hook = loader({ react: { useRef: current => ({ current }) }, './useFleetSe
     '@/hooks/useFleetTransaction': { useFleetTransaction: () => ({ isPending: false }) },
     '@mysten/dapp-kit-react': { useCurrentClient: () => client },
     '@tanstack/react-query': {
-      useQuery: o => ({ isPending: false, data: o.queryKey[0] === 'subscription-quotes' ? (unavailable ? undefined : { quotes: [q], treasury: m.treasury_payee }) : o.queryKey[0] === 'subscription-account' ? { account: { ...account, term_end_ms: String(now - 1) }, symbol: 'USDC' } : o.queryKey[0] === 'subscription-history' ? [{ kind: 'Deposited', digest: 'fixture-history-digest', amount: '1000', accountId: account.id }] : undefined, error: unavailable && o.queryKey[0] === 'subscription-quotes' ? new Error('unconfigured') : null }),
+      useQuery: o => ({ isPending: false, data: o.queryKey[0] === 'subscription-quotes' ? (unavailable ? undefined : { quotes: [q], treasury: m.treasury_payee }) : o.queryKey[0] === 'subscription-account' ? { account: { ...account, term_end_ms: String(now - 1) }, symbol: 'USDC' } : o.queryKey[0] === 'subscription-history' ? [{ kind: 'Deposited', digest: 'fixture-history-digest', amount: '1000', accountId: account.id, checkpoint: '10', eventIndex: 0, timestampMs: 1700000000000, throughMs: '1700000060000' }] : undefined, error: unavailable && o.queryKey[0] === 'subscription-quotes' ? new Error('unconfigured') : null }),
       useQueries: () => [{ data: { offer, total: 49000000n, annual: false, descriptor: m.subscription_coins.USDC, usd: 49 } }],
     },
   })('app/billing/page.tsx');
   const React = appRequire('react'), { renderToStaticMarkup } = appRequire('react-dom/server');
   const page = renderToStaticMarkup(React.createElement(pageModule.default));
   assert.match(page, /Plans and billing/); assert.match(page, /Subscription term expired/);
-  assert.match(page, /Download CSV receipts/); assert.match(page, /fixture-history-digest/);
+  assert.match(page, /Download CSV receipts/); assert.match(page, /fixture-history-digest/); assert.match(page, /2023-11-14T22:13:20.000Z/); assert.match(page, /Collected through 2023-11-14T22:14:20.000Z/); assert.match(page, /checkpoint 10/);
   assert.match(page, /Company address/); assert.match(page, /0.001.*USDC/);
   assert.doesNotMatch(page, /docs\/BUSINESS_PLAN/);
   unavailable = true;

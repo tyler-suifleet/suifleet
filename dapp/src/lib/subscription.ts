@@ -12,7 +12,7 @@ export type Symbol = 'USDC' | 'SUI';
 export type Offer = ReturnType<typeof subscription_OfferBcs.parse>;
 export type Account = ReturnType<typeof subscription_AccountBcs.parse>;
 export interface Quote { offerId: string; symbol: Symbol; usdPerCoin: number; observedAt: number; source: string }
-export interface Receipt { kind: string; digest: string; amount: string; accountId: string }
+export interface Receipt { kind: string; digest: string; amount: string; accountId: string; checkpoint: string; eventIndex: number; timestampMs: number | null; throughMs: string | null }
 const U64 = BigInt('18446744073709551615');
 export function units(value: string): bigint {
   if (value.length > 20 || !/^[1-9][0-9]*$/.test(value) || BigInt(value) > U64) throw Error('Enter a positive whole amount in coin base units');
@@ -187,19 +187,37 @@ export async function verifyPlan(client: SuiGrpcClient, digest: string, customer
 export async function history(client: SuiGrpcClient, accountId: string): Promise<Receipt[]> {
   await verifyDeployment(client);
   const result: Receipt[] = [];
+  const dates = new Map<string, number | null>();
   for (const [kind, codec] of [['Deposited', subscription_DepositedBcs], ['Collected', subscription_CollectedBcs], ['Refunded', subscription_RefundedBcs]] as const) {
     for (const e of await incrementalEvents(client, moveType(`subscription::${kind}`))) {
       const value = codec.parse(e.bcs);
-      if (normalizeId(value.account_id) === normalizeId(accountId)) result.push({ kind, digest: e.transactionDigest, amount: value.amount, accountId });
+      if (normalizeId(value.account_id) !== normalizeId(accountId)) continue;
+      if (!dates.has(e.transactionDigest)) {
+        const tx = await client.getTransaction({ digest: e.transactionDigest });
+        if (tx.$kind !== 'Transaction') throw Error('Receipt transaction unavailable');
+        dates.set(e.transactionDigest, tx.Transaction.timestampMs);
+      }
+      if (e.checkpoint === null) throw Error('Receipt checkpoint unavailable');
+      result.push({ kind, digest: e.transactionDigest, amount: value.amount, accountId,
+        checkpoint: e.checkpoint, eventIndex: e.eventIndex, timestampMs: dates.get(e.transactionDigest)!,
+        throughMs: kind === 'Collected' ? subscription_CollectedBcs.parse(e.bcs).through_ms : null });
     }
   }
-  return result;
+  return result.sort((a, b) => {
+    const checkpoint = BigInt(a.checkpoint) - BigInt(b.checkpoint);
+    return checkpoint < BigInt(0) ? -1 : checkpoint > BigInt(0) ? 1 :
+      a.eventIndex - b.eventIndex || a.digest.localeCompare(b.digest);
+  });
+}
+/** UTC avoids ambiguous locale-dependent accounting dates. */
+export function receiptDate(milliseconds: number | string | null) {
+  return milliseconds === null ? 'Unavailable' : new Date(Number(milliseconds)).toISOString();
 }
 const csv = (value: string) => '"' + (/^(?:\s*[=+\-@]|[\t\r\n])/.test(value) ? "'" : '') + value.replaceAll('"', '""') + '"';
 export function receiptsCsv(rows: Receipt[], company: string, address: string, taxId: string, symbol: Symbol) {
   const m = requireManifest();
-  const header = ['Company', 'Company address', 'Tax ID', 'Chain', 'Treasury', 'Account', 'Kind', 'Coin type', 'Amount (base units)', 'Digest'];
-  return '\uFEFF' + [header, ...rows.map(r => [company, address, taxId, m.chain_identifier, treasuryPayee(), r.accountId, r.kind, coin(symbol).coin_type, r.amount, r.digest])].map(row => row.map(csv).join(',')).join('\r\n');
+  const header = ['Company', 'Company address', 'Tax ID', 'Chain', 'Treasury', 'Account', 'Kind', 'Coin type', 'Amount (base units)', 'Date (UTC)', 'Checkpoint', 'Event index', 'Collected through (UTC)', 'Digest'];
+  return '\uFEFF' + [header, ...rows.map(r => [company, address, taxId, m.chain_identifier, treasuryPayee(), r.accountId, r.kind, coin(symbol).coin_type, r.amount, receiptDate(r.timestampMs), r.checkpoint, String(r.eventIndex), r.throughMs === null ? '' : receiptDate(r.throughMs), r.digest])].map(row => row.map(csv).join(',')).join('\r\n');
 }
 
 /** Optional display only; lookup never supplies an address or changes a PTB. */
