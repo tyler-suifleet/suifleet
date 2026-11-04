@@ -113,16 +113,18 @@ module sui_edge::deployment_manager {
         window_start_ms: u64, window_end_ms: u64, notice_ms: u64,
         ctx: &TxContext,
     ) {
-        set_control_as(deployment, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx.sender());
+        k2(deployment, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx.sender());
     }
     /// Bind administrator decisions, not device-reported outcomes or health.
-    public(package) fun security_snapshot(d: &DeploymentRecord): vector<u8> {
+    /// Package helper: security_snapshot.
+    public(package) fun k0(d: &DeploymentRecord): vector<u8> {
         let mut parts = vector[std::bcs::to_bytes(&control(d)),
             std::bcs::to_bytes(target_groups(d)), std::bcs::to_bytes(target_devices(d))];
         if (df::exists(&d.id, RolloutKey {})) parts.push_back(std::bcs::to_bytes(&rollout(d).revision));
         std::bcs::to_bytes(&parts)
     }
-    public(package) fun pause_as(deployment: &mut DeploymentRecord, authority: address) {
+    /// Package helper: pause_as.
+    public(package) fun k1(deployment: &mut DeploymentRecord, authority: address) {
         q(deployment.creator == authority, BNotCreator);
         let mut c = control(deployment);
         q(c.state != 2, BCancelled);
@@ -132,7 +134,8 @@ module sui_edge::deployment_manager {
             *df::borrow_mut<ControlKey, Control>(&mut deployment.id, ControlKey {}) = c;
         } else df::add(&mut deployment.id, ControlKey {}, c);
     }
-    public(package) fun set_control_as(deployment: &mut DeploymentRecord, state: u8,
+    /// Package helper: set_control_as.
+    public(package) fun k2(deployment: &mut DeploymentRecord, state: u8,
         not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, authority: address) {
         q(authority == deployment.creator, BNotCreator);
         assert!(state <= 2, EInvalidControlState);
@@ -192,9 +195,10 @@ module sui_edge::deployment_manager {
     /// notice and re-read admission.
     public fun set_recurring_window(deployment: &mut DeploymentRecord, timezone: String,
         days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, ctx: &mut TxContext) {
-        set_recurring_window_as(deployment, timezone, days, start_minutes, duration_minutes, ctx.sender());
+        k3(deployment, timezone, days, start_minutes, duration_minutes, ctx.sender());
     }
-    public(package) fun set_recurring_window_as(deployment: &mut DeploymentRecord, timezone: String,
+    /// Package helper: set_recurring_window_as.
+    public(package) fun k3(deployment: &mut DeploymentRecord, timezone: String,
         days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, authority: address) {
         q(authority == deployment.creator, BNotCreator);
         h1(&timezone);
@@ -215,9 +219,10 @@ module sui_edge::deployment_manager {
         df::add(&mut deployment.id, RecurringWindowKey {}, RecurringWindow { revision, timezone, slots });
     }
     public fun clear_recurring_window(deployment: &mut DeploymentRecord, ctx: &mut TxContext) {
-        clear_recurring_window_as(deployment, ctx.sender());
+        k4(deployment, ctx.sender());
     }
-    public(package) fun clear_recurring_window_as(deployment: &mut DeploymentRecord, authority: address) {
+    /// Package helper: clear_recurring_window_as.
+    public(package) fun k4(deployment: &mut DeploymentRecord, authority: address) {
         q(authority == deployment.creator, BNotCreator);
         q(df::exists(&deployment.id, RecurringWindowKey {}), BInvalidRecurringWindow);
         h0(deployment);
@@ -385,7 +390,7 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ): DeploymentRecord {
-        new_customer_deployment(ctx.sender(), component_name, version, recipe_blob_id,
+        k6(ctx.sender(), component_name, version, recipe_blob_id,
             artifact_sha256, recipe_sha256, target_groups, target_devices, clock, ctx)
     }
 
@@ -396,7 +401,8 @@ module sui_edge::deployment_manager {
     /// A verified group deployment attributed to `operator` but created by the
     /// sender as its delegate. Only `roles::create_deployment_as`, which checks
     /// an active deployer role scoped to these groups, may call it.
-    public(package) fun create_delegated(
+    /// Package helper: create_delegated.
+    public(package) fun k5(
         operator: address,
         component_name: String,
         version: String,
@@ -407,7 +413,7 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
-        let mut record = new_customer_deployment(operator, component_name, version, recipe_blob_id,
+        let mut record = k6(operator, component_name, version, recipe_blob_id,
             artifact_sha256, recipe_sha256, target_groups, v0(), clock, ctx);
         df::add(&mut record.id, DelegateKey {}, ctx.sender());
         let id = object::id(&record);
@@ -417,7 +423,8 @@ module sui_edge::deployment_manager {
 
     /// Shared verified constructor. Managed callers additionally validate their
     /// complete fleet target inventory before supplying its object authority.
-    public(package) fun new_customer_deployment(creator: address, component_name: String,
+    /// Package helper: new_customer_deployment.
+    public(package) fun k6(creator: address, component_name: String,
         version: String, recipe_blob_id: String, artifact_sha256: String,
         recipe_sha256: String, groups: vector<ID>, devices: vector<ID>,
         clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
@@ -440,20 +447,23 @@ module sui_edge::deployment_manager {
         };
     }
 
-    public(package) fun create_catalog_deployment<K: copy + drop + store, V: store>(
+    /// Package helper: create_catalog_deployment.
+    public(package) fun k7<K: copy + drop + store, V: store>(
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext,
     ) {
-        transfer::share_object(new_catalog_deployment(name, version, groups, devices, key, value, clock, ctx));
+        transfer::share_object(k8(name, version, groups, devices, key, value, clock, ctx));
     }
 
-    public(package) fun new_catalog_deployment<K: copy + drop + store, V: store>(
+    /// Package helper: new_catalog_deployment.
+    public(package) fun k8<K: copy + drop + store, V: store>(
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext,
     ): DeploymentRecord {
-        new_catalog_as(ctx.sender(), name, version, groups, devices, key, value, clock, ctx)
+        k9(ctx.sender(), name, version, groups, devices, key, value, clock, ctx)
     }
-    public(package) fun new_catalog_as<K: copy + drop + store, V: store>(creator: address,
+    /// Package helper: new_catalog_as.
+    public(package) fun k9<K: copy + drop + store, V: store>(creator: address,
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         let mut record = p1(creator, name, version, std::string::utf8(b""),
@@ -463,12 +473,14 @@ module sui_edge::deployment_manager {
         record
     }
 
-    public(package) fun remove_catalog_binding<K: copy + drop + store, V: store + drop>(
+    /// Package helper: remove_catalog_binding.
+    public(package) fun k10<K: copy + drop + store, V: store + drop>(
         deployment: &mut DeploymentRecord, key: K, ctx: &TxContext,
     ) {
-        remove_catalog_binding_as<K, V>(deployment, key, ctx.sender());
+        k11<K, V>(deployment, key, ctx.sender());
     }
-    public(package) fun remove_catalog_binding_as<K: copy + drop + store, V: store + drop>(deployment: &mut DeploymentRecord, key: K, authority: address) {
+    /// Package helper: remove_catalog_binding_as.
+    public(package) fun k11<K: copy + drop + store, V: store + drop>(deployment: &mut DeploymentRecord, key: K, authority: address) {
         q(authority == deployment.creator, BNotCreator);
         let _: V = df::remove(&mut deployment.id, key);
         if (df::exists(&deployment.id, ReceiptShardKey {})) {
@@ -594,7 +606,8 @@ module sui_edge::deployment_manager {
         q(!df::exists(&deployment.id, CustomerFleetKey {}), BPackageOutdated);
         p3(deployment, cap, status, ctx);
     }
-    public(package) fun record_customer_status(deployment: &mut DeploymentRecord, fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
+    /// Package helper: record_customer_status.
+    public(package) fun k12(deployment: &mut DeploymentRecord, fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
         q(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, BNotTargeted);
         p3(deployment, cap, status, ctx);
     }
@@ -624,7 +637,8 @@ module sui_edge::deployment_manager {
         });
     }
 
-    public(package) fun bind_customer(deployment: &mut DeploymentRecord, fleet_id: ID) {
+    /// Package helper: bind_customer.
+    public(package) fun k13(deployment: &mut DeploymentRecord, fleet_id: ID) {
         q(!df::exists(&deployment.id, ReceiptShardKey {}), BPackageOutdated);
         // Preserve already-authoritative historical receipts at the cutover.
         let receipts = h2(deployment);
@@ -662,7 +676,8 @@ module sui_edge::deployment_manager {
     public entry fun delete_deployment(deployment: DeploymentRecord, ctx: &TxContext) {
         p5(deployment, ctx.sender());
     }
-    public(package) fun delete_for_customer(mut deployment: DeploymentRecord, authority: address) {
+    /// Package helper: delete_for_customer.
+    public(package) fun k14(mut deployment: DeploymentRecord, authority: address) {
         q(authority == deployment.creator, BNotCreator);
         pa(&mut deployment);
         if (deployment.schema_version == SMALL_3) {
@@ -715,7 +730,8 @@ module sui_edge::deployment_manager {
 
     /// Authority changes in place so every still-callable package checks the
     /// recipient as creator. Preserve payload, targets, receipts and controls.
-    public(package) fun handover(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
+    /// Package helper: handover.
+    public(package) fun k15(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
         q(ctx.sender() == d.creator, BNotCreator);
         // Catalog-bound records resolve dependencies through the original
         // publisher index. Supersede them under a recipient-owned catalog;
@@ -779,9 +795,10 @@ module sui_edge::deployment_manager {
     /// Creator opt-in; repeated starts do nothing. No authority can report while
     /// the snapshot is copied, and stale pre-v2 history is never promoted.
     public fun begin_sharded_receipts(d: &mut DeploymentRecord, ctx: &mut TxContext) {
-        begin_sharded_receipts_as(d, ctx.sender(), ctx);
+        k16(d, ctx.sender(), ctx);
     }
-    public(package) fun begin_sharded_receipts_as(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
+    /// Package helper: begin_sharded_receipts_as.
+    public(package) fun k16(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
         q(authority == d.creator, BNotCreator);
         if (df::exists(&d.id, ReceiptShardKey {})) return;
         // Catalog bindings need relocating by their defining module first; an
@@ -812,12 +829,14 @@ module sui_edge::deployment_manager {
     }
     /// Relocate catalog authority out of the key understood by old deletion
     /// paths before enabling shards. Called only by the binding's module.
-    public(package) fun begin_catalog_receipts<K: copy + drop + store, N: copy + drop + store, V: store>(
+    /// Package helper: begin_catalog_receipts.
+    public(package) fun k17<K: copy + drop + store, N: copy + drop + store, V: store>(
         d: &mut DeploymentRecord, old_key: K, new_key: N, ctx: &mut TxContext,
     ) {
-        begin_catalog_receipts_as<K, N, V>(d, old_key, new_key, ctx.sender(), ctx);
+        k18<K, N, V>(d, old_key, new_key, ctx.sender(), ctx);
     }
-    public(package) fun begin_catalog_receipts_as<K: copy + drop + store, N: copy + drop + store, V: store>(
+    /// Package helper: begin_catalog_receipts_as.
+    public(package) fun k18<K: copy + drop + store, N: copy + drop + store, V: store>(
         d: &mut DeploymentRecord, old_key: K, new_key: N, authority: address, ctx: &mut TxContext,
     ) {
         q(authority == d.creator, BNotCreator);
@@ -826,7 +845,7 @@ module sui_edge::deployment_manager {
         let binding: V = df::remove(&mut d.id, old_key);
         df::add(&mut d.id, new_key, binding);
         d.schema_version = SMALL_1;
-        begin_sharded_receipts_as(d, authority, ctx);
+        k16(d, authority, ctx);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
         directory.original_schema = SMALL_2;
         // Previously published handover checks the inline schema, not this
@@ -936,7 +955,8 @@ module sui_edge::deployment_manager {
         q(target_groups(d).contains(&device_group::group_id(group)), BNotTargeted); q(device_group::admin(group) == d.creator, BNotTargeted); q(device_group::contains_device(group, device_cap::device_id(cap)), BNotTargeted);
         p9(d, shard, cap, status, ctx);
     }
-    public(package) fun record_customer_status_v4(d: &DeploymentRecord, shard: &mut ReceiptShard,
+    /// Package helper: record_customer_status_v4.
+    public(package) fun k19(d: &DeploymentRecord, shard: &mut ReceiptShard,
         fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
         q(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id, BNotTargeted);
         p9(d, shard, cap, status, ctx);
@@ -962,9 +982,10 @@ module sui_edge::deployment_manager {
         };
     }
     public fun begin_receipt_cleanup(d: &mut DeploymentRecord, ctx: &mut TxContext) {
-        begin_receipt_cleanup_as(d, ctx.sender());
+        k20(d, ctx.sender());
     }
-    public(package) fun begin_receipt_cleanup_as(d: &mut DeploymentRecord, authority: address) {
+    /// Package helper: begin_receipt_cleanup_as.
+    public(package) fun k20(d: &mut DeploymentRecord, authority: address) {
         q(authority == d.creator, BNotCreator);
         q(receipts_version(d) == RECEIPTS_VERSION, BPackageOutdated);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
@@ -1126,7 +1147,8 @@ module sui_edge::deployment_manager {
     public fun creator(d: &DeploymentRecord): address { d.creator }
     public fun component_name(d: &DeploymentRecord): &String { &d.component_name }
     /// Inspect a module-owned binding without exposing the record UID.
-    public(package) fun has_binding<K: copy + drop + store, V: store>(d: &DeploymentRecord, key: K): bool {
+    /// Package helper: has_binding.
+    public(package) fun k21<K: copy + drop + store, V: store>(d: &DeploymentRecord, key: K): bool {
         df::exists_with_type<K, V>(&d.id, key)
     }
 
@@ -1134,7 +1156,8 @@ module sui_edge::deployment_manager {
     public fun is_managed(d: &DeploymentRecord): bool { df::exists(&d.id, ManagedKey {}) }
 
     /// Marks a record as owned by desired-state reconciliation (idempotent).
-    public(package) fun mark_managed(d: &mut DeploymentRecord) {
+    /// Package helper: mark_managed.
+    public(package) fun k22(d: &mut DeploymentRecord) {
         if (!df::exists(&d.id, ManagedKey {})) {
             df::add(&mut d.id, ManagedKey {}, true);
         };
@@ -1224,10 +1247,11 @@ module sui_edge::deployment_manager {
         target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
         policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext,
     ): DeploymentRecord {
-        new_rollout_as(ctx.sender(), component_name, version, recipe_blob_id, artifact_sha256, recipe_sha256,
+        k23(ctx.sender(), component_name, version, recipe_blob_id, artifact_sha256, recipe_sha256,
             target_groups, members, cohorts, policy, clock, ctx)
     }
-    public(package) fun new_rollout_as(authority: address, component_name: String, version: String,
+    /// Package helper: new_rollout_as.
+    public(package) fun k23(authority: address, component_name: String, version: String,
         recipe_blob_id: String, artifact_sha256: String, recipe_sha256: String,
         target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
         policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
@@ -1246,7 +1270,7 @@ module sui_edge::deployment_manager {
         q(count >= policy.minimum_samples, BRolloutPolicy);
         // Direct targets bind the snapshot even if there are no groups. The
         // operator check in the daemon remains mandatory for every member.
-        let mut d = new_customer_deployment(authority, component_name, version, recipe_blob_id, artifact_sha256,
+        let mut d = k6(authority, component_name, version, recipe_blob_id, artifact_sha256,
             recipe_sha256, target_groups, members, clock, ctx);
         d.schema_version = SMALL_3;
         let mut admitted_at = v0(); let mut outcomes = v0(); let mut skipped = v0();
@@ -1297,9 +1321,10 @@ module sui_edge::deployment_manager {
     /// permission, not evidence that an offline device has started work.
     public fun advance_rollout_onchain(d: &mut DeploymentRecord, registry: &DeviceRegistry,
         candidates: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        advance_rollout_onchain_as(d, registry, candidates, clock, ctx.sender());
+        k24(d, registry, candidates, clock, ctx.sender());
     }
-    public(package) fun advance_rollout_onchain_as(d: &mut DeploymentRecord, registry: &DeviceRegistry,
+    /// Package helper: advance_rollout_onchain_as.
+    public(package) fun k24(d: &mut DeploymentRecord, registry: &DeviceRegistry,
         candidates: vector<ID>, clock: &Clock, authority: address) {
         let r = rollout(d);
         let mut healthy = v0(); let mut unhealthy = v0();
@@ -1318,7 +1343,7 @@ module sui_edge::deployment_manager {
                 i = i + SMALL_1;
             };
         };
-        advance_rollout_as(d, candidates, healthy, unhealthy, clock, authority);
+        k25(d, candidates, healthy, unhealthy, clock, authority);
     }
 
     /// Tick by the creator, after checking current identity-bound telemetry.
@@ -1329,9 +1354,10 @@ module sui_edge::deployment_manager {
     public fun advance_rollout(d: &mut DeploymentRecord, online: vector<ID>,
         healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &TxContext,
     ) {
-        advance_rollout_as(d, online, healthy, unhealthy, clock, ctx.sender());
+        k25(d, online, healthy, unhealthy, clock, ctx.sender());
     }
-    public(package) fun advance_rollout_as(d: &mut DeploymentRecord, online: vector<ID>, healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, authority: address) {
+    /// Package helper: advance_rollout_as.
+    public(package) fun k25(d: &mut DeploymentRecord, online: vector<ID>, healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, authority: address) {
         q(authority == d.creator, BNotCreator);
         q(receipt_schema(d) == SMALL_3, BRolloutState);
         let control = control(d);
@@ -1400,9 +1426,10 @@ module sui_edge::deployment_manager {
     public fun control_rollout(d: &mut DeploymentRecord, state: u8, skip: vector<ID>,
         reason: String, clock: &Clock, ctx: &TxContext,
     ) {
-        control_rollout_as(d, state, skip, reason, clock, ctx.sender());
+        k26(d, state, skip, reason, clock, ctx.sender());
     }
-    public(package) fun control_rollout_as(d: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, authority: address) {
+    /// Package helper: control_rollout_as.
+    public(package) fun k26(d: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, authority: address) {
         q(authority == d.creator, BNotCreator);
         q(reason.length() > SMALL_0, BRolloutPolicy); q(reason.length() <= SMALL_256, BRolloutPolicy); q(state <= 2, BRolloutPolicy);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
@@ -1440,9 +1467,10 @@ module sui_edge::deployment_manager {
     /// Explicit deletion preparation, at most 64 revisions per call. Starting
     /// cleanup freezes further decisions through this package version.
     public fun clear_decision_audit(d: &mut DeploymentRecord, limit: u64, ctx: &mut TxContext) {
-        clear_decision_audit_as(d, limit, ctx.sender());
+        k27(d, limit, ctx.sender());
     }
-    public(package) fun clear_decision_audit_as(d: &mut DeploymentRecord, limit: u64, authority: address) {
+    /// Package helper: clear_decision_audit_as.
+    public(package) fun k27(d: &mut DeploymentRecord, limit: u64, authority: address) {
         q(authority == d.creator, BNotCreator);
         q(limit > SMALL_0, BRolloutPolicy); q(limit <= SMALL_64, BRolloutPolicy);
         if (!df::exists(&d.id, DecisionCleanupKey {})) {
@@ -1464,7 +1492,7 @@ module sui_edge::deployment_manager {
 
     /// finish_decision_audit: compact private symbol to bound published bytecode storage.
     fun pe(d: &mut DeploymentRecord, authority: address) {
-        clear_decision_audit_as(d, SMALL_64, authority);
+        k27(d, SMALL_64, authority);
         q(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == SMALL_0, BRolloutState);
         let _: u64 = df::remove(&mut d.id, DecisionCleanupKey {});
     }

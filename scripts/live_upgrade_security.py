@@ -41,6 +41,7 @@ device key's unspent funding back to the operator. Until that sweep succeeds
 the key's seed is kept (0600) beside the wallet as live-security-device.key,
 and the next run sweeps it first, charged to its own allowance.
 """
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -210,7 +211,7 @@ def run(args):
             # The device holds DEVICE_FUNDING: its budgets stay well below that.
             attack = lambda label, *ptb, **expected: live.attack(label, *ptb, budget=10_000_000, sender=device_wallet, **expected)
             attack("old package report on a new record", "--move-call", f"{old}::deployment_manager::report_status", f"@{d1}", f"@{cap}", "1u8",
-                   module="deployment_manager", function="receipts_mut", code=5)
+                   module="deployment_manager", function=abort_site(base_contracts, "deployment_manager", "receipts_mut", 5), code=5)
             attack("superseded report signature in the new package", "--move-call", f"{new}::deployment_manager::report_status", f"@{d1}",
                    f"@{cap}", "1u8", module="deployment_manager", function="report_status", code=7)
             attack("verified report before the legacy device is activated", "--move-call", f"{new}::deployment_manager::report_verified_status",
@@ -250,7 +251,7 @@ def run(args):
                 "--move-call", f"{new}::deployment_manager::finish_receipt_migration", f"@{d2}", budget=50_000_000)
             assert live.receipts(d2) == {dm.object_id(device): 1}, "migration dropped the v2 receipt"
             attack("old package report after v3 migration", "--move-call", f"{old}::deployment_manager::report_status", f"@{d2}", f"@{cap}", "2u8",
-                   module="deployment_manager", function="receipts_mut", code=5)
+                   module="deployment_manager", function=abort_site(base_contracts, "deployment_manager", "receipts_mut", 5), code=5)
             # Reuse the migrated roots and the already-applied outcome. A
             # durable report retry proves the daemon uses the new report path
             # without another publication/root allocation or updater replay.
@@ -324,6 +325,8 @@ def run(args):
             daemon.wait(timeout=60)
             daemon = None
             live.evidence["receipts"] = {"d0": {dm.object_id(device): 1}, "d2": {dm.object_id(device): 1}}
+            from live_passkey_factor import cached_acceptance
+            cached_acceptance(live, state_path)
             passed = True
         finally:
             if daemon:

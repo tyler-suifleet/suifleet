@@ -331,7 +331,7 @@ module sui_edge::customer_tests {
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let mut action = s.take_shared<sui_edge::security_policy::Action>();
         // Test-only package hook supplies the otherwise-unavailable mechanism.
-        sui_edge::security_policy::attest(&mut action, 1);
+        sui_edge::security_policy::k16(&mut action, 1);
         let clock = sui::clock::create_for_testing(s.ctx());
         customer::set_security_secured(&mut c, requirements, action, &clock, s.ctx());
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); consume_claim(s, fid);
@@ -340,7 +340,7 @@ module sui_edge::customer_tests {
     fun factor_source_change_invalidates_claims() {
         let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>();
-        customer::configure_security_factor(&mut c, 1, vector[1], s.ctx());
+        customer::k6(&mut c, 1, vector[1], s.ctx());
         ts::return_shared(c); consume_claim(s, fid);
     }
     #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
@@ -459,11 +459,11 @@ module sui_edge::customer_tests {
     fun set_recurring_arguments(c: &Customer, f: &Fleet, d: &sui_edge::deployment_manager::DeploymentRecord, timezone: vector<u8>): vector<vector<u8>> {
         vector[std::bcs::to_bytes(&utf8(b"set_recurring_window")), std::bcs::to_bytes(&object::id(c)), std::bcs::to_bytes(&object::id(f)), std::bcs::to_bytes(&object::id(d)),
             std::bcs::to_bytes(&utf8(timezone)), std::bcs::to_bytes(&vector[64u8]), std::bcs::to_bytes(&vector[120u16]), std::bcs::to_bytes(&vector[120u16]),
-            sui_edge::deployment_manager::security_snapshot(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
+            sui_edge::deployment_manager::k0(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
     }
     fun clear_recurring_arguments(c: &Customer, f: &Fleet, d: &sui_edge::deployment_manager::DeploymentRecord): vector<vector<u8>> {
         vector[std::bcs::to_bytes(&utf8(b"clear_recurring_window")), std::bcs::to_bytes(&object::id(c)), std::bcs::to_bytes(&object::id(f)), std::bcs::to_bytes(&object::id(d)),
-            sui_edge::deployment_manager::security_snapshot(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
+            sui_edge::deployment_manager::k0(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
     }
     /// Prepares an action for `arguments`; `attested` simulates the approved
     /// factor through the test-only package hook.
@@ -477,7 +477,7 @@ module sui_edge::customer_tests {
         let id = s.next_tx(OWNER).created()[0];
         if (attested != 0) {
             let mut action = s.take_shared_by_id<sui_edge::security_policy::Action>(id);
-            sui_edge::security_policy::attest(&mut action, attested); ts::return_shared(action); s.next_tx(OWNER);
+            sui_edge::security_policy::k16(&mut action, attested); ts::return_shared(action); s.next_tx(OWNER);
         };
         id
     }
@@ -640,20 +640,20 @@ module sui_edge::customer_tests {
         let device = device_registry::register_device(&mut r, utf8(b"Legacy"), @0xD1, utf8(b"x86_64"), &clock, s.ctx());
         let cap = device_registry::activate_device(&mut r, device, s.ctx());
         let did = device_registry::owner_cap_device_id(&cap);
-        let (mut budget, bcap) = fleet_budget::new_budget(&r, coin::mint_for_testing<SUI>(100, s.ctx()),
+        let (mut budget, bcap) = fleet_budget::k1(&r, coin::mint_for_testing<SUI>(100, s.ctx()),
             fleet_budget::new_limits(1, 1000, 1, 1, 1), 0, s.ctx());
         let bid = object::id(&budget);
         let aid = fleet_budget::enroll_device(&mut budget, &bcap, &r, &cap, 0, 10, &clock, s.ctx());
         let mut c = s.take_shared<Customer>();
         if (mode == 1) {
-            let (mut other, ocap) = fleet_budget::new_budget(&r, coin::zero(s.ctx()),
+            let (mut other, ocap) = fleet_budget::k1(&r, coin::zero(s.ctx()),
                 fleet_budget::new_limits(1, 1000, 1, 1, 1), 0, s.ctx());
             fleet_budget::enroll_device(&mut other, &ocap, &r, &cap, 0, 0, &clock, s.ctx());
             customer::adopt_budget(&mut c, &mut other, ocap, utf8(b"Other"), s.ctx());
-            fleet_budget::share_managed(other);
+            fleet_budget::k0(other);
         };
         customer::adopt_budget(&mut c, &mut budget, bcap, utf8(b"Legacy"), s.ctx());
-        fleet_budget::share_managed(budget);
+        fleet_budget::k0(budget);
         if (mode == 0) device_registry::deregister_activated_device(&mut r, cap, s.ctx())
         else transfer::public_transfer(cap, if (mode == 2) OTHER else OWNER);
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(r);

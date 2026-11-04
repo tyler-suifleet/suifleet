@@ -5,6 +5,7 @@ Uses the shared verified package/PTB submitters and strict non-replenishing
 ledger. Cache state is private, bytecode-keyed and reverified before reuse.
 A pending/uncertain publication is never retried as a fresh publication.
 """
+from abort_site import abort_site
 import argparse
 import hashlib
 import json
@@ -38,8 +39,8 @@ def run(args):
         state["pending"]["verified_transaction"] = identity
         save()
 
-    def transaction(label, *ptb, funding=0):
-        return live.transaction(label, *ptb, budget=min(20_000_000, live.ledger.remaining - funding), funding=funding)
+    def transaction(label, *ptb, funding=0, budget=20_000_000):
+        return live.transaction(label, *ptb, budget=min(budget, live.ledger.remaining - funding), funding=funding)
 
     live.evidence["success"] = False
     try:
@@ -66,6 +67,8 @@ def run(args):
             fixture = {**prior, "head": new_head, "head_digest": head_digest, "version": prior.get("version", 2) + 1,
                        "security_origin": prior.get("security_origin", prior["head"]),
                        "upgrade_path": prior.get("upgrade_path", [prior["base"], prior["head"]]) + [new_head]}
+            fixture["member_abort_sites"] = {**prior.get("member_abort_sites", {}),
+                new_head: abort_site(Path("contracts"), "customer", "assert_member", 0)}
             prior["superseded_by"] = new_head
             state["fixtures"][key] = fixture; del state["pending"]; save()
             live.evidence["repair_previous_head"] = prior["head"]
@@ -89,7 +92,7 @@ def run(args):
             registry = live.created(result, "::device_registry::DeviceRegistry")[0]
             cap = live.created(result, "::package::UpgradeCap")[0]
             state["pending"].update(base=base, registry=registry, cap=cap, digest=result["digest"]); save()
-            result = transaction("create customer before upgrade", "--move-call", f"{base}::customer::create", f"@{registry}", '"SF196 isolated fixture"')
+            result = transaction("create customer before upgrade", "--move-call", f"{base}::customer::create", f"@{registry}", '"SF196 isolated fixture"', budget=60_000_000)
             customer = live.created(result, "::customer::Customer")[0]
             fleet = live.created(result, "::customer::Fleet")[0]
             budget = live.created(result, "::fleet_budget::FleetBudget")[0]
@@ -98,7 +101,9 @@ def run(args):
             result = live.publish("security upgrade head", Path("contracts"), state_path.with_suffix(".toml"), {"cap": cap, "package": base}, persist=checkpoint)
             head = live.published(result)
             fixture = dict(base=base, head=head, registry=registry, cap=cap, customer=customer, fleet=fleet, budget=budget,
-                           base_digest=base_digest, head_digest=head_digest)
+                           base_digest=base_digest, head_digest=head_digest, version=2,
+                           member_abort_sites={base: abort_site(Path(args.base), "customer", "assert_member", 0),
+                                               head: abort_site(Path("contracts"), "customer", "assert_member", 0)})
             state["fixtures"][key] = fixture; del state["pending"]; save()
         base, head = fixture["base"], fixture["head"]
         c, f = fixture["customer"], fixture["fleet"]
@@ -123,20 +128,20 @@ def run(args):
             ptb = ["--move-call", f"{base}::customer::{function}", *arguments]
             if function == "borrow_budget_cap":
                 ptb += ["--assign", "loan", "--move-call", f"{base}::customer::return_budget_cap", f"@{f}", "loan.0", "loan.1"]
-            live.attack("old package " + function, *ptb, module="customer", function="assert_member", code=0, budget=min(20_000_000, live.ledger.remaining))
+            live.attack("old package " + function, *ptb, module="customer", function=abort_site(Path(args.base), "customer", "assert_member", 0), code=0, budget=min(20_000_000, live.ledger.remaining))
         for previous in fixture.get("upgrade_path", [])[1:-1]:
             live.attack("intermediate package cannot alter administrators", "--move-call", f"{previous}::customer::set_credential",
-                        f"@{c}", f"@{live.operator}", "true", "true", module="customer", function="assert_member", code=0,
+                        f"@{c}", f"@{live.operator}", "true", "true", module="customer", function=fixture.get("member_abort_sites", {}).get(previous, "assert_member"), code=0,
                         budget=min(20_000_000, live.ledger.remaining))
-        live.attack("unimplemented factor cannot activate", "--move-call", f"{head}::customer::set_security", f"@{c}", "vector[2u8,0u8,0u8,0u8,0u8,0u8,0u8]",
-                    module="security_policy", function="update", code=2, budget=min(20_000_000, live.ledger.remaining))
+        live.attack("unconfigured factor cannot activate", "--move-call", f"{head}::customer::set_security", f"@{c}", "vector[8u8,0u8,0u8,0u8,0u8,0u8,0u8]",
+                    module="security_policy", function=abort_site(Path("contracts"), "security_policy", "update", 1), code=1, budget=min(20_000_000, live.ledger.remaining))
         transaction("current all-off administration", "--move-call", f"{head}::customer::rename_fleet", f"@{c}", f"@{f}", '"SF196 verified fleet"')
         result = transaction("create disposable catalog", "--move-call", f"{head}::component_catalog::create_catalog")
         catalog = live.created(result, "::component_catalog::ComponentCatalog")[0]
         transaction("customer takes publisher custody", "--move-call", f"{head}::customer::adopt_catalog", f"@{c}", f"@{catalog}")
         live.attack("old catalog publisher excluded", "--move-call", f"{base}::component_catalog::publish_version", f"@{catalog}", '"app"', '"1.0.0"',
                     'vector["linux"]', 'vector["x86_64"]', 'vector["blob"]', 'vector["' + "ab" * 32 + '"]', 'vector["' + "cd" * 32 + '"]', CLOCK,
-                    module="component_catalog", function="publish_version", code=0, budget=min(20_000_000, live.ledger.remaining))
+                    module="component_catalog", function=abort_site(Path(args.base), "component_catalog", "publish_version", 0), code=0, budget=min(20_000_000, live.ledger.remaining))
         transaction("customer publishes authenticated version", "--move-call", f"{head}::customer::publish_version", f"@{c}", f"@{catalog}", '"app"', '"1.0.0"',
                     'vector["linux"]', 'vector["x86_64"]', 'vector["blob"]', 'vector["' + "ab" * 32 + '"]', 'vector["' + "cd" * 32 + '"]', CLOCK)
         transaction("fund isolated activity budget", "--split-coins", "gas", "[1000000]", "--assign", "funds",

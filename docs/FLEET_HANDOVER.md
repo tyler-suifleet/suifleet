@@ -147,7 +147,9 @@ make test-handover-upgrade-localnet        # compatible upgrade + old-package ef
 The bounded `scripts/live_fleet_handover.py` runner reuses an already published,
 verified dedicated-wallet package fixture. It requires the machine-session
 `network:suifleet-testnet` lock and explicit package, UpgradeCap, registry, base
-package and evidence path. It checks effects and charges source/child gas to the
+package, `--base-source /path/to/exported/base/contracts` and evidence path.
+The base source must match the published base package so refusal checks select
+its exact abort sites. It checks effects and charges source/child gas to the
 strict non-replenishing run allowance; it never publishes a duplicate package or
 requests faucet funds. Its disposable Ed25519 recipient is distinct from the
 local native-multisig fixture. Public testnet results must name their actual

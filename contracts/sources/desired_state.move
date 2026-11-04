@@ -91,10 +91,11 @@ module sui_edge::desired_state {
 
     /// Start a revision from the group's current desired state. Admin only.
     public fun begin(group: &DeviceGroup, ctx: &TxContext): RevisionPlan {
-        begin_as(group, ctx.sender())
+        k0(group, ctx.sender())
     }
 
-    public(package) fun begin_as(group: &DeviceGroup, admin: address): RevisionPlan {
+    /// Package helper: begin_as.
+    public(package) fun k0(group: &DeviceGroup, admin: address): RevisionPlan {
         q(device_group::admin(group) == admin, BNotAdmin);
         let (base_revision, components) = if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
@@ -112,8 +113,8 @@ module sui_edge::desired_state {
         q(deployment_manager::creator(deployment) == plan.admin, BNotCreator);
         assert!(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
         assert!(deployment_manager::has_recipe_digest(deployment) ||
-            component_catalog::has_authenticated_version(deployment), EUnverifiedRecipe);
-        deployment_manager::mark_managed(deployment);
+            component_catalog::k2(deployment), EUnverifiedRecipe);
+        deployment_manager::k22(deployment);
         let name = *deployment_manager::component_name(deployment);
         let id = object::id(deployment);
         if (plan.components.contains(&name)) {
@@ -131,11 +132,12 @@ module sui_edge::desired_state {
 
     /// Store the revision on the group. Aborts if the group changed since `begin`.
     public fun commit(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
-        commit_as(plan, group, clock, ctx.sender(), ctx);
+        k1(plan, group, clock, ctx.sender(), ctx);
     }
 
     /// `ctx` scopes the SF-129 retirement check to the current transaction.
-    public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address, ctx: &TxContext) {
+    /// Package helper: commit_as.
+    public(package) fun k1(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address, ctx: &TxContext) {
         let RevisionPlan { group_id, admin, base_revision, components } = plan;
         q(device_group::group_id(group) == group_id, BWrongGroup);
         q(authority == admin, BNotAdmin); q(device_group::admin(group) == admin, BNotAdmin);

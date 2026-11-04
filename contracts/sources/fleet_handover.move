@@ -107,12 +107,12 @@ module sui_edge::fleet_handover {
 
     public fun group(h: &mut Handover, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
         p0(h, object::id(group), SMALL_1, clock, ctx);
-        device_group::handover(group, h.recipient, ctx);
+        device_group::k0(group, h.recipient, ctx);
     }
 
     public fun deployment(h: &mut Handover, record: &mut DeploymentRecord, clock: &Clock, ctx: &TxContext) {
         p0(h, object::id(record), SMALL_2, clock, ctx);
-        deployment_manager::handover(record, h.recipient, ctx);
+        deployment_manager::k15(record, h.recipient, ctx);
     }
 
     public fun revoke_role(h: &mut Handover, registry: &mut DeviceRegistry,

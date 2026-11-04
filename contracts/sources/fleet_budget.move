@@ -279,14 +279,16 @@ module sui_edge::fleet_budget {
         low_balance_threshold: u64,
         ctx: &mut TxContext,
     ): BudgetOwnerCap {
-        let (budget, cap) = new_budget(registry, deposit, default_limits, low_balance_threshold, ctx);
+        let (budget, cap) = k1(registry, deposit, default_limits, low_balance_threshold, ctx);
         transfer::share_object(budget);
         cap
     }
 
-    public(package) fun share_managed(budget: FleetBudget) { transfer::share_object(budget); }
+    /// Package helper: share_managed.
+    public(package) fun k0(budget: FleetBudget) { transfer::share_object(budget); }
 
-    public(package) fun new_budget(registry: &DeviceRegistry, deposit: Coin<SUI>,
+    /// Package helper: new_budget.
+    public(package) fun k1(registry: &DeviceRegistry, deposit: Coin<SUI>,
         default_limits: Limits, low_balance_threshold: u64, ctx: &mut TxContext): (FleetBudget, BudgetOwnerCap) {
         p1(&default_limits);
         let id = object::new(ctx);
@@ -370,7 +372,8 @@ module sui_edge::fleet_budget {
         h0(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
     }
 
-    public(package) fun enroll_managed(
+    /// Package helper: enroll_managed.
+    public(package) fun k2(
         budget: &mut FleetBudget, cap: &BudgetOwnerCap, registry: &DeviceRegistry,
         owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
     ): ID {
@@ -491,7 +494,8 @@ module sui_edge::fleet_budget {
         q(budget.version == VERSION, BWrongVersion);
         p0(budget, cap, account);
     }
-    public(package) fun remove_managed(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
+    /// Package helper: remove_managed.
+    public(package) fun k3(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
         q(budget.version == MANAGED_VERSION, BWrongVersion);
         p0(budget, cap, account);
     }
@@ -588,7 +592,8 @@ module sui_edge::fleet_budget {
     }
 
     /// Adoption seals out all older package versions before capability custody.
-    public(package) fun adopt_managed(budget: &mut FleetBudget, cap: &BudgetOwnerCap) {
+    /// Package helper: adopt_managed.
+    public(package) fun k4(budget: &mut FleetBudget, cap: &BudgetOwnerCap) {
         assert_owner(budget, cap);
         budget.version = MANAGED_VERSION;
         df::add(&mut budget.id, CustomerManagedKey {}, true);
@@ -728,7 +733,8 @@ module sui_edge::fleet_budget {
 
     /// Adoption keeps the account ID/reserve/limits but binds it to the new
     /// custodied capability; unrelated old accounts remain retired by identity.
-    public(package) fun rebind_account(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
+    /// Package helper: rebind_account.
+    public(package) fun k5(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
         p2(budget, account);
         q(object::id(registry) == budget.registry_id, BWrongAccount); q(account.device_id == device_registry::owner_cap_device_id(cap), BWrongAccount);
         let identity = device_registry::identity(registry, account.device_id).destroy_some();

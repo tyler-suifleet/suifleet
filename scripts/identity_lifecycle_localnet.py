@@ -30,6 +30,7 @@ Run inside the dev image against a throwaway localnet and client config:
     SUI_CONFIG_DIR=/tmp/sui-config python3 scripts/identity_lifecycle_localnet.py \\
         --prior /tmp/prior/contracts --new contracts
 """
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -123,7 +124,7 @@ def main():
     new_record = deploy(pkg_new, "upgraded", legacy)
 
     report("prior package cannot write a record created by the upgrade", new_record, legacy_cap,
-           old=pkg_prior, ok=False, abort=("receipts_mut", 5))
+           old=pkg_prior, ok=False, abort=(abort_site(args.prior, "deployment_manager", "receipts_mut", 5), 5))
     report("retired report signature aborts in the upgraded package", new_record, legacy_cap,
            old=pkg_new, ok=False, abort=("report_status", 7))
     report("legacy device without identity is untrusted", new_record, legacy_cap,
@@ -197,7 +198,7 @@ def main():
     u.check("migration discards version-1 statuses instead of promoting them", (version, statuses) == (2, {}),
             f"version={version} statuses={statuses}")
     report("prior package cannot write the migrated record", old_record, legacy_cap,
-           old=pkg_prior, ok=False, abort=("receipts_mut", 5))
+           old=pkg_prior, ok=False, abort=(abort_site(args.prior, "deployment_manager", "receipts_mut", 5), 5))
 
     other, other_cap, _ = register(pkg_new, "current", other_dev)
     late_record = deploy(pkg_prior, "after the sweep", legacy, other)

@@ -9065,80 +9065,6 @@
         }
       }
     },
-    "multisig_admin": {
-      "functions": {
-        "administrator": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&vector<vector<u8>>",
-            "&vector<u8>",
-            "u16"
-          ],
-          "returns": [
-            "address"
-          ]
-        },
-        "approve": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "&mut sui_edge::security_policy::Action",
-            "vector<vector<u8>>",
-            "vector<u8>",
-            "u16",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "enroll": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<vector<u8>>",
-            "vector<u8>",
-            "u16",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "enroll_secured": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<vector<u8>>",
-            "vector<u8>",
-            "u16",
-            "sui_edge::security_policy::Action",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "prepare_policy_change": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "vector<u8>",
-            "u64",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        }
-      },
-      "structs": {}
-    },
     "subscription": {
       "functions": {
         "cancel": {
@@ -9529,6 +9455,129 @@
           ]
         }
       }
+    },
+    "passkey_factor": {
+      "functions": {
+        "enroll": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "sui_edge::passkey_factor::Enrollment",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "key_address": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "vector<u8>"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "keys": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer"
+          ],
+          "returns": [
+            "vector<address>"
+          ]
+        },
+        "prove_enrollment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "address",
+            "vector<u8>",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "remove": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "address",
+            "address",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {
+        "Enrollment": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "customer",
+              "sui::object::ID"
+            ],
+            [
+              "administrator",
+              "address"
+            ],
+            [
+              "key",
+              "address"
+            ],
+            [
+              "generation",
+              "u64"
+            ],
+            [
+              "expires_ms",
+              "u64"
+            ]
+          ]
+        },
+        "ProofCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "proof_id",
+              "sui::object::ID"
+            ],
+            [
+              "customer",
+              "sui::object::ID"
+            ],
+            [
+              "administrator",
+              "address"
+            ],
+            [
+              "key",
+              "address"
+            ]
+          ]
+        }
+      }
     }
   },
   "required_type_origins": [
@@ -9707,6 +9756,10 @@
       "subscription::Collected",
       "subscription::PlanChanged",
       "subscription::Refunded"
+    ],
+    "passkey_factor": [
+      "passkey_factor::Enrollment",
+      "passkey_factor::ProofCreated"
     ]
   },
   "supported_deployment_schema_versions": [

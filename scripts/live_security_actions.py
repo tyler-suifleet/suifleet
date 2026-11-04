@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Positive/tampered/cancelled production Action acceptance on the cached fixture."""
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -11,9 +12,9 @@ from live_common import Live, CLOCK
 
 
 def run(args):
-    if not os.environ.get("SUIFLEET_TESTNET_LOCK_TOKEN"):
+    if args.network == "testnet" and not os.environ.get("SUIFLEET_TESTNET_LOCK_TOKEN"):
         raise RuntimeError("requires network:suifleet-testnet lock")
-    live = Live(args.wallet, "testnet", 100_000_000)
+    live = Live(args.wallet, args.network, 100_000_000)
     live.preflight(auto_fund=False)
     receipt = json.loads(Path(args.fixture_receipt).read_text())
     assert receipt["success"] and receipt["chain"] == live.chain and receipt["operator"] == live.operator
@@ -21,7 +22,7 @@ def run(args):
     cap = live.object(f["cap"])
     assert dm.object_id(cap["owner"]["AddressOwner"]) == live.operator
     assert dm.object_id(cap["content"]["package"]) == f["head"]
-    assert int(cap["content"]["version"]) == f["version"]
+    assert int(cap["content"]["version"]) == f.get("version", 2)
     c, fleet, head = f["customer"], f["fleet"], f["head"]
     live.evidence.update(success=False, fixture=f)
 
@@ -49,11 +50,11 @@ def run(args):
                              f"@{c}", f"@{fleet}", json.dumps(name), f"@{action}", CLOCK)
         deleted(result, action)
         assert live.object(fleet)["content"]["name"] == name
-        live.check("canonical SDK object BCS accepted; executed Action nonce deleted")
+        live.check("canonical SDK identity BCS accepted; executed Action nonce deleted")
         pending = prepare("SF196 approved name")
         live.attack("substituted arguments rejected on chain", "--move-call", f"{head}::customer::rename_fleet_secured",
                     f"@{c}", f"@{fleet}", json.dumps("unauthorized replacement"), f"@{pending}", CLOCK,
-                    module="security_policy", function="begin_scoped_bytes", code=0, budget=20_000_000)
+                    module="security_policy", function=abort_site(Path("contracts"), "security_policy", "begin_scoped_bytes", 0), code=0, budget=20_000_000)
         assert live.object(fleet)["content"]["name"] == name
         result = transaction("cancel retained action after failed substitution", "--move-call",
                              f"{head}::customer::cancel_security_action", f"@{c}", f"@{pending}")
@@ -67,6 +68,7 @@ def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wallet", required=True)
+    parser.add_argument("--network", choices=["testnet", "localnet"], default="testnet")
     parser.add_argument("--fixture-receipt", required=True)
     parser.add_argument("--evidence", required=True)
     run(parser.parse_args())

@@ -9448,5 +9448,128 @@ export const MOVE_ABI = {
         ]
       }
     }
+  },
+  "passkey_factor": {
+    "functions": {
+      "enroll": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "sui_edge::passkey_factor::Enrollment",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "key_address": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "vector<u8>"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "keys": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer"
+        ],
+        "returns": [
+          "vector<address>"
+        ]
+      },
+      "prove_enrollment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "address",
+          "vector<u8>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "remove": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "address",
+          "address",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "Enrollment": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "customer",
+            "sui::object::ID"
+          ],
+          [
+            "administrator",
+            "address"
+          ],
+          [
+            "key",
+            "address"
+          ],
+          [
+            "generation",
+            "u64"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ]
+        ]
+      },
+      "ProofCreated": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "proof_id",
+            "sui::object::ID"
+          ],
+          [
+            "customer",
+            "sui::object::ID"
+          ],
+          [
+            "administrator",
+            "address"
+          ],
+          [
+            "key",
+            "address"
+          ]
+        ]
+      }
+    }
   }
 } as const;
