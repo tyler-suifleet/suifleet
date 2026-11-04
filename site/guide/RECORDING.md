@@ -83,3 +83,13 @@ caption readability, keys, credentials, tokens and non-demo addresses. Keep raw
 frames, browser state, keys and failed captures private outside the checkout.
 Record review evidence and exact console commit with the transaction/cost receipt.
 Do not mark SF-175 Review until the genuine nine-step run and review pass.
+
+The recording-only overlay in `recording_overlay.cjs` paints a high-contrast
+pointer into compositor frames. It follows actual pointer events, including
+composed events from wallet shadow roots; clicks create a short amber pulse.
+The helpers move the pointer visibly before clicking. The overlay never accepts
+pointer events or focus and is not part of the shipped console. The offline
+recording browser check verifies captured pixels and real screencast frames,
+pointer persistence, click-through behavior and shadow-root wallet interaction.
+Existing videos must be re-recorded to include it; do not infer historical mouse
+trajectories or claim a recorder fix retroactively changes published clips.
