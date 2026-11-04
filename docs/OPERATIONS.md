@@ -1168,3 +1168,49 @@ Validation and limits are recorded in [SF-201 evidence](validation/sf201-multisi
 Manual Slush, extension-wallet, hardware/passkey-member sessions remain **unrun**
 in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32); production and
 mainnet acceptance remain in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## Subscription console checkout
+
+The [billing configuration and verification boundary](FRONTEND_CLIENT.md#plans-and-billing-sf-182)
+describes the reviewed offer list. Deploy the manifest-pinned treasury/coin/type
+origins and matching reviewed conversion metadata together. A pricing estimate
+alone never authorizes a charge. Protected organizations retain their configured
+factor/delay requirements; plain checkout does not create a protection bypass.
+
+The SF-182 [Testnet receipt](validation/sf182-testnet.json) reuses the explicitly
+selected SF-181 cancelled disposable USDC account. The actual frontend generated
+a payment URI, built a 1,000-base-unit escrow deposit, verified node effects and
+typed deposit/account binding, scanned receipts and generated CSV company details.
+A separate cancellation returned the entire 1,000 units; independent gRPC reads
+verify final cancelled/zero-balance state, deposit/refund events and signed gas.
+The run used **5,952,761 MIST of a 100,000,000 MIST ceiling**, including the earlier
+successful setup transaction whose `customer::create` was a no-op because this
+agent already has a Customer in the fixture registry. Storage rebates do not
+replenish that ledger. No package was republished and no faucet was requested.
+
+Initial frontend open and renewal were **not** executed on public Testnet: the
+existing Customer has a persistent subscription binding, and a replacement offer
+requires 30 days' notice. Opening and renewal refusal have local regressions;
+SF-181's historical contract opening is separate evidence, not a new frontend
+walkthrough. Same-agent deposit proves the permissionless protocol, not a manual
+second-wallet/extension session. Those manual checks stay in #32/#159. The
+cancelled fixture was not reactivated; no production tariff or conversion is
+claimed. The generated test-only offer is not added to any customer build.
+
+Read-only verification (no wallet or lease needed):
+
+```bash
+node scripts/live_subscription_checkout.cjs \
+  docs/validation/sf181-testnet-current-manifest.json \
+  --verify-evidence docs/validation/sf182-testnet.json
+```
+
+`python3 scripts/live_subscription_checkout.py --help` documents the bounded
+machine runner. It requires explicit wallet/manifest/state/evidence paths and a
+global Testnet lease; exact pinned CLIs, chain/account/UpgradeCap/type origins,
+registry authority and treasury are checked before mutation. Reconcile retained
+state before a repeat: do not start another ledger to retry an uncertain payment.
+The optional `--existing-account` selects a cancelled/empty disposable fixture
+explicitly; its sole resumed-setup case independently reconciles the completed
+setup and retains its spend. The private state must never be published. Release
+the lease immediately after mutations; read-only verification can follow.
