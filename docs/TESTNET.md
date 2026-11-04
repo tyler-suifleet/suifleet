@@ -1426,3 +1426,33 @@ until `2026-12-04T01:30:04.331Z`. No notice/clock bypass was attempted. Manual
 wallet, physical, mainnet and production-provider acceptance remains unrun in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+**SF-182 CI lane 2 funding repair (2026-11-04, run 41808844424).**
+The completed [exact-source run](https://github.com/tyler-suifleet/suifleet/actions/runs/41808844424)
+at source `491a470aec5e290307ddb10972f5a5c2bdb90049` failed funding
+preflight after its single faucet: 3,299,758,700 MIST versus the unchanged
+3,650,000,000 MIST requirement. Its authenticated head-named artifact records
+zero submitted test transactions, zero allowance use and zero held reservations.
+
+Independent readback confirmed the same current balance, chain `4c78adac`,
+pinned dedicated lane-2 recipient and checksum-pinned 1.83.0 CLI. One separate
+faucet-only maintenance request under the asserted global lease succeeded:
+`EtgiuscEEoh3wa1ELwc5WhQcrbENvF66SUX7AgoaXJwo`, checkpoint `402730451`.
+Effects independently confirm a 1,000,000,000 MIST recipient credit and
+1,000,000 MIST gas paid by the faucet. Balance became 4,299,758,700 MIST.
+The lease was released promptly; no CI rerun, fixture replay, reservation
+clearing, ceiling change or signing-secret access occurred. Funding is a
+point-in-time result that other CI runs may consume.
+
+[Recovery evidence](validation/sf182-lane2-recovery.json) includes the exact
+artifact hash, effects, public recipient, fixture audit and test results.
+Read-only enumeration of 43 dedicated-agent-owned UpgradeCap packages found
+only the two recorded SF-181 packages exposing subscription; both registry
+customers are already bound. No eligible unbound fixture was found. The
+current fixture retains its December 4 notice and 5,952,761 / 100,000,000 MIST
+checkout ledger. Automated frontend open/renew acceptance remains unrun.
+Spending regressions passed 105 tests, checkout refusal tests five, and stale-base
+routing tests nine. The pushed contained infrastructure repair still requires
+sole-coordinator integration and merged-only activation: the existing mixed
+frontend PR cannot be relabeled as an infrastructure-only integration. No
+working-tree installation, merge, successful CI or deferred acceptance is claimed.

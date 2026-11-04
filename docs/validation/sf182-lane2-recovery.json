@@ -1,0 +1,277 @@
+{
+  "model": "gpt-6.1-sol",
+  "checked_at_utc": "2026-11-04T09:59:45.138399+00:00",
+  "run": {
+    "id": 41808844424,
+    "attempt": 1,
+    "source_head": "491a470aec5e290307ddb10972f5a5c2bdb90049",
+    "controller": "dd6243914d79df83707ef437b4b4eddadf2e9ba1",
+    "artifact_id": 13312106792,
+    "artifact_name": "testnet-effects-491a470aec5e290307ddb10972f5a5c2bdb90049",
+    "evidence_sha256": "29af76ea33d498df74cc365e92eb22341e69163cc355f79a8221c4e2761a5a20",
+    "package_upgrade": {
+      "started": "2026-11-04T09:51:32Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1273,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "funding": {
+        "required_mist": 3650000000,
+        "held_mist": 0,
+        "address_mist": 2221399810,
+        "coin_mist": 78358890
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_before_mist": 2299758700,
+        "balance_change_mist": 1000000000,
+        "balance_after_mist": 3299758700,
+        "success": false
+      },
+      "success": false,
+      "allowance_used_mist": 0,
+      "max_spend_mist": 2000000000,
+      "error": "dedicated testnet faucet did not supply the required balance (one bounded attempt): holds 3299758700 MIST; the selected suites may spend up to 3650000000",
+      "failure_class": "funding"
+    }
+  },
+  "maintenance": {
+    "chain": "4c78adac",
+    "lane": 2,
+    "address": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4",
+    "cli_binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+    "requests": 1,
+    "balance_before_mist": 3299758700,
+    "balance_after_mist": 4299758700,
+    "digest": "EtgiuscEEoh3wa1ELwc5WhQcrbENvF66SUX7AgoaXJwo",
+    "checkpoint": "402730451",
+    "effects": {
+      "messageVersion": "v1",
+      "status": {
+        "status": "success"
+      },
+      "executedEpoch": "1273",
+      "gasUsed": {
+        "computationCost": "1000000",
+        "storageCost": "0",
+        "storageRebate": "0",
+        "nonRefundableStorageFee": "0"
+      },
+      "transactionDigest": "EtgiuscEEoh3wa1ELwc5WhQcrbENvF66SUX7AgoaXJwo",
+      "accumulatorEvents": [
+        {
+          "accumulatorObj": "0x77f4053652028a3b69b0133713b80a38870791c15c8ed3dce76fb9c3fa363874",
+          "address": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4",
+          "ty": "0x2::balance::Balance<0x2::sui::SUI>",
+          "operation": "merge",
+          "value": {
+            "integer": 1000000000
+          }
+        },
+        {
+          "accumulatorObj": "0x7843df8abe70bb0b40ec8a4be826c0cd0a5f81027794c1bf9b947bc33df448e3",
+          "address": "0x059e21c19f9a8233f4fcbc11fba713c022dcf9d3632961b7ac7836a9ffa8d94f",
+          "ty": "0x2::balance::Balance<0x2::sui::SUI>",
+          "operation": "split",
+          "value": {
+            "integer": 1001000000
+          }
+        }
+      ],
+      "gasObject": {
+        "owner": {
+          "AddressOwner": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "reference": {
+          "objectId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "version": 0,
+          "digest": "11111111111111111111111111111111"
+        }
+      }
+    },
+    "balance_changes": [
+      {
+        "owner": {
+          "AddressOwner": "0x059e21c19f9a8233f4fcbc11fba713c022dcf9d3632961b7ac7836a9ffa8d94f"
+        },
+        "coinType": "0x2::sui::SUI",
+        "amount": "-1001000000"
+      },
+      {
+        "owner": {
+          "AddressOwner": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4"
+        },
+        "coinType": "0x2::sui::SUI",
+        "amount": "1000000000"
+      }
+    ],
+    "coordination": "https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6627915848",
+    "lease_released": true
+  },
+  "fixture_audit": {
+    "agent_owned_upgrade_caps_checked": 43,
+    "packages_with_subscription": [
+      {
+        "cap": "0x2903ad21c428892861e0690171602c70eaf4c9689bc0fde55b65c6f4b160a8b6",
+        "package": "0x9fa20cc73455f1f6f65ea3f8796856ee5945abac0b895f038dbcc7919e838882",
+        "modules": [
+          "component_catalog",
+          "customer",
+          "deployment_manager",
+          "desired_state",
+          "device_cap",
+          "device_group",
+          "device_registry",
+          "enrollment",
+          "fleet_budget",
+          "fleet_handover",
+          "fleet_inbox",
+          "fleet_settings",
+          "multisig_admin",
+          "roles",
+          "seal_policy",
+          "security_policy",
+          "subscription"
+        ],
+        "subscription": true
+      },
+      {
+        "cap": "0xc5dd92a4a6ef0b256949957ffbd300c1c7ce900fd547ab991e58b6f8f502a1cd",
+        "package": "0xafd1d98b2372622c7f83b18babed428b91469015d06d598c524ac8e06511b801",
+        "modules": [
+          "component_catalog",
+          "customer",
+          "deployment_manager",
+          "desired_state",
+          "device_cap",
+          "device_group",
+          "device_registry",
+          "enrollment",
+          "fleet_budget",
+          "fleet_handover",
+          "fleet_inbox",
+          "fleet_settings",
+          "multisig_admin",
+          "roles",
+          "seal_policy",
+          "security_policy",
+          "subscription"
+        ],
+        "subscription": true
+      }
+    ],
+    "errors": [],
+    "current_fixture": {
+      "customer": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+      "existing": {
+        "symbol": "USDC",
+        "account": {
+          "id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+          "customer_id": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+          "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+          "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+          "balance": {
+            "value": "0"
+          },
+          "tier": "1",
+          "device_limit": "100",
+          "allowance": "1000",
+          "fee": "9000",
+          "remaining": "0",
+          "period_ms": "2628000000",
+          "next_due_ms": "1796358347693",
+          "term_end_ms": "1825266347693",
+          "cancelled": true
+        }
+      },
+      "offer": {
+        "id": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+        "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+        "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+        "tier": "1",
+        "device_limit": "100",
+        "allowance": "1000",
+        "fee": "10000",
+        "periods": "1",
+        "period_ms": "2592000000",
+        "published_at_ms": "1793755804331",
+        "expires_at_ms": "1798939804331"
+      },
+      "action": "renew",
+      "eligible_at_ms": 1796347804331,
+      "eligible_at_utc": "2026-12-04T01:30:04.331Z",
+      "reason": "Renewal requires 30-day notice"
+    },
+    "older_fixture": {
+      "customer": "0x625304798dbaeab6e051a448aedc295f52b920f5c90bbc71cd0262c52f77295d",
+      "existing": {
+        "symbol": "USDC",
+        "account": {
+          "id": "0x8407d34d6b3fabb08f38276361d223932f6e5fd2e7d66fc7e8bc29cad7795d3a",
+          "customer_id": "0x625304798dbaeab6e051a448aedc295f52b920f5c90bbc71cd0262c52f77295d",
+          "registry_id": "0xb39f74a421bdea41488aaf8e8d7f8b90b46ab854fadaf3dc40858825b9267e98",
+          "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+          "balance": {
+            "value": "0"
+          },
+          "tier": "1",
+          "device_limit": "100",
+          "allowance": "1000",
+          "fee": "9000",
+          "remaining": "0",
+          "period_ms": "2628000000",
+          "next_due_ms": "1796352298807",
+          "term_end_ms": "1825260298807",
+          "cancelled": true
+        }
+      },
+      "offer": null,
+      "action": "renew",
+      "eligible_at_ms": null,
+      "eligible_at_utc": null,
+      "reason": "Bound customer requires an explicitly selected compatible offer"
+    },
+    "eligible_unbound_fixture_found": false,
+    "prior_allowance_used_mist": 5952761,
+    "prior_allowance_limit_mist": 100000000
+  },
+  "tests": {
+    "spending": "105 passed",
+    "checkout": "5 passed",
+    "stale_base_contracts": "9 passed",
+    "diff_check": "passed"
+  },
+  "limits": [
+    "Funding maintenance only; no CI rerun or test transaction replay. No spending ceiling/reservation/fixture controls changed.",
+    "No eligible unbound fixture under inspected dedicated-agent authority. Existing subscription bindings and December 4 notice preserved; automated open/renew remains unrun.",
+    "Infrastructure repair 491a470 remains pushed but uninstalled. LocalInfrastructure.eligible requires infra-only paths and infra owner in Review; mixed frontend PR580 does not qualify. Sole coordinator must route the contained repair through merged-only installation; this worker cannot merge/install or relabel scope.",
+    "No current combined-candidate CI/testnet acceptance or installed-runtime routing is claimed. Manual wallet/Pi/mainnet/provider acceptance remains #32/#159."
+  ]
+}
