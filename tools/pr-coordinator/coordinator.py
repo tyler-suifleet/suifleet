@@ -2168,7 +2168,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 print(json.dumps({'project':project['id'],'pr':pr['number'],
                                   'owner':owner['agent'] if owner else None,'merge_blocker':reason,
                                   'ci_failures':failures, 'ci_repair_blocker':repair_blocker,
-                                  'ci_responsibility':responsibility}),flush=True)
+                                  'ci_responsibility':responsibility,
+                                  'shared_acceptance_wait':pr.get('_shared_acceptance_wait')}),flush=True)
                 if not execute or not owner or owner['status'] != 'review' or owner.get('publish_pending') or pr['isDraft'] or pr['state'] != 'OPEN': continue
                 self.ensure_closing_reference(project,pr,owner)
                 intent=self.store.db.execute('SELECT * FROM integrations WHERE project=? AND pr=? AND reconciled=0',(project['id'],pr['number'])).fetchone()

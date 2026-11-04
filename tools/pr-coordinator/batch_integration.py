@@ -32,6 +32,9 @@ class BatchController:
         self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
         self.installed = Path(installed) if installed is not None else Path(__file__).with_name('installed.json')
         self._installed_proofs = set()
+        self.db.execute('''CREATE TABLE IF NOT EXISTS shared_harness_incidents (
+            project TEXT,batch_id TEXT,owner_ticket TEXT,manifest TEXT,error_hash TEXT,
+            receipt TEXT,created REAL,PRIMARY KEY(project,batch_id))''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batches (
             project TEXT,id TEXT,status TEXT,base TEXT,head TEXT,branch TEXT,pr INTEGER,
             members TEXT,directory TEXT,error TEXT,created REAL,updated REAL,
@@ -732,10 +735,88 @@ class BatchController:
             # A retained cleanup/closure receipt must not stop unrelated work.
             print(f"{project['id']} batch {batch['id']}: terminal cleanup deferred ({type(error).__name__})", flush=True)
 
+    def shared_harness_incident(self, project, batch, error):
+        """Narrow operator-reported incident, authenticated before victim suppression.
+
+        This routes evidence to existing SF-243 ownership, never launches workers,
+        retries a mutation, changes source receipts, or grants candidate acceptance.
+        New signatures require a scoped tracker decision and reviewed code.
+        """
+        if (project.get('repository') != 'tyler-suifleet/suifleet'
+                or batch['head'] != 'ebdca15ae1c244376701b323486a94e2ea002799'
+                or batch['base'] != '4aa4344c0a0b0749348ed78544531ed28ac857d3'
+                or error.get('kind') != 'candidate_checks_failed'):
+            return None
+        checks = error.get('checks', [])
+        url = 'https://github.com/tyler-suifleet/suifleet/actions/runs/41914017432'
+        if (len(checks) != 1 or checks[0].get('name') != 'testnet/package-upgrade'
+                or checks[0].get('workflowName') != 'Automatic testnet'
+                or checks[0].get('conclusion') != 'FAILURE' or checks[0].get('detailsUrl') != url):
+            return None
+        self.verify_manifest(project, batch)
+        error_hash = hashlib.sha256(canonical(error).encode()).hexdigest()
+        existing = self.db.execute('SELECT manifest,error_hash,receipt FROM shared_harness_incidents '
+            'WHERE project=? AND batch_id=?', (project['id'], batch['id'])).fetchone()
+        if existing:
+            if tuple(existing[:2]) != (batch['manifest_digest'], error_hash):
+                raise RuntimeError('shared harness incident identity changed')
+            return json.loads(existing[2])
+        path = 'repos/' + project['repository'] + '/actions/runs/41914017432'
+        read = lambda: json.loads(self.c.gh(project, ['api', path]))
+        run = read()
+        if (run.get('id') != 41914017432 or run.get('status') != 'completed'
+                or run.get('conclusion') != 'failure' or run.get('event') != 'workflow_run'
+                or run.get('head_branch') != 'main' or run.get('path') != '.github/workflows/testnet.yml'
+                or run.get('name') != 'Automatic testnet' or type(run.get('run_attempt')) is not int
+                or run['run_attempt'] < 1 or run.get('repository', {}).get('full_name') != project['repository']
+                or run.get('head_repository', {}).get('full_name') != project['repository']):
+            raise RuntimeError('shared harness run provenance unavailable')
+        with tempfile.TemporaryDirectory(prefix='shared-harness-effects-') as directory:
+            self.c.gh(project, ['run', 'download', '41914017432', '-R', project['repository'],
+                '-n', 'testnet-effects-' + batch['head'], '-D', directory])
+            evidence = {}
+            hashes = {}
+            for name in ('package-upgrade.json', 'upgrade-security.json'):
+                file = Path(directory) / name
+                if file.is_symlink() or not file.is_file() or file.stat().st_size > 2_000_000:
+                    raise RuntimeError('shared harness effects unavailable')
+                raw = file.read_bytes()
+                evidence[name] = json.loads(raw)
+                hashes[name] = hashlib.sha256(raw).hexdigest()
+        package, security = evidence['package-upgrade.json'], evidence['upgrade-security.json']
+        failures = [tx for tx in security.get('transactions', []) if tx.get('status') == 'failure'
+                    and tx.get('label') == 'initialize cached passkey authority']
+        if (package.get('base') != batch['base'] or package.get('head') != batch['head']
+                or package.get('chain_identifier', package.get('chain')) != '4c78adac'
+                or security.get('chain_identifier', security.get('chain')) != '4c78adac'
+                or security.get('head') != batch['head']
+                or len(failures) != 1 or failures[0].get('digest') != 'AEbuyHfJEsQjPt9GJq9gM5bMFraHa2VSyrVoUvQGtQkw'
+                or type(failures[0].get('gas_mist')) is not int or failures[0]['gas_mist'] <= 0):
+            raise RuntimeError('shared harness failure receipt does not match pinned incident')
+        if read() != run:
+            raise RuntimeError('shared harness run changed during authentication')
+        receipt = dict(owner_ticket='SF-243', candidate_pr=batch['pr'], candidate_head=batch['head'],
+            candidate_base=batch['base'], run=run['id'], attempt=run['run_attempt'], hashes=hashes,
+            failure_digest=failures[0]['digest'], checks=checks,
+            diagnostic='await scoped SF-243 recovery; unchanged member repairs suppressed; all acceptance gates retained')
+        self.db.execute('INSERT INTO shared_harness_incidents VALUES(?,?,?,?,?,?,?)',
+            (project['id'], batch['id'], 'SF-243', batch['manifest_digest'], error_hash, canonical(receipt), self.clock()))
+        self.db.commit()  # Durable attribution precedes scheduling decisions.
+        return receipt
+
     def repair_context(self, project, pr):
         result = {}
         for batch in reversed(self.rows(project)):
             members = json.loads(batch['members'])
+            if batch['status'] == 'failed' and any(m['pr'] == pr['number'] and m['head'] == pr['headRefOid'] for m in members):
+                try:
+                    shared_error = json.loads(batch['error'] or '{}')
+                except (TypeError, ValueError):
+                    shared_error = {}
+                incident = self.shared_harness_incident(project, batch, shared_error)
+                if incident:
+                    result['_shared_acceptance_wait'] = incident
+                    break
             if (batch['status'] == 'failed' and len(members) == 1
                     and members[0]['pr'] == pr['number'] and members[0]['head'] == pr['headRefOid']):
                 try:
