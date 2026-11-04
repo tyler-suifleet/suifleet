@@ -61,7 +61,7 @@
         record
     }
 
-    #[mode(spec), ext(spec(prove, target = handover))]
+    #[mode(spec), ext(spec(prove, target = k15))]
     fun deployment_handover_security_spec(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
         prover::prover::asserts(ctx.sender() == d.creator);
         // Directory presence selects sharded storage, including schema-2 catalogs.
@@ -72,7 +72,7 @@
         prover::prover::asserts(receipt_schema(d) != 2);
         let artifact = d.artifact_sha256;
         let blob = d.recipe_blob_id;
-        handover(d, recipient, ctx);
+        k15(d, recipient, ctx);
         prover::prover::ensures(d.creator == recipient);
         prover::prover::ensures(d.artifact_sha256 == artifact);
         prover::prover::ensures(d.recipe_blob_id == blob);

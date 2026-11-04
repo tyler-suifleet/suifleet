@@ -16,6 +16,7 @@ Run inside the dev image against a throwaway localnet and client config:
 
 It refuses to run unless the active environment's RPC is on localhost.
 """
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -317,11 +318,11 @@ def main():
     print(f"v3 package={pkg3} (RECEIPTS_VERSION=2)")
     execute("anyone -> v3 migrate R2", "--move-call", f"{pkg3}::deployment_manager::migrate", f"@{r2}")
     execute("v2 migrate cannot downgrade R2",
-            "--move-call", f"{pkg2}::deployment_manager::migrate", f"@{r2}", expect_success=False, abort=("receipts_mut", 5))
+            "--move-call", f"{pkg2}::deployment_manager::migrate", f"@{r2}", expect_success=False, abort=(abort_site(args.v2, "deployment_manager", "receipts_mut", 5), 5))
     use(dev)
     execute("LOCKOUT device -> v2 report_status on migrated R2",
             "--move-call", f"{pkg2}::deployment_manager::report_status",
-            f"@{r2}", f"@{bound[d_new]}", f"{FAILED}u8", expect_success=False, abort=("receipts_mut", 5))
+            f"@{r2}", f"@{bound[d_new]}", f"{FAILED}u8", expect_success=False, abort=(abort_site(args.v2, "deployment_manager", "receipts_mut", 5), 5))
     execute("device -> v3 report_status on migrated R2",
             "--move-call", f"{pkg3}::deployment_manager::report_status",
             f"@{r2}", f"@{bound[d_new]}", f"{FAILED}u8")

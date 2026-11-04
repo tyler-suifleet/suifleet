@@ -13,7 +13,7 @@ import { customer_FleetBcs } from "./fleet-protocol";
 // Jobs contain public data only (claim addresses, names, digests). Claim keys
 // exist in memory just long enough to be written into the downloaded
 // credential archive; they are never stored, logged or put in a URL.
-import { Transaction } from "@mysten/sui/transactions";
+import { Transaction, coinWithBalance } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { bcs } from "@mysten/sui/bcs";
@@ -611,7 +611,8 @@ export function buildClaimsTx(policyId: string, register: string[], fund: { clai
     else calls.enrollment_add_claims(tx, PACKAGE_ID, policyId, register);
   }
   if (fund.length) {
-    const coins = tx.splitCoins(tx.gas, fund.map((f) => tx.pure.u64(f.mist)));
+    const funding = tx.add(coinWithBalance({ balance: fund.reduce((total, f) => total + f.mist, BigInt(0)) }));
+    const coins = tx.splitCoins(funding, fund.map((f) => tx.pure.u64(f.mist)));
     fund.forEach((f, i) => tx.transferObjects([coins[i]], tx.pure.address(f.claim)));
   }
   return tx;

@@ -164,6 +164,8 @@ export const subscription_DepositedBcs = bcs.struct("Deposited", { account_id: b
 export const subscription_OfferBcs = bcs.struct("Offer", { id: bcs.Address, registry_id: bcs.Address, treasury: bcs.Address, tier: bcs.u64(), device_limit: bcs.u64(), allowance: bcs.u64(), fee: bcs.u64(), periods: bcs.u64(), period_ms: bcs.u64(), published_at_ms: bcs.u64(), expires_at_ms: bcs.u64() });
 export const subscription_PlanChangedBcs = bcs.struct("PlanChanged", { account_id: bcs.Address, offer_id: bcs.Address, tier: bcs.u64(), fee: bcs.u64(), periods: bcs.u64() });
 export const subscription_RefundedBcs = bcs.struct("Refunded", { account_id: bcs.Address, recipient: bcs.Address, amount: bcs.u64() });
+export const passkey_factor_EnrollmentBcs = bcs.struct("Enrollment", { id: bcs.Address, customer: bcs.Address, administrator: bcs.Address, key: bcs.Address, generation: bcs.u64(), expires_ms: bcs.u64() });
+export const passkey_factor_ProofCreatedBcs = bcs.struct("ProofCreated", { proof_id: bcs.Address, customer: bcs.Address, administrator: bcs.Address, key: bcs.Address });
 export const calls = {
   component_catalog_begin_sharded_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::begin_sharded_receipts`, arguments: [tx.object(a0)] }),
   component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
@@ -576,6 +578,11 @@ export const calls = {
   security_policy_intent: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::intent`, arguments: [tx.object(a0)] }),
   security_policy_proposer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::proposer`, arguments: [tx.object(a0)] }),
   security_policy_requirements: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::requirements`, arguments: [tx.object(a0)] }),
+  passkey_factor_enroll: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::passkey_factor::enroll`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  passkey_factor_key_address: (tx: Transaction, packageId: string, a0: Uint8Array | number[]) => tx.moveCall({ target: `${packageId}::passkey_factor::key_address`, arguments: [tx.pure.vector("u8", a0)] }),
+  passkey_factor_keys: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::passkey_factor::keys`, arguments: [tx.object(a0)] }),
+  passkey_factor_prove_enrollment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: Uint8Array | number[], a3: number | bigint | string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::passkey_factor::prove_enrollment`, arguments: [tx.object(a0), tx.pure.address(a1), tx.pure.vector("u8", a2), tx.pure.u64(a3), tx.object(a4)] }),
+  passkey_factor_remove: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string) => tx.moveCall({ target: `${packageId}::passkey_factor::remove`, arguments: [tx.object(a0), tx.pure.address(a1), tx.pure.address(a2)] }),
 };
 export const TYPES = {
   component_catalog_CatalogBinding: "component_catalog::CatalogBinding",
@@ -739,4 +746,6 @@ export const TYPES = {
   subscription_Offer: "subscription::Offer",
   subscription_PlanChanged: "subscription::PlanChanged",
   subscription_Refunded: "subscription::Refunded",
+  passkey_factor_Enrollment: "passkey_factor::Enrollment",
+  passkey_factor_ProofCreated: "passkey_factor::ProofCreated",
 } as const;

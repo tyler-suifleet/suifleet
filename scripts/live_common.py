@@ -109,9 +109,11 @@ def plain(value):
 
 
 def run_client_command(full, command):
-    # Only known reads may be retried. A failed submission can have an
-    # unknown on-chain outcome; executor/Budget must reconcile it instead.
-    read_only = command and command[0] in {"object", "dynamic-field", "tx-block", "gas"}
+    # Only known reads and explicitly unsigned PTB builds may be retried.
+    # Serialization never signs/submits; a failed submission can have an
+    # unknown on-chain outcome and executor/Budget must reconcile it instead.
+    read_only = command and (command[0] in {"object", "dynamic-field", "tx-block", "gas"}
+                             or (command[0] == "ptb" and "--serialize-unsigned-transaction" in command))
     # Give the public fullnode a bounded cooldown (75 seconds total).
     # Three immediate reads with only 1s/2s gaps can exhaust one throttle window.
     for attempt in range(5):
