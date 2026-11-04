@@ -9,6 +9,7 @@ import { FleetSelectionProvider, FleetScope } from "@/hooks/useFleetSelection";
 import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { NETWORK } from "@/lib/constants";
 import "./globals.css";
+import "@/components/OrganizationSecurity.css";
 import Link from "next/link";
 import { HistoryStatus } from "@/components/HistoryStatus";
 import { ConnectionRequired } from "@/components/ui";
