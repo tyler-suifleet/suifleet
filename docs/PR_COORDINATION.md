@@ -1638,3 +1638,15 @@ needs the repair through sole-coordinator merged-only activation. Source/base
 movement requires fresh evidence, and every real combined candidate still needs
 independent review and actual protected testnet acceptance. The checkout fixture
 remains ineligible for renewal until December 4; the recovery does not waive it.
+
+SF-182 also permits the authenticated cache-reuse form of this rejection: one
+`upgrade to head` entry marked `not_submitted`, an exact verified/reused base
+package check, zero allowance use and spend, unchanged start/end balance, no
+held reservation or reconciliation. Fresh setup still requires all three
+successful, cumulatively accounted setup transactions. Partial setup and
+unverified reuse fail closed. The [exact-run cache replay](validation/sf182-cached-base-repair.json)
+authenticates run 41815773181 without replaying its faucet or wallet work.
+This is a reader repair for the existing installed `annotate_stale_base` route;
+only the sole coordinator may activate merged runtime code and collect a source.
+It grants no candidate approval and does not change the bound subscription
+fixtures, original checkout allowance or December 4 renewal eligibility.

@@ -11,6 +11,46 @@ import coordinator as c
 
 
 class StaleBaseTests(unittest.TestCase):
+    def cached_case(self):
+        f, pr, run, evidence, trees = self.setup_case()
+        evidence.update(transactions=[dict(label='upgrade to head', status='not_submitted',
+            allowance_used_mist=0)], allowance_used_mist=0, spent_mist=0,
+            start_balance_mist=3728851202, end_balance_mist=3728851202,
+            checks=['verified/reused base package 0x' + '6'*64 + '; no identical package is republished'],
+            error='test-upgrade could not build a transaction: error[EUC01006]: module missing; '
+                  'this package requires changes to be compatible')
+        return f, pr, run, evidence, trees
+
+    def test_cached_base_zero_submission_routes_to_candidate_only(self):
+        f, pr, run, evidence, trees = self.cached_case()
+        failure = copy.deepcopy(c.failed_checks(pr))
+        f.controller.annotate_stale_base(f.project, pr)
+        self.assertTrue(c.verified_stale_base(pr))
+        self.assertEqual(pr['_stale_base_contracts']['allowance_used_mist'], 0)
+        self.assertEqual(c.failed_checks(pr), failure)
+        f.gh = Fixture.gh.__get__(f)
+        f.tick()
+        self.assertEqual(f.row()['status'], 'awaiting_ci')
+        self.assertEqual(f.reconciled, [])
+
+    def test_cached_base_rejects_spend_unknown_and_unverified_reuse(self):
+        for mode in ('spent', 'balance', 'missing_balance', 'no_check', 'wrong_check',
+                     'extra_transaction', 'held', 'submitted', 'wrong_base', 'source_change'):
+            with self.subTest(mode=mode):
+                f, pr, run, evidence, trees = self.cached_case()
+                if mode == 'spent': evidence['spent_mist'] = 1
+                if mode == 'balance': evidence['end_balance_mist'] -= 1
+                if mode == 'missing_balance': evidence.pop('start_balance_mist')
+                if mode == 'no_check': evidence['checks'] = []
+                if mode == 'wrong_check': evidence['checks'] = ['reused base']
+                if mode == 'extra_transaction': evidence['transactions'].insert(0, dict(status='success'))
+                if mode == 'held': evidence['funding']['held_mist'] = 1
+                if mode == 'submitted': evidence['transactions'][0]['digest'] = 'submitted'
+                if mode == 'wrong_base': evidence['base'] = 'f'*40
+                if mode == 'source_change': trees[pr['headRefOid']] = 'e'*40
+                f.controller.annotate_stale_base(f.project, pr)
+                self.assertNotIn('_stale_base_contracts', pr)
+
     def setup_case(self):
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
         f = Fixture(Path(temporary.name))

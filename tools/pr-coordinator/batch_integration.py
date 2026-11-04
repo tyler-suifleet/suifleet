@@ -268,7 +268,19 @@ class BatchController:
                 return
             used = 0
             allowed = ['publish base', 'register device + issue cap (base)', 'add device to group (base)']
-            if len(transactions) != 4:
+            # A reverified cached base needs no setup writes in this run. Keep
+            # that zero-spend path distinct from the fully accounted fresh setup.
+            cached = (len(transactions) == 1
+                and isinstance(evidence.get('checks'), list)
+                and any(isinstance(check, str) and re.fullmatch(
+                    r'verified/reused base package 0x[0-9a-f]{64}; no identical package is republished',
+                    check) for check in evidence['checks'])
+                and type(evidence.get('allowance_used_mist')) is int
+                and evidence['allowance_used_mist'] == 0
+                and type(evidence.get('spent_mist')) is int and evidence['spent_mist'] == 0
+                and type(evidence.get('start_balance_mist')) is int
+                and evidence.get('start_balance_mist') == evidence.get('end_balance_mist'))
+            if len(transactions) != 4 and not cached:
                 return
             for transaction, label in zip(transactions[:-1], allowed):
                 gas = transaction.get('gas_mist')
