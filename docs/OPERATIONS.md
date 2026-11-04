@@ -1274,26 +1274,40 @@ successful setup transaction whose `customer::create` was a no-op because this
 agent already has a Customer in the fixture registry. Storage rebates do not
 replenish that ledger. No package was republished and no faucet was requested.
 
-Initial frontend open and renewal were **not** executed on public Testnet: the
-existing Customer has a persistent subscription binding, and a replacement offer
-requires 30 days' notice. Opening and renewal refusal have local regressions;
-SF-181's historical contract opening is separate evidence, not a new frontend
-walkthrough. Same-agent deposit proves the permissionless protocol, not a manual
-second-wallet/extension session. Those manual checks stay in #32/#159. The
-cancelled fixture was not reactivated; no production tariff or conversion is
-claimed. The generated test-only offer is not added to any customer build.
+The [isolated-customer acceptance](validation/sf182-isolated-testnet.json)
+completes fresh frontend prepay on public Testnet after integrating main
+`16e9cc4d18cb1e9f9c440dc5470133c0b1179c7f`. A disposable identity, funded only
+by the dedicated agent, created its own Customer and granted the agent an
+administrator credential. The frontend then opened a term in one transaction,
+verified `PlanChanged` and the Customer binding, generated/verified a payment-link
+deposit, collected the term, generated company CSV receipts and cancelled/refunded
+the surplus. Independent gRPC verification checks effects, signed gas, typed
+events and final cancelled/empty state. The isolated identity's remaining SUI
+was returned; its balance is zero. No package publication or publisher credentials
+were used. The original customer, subscription and offer remain unchanged.
 
-The [read-only fixture preflight](validation/sf182-checkout-eligibility.json)
-identifies the existing Customer, its cancelled/empty USDC account and the setup
-transaction's monthly offer. That offer permits renewal at **2026-12-04
-01:30:04.331 UTC**, and expires at the recorded `expires_at_ms`. The automated
-connected-wallet prepay walkthrough remains outstanding until an eligible offer
-can be used; no clock bypass, tariff change or package republication is allowed.
+The retained allowance is **55,573,403 / 100,000,000 MIST**. This includes the
+original 5,952,761 MIST, all agent gas and 35,000,000 MIST of child funding.
+Child gas (including an effects-confirmed insufficient-gas creation failure and
+cleanup) is bounded within that already charged funding, not charged twice.
+Refunds and returned gas never replenish the allowance. Private signing material
+and the resumable journal stay outside the repository; the receipt contains
+public addresses, transaction digests and accounting only.
+
+Successful public-Testnet renewal remains **unrun**: the unchanged selected offer
+requires notice until **2026-12-04 01:30:04.331 UTC**. Read-only preflight verifies
+this refusal for both the original and isolated accounts. Offline tests cover
+positive renewal construction and early-notice rejection; fresh open supplies the
+actual frontend prepay walkthrough. No clock or eligibility bypass, product price
+change or original-account reactivation was used. Manual second-wallet/extension,
+physical, mainnet and provider checks remain unrun in #32/#159. The 0.01 USDC test
+quote is not published customer pricing or a market-conversion claim.
 
 The harness now discovers the wallet's registry Customer before setup. It reuses
 an unbound Customer for `open`, or the cancelled/empty bound fixture for `renew`.
 It checks the selected offer through the frontend before spending and records a
-notice-time refusal without submitting a transaction. Pass `--offer ID` to select
+notice-time refusal without submitting a transaction. Pass `--customer ID --offer ID` only for a ready Customer recorded by the
+isolated fixture preparer in the retained journal. Otherwise pass `--offer ID` to select
 an existing offer; a retained setup ledger can also recover its created offer.
 Read-only `--inspect-only` checks chain/account/manifest and records eligibility
 without a mutation lease. The keyless bridge also supports `--discover OFFER_ID
@@ -1321,3 +1335,10 @@ effects and nonnegative charges against the retained ledger, including the
 no-op setup charge. Unknown digests and started prepay attempts require explicit
 reconciliation rather than replay. The private state must never be published. Release
 the lease immediately after mutations; read-only verification can follow.
+
+The bounded `scripts/prepare_subscription_checkout_fixture.py` creates the isolated
+Customer with child gas charged to the retained parent allowance. It refuses
+existing or interrupted fixture replay. Its explicit recovery flags reconcile
+only an unfunded unsigned setup or one independently verified insufficient-gas
+creation failure before a bounded top-up; they never release uncertain charges.
+Use `--help` for required private paths and preserve those paths until cleanup.

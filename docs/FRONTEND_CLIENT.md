@@ -256,7 +256,12 @@ CSV export path.
 Checks: `node scripts/test_subscription_checkout.cjs`, existing wallet manifest
 and real-browser wallet fixtures, frontend typecheck/build and all-route browser
 presentation tests. See [the Testnet receipt](validation/sf182-testnet.json) for the
-actual frontend payment-link deposit/receipt/refund run and its explicit limits.
+historical frontend payment-link deposit/receipt/refund run and its explicit limits.
+The [isolated Testnet walkthrough](validation/sf182-isolated-testnet.json) additionally
+executes real frontend fresh prepay, link deposit, collection and CSV verification,
+then cancellation/refund, under the retained non-replenishing allowance. The
+original binding and December 4 renewal notice remain unchanged; successful live
+renewal is not claimed.
 Manual real-wallet/multi-wallet, physical/mainnet/provider acceptance remains
 unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
