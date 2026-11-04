@@ -1,3 +1,4 @@
+const {abortSite} = require('./abort_site.cjs');
 // SF-136 acceptance on a network-none disposable chain. Real base->head
 // upgrade, populated adoption, old-package attacks, wallet revocation and reads.
 const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), assert = require("node:assert/strict");
@@ -45,22 +46,22 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   }
   const created=(r,suffix)=>{const id=Object.keys(r.objectTypes).find(id=>r.objectTypes[id].endsWith(suffix));assert.ok(id,`missing ${suffix}`);return id;};
   const expectedErrors = {
-   "managed old call during freeze": [5, "deployment_manager::receipts_mut"],
-   "managed old call after finish": [5, "deployment_manager::receipts_mut"],
-   "managed shard foreign fleet": [1, "customer::assert_reporter"],
-   "managed shard after reassignment": [1, "customer::assert_reporter"],
-   "retired pending account cannot release capacity twice": [1, "customer::retire_pending_device"],
-   "pending migration cannot lend cap": [1, "customer::borrow_budget_cap"],
-   "old group mutation after adoption": [0, "device_group::remove_device"],
-   "legacy adoption cannot hide indexed members": [1, "customer::adopt_group_members"],
+   "managed old call during freeze": [5, "deployment_manager::" + abortSite(path.join(managedShards ? managedTree : oldTree,"contracts"), "deployment_manager", "receipts_mut", 5)],
+   "managed old call after finish": [5, "deployment_manager::" + abortSite(path.join(managedShards ? managedTree : oldTree,"contracts"), "deployment_manager", "receipts_mut", 5)],
+   "managed shard foreign fleet": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "assert_reporter", 1)],
+   "managed shard after reassignment": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "assert_reporter", 1)],
+   "retired pending account cannot release capacity twice": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "retire_pending_device", 1)],
+   "pending migration cannot lend cap": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "borrow_budget_cap", 1)],
+   "old group mutation after adoption": [0, "device_group::" + abortSite(path.join(oldTree,"contracts"), "device_group", "remove_device", 0)],
+   "legacy adoption cannot hide indexed members": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "adopt_group_members", 1)],
    "old budget mutation with borrowed cap": /InvalidLinkage|invalid linkage/i,
-   "old gas draw after adoption": [0, "fleet_budget::assert_may_draw"],
-   "cross fleet onchain rollout": [1, "customer::advance_rollout_onchain"],
-   "revoked wallet advances rollout": [0, "customer::assert_member"],
-   "cross fleet group insertion": [1, "customer::assert_group"],
-   "revoked wallet creates fleet": [0, "customer::assert_member"],
-   "old receipt mutation after adoption": [5, "deployment_manager::receipts_mut"],
-   "reassigned device cannot report source receipt": [1, "customer::assert_reporter"],
+   "old gas draw after adoption": [0, "fleet_budget::" + abortSite(path.join(oldTree,"contracts"), "fleet_budget", "assert_may_draw", 0)],
+   "cross fleet onchain rollout": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "advance_rollout_onchain", 1)],
+   "revoked wallet advances rollout": [0, "customer::" + abortSite(path.join(root,"contracts"), "customer", "assert_member", 0)],
+   "cross fleet group insertion": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "assert_group", 1)],
+   "revoked wallet creates fleet": [0, "customer::" + abortSite(path.join(root,"contracts"), "customer", "assert_member", 0)],
+   "old receipt mutation after adoption": [5, "deployment_manager::" + abortSite(path.join(oldTree,"contracts"), "deployment_manager", "receipts_mut", 5)],
+   "reassigned device cannot report source receipt": [1, "customer::" + abortSite(path.join(root,"contracts"), "customer", "assert_reporter", 1)],
   };
   async function reject(label,tx,signer=owner){
    const gas=(await client.listCoins({owner:signer.toSuiAddress()})).objects[0];

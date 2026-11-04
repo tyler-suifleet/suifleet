@@ -176,6 +176,40 @@ class TrustTests(unittest.TestCase):
             ledger.execute(refused, 'retry', ['ptb'], gas=PACKAGE_TRANSACTION_GAS, require_full=True)
         refused.assert_not_called()
 
+    def test_sf196_fresh_pair_exceeded_former_ceiling_and_cached_reuse_fits(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
+        # Settled effects from run 41368161262 (base 02bca2dd, after SF-196):
+        # under the former 1.6 SUI limit the fresh pair left 22,765,718 MIST, so
+        # the device top-up (10M gas + 30M funding) was refused before signing.
+        setup = (772_926_000, 8_425_378, 1_243_578, 785_902_163, 8_737_163)
+        self.assertEqual(sum(setup), 1_577_234_282)
+        fresh = Budget(1_600_000_000, [])  # Retain the historical refusal proof.
+        fresh.grant(sum(setup))
+        refused = Mock()
+        with self.assertRaises(Spent):
+            fresh.execute(refused, 'top up device gas', ['ptb'], gas=10_000_000,
+                          funding=30_000_000, require_full=True)
+        refused.assert_not_called()
+        # The user-authorized allowance admits that top-up after the same pair.
+        current = Budget(PACKAGE_UPGRADE_CEILING, [])
+        current.grant(sum(setup))
+        self.assertGreaterEqual(current.remaining, 120_073_015 + PACKAGE_TRANSACTION_GAS)
+        # That fixture was cached before the top-up, so a later run with the same
+        # bytecode pair reuses it: the rest of the gate (reservations and settled
+        # costs from run 41359600334) fits even the former allowance, with headroom
+        # for a final unknown full PTB reservation.
+        reused = Budget(1_600_000_000, [])
+        steps = ((10_000_000, 30_000_000, 1_000_099), (PACKAGE_TRANSACTION_GAS, 0, 9_588_562),
+                 (PACKAGE_TRANSACTION_GAS, 0, 42_002_565), (PACKAGE_TRANSACTION_GAS, 0, 13_494_400),
+                 (20_000_000, 0, 19_718_800), (20_000_000, 0, 4_268_589))
+        for gas, funding, cost in steps:
+            def submit(*args, cost=cost):
+                return dict(digest='offline', effects=dict(status=dict(status='success'),
+                    gasUsed=dict(computationCost=str(cost), storageCost='0', storageRebate='0')))
+            reused.execute(submit, 'step', ['ptb'], gas=gas, funding=funding, require_full=True)
+        self.assertEqual(reused.used, 120_073_015)
+        self.assertGreater(reused.remaining, 1_000_000_000 + PACKAGE_TRANSACTION_GAS)
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)
@@ -870,6 +904,45 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)
 
 class BytecodeFixtureTests(unittest.TestCase):
+    def test_sf198_prepared_fixture_needs_next_run_not_faucet_or_republication(self):
+        import live_package_upgrade as live
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
+        # Exact five settled effects and original allowance from protected run
+        # 41374657219; later ceiling changes must not rewrite this receipt.
+        historical_allowance = 1_600_000_000
+        used = sum((772_926_000, 8_425_378, 1_243_578, 784_577_363, 8_737_163))
+        self.assertEqual(used, 1_575_909_482)
+        with self.assertRaisesRegex(Spent, 'retain and reuse'):
+            live.report_funding_plan(historical_allowance - used, 0,
+                                     PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(live.failure_class(Spent('allowance exhausted')), 'source')
+        self.assertEqual(live.failure_class(live.FundingShortfall('balance low')), 'funding')
+        # The merged cost fix lowers the device target to 10M. Cached fixtures
+        # still reserve their entire balance and each full transaction budget.
+        top_up, required = live.report_funding_plan(PACKAGE_UPGRADE_CEILING, 9_000_000,
+                                                   PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(top_up, 1_000_000)
+        self.assertEqual(required, 260_000_000)
+        self.assertEqual(live.report_funding_plan(required, 9_000_000, PACKAGE_TRANSACTION_GAS,
+                                                needs_inbox=True), (top_up, required))
+        with self.assertRaises(Spent):
+            live.report_funding_plan(required - 1, 9_000_000, PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(live.report_funding_plan(220_000_000, 30_000_000, PACKAGE_TRANSACTION_GAS,
+                                                needs_inbox=False), (0, 210_000_000))
+
+    def test_merged_compact_path_reserves_each_call_without_summing_recycled_storage(self):
+        import live_package_upgrade as live
+        # Exact larger-candidate SF221 receipt, before deficit funding.
+        remaining = 1_600_000_000 - 1_557_359_389
+        self.assertEqual(live.report_funding_plan(remaining, 0, 60_000_000,
+                         needs_inbox=False, compact=True), (10_000_000, 35_000_000))
+        with self.assertRaises(Spent):
+            live.report_funding_plan(34_999_999, 0, 60_000_000,
+                                     needs_inbox=False, compact=True)
+        # Cached gas is still charged, not silently spent as free funding.
+        self.assertEqual(live.report_funding_plan(45_000_000, 30_000_000, 60_000_000,
+                         needs_inbox=False, compact=True), (0, 45_000_000))
+
     def test_pair_compiler_framework_and_verified_digest_are_required_for_migration(self):
         import copy, live_package_upgrade as live
         tools={'build':{'version':'pinned compiler'},'network':{'sha256':'pinned network'}}

@@ -593,8 +593,9 @@ The deployment creator can pause/resume admission, permanently cancel admission,
 and set UTC Unix-millisecond not-before, expiry, a single absolute maintenance
 window `[start,end)`, and an advance-notice duration (at most seven days).
 Zero disables the respective deadline/window/notice. These are admission times,
-not promises that an update finishes before the window closes. A closed window
-waits for an operator to edit it; it does not recur automatically. Expiry and
+not promises that an update finishes before the window closes. A closed absolute
+window waits for an operator to edit it; for repeating site rules, add a
+[recurring weekly window](#recurring-weekly-maintenance-windows-sf-174). Expiry and
 cancellation observed by a device are terminal: create a new deployment to retry.
 Removing a desired component or deleting a record remains distinct from cancellation.
 
@@ -642,6 +643,52 @@ cannot enforce fields introduced later. Old package entry points remain callable
 status writes do not change controls, and deletion still prevents later object
 reads. Do not interpret deleting a record through an older package as acknowledged
 cancellation or retain a deleted record as an apply authorization.
+
+### Recurring weekly maintenance windows (SF-174)
+
+A deployment may also carry one recurring window: one IANA timezone (for example
+`Europe/Berlin`) and 1–8 weekly slots. Each slot selects weekdays, a local start
+time and a duration of 1 minute to 24 hours; a slot may cross midnight. Overlapping
+or touching slots merge. The rule ANDs with every control above: pause, cancel,
+not-before, expiry, the absolute window and advance notice still apply. Use one
+deployment per timezone; the reserved `device-local` zone is not supported yet and
+devices defer on it.
+
+Use **Deployments → Add recurring window** (creator or customer-fleet admin). The
+editor shows the next three admission windows in the site zone and in UTC, after
+not-before, expiry and the absolute window; per-device notice may delay each one.
+The preview uses the browser's zone data and is advisory. The editor accepts only
+zone names in the daemon's bundled tzdb (`dapp/src/lib/tzdb-names.ts`, generated and
+checked by the daemon's `dapp_tz_names_match_bundled_database` test) and saves the
+daemon's exact spelling, so `europe/berlin` is stored as `Europe/Berlin`; tzdb
+aliases such as `Asia/Calcutta` are kept as typed. Setting or removing the
+window (`set_recurring_window`/`clear_recurring_window`, or the `customer::`
+variants for fleet records) bumps the Control revision, so every device restarts
+its advance notice and re-reads admission. Cancelled records reject both calls.
+The `customer::` variants enforce the deploy security class, like `set_control`.
+When it requires factors, use `set_recurring_window_secured` or
+`clear_recurring_window_secured` with an approved action.
+
+Devices evaluate the rule locally with the tz database built into the daemon
+(`jiff-tzdb`, pinned exactly in `Cargo.toml`), never the host zoneinfo or `TZ`;
+UTC must still be synchronized. `suifleet --check-config` prints the tzdb release.
+A start in a DST gap opens at the first valid instant after it; a repeated local
+time opens once, at its earlier occurrence. While waiting, `state.json` records
+`outside recurring maintenance window` with `next_window_ms` (UTC) and `tzdb`, and
+the cadence timer wakes for that opening. An unknown or non-canonical zone name
+(names are case-sensitive) defers as `unknown timezone`; nothing is applied. The
+chain checks only structure (ASCII name of at most 64 bytes, slot ranges).
+
+Staged-rollout grants (`advance_rollout`) do not evaluate windows: a device can
+hold a grant while it waits for its window. Size `rate_window_ms` and bake
+expectations to the window. The same admission-boundary rule applies: a window
+closing after the final read never interrupts an admitted plan.
+
+`RecurringWindowKey`, `RecurringWindow` and `WeeklySlot` originate in the upgrade
+that introduced them (optional `recurring_window` type group). Daemons before
+**0.2.3** ignore the field and would admit outside the window, so manifests
+containing the group require edge >= 0.2.3. Upgrade the fleet before setting
+recurring windows. tzdb updates ship only with daemon releases.
 
 Validation commands (disposable network only for the final two):
 
@@ -881,6 +928,92 @@ The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
 including exploratory failures and limits; it is not proof of a manual extension
 wallet walkthrough or a live deployment of this frontend.
 
+## Optional passkey co-signature (SF-198)
+
+**Implementation pending independent source review and public-testnet acceptance.**
+The package-size defect is repaired: isolated existing-object upgrades and native
+setup/allowed/refused/recovery effects have passed; see the revision-scoped
+[recovery evidence](validation/sf198-recovery.md). The protected CI adapter reuses
+the exact published package pair and encrypted signing state. Its public native
+feature effects remain unproved: the latest package gate exhausted its unchanged
+allowance before reaching that suite. Shared cost repair is tracked in
+[SF-221/#463](https://github.com/tyler-suifleet/suifleet/issues/463).
+Source review may proceed while that final merge gate remains unsatisfied.
+This procedure does not establish released functionality or manual wallet acceptance.
+
+Passkey protection defaults off and applies per organization. First migrate legacy
+organization authority through the verified SF-196 procedure. The deployed
+manifest must include the actual introduction origins for
+`passkey_factor::Enrollment` and `passkey_factor::ProofCreated`; do not replace
+older type origins with the latest call package ID.
+
+In Settings → organization security, create a discoverable P-256 passkey, fund its
+address with the explicit **0.01 SUI** wallet transaction, prove possession with
+that passkey, then enroll the confirmed proof with the administrator wallet.
+Proofs expire in ten minutes and bind the organization, current policy generation
+and administrator. The console requests five minutes to allow submission time.
+Changing policy or enrolled factors invalidates outstanding proofs. A possession
+proof alone grants no wallet or fleet authority. Enroll a second independently
+recoverable passkey and save the public credential metadata before enabling
+protection for all action classes. Settings displays the verified administrator /
+passkey address pairs. The current wallet remains necessary for every action.
+
+The passkey is the **gas sponsor** of a protected wallet transaction. Sui validates
+both native signatures over identical transaction bytes; Move compares the
+verified sponsor with the administrator's enrolled, `0x06`-derived passkey address.
+The wallet remains transaction sender. Wallet-only calls, including direct
+contract calls, fail on chain. Existing intent-bound factor requirements still
+combine with AND. A passkey signature is neither a browser flag nor an optional
+multisig member. It also pays transaction gas: keep SUI at that address. Generic
+budget-cap loans may use native passkey sponsorship because it signs every use
+of the cap in the complete PTB; queued or partial action attestations cannot
+authorize those loans. Unreconciled imported fleet custody remains unavailable.
+
+Use HTTPS (localhost is allowed), a WebAuthn-capable browser with discoverable
+ES256 credentials and an authenticator supported by that browser. The console
+requests user verification and defaults to the SDK's cross-platform authenticator
+flow; platform/hybrid/cloud behavior depends on the browser and authenticator.
+The wallet must support signing a transaction with a different gas owner without
+altering its bytes. Unsupported browsers, rejected prompts, insufficient passkey
+gas and changed wallet bytes fail visibly. Native signature support is described
+in [Sui passkeys](https://docs.sui.io/develop/cryptography/passkeys) and
+[Mysten's SDK](https://sdk.mystenlabs.com/sui/cryptography/signers/passkey).
+
+For lost-device recovery, restore the **public metadata** backup on the same
+console origin, select an independently enrolled surviving key with **Use this
+key for signing**, then remove the lost key. A credential is bound to its RP
+hostname; copying metadata does not transfer a private key or allow using it on
+a different origin. Synced credentials depend on their cloud account and may
+share a compromise domain with the wallet. Keep independent custody. Metadata
+contains only public key and credential ID; store no seed, private key or PIN in
+the console. Never remove the final enrolled key while passkey protection is
+required. To remove all keys, first disable the factor using a surviving enrolled
+key plus wallet, then remove the final key. A wallet alone cannot reset required
+protection. Losing every enrolled passkey without another authorized recovery
+mechanism permanently locks protected administration; no support/email reset is
+provided. Public metadata can be backed up/restored in Settings; losing only
+browser metadata is distinct from losing an authenticator.
+
+Software verification uses `scripts/test_passkey_factor.cjs`, Move factor tests
+and `scripts/live_passkey_factor.py`. The latter uses synthetic WebAuthn assertions
+and **real native Sui signature validation**, not an actual hardware authenticator.
+For a disposable `--network none` node, use
+`scripts/test_security_policy_localnet.py --runner scripts/live_passkey_factor.py
+--base /path/to/pre-passkey/contracts --evidence /path/to/evidence.json`.
+The protected automatic testnet security suite also runs the native cases using
+its existing ledger and the package gate's exact cached base/head pair. It
+reverifies the UpgradeCap owner/latest head/version and passkey type origin;
+this adapter never publishes another package. Fixture keys and uncertain
+mutations persist only through the existing authenticated encrypted CI state.
+An uncertain mutation stops reuse until reconciliation. Funding grants and
+failed effects consume the unchanged allowance; a fresh expensive fixture can
+exhaust it before the feature checks, which is a failed run, not acceptance.
+Public machine runs additionally require the existing dedicated wallet and the
+global testnet mutation lock. The standalone runner remains local-only; do not
+create another operator wallet to work around a missing identity.
+Manual real-wallet/hardware-authenticator, physical, provider and mainnet checks
+remain unrun under [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 ## Second-person approval (SF-199)
 
 Organizations can require another **current administrator credential** for any of

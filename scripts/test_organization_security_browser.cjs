@@ -7,19 +7,26 @@ const {appRequire}=require('./frontend_test_utils.cjs'),{build}=appRequire('esbu
  try {
  const manifest=JSON.parse(await fs.readFile(path.join(root,'manifests/fixture.localnet.json')));
  const catalog=JSON.parse(await fs.readFile(path.join(root,'interfaces/fleet-v1.json')));
- for(const group of ['customer','security_policy','security_delay']) for(const name of catalog.optional_type_origins[group]) manifest.type_origins[name]=manifest.call_package_id;
- const replaced=new Set(['@mysten/dapp-kit-react','@/hooks/useCurrentAccount','@/hooks/useFleetSelection','@/hooks/useFleetTransaction','@/lib/security-policy','@/lib/security-delay','@/lib/second-person']);
+ for(const group of ['customer','security_policy','security_delay','passkey_factor']) for(const name of catalog.optional_type_origins[group]) manifest.type_origins[name]=manifest.call_package_id;
+ const replaced=new Set(['@mysten/dapp-kit-react','@/hooks/useCurrentAccount','@/hooks/useFleetSelection','@/hooks/useFleetTransaction','@/lib/security-policy','@/lib/security-delay','@/lib/second-person','@/lib/passkey-factor']);
  await build({entryPoints:[entry],outfile:path.join(dir,'app.js'),bundle:true,platform:'browser',jsx:'automatic',nodePaths:[path.join(root,'dapp/node_modules')],alias:{'@':src},define:{'process.env':'{}','process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST':JSON.stringify(JSON.stringify(manifest))},plugins:[{name:'security-ui-fixture',setup(b){b.onResolve({filter:/.*/},a=>a.importer!==entry&&replaced.has(a.path)?{path:entry}:undefined)}}],logLevel:'warning'});
  let styles=await fs.readFile(path.join(src,'components/OrganizationSecurity.css'),'utf8');
  if(process.env.SECURITY_SCREENSHOTS){for(const f of await fs.readdir(path.join(root,'dapp/out/_next/static/chunks')))if(f.endsWith('.css')) styles+=await fs.readFile(path.join(root,'dapp/out/_next/static/chunks',f),'utf8');await fs.mkdir(process.env.SECURITY_SCREENSHOTS,{recursive:true});}
  server=http.createServer(async(req,res)=>{const js=req.url==='/app.js';res.setHeader('Content-Type',js?'text/javascript':'text/html');res.end(js?await fs.readFile(path.join(dir,'app.js')):`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles} body{margin:0;background:#f8fafc;font-family:Arial,sans-serif}</style><div id="root"></div><script src="/app.js"></script>`)});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
  browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||undefined,headless:true,args:['--no-sandbox']});
- for(const [scenario,heading] of [['pending','2 of 7 actions have extra protection'],['configured','2 of 7 actions have extra protection'],['off','No additional protections enabled'],['no-delays','No additional protections enabled'],['legacy','Security setup needs attention'],['error','Protection status could not be verified'],['unsupported','Security settings unavailable'],['loading','Checking organization security…'],['unselected','Organization security']]){
+ for(const [scenario,heading] of [['passkey','2 of 7 actions have extra protection'],['pending','2 of 7 actions have extra protection'],['configured','2 of 7 actions have extra protection'],['off','No additional protections enabled'],['no-delays','No additional protections enabled'],['legacy','Security setup needs attention'],['error','Protection status could not be verified'],['unsupported','Security settings unavailable'],['loading','Checking organization security…'],['unselected','Organization security']]){
   const page=await browser.newPage({viewport:{width:1280,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`${origin}/?scenario=${scenario}`,{waitUntil:'networkidle'});await page.getByRole('heading',{name:heading,exact:true}).waitFor({timeout:10000}).catch(async()=>{throw Error(JSON.stringify({scenario,errors,body:await page.textContent('body')}))});
   assert.equal(await page.getByLabel('Ordered public keys, weights and threshold (JSON)').isVisible(),false,'advanced signing hidden by default');
   assert.equal(await page.getByText(/SF-\d+/).count(),0,'no tracker references in product guidance');
+  if(scenario==='passkey'){
+   const card=page.getByRole('article').filter({has:page.getByRole('heading',{name:'Passkey verification',exact:true})});
+   await card.getByRole('button',{name:'View setup'}).click();
+   assert.equal(await page.getByRole('button',{name:'Create passkey',exact:true}).isVisible(),true);
+   assert.equal(await page.getByRole('button',{name:'Save or request passkey protection change for all actions',exact:true}).isVisible(),true);
+  }
+  if(scenario==='unsupported'){await page.locator('#security-passkeys > summary').click();assert.equal(await page.getByRole('button',{name:'Create passkey',exact:true}).count(),0);}
   if(scenario==='pending'){
    for(const width of [1280,390]){
     await page.setViewportSize({width,height:1000});

@@ -134,12 +134,16 @@ dapp-typecheck:
 
 # Compare full reviewed ABI/layouts and generated clients with compiled contracts.
 check-interfaces:
+	$(RUN) python3 scripts/check_package_size.py
+	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_check_package_size.py'
+	$(RUN) node scripts/test_subscription_manifest.cjs
 	$(RUN) python3 scripts/check_contract_interfaces.py
 	$(RUN) python3 scripts/generate_interfaces.py --check
 	$(RUN) python3 scripts/test_generated_interfaces.py
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
 	$(RUN) node scripts/test_deployment_control.cjs
+	$(RUN) node scripts/test_recurring_window.cjs
 	$(RUN) node scripts/test_rollout.cjs
 	$(RUN) node scripts/test_receipt_shards.cjs
 	$(RUN) node scripts/test_browser_receipt_cleanup.cjs
@@ -351,6 +355,7 @@ test-site:
 .PHONY: test-guide-recording
 test-guide-recording:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node site/tests/recording_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node site/tests/guide_browser.cjs
 
 # Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
 .PHONY: test-disk-cleanup
@@ -543,6 +548,10 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_abort_site.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_security_delay.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_upgrade_security_localnet.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_passkey.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
@@ -835,6 +844,9 @@ test-customer-fleets:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
 	$(RUN) node scripts/test_security_policy.cjs
+	$(RUN) node scripts/test_passkey_factor.cjs
+	$(RUN) node scripts/test_passkey_fixture.cjs
+	$(RUN) node scripts/test_passkey_payment.cjs
 	$(RUN) node scripts/test_security_delay.cjs
 	$(RUN) node scripts/test_second_person.cjs
 	$(RUN) node scripts/test_multisig_admin.cjs
@@ -865,3 +877,8 @@ test-hydration:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
 	$(RUN) bash -c 'set -a; source profiles/seal-testnet/frontend.env; set +a; cd dapp && pnpm build'
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
+
+# SF-181: existing-object compatible upgrade on an isolated disposable chain.
+.PHONY: test-subscription-localnet
+test-subscription-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --subscription-upgrade

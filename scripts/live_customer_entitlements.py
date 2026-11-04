@@ -7,6 +7,7 @@ customer/default fleet remain (there is no customer deletion API); device object
 are removed and remaining child gas is returned. Failed runs retain their private
 runtime directory for explicit recovery, never print key material.
 """
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -59,14 +60,14 @@ def run(args):
         console_capacity(True)
         def register(device_address):
             return ["--move-call", call("register_device"), f"@{customer}", f"@{fleet}", f"@{budget}", f"@{registry}", '"SF-187 test device"', f"@{device_address}", '"aarch64"', "@0x6"]
-        live.attack("zero limit refuses first registration", *register(address), module="customer", function="enroll_checked", code=2, budget=5_000_000, sender=child)
+        live.attack("zero limit refuses first registration", *register(address), module="customer", function=abort_site(Path("contracts"), "customer", "enroll_checked", 2), code=2, budget=5_000_000, sender=child)
         live.transaction("registry grants one device", "--move-call", call("set_entitlement"), f"@{customer}", f"@{registry}", "1", "0", "0", budget=5_000_000)
         console_capacity(False)
         result = live.transaction("first device at granted limit", *register(address), budget=min(40_000_000, child[1].remaining), sender=child)
         devices = [(live.created(result, "::device_registry::Device")[0], live.created(result, "::fleet_budget::GasAccount")[0])]
         console_capacity(True)
         other = "0x" + os.urandom(32).hex()
-        live.attack("limit boundary refuses second registration", *register(other), module="customer", function="enroll_checked", code=2, budget=5_000_000, sender=child)
+        live.attack("limit boundary refuses second registration", *register(other), module="customer", function=abort_site(Path("contracts"), "customer", "enroll_checked", 2), code=2, budget=5_000_000, sender=child)
         live.transaction("registry raises device limit", "--move-call", call("set_entitlement"), f"@{customer}", f"@{registry}", "2", "0", "0", budget=5_000_000)
         console_capacity(False)
         state = plain(live.object(customer)["content"])

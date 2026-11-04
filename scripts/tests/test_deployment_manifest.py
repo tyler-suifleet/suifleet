@@ -37,6 +37,20 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_subscription_coins_are_explicit_and_require_payee(self):
+        manifest = fixture()
+        manifest["subscription_coins"] = {"USDC": {"coin_type": "0x" + "ab" * 32 + "::usdc::USDC", "decimals": 6}}
+        with self.assertRaises(ValueError):
+            dm.validate(manifest)
+        manifest["treasury_payee"] = "0x" + "cd" * 32
+        dm.validate(manifest)
+        for invalid in [None, {}, {"SUI": {"coin_type": "0x2::sui::SUI", "decimals": 9}},
+                        {"USDC": {"coin_type": "0x1::fake::USDC", "decimals": 6}},
+                        {"USDC": {"coin_type": "0x" + "ab" * 32 + "::usdc::USDC", "decimals": True}}]:
+            manifest["subscription_coins"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
     def test_ordered_publishers(self):
         manifest = fixture()
         manifest["walrus"]["publisher_urls"] = ["https://one.example", "https://two.example"]
@@ -160,6 +174,29 @@ class ManifestTests(unittest.TestCase):
         forged["type_origins"][dm.SETTINGS_TYPES[-1]] = dm.object_id("0x3")
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
+
+    def test_recurring_window_origins_fence_daemons_that_ignore_them(self):
+        manifest = fixture()
+        manifest["type_origins"][dm.RECURRING_WINDOW_TYPES[0]] = dm.object_id("0x4")
+        with self.assertRaisesRegex(ValueError, "partial recurring window"):
+            dm.validate(manifest)
+        manifest["type_origins"].update({n: dm.object_id("0x4") for n in dm.RECURRING_WINDOW_TYPES})
+        dm.verify(manifest, chain(manifest))
+        forged = copy.deepcopy(manifest)
+        forged["type_origins"][dm.RECURRING_WINDOW_TYPES[-1]] = dm.object_id("0x3")
+        with self.assertRaisesRegex(ValueError, "type origin mismatch"):
+            dm.verify(forged, chain(manifest))
+        # Pre-SF-174 daemons would admit outside the window: resolution raises
+        # the minimum edge version only when the recurring types exist.
+        args = SimpleNamespace(chain_identifier=manifest["chain_identifier"], upgrade_cap=manifest["upgrade_cap_id"], rpc=manifest["rpc_url"], package=manifest["call_package_id"], registry=manifest["shared_objects"]["registry"]["id"],
+            publisher=manifest["walrus"]["publisher_url"], aggregator=manifest["walrus"]["aggregator_url"], network="localnet")
+        resolved = dm.resolve(args, chain(manifest))
+        self.assertEqual(resolved["supported_clients"]["edge"]["min"], "0.2.3")
+        self.assertTrue(all(n in resolved["type_origins"] for n in dm.RECURRING_WINDOW_TYPES))
+        from unittest.mock import patch
+        with patch.dict(dm.CLIENT_VERSIONS, {"edge": "0.2.2"}):
+            with self.assertRaisesRegex(ValueError, "unsupported edge version"):
+                dm.validate(resolved)
 
     def test_optional_catalog_origin_group(self):
         manifest = fixture()

@@ -6,14 +6,14 @@
         receipts
     }
 
-    #[mode(spec), ext(spec(prove, target = receipts_mut))]
+    #[mode(spec), ext(spec(prove, target = h2))]
     fun receipts_mut_security_spec(deployment: &mut DeploymentRecord): &mut Receipts {
         let present = df::exists(&deployment.id, ReceiptsKey {});
         prover::prover::asserts(!present || df::exists_with_type<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}));
         let old_version = if (present) df::borrow<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}).version else 0;
         let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else LEGACY_RECEIPTS_VERSION;
         prover::prover::asserts(old_version <= target_version);
-        let result = receipts_mut(deployment);
+        let result = h2(deployment);
         prover::prover::ensures(result.version == target_version);
         if (!present || old_version < target_version) prover::prover::ensures(result.statuses.is_empty());
         result
@@ -61,7 +61,7 @@
         record
     }
 
-    #[mode(spec), ext(spec(prove, target = handover))]
+    #[mode(spec), ext(spec(prove, target = k15))]
     fun deployment_handover_security_spec(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
         prover::prover::asserts(ctx.sender() == d.creator);
         // Directory presence selects sharded storage, including schema-2 catalogs.
@@ -72,7 +72,7 @@
         prover::prover::asserts(receipt_schema(d) != 2);
         let artifact = d.artifact_sha256;
         let blob = d.recipe_blob_id;
-        handover(d, recipient, ctx);
+        k15(d, recipient, ctx);
         prover::prover::ensures(d.creator == recipient);
         prover::prover::ensures(d.artifact_sha256 == artifact);
         prover::prover::ensures(d.recipe_blob_id == blob);

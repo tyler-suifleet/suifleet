@@ -378,6 +378,10 @@ fn to_json(value: &prost_types::Value) -> Value {
     }
 }
 
+fn supported_customer_version(value: &serde_json::Value) -> bool {
+    matches!(json_u64(value), Some(1) | Some(197) | Some(199) | Some(201))
+}
+
 /// A Move integer as the node renders it (string, or exact safe JSON number).
 pub fn json_u64(value: &Value) -> Option<u64> { number(value) }
 
@@ -1470,7 +1474,7 @@ impl SuiClient {
                     .await?;
                 anyhow::ensure!(
                     same_type(&customer.object_type, &self.move_type("customer::Customer"))
-                    && matches!(json_u64(&customer.fields["version"]), Some(1) | Some(197) | Some(199))
+                    && supported_customer_version(&customer.fields["version"])
                         && matches!(customer.owner, Owner::Shared { .. })
                         && same_id(
                             customer.fields["registry_id"].as_str().unwrap_or(""),
@@ -1567,6 +1571,20 @@ impl SuiClient {
             Some(value) => Ok(serde_json::from_value(
                 value.get("fields").cloned().unwrap_or(value)
             )?),
+        }
+    }
+
+    /// The SF-174 recurring window, or None before the upgrade introducing it
+    /// (such a package cannot have written one) or when the creator set none.
+    pub async fn deployment_recurring_window(&self, deployment: &str) -> anyhow::Result<Option<crate::control::Recurring>> {
+        if !protocol::RECURRING_WINDOW_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)) {
+            return Ok(None);
+        }
+        match self.dynamic_field(deployment, protocol::deployment_manager::RecurringWindowKey::MOVE_TYPE).await? {
+            None => Ok(None),
+            Some(value) => Ok(Some(serde_json::from_value(
+                value.get("fields").cloned().unwrap_or(value)
+            )?)),
         }
     }
 
@@ -2616,6 +2634,17 @@ fn execution_digest(executed: &proto::ExecutedTransaction) -> anyhow::Result<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn subscription_customer_version_is_supported() {
+        for version in [1, 197, 199, 201] {
+            assert!(supported_customer_version(&json!(version)));
+            assert!(supported_customer_version(&json!(version.to_string())));
+        }
+        for version in [0, 2, 196, 200, 202] {
+            assert!(!supported_customer_version(&json!(version)));
+        }
+    }
+
     #[test]
     fn fallback_only_retries_transport_failures() {
         for code in [

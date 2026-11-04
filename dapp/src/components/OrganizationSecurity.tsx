@@ -1,4 +1,7 @@
 "use client";
+import { policyChangeTx } from "@/lib/second-person";
+import { PasskeySettings } from "./PasskeySettings";
+import { passkeySupported } from "@/lib/passkey-factor";
 import { SecondPersonSetup } from "./SecondPersonSetup";
 import { SecondPersonApprovals } from "./SecondPersonApprovals";
 import { MultisigAdministrator } from "./MultisigAdministrator";
@@ -47,7 +50,7 @@ export function OrganizationSecurity() {
   };
   const presentations: Record<number, { name: string; description: string; target?: string }> = {
     1: { name: "Multiple signers", description: "Require a chosen number of signatures from independently controlled keys.", target: "security-multisig" },
-    2: { name: "Passkey verification", description: "Add a registered passkey alongside the administrator’s wallet approval." },
+    2: { name: "Passkey verification", description: "Add a registered passkey alongside the administrator’s wallet approval.", target: "security-passkeys" },
     4: { name: "Second-person approval", description: "Have another authorized administrator review sensitive changes.", target: "security-second-person" },
     8: { name: "Delay and cancellation", description: "Allow time to review and cancel a sensitive change before it takes effect.", target: "security-delays" },
   };
@@ -67,7 +70,7 @@ export function OrganizationSecurity() {
       {SECURITY_FACTORS.map(factor => {
         const view = presentations[factor.bit];
         const count = policy.data?.requirements.filter(value => (value & factor.bit) !== 0).length;
-        const available = securitySupported() && (AVAILABLE_SECURITY_FACTORS & factor.bit) !== 0 && (factor.bit !== 8 || delaySupported());
+        const available = securitySupported() && (AVAILABLE_SECURITY_FACTORS & factor.bit) !== 0 && (factor.bit !== 8 || delaySupported()) && (factor.bit !== 2 || passkeySupported());
         return <article key={factor.bit} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-start justify-between gap-3"><span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 3 4 6v6c0 4 8 9 8 9s8-5 8-9V6z"/><path d="m8 12 3 3 5-6"/></svg></span>
             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${count ? "bg-blue-50 text-blue-800" : "bg-slate-100 text-slate-600"}`}>{count ? `Configured · ${count} ${count === 1 ? "action" : "actions"}` : !available ? "Unavailable" : policy.data ? "Not enabled" : "Not verified"}</span></div>
@@ -111,6 +114,14 @@ export function OrganizationSecurity() {
       <div className={`${styles.setupBody} space-y-6`}>
         {(AVAILABLE_SECURITY_FACTORS & 4) === 0 && <p>Second-person approval settings are unavailable on this deployment.</p>}
         <SecondPersonSetup key={fleet.customerId} />
+      </div>
+    </details>
+    <details id="security-passkeys" className={styles.setup}>
+      <summary>Passkey verification<span className="mt-1 block text-xs font-normal text-slate-500">Enroll credentials and manage passkey protection</span></summary>
+      <div className={`${styles.setupBody} space-y-5`}>
+        {!passkeySupported() && <p>Passkey setup is not available in this deployment.</p>}
+        <PasskeySettings />
+        {policy.data && fleet.administrator && passkeySupported() && <button disabled={mutation.isPending} onClick={async () => { try { setError(""); const values = policy.data!.requirements.map(v => policy.data!.requirements.some(r => (r & 2) !== 0) ? v & ~2 : v | 2); await mutation.mutateAsync({ transaction: await policyChangeTx(client, fleet.customerId, values) }); await policy.refetch(); } catch (e) { setError(e instanceof Error ? e.message : "Passkey policy update failed"); } }}>Save or request passkey protection change for all actions</button>}
       </div>
     </details>
     <details id="security-multisig" className={styles.setup}>

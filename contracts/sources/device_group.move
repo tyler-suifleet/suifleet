@@ -1,9 +1,7 @@
 module sui_edge::device_group {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
+    // Named u64 constants share the bytecode constant pool without changing types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
 
     use std::string::String;
     use sui::clock::Clock;
@@ -18,6 +16,7 @@ module sui_edge::device_group {
     // ── Errors ────────────────────────────────────────────────────────────────
 
     const ENotAdmin: u64 = 0;
+    const BNotAdmin: u8 = 0;
     const EDeviceAlreadyInGroup: u64 = 1;
     const EDeviceNotInGroup: u64 = 2;
     const EInvalidLimit: u64 = 3;
@@ -93,7 +92,7 @@ module sui_edge::device_group {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        share_managed(new_managed(name, description, ctx.sender(), clock, ctx));
+        k3(k1(name, description, ctx.sender(), clock, ctx));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -102,8 +101,8 @@ module sui_edge::device_group {
         device: &Device,
         ctx: &TxContext,
     ) {
-        p0(ctx.sender() == group.admin);
-        add_managed(group, device_registry::device_id(device));
+        q(ctx.sender() == group.admin, BNotAdmin);
+        k4(group, device_registry::device_id(device));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -112,36 +111,36 @@ module sui_edge::device_group {
         device_id: ID,
         ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
-        remove_managed(group, device_id);
+        q(ctx.sender() == group.admin, BNotAdmin);
+        k5(group, device_id);
     }
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
     public entry fun delete_group(group: DeviceGroup, ctx: &TxContext) {
-        p0(ctx.sender() == group.admin);
+        q(ctx.sender() == group.admin, BNotAdmin);
         // Remaining MemberKey fields are orphaned with the group; remove
         // members first to reclaim their storage.
-        delete_managed(group);
+        k2(group);
     }
 
     /// Move up to `limit` members from `device_ids` into the MemberKey index,
     /// marking the group indexed. Admin only; repeat until `remaining` is 0.
     public fun index_members(group: &mut DeviceGroup, limit: u64, ctx: &mut TxContext) {
-        p0(ctx.sender() == group.admin);
-        assert!(limit > (SMALL_0 as u64), EInvalidLimit);
+        q(ctx.sender() == group.admin, BNotAdmin);
+        assert!(limit > SMALL_0, EInvalidLimit);
         if (!is_indexed(group)) {
-            df::add(&mut group.id, IndexKey {}, GroupIndex { members: (SMALL_0 as u64) });
+            df::add(&mut group.id, IndexKey {}, GroupIndex { members: SMALL_0 });
         };
-        let mut moved = (SMALL_0 as u64);
+        let mut moved = SMALL_0;
         while (moved < limit && !group.device_ids.is_empty()) {
             let device_id = group.device_ids.pop_back();
             // An older package may have re-added an indexed member.
             if (!df::exists(&group.id, MemberKey { device_id })) {
                 df::add(&mut group.id, MemberKey { device_id }, true);
                 let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-                index.members = index.members + (SMALL_1 as u64);
+                index.members = index.members + SMALL_1;
             };
-            moved = moved + (SMALL_1 as u64);
+            moved = moved + SMALL_1;
         };
         event::emit(GroupIndexed {
             group_id: object::id(group),
@@ -151,21 +150,24 @@ module sui_edge::device_group {
     }
 
     /// Called only by the recipient-confirmed fleet handover protocol.
-    public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
-        p0(ctx.sender() == group.admin);
+    /// Package helper: handover.
+    public(package) fun k0(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
+        q(ctx.sender() == group.admin, BNotAdmin);
         group.admin = recipient;
     }
 
     /// Construct a group with the supplied admin. Managed callers use an object
     /// address: no wallet can sign as it through legacy add/remove/handover.
-    public(package) fun new_managed(name: String, description: String, admin: address,
+    /// Package helper: new_managed.
+    public(package) fun k1(name: String, description: String, admin: address,
         clock: &Clock, ctx: &mut TxContext): DeviceGroup {
         let group = DeviceGroup { id: object::new(ctx), name, description, admin,
             device_ids: vector[], created_at: clock.timestamp_ms(), schema_version: SCHEMA_VERSION };
         event::emit(GroupCreated { group_id: object::id(&group), name: group.name, admin });
         group
     }
-    public(package) fun delete_managed(mut group: DeviceGroup) {
+    /// Package helper: delete_managed.
+    public(package) fun k2(mut group: DeviceGroup) {
         if (is_indexed(&group)) {
             let _: GroupIndex = df::remove(&mut group.id, IndexKey {});
         };
@@ -173,13 +175,15 @@ module sui_edge::device_group {
         event::emit(GroupDeleted { group_id: id.to_inner(), admin });
         id.delete();
     }
-    public(package) fun share_managed(group: DeviceGroup) { transfer::share_object(group); }
-    public(package) fun add_managed(group: &mut DeviceGroup, device_id: ID) {
+    /// Package helper: share_managed.
+    public(package) fun k3(group: DeviceGroup) { transfer::share_object(group); }
+    /// Package helper: add_managed.
+    public(package) fun k4(group: &mut DeviceGroup, device_id: ID) {
         assert!(!contains_device(group, device_id), EDeviceAlreadyInGroup);
         if (is_indexed(group)) {
             df::add(&mut group.id, MemberKey { device_id }, true);
             let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members + (SMALL_1 as u64);
+            index.members = index.members + SMALL_1;
         } else {
             group.device_ids.push_back(device_id);
         };
@@ -188,14 +192,15 @@ module sui_edge::device_group {
             device_id,
         });
     }
-    public(package) fun remove_managed(group: &mut DeviceGroup, device_id: ID) {
+    /// Package helper: remove_managed.
+    public(package) fun k5(group: &mut DeviceGroup, device_id: ID) {
         // An older package may have added an indexed member to the vector too:
         // remove it from both so it is no longer a member anywhere.
         let indexed = df::exists(&group.id, MemberKey { device_id });
         if (indexed) {
             let _: bool = df::remove(&mut group.id, MemberKey { device_id });
             let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members - (SMALL_1 as u64);
+            index.members = index.members - SMALL_1;
         };
         let (found, idx) = group.device_ids.index_of(&device_id);
         assert!(found || indexed, EDeviceNotInGroup);
@@ -230,7 +235,7 @@ module sui_edge::device_group {
         let indexed = if (is_indexed(group)) {
             let index: &GroupIndex = df::borrow(&group.id, IndexKey {});
             index.members
-        } else { (SMALL_0 as u64) };
+        } else { SMALL_0 };
         group.device_ids.length() + indexed
     }
 
@@ -244,8 +249,12 @@ module sui_edge::device_group {
     public(package) fun uid(group: &DeviceGroup): &UID { &group.id }
     public(package) fun uid_mut(group: &mut DeviceGroup): &mut UID { &mut group.id }
     // Share each named abort branch without changing its module or error code.
-    /// check_NotAdmin: compact private symbol to bound published bytecode storage.
-    fun p0(condition: bool) {
-        if (!condition) abort ENotAdmin
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
+    fun q(condition: bool, _code: u8) {
+        if (!condition) {
+             abort ENotAdmin
+        }
     }
 }

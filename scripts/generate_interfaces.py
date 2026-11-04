@@ -323,11 +323,13 @@ def generate(catalog, recipe):
           f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
           f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
+          f'export const SUBSCRIPTION_TYPES = {json.dumps(catalog["optional_type_origins"]["subscription"])} as const;',
           f'export const GROUP_BATCH_TYPES = {json.dumps(catalog["optional_type_origins"]["group_batch"])} as const;',
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
           f'export const APPROVAL_TYPES = {json.dumps(catalog["optional_type_origins"]["second_person"])} as const;',
           f'export const SECURITY_TYPES = {json.dumps(catalog["optional_type_origins"]["security_policy"])} as const;',
+          f'export const PASSKEY_TYPES = {json.dumps(catalog["optional_type_origins"]["passkey_factor"])} as const;',
           f'export const SECURITY_DELAY_TYPES = {json.dumps(catalog["optional_type_origins"]["security_delay"])} as const;',
           f'export const CUSTOMER_TYPES = {json.dumps(catalog["optional_type_origins"]["customer"])} as const;',
           f'export const INBOX_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_inbox"])} as const;',
@@ -335,6 +337,7 @@ def generate(catalog, recipe):
           f'export const ROLLOUT_HEALTH_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_health"])} as const;',
           f'export const SETTINGS_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_settings"])} as const;',
           f'export const SHARD_TYPES = {json.dumps(catalog["optional_type_origins"]["receipt_shards"])} as const;',
+          f'export const RECURRING_WINDOW_TYPES = {json.dumps(catalog["optional_type_origins"]["recurring_window"])} as const;',
           '/** SF-130 per-fleet cost settings: defaults and inclusive bounds, in Move field units. */',
           f'export const FLEET_SETTINGS = {json.dumps(catalog["fleet_settings"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
@@ -349,15 +352,18 @@ def generate(catalog, recipe):
             f'pub const MANIFEST_SCHEMA_VERSION: u64 = {catalog["manifest_schema_version"]};',
             f'pub const DEPLOYMENT_SCHEMA_VERSION: u64 = {catalog["deployment_schema_version"]};',
             f'pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &{json.dumps(catalog["supported_deployment_schema_versions"])};',
+            'pub const SUBSCRIPTION_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["subscription"]) + '];',
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
             'pub const SEAL_POLICY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["seal_policy"]) + '];',
             'pub const BUDGET_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_budget"]) + '];',
             'pub const SECURITY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["security_policy"]) + '];',
+            'pub const PASSKEY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["passkey_factor"]) + '];',
             'pub const CUSTOMER_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["customer"]) + '];',
             'pub const INBOX_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_inbox"]) + '];',
             'pub const ROLLOUT_HEALTH_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["rollout_health"]) + '];',
             'pub const SETTINGS_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_settings"]) + '];',
             'pub const SHARD_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["receipt_shards"]) + '];',
+            'pub const RECURRING_WINDOW_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["recurring_window"]) + '];',
             *settings_rust(catalog["fleet_settings"]),
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',
             'pub const RECIPE_VERSIONS: &[&str] = &[' + ', '.join(json.dumps(v) for v in recipe["properties"]["schemaVersion"]["enum"]) + '];',
@@ -401,6 +407,8 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "vector<u64>":
                     types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
+                elif base == "vector<u16>":
+                    types += [f"{arg}: number[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u16()).serialize({arg}))"]
                 elif base == "vector<vector<u8>>":
                     types += [f"{arg}: number[][]"]; arguments += [f"tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize({arg}))"]
                 elif base == "u16":
@@ -439,8 +447,9 @@ def generate(catalog, recipe):
             emit_struct(name)
         for name in ordered:
             struct = contents["structs"][name]
-            if struct["type_parameters"]:
-                raise ValueError("generic contract structs require explicit support")
+            # Phantom coin parameters do not affect BCS; Balance<T> stores only u64.
+            if any(not parameter["phantom"] for parameter in struct["type_parameters"]):
+                raise ValueError("nonphantom generic contract structs require explicit support")
             fields = ", ".join(f"{name}: {bcs_type(t)}" for name, t in struct["fields"])
             ts += [f'export const {module}_{name}Bcs = bcs.struct("{name}", {{ {fields} }});']
             move_types += [f'  {module}_{name}: "{module}::{name}",']

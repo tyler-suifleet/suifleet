@@ -120,6 +120,12 @@ introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
 
+The optional all-or-none `recurring_window` type group (`RecurringWindowKey`,
+`RecurringWindow`, `WeeklySlot`; SF-174) enables recurring weekly maintenance
+windows. Daemons before 0.2.3 ignore the field, so resolved manifests containing
+it require edge >=0.2.3. Without it, clients neither read nor write the field; see
+[OPERATIONS.md](OPERATIONS.md#recurring-weekly-maintenance-windows-sf-174).
+
 Treasury payment configuration and user-only multisig/SuiNS operations are documented in [TREASURY.md](TREASURY.md). `resolve --treasury-payee ADDRESS` and publication `--treasury-payee ADDRESS` pin a reviewed address; publication preserves the previous payee when omitted, including recovery. Missing payees preserve legacy nonpayment use, while the frontend payment guard fails closed.
 
 The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
@@ -186,3 +192,22 @@ For a public account read smoke test (no signer), run
 It runs the console's inventory, library, deployment and enrollment queries plus
 a balance read after deployment verification. This does not simulate a browser
 wallet connection or authorize writes.
+
+## Subscription coins (SF-181)
+
+The optional `subscription_coins` object contains `USDC` and optionally `SUI`,
+each with `coin_type` (full introduction-origin type tag) and integer `decimals`
+(6 or 9). Its presence requires `treasury_payee`. Public testnet/mainnet USDC must
+match Circle's canonical origin; local fixtures may use an isolated test coin.
+The optional all-or-none `subscription` type-origin group records
+`customer::SubscriptionKey`, `subscription::Offer`, `Account`, `Deposited`,
+`Collected`, `PlanChanged` and `Refunded` with their own introduction origins.
+Existing Customer origins and layouts remain unchanged.
+
+`resolve --subscription-coins '{"USDC":{"coin_type":"FULL_ORIGIN::usdc::USDC","decimals":6}}'`
+accepts a reviewed descriptor alongside `--treasury-payee`. Publication accepts
+the same flag, preserves previous coin descriptors when omitted, and journals
+them for recovery. Replace the example's `FULL_ORIGIN` with the verified canonical
+address; the placeholder is intentionally invalid. Payment callers use the
+manifest payee and exact coin guard, never a symbol, URL or mutable SuiNS answer.
+See [subscription custody and Payment Kit evaluation](SUBSCRIPTIONS.md).
