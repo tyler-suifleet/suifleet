@@ -1,0 +1,21 @@
+{
+  "mode": "read-only real GitHub metadata; retry POST intercepted and simulated locally only",
+  "notice": {
+    "state": "waiting_for_run_completion",
+    "run": 41897433096,
+    "job": 126811187286
+  },
+  "verified": [
+    {
+      "project": "suifleet",
+      "pr": 580,
+      "head": "5384ce3c06628c1d25740e8e5653ca8ef05bb5ce",
+      "run": 41897433096,
+      "job": 126811187286,
+      "attempt": 1,
+      "state": "waiting",
+      "proof": "d3c36b53b8b2feba9f97c625fcce8a94aede6c0665a40a961494c9d2c47d7e57"
+    }
+  ],
+  "intercepted_requests": []
+}

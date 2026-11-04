@@ -1086,6 +1086,156 @@ def uninspectable_reason(found):
     return None
 
 
+class HostedRunnerRecovery:
+    """Retry only authenticated, never-started macOS CI capacity failures.
+
+    An intent is committed before POST. Unknown delivery never causes another
+    POST: a subsequent run attempt must be observed before scheduling more work.
+    No check/result/review/claim is cleared, and no testnet workflow is retried.
+    """
+    LIMIT = 3
+    WAIT = 300
+
+    def __init__(self, coordinator, clock=time.time):
+        self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
+        self.db.execute('''CREATE TABLE IF NOT EXISTS hosted_runner_retries (
+            project TEXT, pr INTEGER, head TEXT, run INTEGER, job INTEGER,
+            attempt INTEGER, state TEXT, next_check REAL, updated REAL, proof TEXT,
+            PRIMARY KEY(project,run,job))''')
+
+    def read(self, project, path):
+        return json.loads(self.c.gh(project, ['api', path]))
+
+    @staticmethod
+    def run_matches(project, pr, run):
+        repo = project['repository'].lower()
+        return (run.get('event') == 'pull_request'
+                and run.get('path') == '.github/workflows/ci.yml'
+                and run.get('head_sha') == pr['headRefOid']
+                and (run.get('repository') or {}).get('full_name', '').lower() == repo
+                and (run.get('head_repository') or {}).get('full_name', '').lower() == repo
+                and type(run.get('run_attempt')) is int and run['run_attempt'] >= 1
+                and any(p.get('number') == pr['number']
+                        and (p.get('head') or {}).get('sha') == pr['headRefOid']
+                        for p in run.get('pull_requests', [])))
+
+    def update(self, project, job, state):
+        self.db.execute('UPDATE hosted_runner_retries SET state=?,next_check=?,updated=? '
+                        'WHERE project=? AND job=?',
+                        (state, self.clock() + self.WAIT, self.clock(), project['id'], job))
+
+    def scan(self, project, prs):
+        notices = []
+        for pr in prs:
+            try:
+                notice = self.tick(project, pr)
+            except Exception as error:
+                # Error strings/argv can include private transport details. A
+                # failed read on one PR must not stop the other PRs or reviews.
+                notice = dict(state='unavailable', diagnostic=type(error).__name__)
+            if notice:
+                notices.append(dict(pr=pr['number'], **notice))
+        return notices
+
+    def tick(self, project, pr):
+        if pr.get('state') != 'OPEN' or pr.get('isDraft') or pr.get('isCrossRepository'):
+            return
+        prefix = 'repos/' + project['repository']
+        old = self.db.execute("SELECT * FROM hosted_runner_retries WHERE project=? AND pr=? "
+                              "AND state IN ('intent','submitted','uncertain')",
+                              (project['id'], pr['number'])).fetchall()
+        for row in old:
+            if row['head'] != pr['headRefOid']:
+                self.update(project, row['job'], 'superseded')
+                continue
+            run = self.read(project, prefix + '/actions/runs/' + str(row['run']))
+            if not self.run_matches(project, pr, run):
+                return dict(state='identity_changed', job=row['job'])
+            if run['run_attempt'] > row['attempt']:
+                self.update(project, row['job'], 'observed')
+            else:
+                return dict(state=row['state'], run=row['run'], job=row['job'])
+        for check in pr.get('statusCheckRollup', []):
+            if (check.get('name') != 'macOS runtime (launchd)'
+                    or check.get('status') != 'COMPLETED' or check.get('conclusion') != 'CANCELLED'):
+                continue
+            match = re.fullmatch(r'https://github\.com/' + re.escape(project['repository'])
+                                 + r'/actions/runs/([1-9][0-9]*)/job/([1-9][0-9]*)', check.get('detailsUrl', ''))
+            if not match:
+                continue
+            run_id, job_id = map(int, match.groups())
+            row = self.db.execute('SELECT * FROM hosted_runner_retries WHERE project=? AND run=? AND job=?',
+                                  (project['id'], run_id, job_id)).fetchone()
+            if row and row['state'] != 'waiting':
+                continue  # Never replay intent, delivered, refused or exhausted work.
+            if row and row['next_check'] > self.clock():
+                return dict(state='waiting', run=run_id, job=job_id)
+            run_path = prefix + '/actions/runs/' + str(run_id)
+            run = self.read(project, run_path)
+            if (run.get('id') != run_id or not self.run_matches(project, pr, run)
+                    or run.get('conclusion') == 'cancelled'):
+                continue
+            job = self.read(project, prefix + '/actions/jobs/' + str(job_id))
+            if (job.get('id') != job_id or job.get('run_id') != run_id
+                    or job.get('run_attempt') != run['run_attempt']
+                    or job.get('head_sha') != pr['headRefOid']
+                    or job.get('name') != 'macOS runtime (launchd)'
+                    or job.get('status') != 'completed' or job.get('conclusion') != 'cancelled'
+                    or job.get('steps') != [] or job.get('runner_id') != 0 or job.get('runner_name') != ''
+                    or len(job.get('labels', [])) != 1
+                    or not re.fullmatch(r'macos-(?:latest|[0-9]+)(?:-intel|-arm64)?', job['labels'][0])
+                    or job.get('check_run_url') != 'https://api.github.com/' + prefix + '/check-runs/' + str(job_id)):
+                continue
+            annotations = self.read(project, prefix + '/check-runs/' + str(job_id) + '/annotations?per_page=100')
+            messages = [a.get('message', '') for a in annotations]
+            if ("The job was not acquired by Runner of type hosted even after multiple attempts" not in messages
+                    or not any('capacity constraints' in m and 'macOS arm64' in m for m in messages)):
+                continue
+            proof = hashlib.sha256(json.dumps(dict(job=job, annotations=annotations), sort_keys=True).encode()).hexdigest()
+            if row and (row['attempt'] != run['run_attempt'] or row['proof'] != proof):
+                return dict(state='evidence_changed', job=job_id)
+            if not row:
+                self.db.execute('INSERT INTO hosted_runner_retries VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                (project['id'], pr['number'], pr['headRefOid'], run_id, job_id,
+                                 run['run_attempt'], 'waiting', self.clock(), self.clock(), proof))
+            if run.get('status') != 'completed':
+                self.update(project, job_id, 'waiting')
+                return dict(state='waiting_for_run_completion', run=run_id, job=job_id)
+            if run.get('conclusion') != 'failure':
+                self.update(project, job_id, 'refused')
+                continue
+            used = self.db.execute("SELECT count(*) FROM hosted_runner_retries WHERE project=? AND pr=? AND head=? "
+                                   "AND state IN ('intent','submitted','observed','uncertain')",
+                                   (project['id'], pr['number'], pr['headRefOid'])).fetchone()[0]
+            if used >= self.LIMIT:
+                self.update(project, job_id, 'exhausted')
+                return dict(state='exhausted', run=run_id, job=job_id, attempts=used)
+            # Fresh authority and run state immediately before an irreversible
+            # request. An unrelated branch/head or user cancellation is refused.
+            fresh = self.read(project, prefix + '/pulls/' + str(pr['number']))
+            if (fresh.get('state') != 'open' or fresh.get('draft') or fresh.get('head', {}).get('sha') != pr['headRefOid']
+                    or fresh.get('head', {}).get('repo', {}).get('full_name', '').lower() != project['repository'].lower()
+                    or self.read(project, run_path) != run):
+                self.update(project, job_id, 'refused')
+                return dict(state='changed_before_retry', job=job_id)
+            self.update(project, job_id, 'intent')  # durable autocommit BEFORE POST
+            try:
+                self.c.gh(project, ['api', prefix + '/actions/jobs/' + str(job_id) + '/rerun', '--method', 'POST'])
+            except subprocess.CalledProcessError as error:
+                # GitHub rejects job reruns until all sibling jobs finish. A
+                # concurrent rerun can race our last read; this refusal is known.
+                if 'HTTP 403' in (error.stderr or '') and 'already running' in (error.stderr or '').lower():
+                    self.update(project, job_id, 'waiting')
+                    return dict(state='waiting_for_run_completion', run=run_id, job=job_id)
+                self.update(project, job_id, 'uncertain')
+                return dict(state='uncertain', run=run_id, job=job_id)
+            except Exception:
+                self.update(project, job_id, 'uncertain')
+                return dict(state='uncertain', run=run_id, job=job_id)
+            self.update(project, job_id, 'submitted')
+            return dict(state='retry_submitted', run=run_id, job=job_id, attempt=used + 1)
+
+
 class Coordinator:
     def __init__(self, config, state):
         if set(config['workers']) != FAMILIES or any(not isinstance(c,list) or not c or not all(isinstance(v,str) for v in c) for c in config['workers'].values()):
@@ -1105,6 +1255,7 @@ class Coordinator:
         self.batches = BatchController(self)
         from batch_integration import LocalInfrastructure
         self.local_infrastructure = LocalInfrastructure(self)
+        self.hosted_runner_recovery = HostedRunnerRecovery(self)
 
     def gh(self, project, args):
         account = project['github_account']
@@ -1946,6 +2097,9 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             prs = self.prs(project, on_snapshot, owners)
         else:
             prs = self.prs(project)
+        if execute and getattr(self, 'hosted_runner_recovery', None):
+            for notice in self.hosted_runner_recovery.scan(project, prs):
+                print(json.dumps(dict(project=project['id'], hosted_runner_recovery=notice)), flush=True)
         # Historical reconciliation cannot delay independent source workers.
         if execute:
             try:
