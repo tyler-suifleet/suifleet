@@ -1667,3 +1667,28 @@ PRs, reviews, repairs or merges. No model worker, wallet or resource lease is
 needed for these job-only retries. All source review, CI, testnet, spending and
 release gates remain in force. Provider capacity can still be unavailable; an
 exhausted or uncertain receipt is evidence for explicit recovery, not success.
+
+### Interrupted protected fixture incident (SF-243)
+
+The reported failed candidate #605 at
+`ebdca15ae1c244376701b323486a94e2ea002799`, base
+`4aa4344c0a0b0749348ed78544531ed28ac857d3`, has one scoped harness owner:
+[SF-243/#606](https://github.com/tyler-suifleet/suifleet/issues/606).
+This narrow route authenticates completed Automatic testnet run 41914017432,
+the same-repository main controller, the head-named effects artifact, exact
+ordinary head/base/chain and the known failed initializer transaction digest.
+It verifies the original candidate manifest and records artifact hashes,
+attempt, failure digest, member identities and checks in
+`shared_harness_incidents` before suppressing unchanged victim batch repairs.
+The source snapshot and coordinator report expose `_shared_acceptance_wait`.
+
+This is deliberately a single known incident, not a generic passkey/security
+failure classifier. Mixed failures, different candidate/run/source identities,
+missing evidence and changed durable receipts cannot use it. Existing SF-182
+workers/claims/branches and repair history remain untouched. It does not launch
+an owner worker, manufacture a source receipt, clear a failed candidate, retry
+wallet work, or suppress genuine independent source findings and source CI
+repairs. SF-243's existing implementation claim carries the repair; a newly
+pinned candidate after merged integration still needs real CI, automatic
+testnet and ordinary application review. Install only reviewed merged runtime.
+Offline routing tests establish no deployment or public-testnet success.
