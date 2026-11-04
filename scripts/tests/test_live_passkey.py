@@ -80,6 +80,70 @@ class CachedPasskeyTests(unittest.TestCase):
                 self.assertEqual((root / name).read_text().strip(), value)
                 self.assertEqual((root / name).stat().st_mode & 0o777, 0o600)
 
+    def test_base_probe_requires_missing_factor_only_for_unchanged_root(self):
+        # Run the real exercise/tx control flow with deterministic signing and
+        # effects fixtures. A sponsored rename succeeds on the current package;
+        # thus the original unchanged-root probe reproduces the CI failure.
+        import subprocess
+        for upgraded, bad_abort in ((False, False), (True, False), (False, True)):
+            with self.subTest(upgraded=upgraded, bad_abort=bad_abort):
+                head, base = '0x' + '2'*64, '0x' + ('3' if upgraded else '2')*64
+                operator = '0x' + '1'*64
+                keys = [dict(address='0x' + c*64) for c in ('4', '5')]
+                requests, current = [], {}
+                evidence = {'transactions': []}
+                def prepare(args, *, input, **kwargs):
+                    request = json.loads(input)
+                    if request['operation'] == 'info':
+                        return subprocess.CompletedProcess(args, 0, json.dumps(keys), '')
+                    requests.append(request)
+                    current.clear(); current.update(request)
+                    return subprocess.CompletedProcess(args, 0, json.dumps(
+                        dict(bytes='bytes', digest='digest', signature='signature' if 'sponsor' in request else None)), '')
+                def decode(_):
+                    return dict(digest='digest', gas_budget=20_000_000, gas_payment=[], expiration=None,
+                        gas_owner=keys[current['sponsor']]['address'] if 'sponsor' in current else operator,
+                        sender=operator)
+                def execute(client, label, submit, **kwargs):
+                    evidence['transactions'].append({'label': label})
+                    submit(20_000_000)
+                    # The base differs only in the real-upgrade case; otherwise
+                    # a valid passkey authorizes this call just like the head.
+                    status = 'success'
+                    if current['operation'] == 'rename' and (
+                            'sponsor' not in current or current['name'] == 'must fail removed'
+                            or current['package'] != head):
+                        status = 'failure'
+                    self.assertEqual(status, kwargs['expect'], label)
+                    return {'effects': {'status': {'status': status, 'error': 'fixture'}}}
+                live = SimpleNamespace(network='testnet', rpc_url='fixture', operator=operator,
+                    evidence=evidence, assert_lock=Mock(), decode=decode,
+                    executor=Mock(return_value=Mock()), signer=Mock(return_value=Mock(return_value='wallet')),
+                    ledger=SimpleNamespace(execute=execute))
+                abort = Mock()
+                abort.search.return_value.groups.return_value = (
+                    'security_policy', 'wrong' if bad_abort else target.abort_site(
+                        Path('contracts'), 'security_policy', 'check', 1), '1')
+                installed = [value for key in keys for value in (operator, key['address'])]
+                with patch.object(target.subprocess, 'run', side_effect=prepare), \
+                     patch.object(target, 'enrolled_keys', return_value=installed), \
+                     patch.object(target, 'fund_passkey'), \
+                     patch.object(target.tc, 'bound', return_value={}), \
+                     patch.object(target, 'ABORT', abort):
+                    if bad_abort:
+                        with self.assertRaisesRegex(AssertionError, 'missing-factor abort'):
+                            target.exercise(live, dict(head=head, base=base, customer='customer', fleet='fleet'),
+                                Path('/private/state.json'), {}, Mock())
+                        continue
+                    target.exercise(live, dict(head=head, base=base, customer='customer', fleet='fleet'),
+                        Path('/private/state.json'), {}, Mock())
+                probe = next(r for r in requests if r.get('name') == 'must fail old')
+                self.assertEqual(probe['package'], base)
+                self.assertEqual('sponsor' in probe, upgraded)
+                self.assertEqual(evidence['native_old_package_probe'],
+                    'distinct-package' if upgraded else 'unchanged-root-wallet-only')
+                self.assertEqual(len(requests), 9)
+
     def fixture(self, upgraded=False, retained=False):
         base, head = '0x'+'2'*64, '0x'+('3' if upgraded else '2')*64
         source = 'bytecode-v1:' + 'a'*64

@@ -108,7 +108,13 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
     tx('enable native passkey protection',operation='policy',mask=2,**common)
     tx('wallet plus passkey allows action',operation='rename',fleet=f['fleet'],name='Native co-signed action',sponsor=0,**common)
     tx('wallet alone refused on chain',operation='rename',fleet=f['fleet'],name='must fail',expect='failure',**common)
-    tx('old package cannot bypass protection',operation='rename',fleet=f['fleet'],name='must fail old',expect='failure',sponsor=0,**{**common,'package':f['base']})
+    # A co-signed call to an unchanged base/head is authorized, not a bypass.
+    # Only a distinct old package must refuse even with a valid factor.
+    distinct_base = dm.object_id(f['base']) != dm.object_id(f['head'])
+    tx('old package cannot bypass protection' if distinct_base else 'unchanged base wallet alone refused',
+       operation='rename',fleet=f['fleet'],name='must fail old',expect='failure',
+       **({'sponsor': 0} if distinct_base else {}), **{**common,'package':f['base']})
+    live.evidence['native_old_package_probe'] = 'distinct-package' if distinct_base else 'unchanged-root-wallet-only'
     tx('backup passkey recovers lost primary',operation='remove',administrator=live.operator,key=0,sponsor=1,**common)
     tx('removed primary refused',operation='rename',fleet=f['fleet'],name='must fail removed',sponsor=0,expect='failure',**common)
     tx('surviving backup allows action',operation='rename',fleet=f['fleet'],name='Recovered with backup',sponsor=1,**common)
