@@ -10,7 +10,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  const policy=(await fs.readFile(path.join(root,'_headers'),'utf8')).split('Content-Security-Policy: ')[1].split('\n')[0];
  const steps=JSON.parse(await fs.readFile(path.join(repo,'site/guide/steps.json'))).steps;
  const expected=new Map(steps.flatMap(step=>[step.summary,...step.before,...step.actions,step.result].map((text,i)=>[`${step.id}/${i}`,text.replace(/\s+/g,' ').trim()])));
- server=http.createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://local').pathname;if(missingMedia.has(pathname)){res.statusCode=404;res.end();return;}let name=path.resolve(root,'.'+pathname);if(!name.startsWith(root+path.sep))throw Error('outside root');if(pathname.endsWith('/'))name=path.join(name,'index.html');const data=await fs.readFile(name);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.woff2':'font/woff2','.webm':'video/webm','.mp4':'video/mp4','.vtt':'text/vtt'})[path.extname(name)]||'application/octet-stream');res.setHeader('Content-Security-Policy',policy);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Length',data.length);res.end(data)}catch{res.statusCode=404;res.end()}});
+ server=http.createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://local').pathname;if(missingMedia.has(pathname)){res.statusCode=404;res.end();return;}let name=path.resolve(root,'.'+pathname);if(!name.startsWith(root+path.sep))throw Error('outside root');if(pathname.endsWith('/'))name=path.join(name,'index.html');const data=await fs.readFile(name);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.woff2':'font/woff2','.webm':'video/webm','.mp4':'video/mp4','.vtt':'text/vtt'})[path.extname(name)]||'application/octet-stream');res.setHeader('Content-Security-Policy',policy);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Accept-Ranges','bytes');const range=req.headers.range?.match(/^bytes=(\d+)-(\d*)$/);if(range){const start=Number(range[1]),end=range[2]?Math.min(Number(range[2]),data.length-1):data.length-1;if(start>end){res.writeHead(416);res.end();return}res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1});res.end(data.subarray(start,end+1))}else{res.setHeader('Content-Length',data.length);res.end(data)}}catch{res.statusCode=404;res.end()}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
  browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||undefined,headless:true,args:['--no-sandbox']});if(shots)await fs.mkdir(shots,{recursive:true});
  for(const [width,height] of [[1440,900],[1280,720],[390,844],[375,667],[320,568],[844,390],[640,360]]){
@@ -95,11 +95,13 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  await page.getByLabel('Guide stage').selectOption('fund');assert.equal(await video.evaluate(v=>v.paused),true,'leaving a stage pauses its video');
 
  missingMedia.add('/media/guide/fund.webm');
- await page.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
- await page.locator('#fund video').evaluate(async v=>{v.load();await v.play()});
- assert.ok(await page.locator('#fund video').evaluate(v=>v.currentSrc.endsWith('fund.mp4')),'MP4 plays after WebM 404');
- assert.equal(await page.locator('#fund [data-video-error]').isVisible(),false,'working MP4 is not marked unavailable');
- missingMedia.clear();
+ // A fresh context prevents a previously cached WebM range from hiding the 404.
+ const fallbackPlayerPage=await browser.newPage();
+ await fallbackPlayerPage.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
+ await fallbackPlayerPage.locator('#fund video').evaluate(async v=>{v.load();await v.play()});
+ assert.ok(await fallbackPlayerPage.locator('#fund video').evaluate(v=>v.currentSrc.endsWith('fund.mp4')),'MP4 plays after WebM 404');
+ assert.equal(await fallbackPlayerPage.locator('#fund [data-video-error]').isVisible(),false,'working MP4 is not marked unavailable');
+ await fallbackPlayerPage.close();missingMedia.clear();
  // Native captions load from the same origin on desktop and mobile. Keyboard
  // focus stays on the native player; Space must start/pause real playback.
  for(const viewport of [{width:1280,height:720},{width:390,height:844}]) {
