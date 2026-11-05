@@ -28,8 +28,13 @@ class DocsTest(unittest.TestCase):
         self.assertEqual(len(index), len(build.catalog()))
         self.assertTrue(any("provisioning" in p["text"] for p in index))
         console = (build.ROOT / "dapp/src/components/FirstRun.tsx").read_text()
-        links = re.findall(r'https://docs.suifleet.io(/[^"\s]*)', console)
+        # FirstRun uses the shared, configurable docs origin. Validate the
+        # actual helper arguments against the built pages rather than requiring
+        # production-host literals (which break public evaluation previews).
+        self.assertIn('import { docsUrl } from "@/lib/device-client";', console)
+        links = re.findall(r'\bdocsUrl\("([^"\s]+)"\)', console)
         self.assertGreaterEqual(len(links), 3)
+        self.assertTrue({"install", "enrollment", "components"}.issubset(links))
         for link in links:
             self.assertTrue((self.out / link.strip("/") / "index.html").is_file(), link)
 
