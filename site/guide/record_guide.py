@@ -333,6 +333,15 @@ def run(args):
         demo_path.write_text(json.dumps(demo))
         live.check(f"verified customer {customers[0]}; {'reused' if not sign_in['transactions'] else 'created in this recording'}")
 
+        if resume and not demo.get("policy"):
+            policies = []
+            for phase in live.evidence.get("browser", {}).get("phases", []):
+                for transaction in phase.get("transactions", []):
+                    if transaction.get("step") == "enroll-batch" and transaction.get("status") == "success":
+                        policies += created(live, transaction["digest"], "::enrollment::EnrollmentPolicy")
+            if len(set(policies)) == 1:
+                demo["policy"] = policies[0]; demo_path.write_text(json.dumps(demo))
+
         rest_steps = ["capacity-plan", "fund", "register-device", "enroll-batch", "publish-version", "deploy-group", "access-policy", "fleet-settings"]
         remaining = [s for s in rest_steps if not (runtime / "frames" / s / "frames.json").exists()] if resume else rest_steps
         resume_phase = "resume-rest-" + str(len(list(runtime.glob("evidence-resume-rest*.json"))) + 1)

@@ -591,6 +591,7 @@ const devices = JSON.parse(process.env.GUIDE_DEVICES || "[]");
     evidence.page_errors = errors;
     evidence.other_hosts = [...other].sort();
     persist();
+    await context.storageState({ path: statePath });
     await browser.close();
     server.close();
   }
