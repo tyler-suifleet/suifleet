@@ -36,7 +36,7 @@ render source or storyboard invalidates build checks until regeneration.
 The player has native caption controls, captions off by default, no autoplay, a phone-specific portrait video,
 English captions, an MP4 fallback and the complete transcript. Plain diagrams,
 full narration and readable text provide alternatives; colors alone never
-explain a state. No new page scripts or remote assets are introduced.
+explain a state. No third-party scripts or remote assets are introduced.
 
 The revised animation uses separate scene compositions rather than a repeated
 fixed diagram: devices enter and regroup, a signed approval travels to shared
@@ -54,3 +54,13 @@ still required; pixel change does not establish animation quality.
 For a completed matching frame render, `--reuse-frames` verifies its timeline and
 scene/renderer source receipt and exact frame count, then regenerates narration
 from the pinned engine before encoding. A stale receipt is rejected.
+
+The hosted static service does not advertise video byte ranges. The exact
+integrity-pinned local guide/player script therefore buffers the reviewed
+same-origin MP4 after playback begins, verifies its SHA256 and hands it to the
+native player as a local Blob. That enables normal seeking without an application
+server or another video service. Captions remain native and optional. No download
+starts before playback, no credentials are sent, and the script never loads a
+remote URL. Its CSP permits same-origin fetch and Blob media only on this page.
+If preparation fails, ordinary streaming and the transcript remain available.
+The no-range browser fixture exercises this path and rejects tampered bytes.
