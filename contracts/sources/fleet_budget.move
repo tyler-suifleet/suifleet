@@ -744,6 +744,18 @@ module sui_edge::fleet_budget {
 
     /// For per-fleet records kept by other modules of this package
     /// (`fleet_settings`); each module owns its own dynamic-field key types.
+    /// Append-only extension under current budget authority. Keys remain
+    /// constructible only by their defining modules: callers cannot forge the
+    /// private core budget/settings keys or remove/replace existing fields.
+    /// Managed callers must use the transaction-scoped customer capability loan,
+    /// which retains all organization-security and current membership checks.
+    public fun attach<K: copy + drop + store>(
+        budget: &mut FleetBudget, cap: &BudgetOwnerCap, key: K, value: ID,
+    ) {
+        assert_owner(budget, cap);
+        df::add(&mut budget.id, key, value);
+    }
+
     public(package) fun uid(budget: &FleetBudget): &UID { &budget.id }
     public(package) fun uid_mut(budget: &mut FleetBudget): &mut UID { &mut budget.id }
 
@@ -755,21 +767,10 @@ module sui_edge::fleet_budget {
 
     // Private named guards retain module-local error codes; selectors are fixed at each call.
 
+    // Every private call selects a B* u8 whose value equals its E* u64.
+    // Widening preserves the exact abort code/site while leaving room for the
+    // additive extension API under the chain's 100 KiB package limit.
     fun q(condition: bool, code: u8) {
-        if (!condition) {
-            if (code == BZeroAmount) abort EZeroAmount;
-            if (code == BWrongVersion) abort EWrongVersion;
-            if (code == BWrongAccount) abort EWrongAccount;
-            if (code == BInsufficientBalance) abort EInsufficientBalance;
-            if (code == BInactiveDevice) abort EInactiveDevice;
-            if (code == BNotOwner) abort ENotOwner;
-            if (code == BInvalidLimits) abort EInvalidLimits;
-            if (code == BWrongRegistry) abort EWrongRegistry;
-            if (code == BOwnerChanged) abort EOwnerChanged;
-            if (code == BOverFloat) abort EOverFloat;
-            if (code == BOverReserve) abort EOverReserve;
-            if (code == BRateLimited) abort ERateLimited;
-            abort ENotEnrolled
-        }
+        if (!condition) abort (code as u64)
     }
 }
