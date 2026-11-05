@@ -412,7 +412,7 @@ const STEPS = {
     await h.click(h.sidebar("Components"));
     await h.click(page.getByRole("heading", { name: `Version ${VERSION}`, exact: true }).locator("..").getByRole("link", { name: "Deploy this version" }));
     await page.getByRole("heading", { name: "Deploy component", exact: true }).waitFor();
-    await h.caption("Select the group as the target. This catalog release creates a one-shot deployment.");
+    await h.caption("Select the group as the target. The desired-state option keeps this version requested for group members.");
     await h.click(page.getByRole("checkbox", { name: /^guide-pilot [1-9][0-9]* devices?$/ }));
     before = evidence.transactions.length;
     await h.caption("Click Deploy and approve. Each device in the group checks its membership and applies it.");
@@ -486,20 +486,18 @@ const STEPS = {
     await h.pause(1500);
     let before;
     if (!extra.rollout) {
-    await h.caption("Open Create a gradual rollout and fill in the version, recipe and digests.");
+    await h.caption("Open Create a gradual rollout. Choose the published version and matching device platform from your library.");
     await h.click(page.getByText("Create a gradual rollout", { exact: true }));
-    const field = (label) => page.getByLabel(label, { exact: true });
-    await h.type(field("component"), "guide-app");
-    await h.type(field("version"), VERSION);
-    await h.type(field("recipe"), extra.recipe, 4);
-    await h.type(field("artifactSha256"), extra.artifactSha256, 4);
-    await h.type(field("recipeSha256"), extra.recipeSha256, 4);
-    await h.caption("List the cohorts, one line each; the first cohort goes first.");
-    await h.type(page.getByLabel(/Cohorts/), extra.cohorts.join("\n"), 4);
-    await h.caption("Set the pacing, bake period and abort threshold, then create the rollout.");
-    await h.pause(1500);
+    const library = page.getByLabel("Published library version and platform");
+    const recipe = library.locator("option").filter({hasText:`guide-app ${VERSION} · linux/x86_64`});
+    await recipe.waitFor({state:"attached",timeout:90000});
+    await library.selectOption(await recipe.getAttribute("value"));
+    await h.caption("A cohort is a batch of devices. Add named devices or groups to the first batch; a device belongs to only one batch.");
+    await h.click(page.getByRole("checkbox",{name:new RegExp(DEVICE_NAME)}));
+    await h.caption("Set the pacing, observation period and failure threshold, then review the exact plan. Creating a rollout does not start any device.");
+    await h.click(page.getByRole("button",{name:"Review rollout",exact:true}));
     let before = evidence.transactions.length;
-    await h.click(page.getByRole("button", { name: "Create without admitting devices" }));
+    await h.click(page.getByRole("button", { name: "Confirm creation in wallet",exact:true }));
     await transactions(page, before, 1);
     const overview = page.getByTestId("rollout-overview");
     await overview.waitFor({ timeout: 90000 });
@@ -514,13 +512,16 @@ const STEPS = {
     const value = await option.getAttribute("value");
     await select.selectOption(value);
     await h.pause(1500);
-    await h.type(page.getByLabel(/Admission candidate IDs/), extra.cohorts[0], 4);
+    await h.caption("This plan is created with devices waiting, not installed. Only admit devices after reporting is configured and current signed health is available.");
+    await page.getByText(/Active · cohort/).first().waitFor({timeout:90000});
+    await h.caption("Pause stops new devices from starting; it does not undo an update already allowed to start. This example deliberately admits no devices.");
+    await h.type(page.getByLabel("Audit reason"),"Guide demonstration: wait for configured device reporting");
     before = evidence.transactions.length;
-    await h.click(page.getByRole("button", { name: "Check device health and continue" }));
-    await transactions(page, before, 1);
-    await page.getByText(/Active · cohort/).first().waitFor({ timeout: 90000 });
-    await h.caption("The rollout advances only on healthy signed reports. Pause or abort at any time.");
-    await h.pause(3500);
+    await h.click(page.getByRole("button",{name:"Pause",exact:true}));
+    await transactions(page,before,1);
+    await page.getByText(/Paused · cohort/).first().waitFor({timeout:90000});
+    await h.caption("The saved plan is paused. Return after reporting is ready to resume and explicitly approve the next batch. This clip does not demonstrate a healthy rollout or automatic advancement.");
+    await h.pause(4000);
   },
 };
 

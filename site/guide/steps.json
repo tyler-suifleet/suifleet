@@ -189,17 +189,17 @@
       "console_label": "Rollouts",
       "summary": "A staged rollout releases to cohorts in order. Devices are admitted a few at a time; each cohort must report signed, healthy results for its bake period before the next one starts, and the rollout stops itself if failures pass your threshold.",
       "before": [
-        "A published version (its recipe blob and the artifact and recipe SHA-256 digests).",
-        "The device IDs for each cohort."
+        "A published library version for the target device platform.",
+        "Named devices or groups to divide into batches. Configure device reporting and verify current health before admitting devices."
       ],
       "actions": [
-        "Choose Rollouts in the sidebar and open Create a gradual rollout.",
-        "Fill in the component, version, recipe and digests, and list the Cohorts, one line per cohort.",
-        "Set the concurrency, rate window, Bake period, Minimum samples per cohort and Abort failure threshold, then click Create without admitting devices.",
-        "Select the rollout, enter Admission candidate IDs and click Check device health and continue to admit the next devices.",
-        "Use Pause, Resume or Abort permanently at any time; each action records your Audit reason on chain."
+        "Choose Rollouts and open Create a gradual rollout.",
+        "Choose Published library version and platform. Add named devices or groups to each cohort (batch); each device can appear in only one batch.",
+        "Choose the pace, observation period, minimum reports and failure threshold. Select Review rollout, check the exact plan, then Confirm creation in wallet. Creation starts no devices.",
+        "Select the saved rollout. Once device reporting is configured and current health is available, choose waiting devices and Check device health and continue. Return to approve subsequent batches.",
+        "Use Pause to stop new starts, Resume to allow further checks, or Abort permanently. Give an audit reason; updates already allowed to start may finish."
       ],
-      "result": "The rollout status line shows the active cohort and decision number, and advances only on healthy signed reports.",
+      "result": "Creation leaves devices waiting. The demonstration creates and pauses a plan without admitting devices; it does not claim healthy rollout completion. Actual progress requires admitted devices, verified update results and current health reports.",
       "docs": [
         {
           "label": "Staged rollouts",
