@@ -31,9 +31,9 @@ export function useFleetHealth(deviceIds: string[]) {
   const now = useNow(5_000);
   const scopedIds = selection.supported ? deviceIds.filter(id => selection.fleet?.devices.includes(id)) : deviceIds;
   const query = useQuery<Record<string, DeviceHealth>>({
-    queryKey: ["health", NETWORK, account?.address, selection.identity, ...scopedIds],
+    queryKey: ["health", NETWORK, account?.address, selection.identity, config?.fleetId, config?.packageId, ...scopedIds],
     queryFn: () => fetchFleetHealth(client, scopedIds, account!.address, undefined, undefined, undefined, selection.supported ? { config } : undefined),
-    enabled: !!account?.address && scopedIds.length > 0 && (!selection.supported || !!selection.fleet),
+    enabled: !!account?.address && scopedIds.length > 0 && (!selection.supported || (!!selection.fleet && !!config)),
     refetchInterval: HEALTH_REFRESH_MS,
   });
   return { data: currentHealth(query.data, query.dataUpdatedAt, query.isError, Math.max(now, query.dataUpdatedAt)), error: query.error };
