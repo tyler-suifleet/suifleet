@@ -106,7 +106,7 @@ def prepare(source, out, kind, revision):
         meta_policy = policy.replace("; frame-ancestors 'none'", "")
         for page in sorted(out.rglob('*.html')):
             document = page.read_text()
-            meta = '<meta http-equiv="Content-Security-Policy" content="' + html.escape(meta_policy, quote=True) + '"><meta name="referrer" content="strict-origin-when-cross-origin">'
+            meta = '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + html.escape(meta_policy, quote=True) + '"><meta name="referrer" content="strict-origin-when-cross-origin">'
             match = re.search(r'<head(?:\s[^>]*)?>', document, re.IGNORECASE)
             if not match:
                 raise ValueError('console HTML must have a head: ' + str(page))

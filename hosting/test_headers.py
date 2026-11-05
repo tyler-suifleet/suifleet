@@ -2,6 +2,8 @@ import importlib.util
 from email.message import Message
 from pathlib import Path
 import unittest
+from unittest.mock import patch, MagicMock
+from urllib.error import HTTPError
 
 spec = importlib.util.spec_from_file_location('check_headers', Path(__file__).with_name('check_headers.py'))
 check = importlib.util.module_from_spec(spec)
@@ -14,6 +16,25 @@ class HeadersTest(unittest.TestCase):
         for key, value in values.items():
             result[key.replace('_', '-')] = value
         return result
+
+    def test_fetch_uses_explicit_user_agent_and_checks_success_headers(self):
+        response = MagicMock()
+        response.status = 200
+        response.url = 'https://example.com/'
+        response.headers = self.headers(Content_Type='text/html')
+        response.__enter__.return_value = response
+        with patch.object(check, 'urlopen', return_value=response) as fetch:
+            errors = check.check(dict.fromkeys(['origin', 'app_url', 'docs_url'], response.url))
+        self.assertEqual(fetch.call_args.args[0].get_header('User-agent'), 'suifleet-header-check/1')
+        self.assertTrue(any('frame-ancestors' in e for e in errors))
+        self.assertFalse(any('fetch/access failure' in e for e in errors))
+
+    def test_http_403_is_access_failure_without_header_assertions(self):
+        with patch.object(check, 'urlopen', side_effect=HTTPError('https://example.com', 403, 'Forbidden', {}, None)):
+            errors = check.check(dict.fromkeys(['origin', 'app_url', 'docs_url'], 'https://example.com'))
+        self.assertEqual(len(errors), 4)
+        self.assertTrue(all('fetch/access failure: HTTP 403' in e for e in errors))
+        self.assertFalse(any('CSP' in e for e in errors))
 
     def test_provider_without_headers_fails_closed(self):
         errors = check.failures(self.headers(Content_Type='text/html'))

@@ -69,6 +69,7 @@ class HostedTests(unittest.TestCase):
             meta = next(t['content'] for t in parsed.tags if t.get('http-equiv') == 'Content-Security-Policy')
             self.assertEqual(meta, policy.replace("; frame-ancestors 'none'", ""))
             self.assertLess(document.index('<meta'), document.index('<script'))
+            self.assertLess(document.index('<meta charset="utf-8">'), 1024)
             self.assertIn({'name': 'referrer', 'content': 'strict-origin-when-cross-origin'}, parsed.tags)
             parser = hosted.Scripts()
             parser.feed(document)

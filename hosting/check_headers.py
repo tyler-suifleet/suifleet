@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -43,10 +44,16 @@ def check(origins):
     targets.append((origins['origin'].rstrip('/') + '/setup/suifleet-dns.zone', True))
     for url, download in targets:
         try:
-            with urlopen(Request(url, headers={'Cache-Control': 'no-cache'}), timeout=30) as response:
-                if response.status != 200 or not response.url.startswith('https://'):
-                    errors.append(url + ': requires HTTPS 200')
+            with urlopen(Request(url, headers={'Cache-Control': 'no-cache', 'User-Agent': 'suifleet-header-check/1'}), timeout=30) as response:
+                if response.status != 200:
+                    errors.append(url + ': fetch/access failure: HTTP ' + str(response.status))
+                    continue
+                if not response.url.startswith('https://'):
+                    errors.append(url + ': fetch/access failure: requires HTTPS')
+                    continue
                 errors.extend(url + ': ' + error for error in failures(response.headers, download))
+        except HTTPError as error:
+            errors.append(url + ': fetch/access failure: HTTP ' + str(error.code))
         except Exception as error:
             errors.append(url + ': fetch failed: ' + str(error))
     return errors
