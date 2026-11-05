@@ -205,3 +205,16 @@ provider and actual mainnet acceptance remain in
 [SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62). The explicit
 SF-201 policy entry records this user-authorized ordering without claiming final
 wallet/hardware compatibility or granting production/hardware/mainnet authority.
+
+## SF-183 provider-independent partial delivery
+
+The explicit 2026-11-04 recovery instruction authorizes a contained partial PR
+for purchase tracking and labelled Testnet USDC-transfer simulation through
+SF-182 prepay. Local software/security checks, actual bounded Testnet evidence,
+normal CI and independent review remain gates. Provider choice/signup and the
+provider-specific public-configuration adapter remain unresolved in
+[SF-183/#372](https://github.com/tyler-suifleet/suifleet/issues/372); **full SF-183
+is not Done** on the strength of this partial implementation. Keep production
+checkout disabled and do not invent a provider contract. Final real-card and
+provider-account acceptance stays unrun in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159),
+and manual real-wallet checks in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).

@@ -724,6 +724,21 @@
         "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
         "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
       ]
+    },
+    "SF-183": {
+      "authorization": "User-authorized recovery scope (2026-11-04): deliver a contained provider-independent partial PR now: checkout state machine; wallet/quote/network/customer binding; on-chain USDC arrival observation with partial, late and abandoned purchases; clearly labelled Testnet transfer simulation continuing through SF-182 prepay. Keep the production adapter disabled. Provider choice, partner signup, provider-specific public URL integration and real-card acceptance remain unresolved; this partial delivery does not complete the full ticket. No production credentials, mainnet, physical testing or invented provider contracts.",
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/372",
+        "https://github.com/tyler-suifleet/suifleet/issues/159",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Real production card/provider-account and manual extension-wallet acceptance remain unrun in SF-087/#159 and SF-031/#32. No mainnet, credentials or physical authorization."
+      ],
+      "retained_gates": [
+        "Partial PR: binding/state-machine/failure-path software regressions, frontend typecheck/build, actual bounded Testnet transfer/prepay evidence, normal exact-head/current-base CI and independent source/security review.",
+        "Full SF-183 is not Done: user provider choice/signup and the corresponding reviewed public-configuration adapter are still unresolved implementation scope. Do not infer approval, production API contracts or full acceptance from this partial PR."
+      ]
     }
   },
   "development_defaults": {
