@@ -60,7 +60,7 @@ export default function ComponentsPage() {
   const repeated = crossCatalogDuplicates(all);
   const refresh = () => { void catalogs.refetch(); void versions.refetch(); };
   return <div className="max-w-5xl space-y-5 [overflow-wrap:anywhere]">
-    <div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Components" subtitle="Your software library · reusable components and immutable versions" />
+    <div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Components" subtitle="Your software library: publish a version once, then choose where to deploy it." />
       {account && view === "library" && <button className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50" disabled={loading || !!error || creating} onClick={() => setView("publish")}>Publish version</button>}
     </div>
     <p className="text-sm text-gray-600">Publish a version to store it in your library. Deploy a published version separately to choose targets and review the rollout. A library entry does not mean software is installed or running.</p>

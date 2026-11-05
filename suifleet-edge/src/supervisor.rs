@@ -1906,26 +1906,31 @@ mod tests {
     async fn restart_policies_never_and_always() {
         let mut f = Fixture::new("never");
         let mut s = f.open();
-        let mut spec = f.spec("1.0.0", "echo run >> {work}/runs; sleep 1.2; exit 1");
+        // Trigger exits only after deploy confirms startup, independent of host load.
+        let mut spec = f.spec("1.0.0", "echo run >> {work}/runs; while test ! -e {work}/exit; do sleep 0.05; done; rm {work}/exit; exit 1");
         spec.restart = Restart::Never;
         f.deploy(&mut s, spec, None).await.unwrap();
+        std::fs::write(f.work("exit"), "").unwrap();
         until("the run to end", || phase(&s) == Phase::Exited).await;
         tokio::time::sleep(Duration::from_millis(1500)).await;
         assert_eq!(f.read("runs").lines().count(), 1);
 
         let mut g = Fixture::new("always");
         let mut s = g.open();
-        let mut spec = g.spec("1.0.0", "echo run >> {work}/runs; sleep 1.2; exit 0");
+        let mut spec = g.spec("1.0.0", "echo run >> {work}/runs; while test ! -e {work}/exit; do sleep 0.05; done; rm {work}/exit; exit 0");
         spec.restart = Restart::Always;
         g.deploy(&mut s, spec, None).await.unwrap();
+        std::fs::write(g.work("exit"), "").unwrap();
         until("a clean exit to be restarted", || g.read("runs").lines().count() >= 2).await;
         s.stop_all().await;
 
         let mut h = Fixture::new("on-failure");
         let mut s = h.open();
-        let spec = h.spec("1.0.0", "echo run >> {work}/runs; sleep 1.2; exit 0");
+        let spec = h.spec("1.0.0", "echo run >> {work}/runs; while test ! -e {work}/exit; do sleep 0.05; done; rm {work}/exit; exit 0");
         h.deploy(&mut s, spec, None).await.unwrap();
+        std::fs::write(h.work("exit"), "").unwrap();
         until("a clean exit to end the run", || phase(&s) == Phase::Exited).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
         assert_eq!(h.read("runs").lines().count(), 1);
     }
 

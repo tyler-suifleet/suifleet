@@ -24,7 +24,7 @@ function ManifestDownload() {
     link.href = url; link.download = "deployment.json";
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }}>Download deployment.json</button>;
+  }}>Download connection settings</button>;
 }
 
 /**
@@ -36,11 +36,15 @@ export function DeviceClientHelp({ variant }: { variant: "address" | "enroll" })
   return <div data-testid="device-client-help" className="space-y-2 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800">
     <p>
       The device runs the SuiFleet client, <code>suifleet</code>. See <GuideLink>Install the device client</GuideLink> for
-      where to get it, the configuration file, the <GuideLink section="manifest">network manifest</GuideLink> and first boot.
+      the supported installation options. Your device installer or integrator uses the <GuideLink section="manifest">connection settings</GuideLink> to connect it to this workspace.
     </p>
-    <ul className="list-disc space-y-0.5 pl-5">
+    <details><summary className="cursor-pointer font-medium">Installation options</summary>
+    <ul className="mt-2 list-disc space-y-0.5 pl-5">
       {PLATFORMS.map((platform) => <li key={platform.section}><GuideLink section={platform.section}>{platform.label}</GuideLink>: {platform.note}</li>)}
-    </ul>
+    </ul></details>
+    <details><summary className="cursor-pointer font-medium">Manual setup for device integrators</summary>
+    <div className="mt-2 space-y-2">
+    <p>These commands run on the device, not in your browser. They configure its identity and connection; they do not install an application update.</p>
     {variant === "address" ? <>
       <p>
         When it creates the device key, the client prints one line, <code>{ADDRESS_LINE}</code>. The address is {ADDRESS_FORMAT}.
@@ -48,7 +52,7 @@ export function DeviceClientHelp({ variant }: { variant: "address" | "enroll" })
       </p>
       <Commands lines={[COMMANDS.readAddress, COMMANDS.provisionLog, COMMANDS.deriveAddress]} />
       <p>
-        After registering, install <code>deployment.json</code>, then the DeviceCap ID in <code>/etc/suifleet/signer.toml</code> (<GuideLink section="signer">signing service</GuideLink>, Linux),
+        After registering, install <GuideLink section="manifest">deployment.json</GuideLink>, then the DeviceCap ID in <code>/etc/suifleet/signer.toml</code> (<GuideLink section="signer">signing service</GuideLink>, Linux),
         then both IDs in <code>/etc/suifleet/config.toml</code> last, and check it with <code>{COMMANDS.checkConfig}</code> (<GuideLink section="register">steps</GuideLink>).
       </p>
     </> : <>
@@ -60,6 +64,8 @@ export function DeviceClientHelp({ variant }: { variant: "address" | "enroll" })
         <GuideLink section="signer">signing service</GuideLink>, <GuideLink section="config">configuration file</GuideLink>).
       </p>
     </>}
+    </div></details>
+    <p>For a single-device pilot, copy the public device address supplied by the installer. For a batch, give each device only its own enrollment credential. Never enter the device’s private key in the console.</p>
     <ManifestDownload />
   </div>;
 }
