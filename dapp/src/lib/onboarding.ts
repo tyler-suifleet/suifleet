@@ -50,7 +50,7 @@ type Loaded<T> = { status: "pending" } | { status: "error" } | { status: "succes
  * not mean the daemon is online or that any software is installed, so the
  * first-update step is never reported done here.
  */
-export function onboardingProgress(connected: boolean, balance: Loaded<string>, devices: Loaded<number>): OnboardingStep[] {
+export function onboardingProgress(connected: boolean, balance: Loaded<string>, devices: Loaded<number>, capacity?: { available: boolean; administrator: boolean }): OnboardingStep[] {
   const funded = balance.status === "success" && BigInt(balance.value) > BigInt(0);
   const registered = devices.status === "success" && devices.value > 0;
   const at = (state: StepState, status: string) => ({ state, status });
@@ -63,6 +63,8 @@ export function onboardingProgress(connected: boolean, balance: Loaded<string>, 
     : devices.status === "error" ? at("blocked", "Inventory unavailable")
     : devices.status === "pending" ? at(funded ? "current" : "upcoming", "Checking inventory…")
     : registered ? at("done", `${devices.value} registered`)
+    : capacity && !capacity.administrator ? at("blocked", "Administrator required")
+    : capacity && !capacity.available ? at("blocked", "Device capacity needed")
     : funded ? at("current", "No devices yet") : at("upcoming", "Needs funds first")) };
   const update: OnboardingStep = { id: "update", title: "Deploy a first update", ...(registered
     ? at("current", "Ready to deploy") : at("upcoming", "Needs a registered device")) };

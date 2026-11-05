@@ -1,0 +1,35 @@
+{
+  "ticket": "SF-248",
+  "network": "testnet",
+  "chain": "4c78adac",
+  "deposit_digest": "8ZSrn1upt8ddq9jH1NZGwYjPE6ubeDX9bqADSwrZmHit",
+  "effects": "success",
+  "deposit_mist": 1000000,
+  "net_gas_mist": 1000575,
+  "context": "Actual console Network budget Deposit, managed customer cap loan, actual SDK coin intent; resumed original SF-245 run after pre-submission serialization failure. No completed capacity transaction replayed, no allowance reset.",
+  "limits": [
+    "Not manual Slush or hardware acceptance.",
+    "SDK max-u64 regression uses deterministic object references; real chain deposit is0.001SUI."
+  ],
+  "batch_funding": {
+    "digest": "6ynSYRuqVKmcbVvnWrnve9LfjGKZCfpJfE3yni3gFUjw",
+    "effects": "success",
+    "claim_coins": [
+      {
+        "id": "0x9e28b8d87124608f3c3c8aecef07a05df8d1b983339514e529fbeef934186d98",
+        "owner": {
+          "AddressOwner": "0x89bca99502e764b3dc675350fb8ce719d42ee77f0cb454fa8b8f7750ea5c2ecd"
+        },
+        "balance_mist": 5000000
+      },
+      {
+        "id": "0xf4c7a2a63caac71b72a20b840d80b6ac8c98dca973b238b0aa98266eb4c0ea67",
+        "owner": {
+          "AddressOwner": "0xa46953fd000839678b83882575c247ef6e62c8e36e41cd9a8235ac2ebb1598e7"
+        },
+        "balance_mist": 5000000
+      }
+    ],
+    "check": "Two distinct claims each received exactly5000000MIST; no unused-value failure. Original customer/policy/run allowance retained."
+  }
+}

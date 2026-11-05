@@ -121,7 +121,7 @@ export function withManagedBudgetCap(original: Transaction, fleet: NamedFleet, c
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, remap(child)]));
   }
   return Transaction.from(JSON.stringify({ ...data, inputs: data.inputs.filter((_, i) => i !== capIndex),
-    commands: [data.commands[n], ...data.commands.slice(0, n), data.commands[n + 1]].map(remap) }));
+    commands: [data.commands[n], ...data.commands.slice(0, n), data.commands[n + 1]].map(remap) }, (_key, value) => typeof value === "bigint" ? value.toString() : value));
 }
 
 export async function buildDeregisterManagedDeviceTx(client: SuiGrpcClient, fleet: NamedFleet, deviceId: string) {

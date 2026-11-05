@@ -113,3 +113,16 @@ layouts omit those parameters because they have no representation, including
 Generic calls remain in the ABI and must be built with explicit type arguments.
 See [subscription accounts](SUBSCRIPTIONS.md) for version-2 customer opt-in and
 old-package rejection.
+
+
+## Per-fleet reporting discovery (SF-247)
+
+The additive `fleet_budget::attach<K>` appends a privately constructible consumer
+key and an object ID under the current BudgetOwnerCap. It cannot overwrite or
+remove existing fields. `fleet_data::LocatorKey` is introduced by the data
+package upgrade; readers derive its original package from the verified data
+release, then verify the located FleetData registry/budget/storage bindings.
+See [reporting setup](FLEET_REPORTING_SETUP.md). Existing public APIs/layouts and
+device keys/journals are preserved. The core private selector guard widens its
+fixed u8 error selector to u64, retaining every called error code and abort site;
+the source-pinned refusal helper verifies the matching literal selector.

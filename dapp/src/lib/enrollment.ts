@@ -612,8 +612,10 @@ export function buildClaimsTx(policyId: string, register: string[], fund: { clai
   }
   if (fund.length) {
     const funding = tx.add(coinWithBalance({ balance: fund.reduce((total, f) => total + f.mist, BigInt(0)) }));
-    const coins = tx.splitCoins(funding, fund.map((f) => tx.pure.u64(f.mist)));
-    fund.forEach((f, i) => tx.transferObjects([coins[i]], tx.pure.address(f.claim)));
+    // The exact-total funding coin must be consumed too: splitting every
+    // payment out leaves a zero-value Coin without drop, rejected by the VM.
+    const coins = fund.length > 1 ? tx.splitCoins(funding, fund.slice(0, -1).map((f) => tx.pure.u64(f.mist))) : [];
+    fund.forEach((f, i) => tx.transferObjects([i === fund.length - 1 ? funding : coins[i]], tx.pure.address(f.claim)));
   }
   return tx;
 }

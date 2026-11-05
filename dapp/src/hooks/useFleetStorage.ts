@@ -8,6 +8,7 @@ import { fetchRetention, retentionOrigin } from "@/lib/retention";
 import { parseToken } from "@/lib/network-costs";
 import { useQuery } from "@tanstack/react-query";
 import { useFleetSelection } from "./useFleetSelection";
+import { resolveFleetStorageRelease } from "@/lib/fleet-reporting";
 import { NETWORK } from "@/lib/constants";
 import { budgetSupported, fetchBudgets, fetchManagedBudget, fetchStorage, storageConfig, type BudgetView, type StorageView } from "@/lib/fleet-budget";
 import { uploadToFleetStorage, type FleetStorageTarget } from "@/lib/fleet-upload";
@@ -32,22 +33,29 @@ export function useFleetStorage() {
   const client = useCurrentClient();
   const budgets = useBudgets();
   const budget = budgets.data?.[0];
-  const { config, reason } = storageConfig();
-  const storage = useQuery<StorageView | null>({
-    queryKey: ["fleet-storage", NETWORK, budget?.id, config?.packageId],
-    enabled: !!budget && !!config,
+  const storage = useQuery({
+    queryKey: ["fleet-storage", NETWORK, budget?.id, selection.identity],
+    enabled: !!budget,
     refetchInterval: 60_000,
     // An absent optional record is successful data; Query rejects undefined.
-    queryFn: async () => (await fetchStorage(client, config!, budget!.id)) ?? null,
+    queryFn: async () => {
+      const resolved = selection.fleet ? await resolveFleetStorageRelease(client, selection.fleet) : { ...storageConfig(), storageId: undefined };
+      const value = resolved.config ? (await fetchStorage(client, resolved.config, budget!.id)) ?? null : null;
+      if (resolved.storageId && value?.id !== resolved.storageId) throw Error("Reporting storage discovery does not match its verified locator");
+      return { ...resolved, value };
+    },
   });
-  const target: FleetStorageTarget | undefined = config && budget && storage.data
-    ? { config, storageId: storage.data.id, budgetId: budget.id, capId: budget.capId, managed: selection.fleet ? { customerId: selection.fleet.customerId, fleetId: selection.fleet.id } : undefined } : undefined;
+  const config = storage.isSuccess && !storage.isRefetchError ? storage.data.config : undefined;
+  const value = config ? storage.data?.value : undefined;
+  const reason = storage.data?.reason;
+  const target: FleetStorageTarget | undefined = config && budget && value
+    ? { config, storageId: value.id, budgetId: budget.id, capId: budget.capId, managed: selection.fleet ? { customerId: selection.fleet.customerId, fleetId: selection.fleet.id } : undefined } : undefined;
   const why = reason ?? (budgets.error ? formatStorageQueryError(budgets.error, "Fleet budget")
     : storage.error ? formatStorageQueryError(storage.error)
     : !budget ? (budgets.isLoading ? "Loading your fleet budget…" : "Create a fleet budget on the Network budget page first.")
-    : !storage.data ? (storage.isLoading ? "Loading fleet storage…" : "Create and fund fleet storage on the Network budget page first.")
+    : !value ? (storage.isLoading ? "Loading fleet storage…" : "Create and fund fleet storage on the Network budget page first.")
     : undefined);
-  return { budget, loading: budgets.isLoading || storage.isLoading, budgetError: budgets.error, storage: storage.data ?? undefined, config, target, reason: why, refetch: storage.refetch };
+  return { budget, loading: budgets.isLoading || storage.isLoading, budgetError: budgets.error, storage: value ?? undefined, config, target, reason: why, refetch: storage.refetch };
 }
 
 /** A BlobStore that pays uploads from the fleet's prepaid storage, when the owner has one. */
@@ -56,7 +64,7 @@ export function useFleetBlobStore() {
   const mutation = useFleetTransaction();
   const { target, storage, reason } = useFleetStorage();
   const [renewalTarget, setRenewalTarget] = useState(0), [maxFee, setMaxFee] = useState('');
-  const origin = retentionOrigin();
+  const origin = retentionOrigin(target?.config);
   const policy = useQuery({ queryKey: ['retention-upload', target?.storageId, origin], enabled: !!target && !!origin,
     refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, target!.storageId, origin!, target!.config.storageOrigin ?? target!.config.packageId) });

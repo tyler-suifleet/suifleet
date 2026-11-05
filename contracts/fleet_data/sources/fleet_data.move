@@ -165,6 +165,37 @@ module fleet_data::fleet_data {
         });
     }
 
+    /// New introduction origins, independent of existing FleetData layouts.
+    public struct LocatorKey has copy, drop, store {}
+
+    /// Atomic new-fleet provisioning, including authoritative discovery. A
+    /// failed command rolls back both objects and the locator. Existing public
+    /// create remains available for explicitly verified legacy migrations.
+    public fun provision(budget: &mut FleetBudget, cap: &BudgetOwnerCap,
+        quota: fleet_storage::Quota, chain_identifier: String, ctx: &mut TxContext) {
+        let storage = fleet_storage::new_storage(budget, cap, quota, ctx);
+        let data = FleetData {
+            id: object::new(ctx), version: VERSION, budget_id: object::id(budget),
+            storage_id: object::id(&storage), registry_id: fleet_budget::registry_id(budget),
+            chain_identifier, key_epoch: 0, support: vector[],
+            health_interval_ms: 86_400_000, batch_interval_ms: 86_400_000,
+            emergency_interval_ms: 300_000, device_count: 0,
+        };
+        assert!(data.chain_identifier.as_bytes().length() == 8, EBounds);
+        fleet_budget::attach(budget, cap, LocatorKey {}, object::id(&data));
+        fleet_storage::share_storage(storage);
+        transfer::share_object(data);
+    }
+
+    /// Adopt already deployed data without rewriting writers or signed history.
+    public fun publish_locator(data: &FleetData, budget: &mut FleetBudget,
+        cap: &BudgetOwnerCap, storage: &FleetStorage) {
+        owner(data, budget, cap);
+        assert!(object::id(storage) == data.storage_id, EBinding);
+        assert!(fleet_storage::budget_id(storage) == object::id(budget), EBinding);
+        fleet_budget::attach(budget, cap, LocatorKey {}, object::id(data));
+    }
+
     /// Owner enrollment prevents a device from resetting cadence by creating
     /// another writer. Re-enrollment after account replacement is explicit.
     public fun enroll(fleet: &mut FleetData, budget: &FleetBudget,
