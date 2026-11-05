@@ -1,0 +1,30 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:12.083
+Your software library stores a release once so you can deploy
+the same version to different devices later. Publishing alone
+does not install it. Choose Components in the sidebar to publish
+software.
+
+2
+00:00:12.800 --> 00:00:16.213
+Name the component and give the release a semantic version.
+
+3
+00:00:17.480 --> 00:00:20.189
+Choose the platform and attach the artifact for it.
+
+4
+00:00:21.320 --> 00:00:28.253
+Delivery: choose Confidential for proprietary software. This
+public demo artifact is published unencrypted.
+
+5
+00:00:28.960 --> 00:00:33.717
+Review, then upload to Walrus and register the version. Approve
+the transaction.
+
+6
+00:01:14.240 --> 00:01:17.973
+Version published. It is now in the library, ready to deploy.

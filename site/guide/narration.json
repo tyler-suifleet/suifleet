@@ -8,240 +8,287 @@
       "step": "sign-in",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Welcome to SuiFleet. Start here to connect the account that manages your devices. Your wallet is the approval tool for changes such as registering devices and deploying software. Choose Connect Wallet, then pick your sign-in method."
+          "source_start": 0.0,
+          "text": "SuiFleet helps you organize devices and deliver software updates. Your wallet is the approval tool for changes to your account. A fleet is a workspace for devices managed together. Open the console and choose Get started."
         },
         {
-          "source_start": 4.607,
-          "text": "This demonstration uses a scripted test wallet. In your own session, your wallet asks you to approve the connection. Read each request so you know which account you are connecting."
+          "source_start": 1.745,
+          "text": "Click Connect and choose your wallet: Slush, an extension, or Google where enabled."
         },
         {
-          "source_start": 6.027,
-          "text": "After connecting, check the account and network shown here. This guide uses testnet, where the tokens are for testing. Confirming these details helps you avoid making changes with the wrong account."
+          "source_start": 4.616,
+          "text": "This recording uses a scripted test wallet in place of Slush; approve the connection."
         },
         {
-          "source_start": 8.676,
-          "text": "A fleet is a workspace for a set of devices and their management settings. On your first visit, create the default fleet and approve the request. This gives you a workspace to organize your devices."
+          "source_start": 6.003,
+          "text": "Connected: the card shows your address and the network (Testnet)."
         },
         {
-          "source_start": 14.932,
-          "text": "The fleet switcher shows which workspace you are managing. Check it before making changes, especially if your account manages several fleets. With your account connected and fleet selected, you can fund the network budget."
+          "source_start": 8.33,
+          "text": "First time only: create your default fleet, then approve the transaction."
+        },
+        {
+          "source_start": 14.143,
+          "text": "Your fleet is selected. Next check device capacity: network funds do not increase your device limit."
         }
       ],
-      "source_sha256": "d8689050af05d40f57c0b07bdfca8df55aa8616cfc17c846776b6c7c08682433",
-      "source_duration_seconds": 19.6
+      "source_sha256": "d0a26aaf102af4b274dc881338e41318c01059d27822ec4bbb50c6bdc0776a10",
+      "source_duration_seconds": 19.4
+    },
+    {
+      "step": "capacity-plan",
+      "cues": [
+        {
+          "source_start": 0.0,
+          "text": "Check Device capacity before funding devices. A subscription provides places for devices; network deposits pay operating fees."
+        },
+        {
+          "source_start": 3.814,
+          "text": "Choose Plans and billing. This demonstration uses test tokens and a disposable test tariff, not commercial pricing."
+        },
+        {
+          "source_start": 10.412,
+          "text": "Review the device limit, token amount and verified payment recipient, then approve prepayment. It is separate from device operating funds."
+        },
+        {
+          "source_start": 17.657,
+          "text": "Apply the due prepaid payment to activate capacity. This uses the subscription balance, not another wallet payment; approval still costs a network fee."
+        },
+        {
+          "source_start": 28.538,
+          "text": "The organization now has capacity for 100 devices. Next, fund device activity; no software has been installed yet."
+        }
+      ],
+      "source_sha256": "8eaba831f95cd0be9995b824c179c94714b4799167c22030c22333d60967070c",
+      "source_duration_seconds": 32.7
     },
     {
       "step": "fund",
       "cues": [
         {
-          "source_start": 0,
-          "text": "The network budget pays the fees needed for device activity. Use this section to keep devices reporting without funding each one by hand. Open Network budget to see the available balance and funding controls."
+          "source_start": 0.0,
+          "text": "The network budget pays operating fees, such as sending device reports. It is separate from your subscription device limit. Choose Network budget in the sidebar."
         },
         {
-          "source_start": 3.856,
-          "text": "Enter the amount you want to deposit. Your devices use this budget within the spending limits you set. How often devices report, and how much data they store, affects how quickly the budget is used."
+          "source_start": 3.708,
+          "text": "Enter a deposit in SUI. Devices use these operating funds within your limits. File and log storage has separate funding controls."
         },
         {
-          "source_start": 6.362,
-          "text": "Review and approve the deposit in your wallet. A budget is created if this fleet needs one. The deposit supplies funds for activity; changing a reporting setting later does not add money to this balance."
+          "source_start": 7.223,
+          "text": "Approve the deposit in your wallet. A budget is created only if your fleet needs one."
         },
         {
-          "source_start": 11.129,
-          "text": "Once the deposit is confirmed, check the updated balance under Keep devices reporting. Return here to monitor funds, adjust spending limits or withdraw available funds. A confirmed deposit means the budget is funded; device health is checked separately on the Devices page."
+          "source_start": 12.835,
+          "text": "Confirmed. The balance under Keep devices reporting shows the confirmed deposit. Device readiness and health are checked separately."
         }
       ],
-      "source_sha256": "9c74621b836568659c88aaab697ac0d59c43b5d1114957af6f3b7f5628c2e1cc",
-      "source_duration_seconds": 15.2
+      "source_sha256": "e52c3cc35892584d54a5324696df881cb6533fa88f956ab83226db1686975dbb",
+      "source_duration_seconds": 17.2
     },
     {
       "step": "register-device",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Registration connects a physical device to a record in your fleet. It tells SuiFleet which device you manage, so updates and reports can be associated with the right machine. Register by address is useful for a small pilot or a single device you are setting up."
+          "source_start": 0.0,
+          "text": "Registration connects a named device to your fleet so updates and reports reach the right machine. For a small pilot, use the public identity generated by the installed device client. Its private key stays on the device. Choose Devices in the sidebar."
         },
         {
-          "source_start": 2.882,
-          "text": "Choose Register by address. Give the device a recognizable name, then enter the public address generated by its edge client and choose the matching architecture. The private key stays on the device; this form only needs its public identity."
+          "source_start": 2.85,
+          "text": "Click Register by address. Copy the public identity from the device client setup. Never enter its private key."
         },
         {
-          "source_start": 9.52,
-          "text": "Review the details, then register the device and approve the request. A useful name makes it easier to find the machine later when targeting an update or investigating a failure."
+          "source_start": 9.248,
+          "text": "Click Register and approve the transaction."
         },
         {
-          "source_start": 16.0,
-          "text": "The device now appears in your inventory. Registration alone does not install the client or prove the machine is online. Health reports begin after its configured client starts and can communicate. For manufacturing batches, use Enrollment instead of entering every address manually."
+          "source_start": 13.515,
+          "text": "The device is registered. Registration alone does not prove it is online. Its configured client must start and send a verified report."
         }
       ],
-      "source_sha256": "3d3bf8110188d9deede3a70b55b63f437b87ada746eb0949c66def854fdee7be",
-      "source_duration_seconds": 19.3
+      "source_sha256": "609f759e66d9fc1d8c474ea7ca70246ac73e173ec5818794e5b4fb287b5aa1bb",
+      "source_duration_seconds": 17.6
     },
     {
       "step": "enroll-batch",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Enrollment is for bringing many devices into your fleet without registering them one at a time. Reserve their names and serial numbers before they leave the factory, then let each device claim its own record when it first connects."
+          "source_start": 0.0,
+          "text": "Batch enrollment prepares many devices before first boot. Reserve names and serial numbers, then securely give each device its own single-use credential during manufacturing. This avoids registering large fleets one by one. For a production batch, choose Enrollment in the sidebar."
         },
         {
-          "source_start": 2.832,
-          "text": "First, create a batch policy. The quota limits how many devices may enroll, and the lifetime limits how long the policy can be used. These controls help keep a provisioning batch from remaining open indefinitely."
+          "source_start": 6.619,
+          "text": "This recording reuses the confirmed batch policy created during setup. On first use, choose the device limit and expiry, then create the policy."
         },
         {
-          "source_start": 12.119,
-          "text": "Paste the names and serial numbers from your roster, then choose Check. This lets you review the inventory before registering claims. Consistent names make the devices easier to identify once they appear in the fleet."
+          "source_start": 6.653,
+          "text": "2. Reserve names and serial numbers: paste a roster CSV and click Check."
         },
         {
-          "source_start": 16.417,
-          "text": "Download the credentials and keep the exported file private. During provisioning, give each unit only its own claim credential. Do not put the whole credential file into a shared device image or source repository."
+          "source_start": 11.147,
+          "text": "Download the credentials: the only copy of the claim keys, for your factory provisioning media."
         },
         {
-          "source_start": 18.282,
-          "text": "Register the pending claims and approve the requests. A claim reserves an enrollment opportunity; it does not mean a device is online yet. At first boot, each configured client uses its credential to enroll. Watch for the record to move from waiting to enrolled."
+          "source_start": 12.417,
+          "text": "Register the reserved devices and approve the request. Each device then enrolls itself at first boot."
+        },
+        {
+          "source_start": 20.422,
+          "text": "Claims are registered and waiting for their devices to enroll with their installed client."
         }
       ],
-      "source_sha256": "0ee0276ac63b941f226e4e16bc52fe2cc09634e89c60f9fe88d2c454567c26b7",
-      "source_duration_seconds": 29.7
+      "source_sha256": "1135d6e86e5d6f5598073bb09e89ad3b04f44d8d8f68270fc2db3736320f26e5",
+      "source_duration_seconds": 25.1
     },
     {
       "step": "publish-version",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Components is your software release library. Use it to prepare a named version once, then deploy that version to selected devices or groups. Publishing a release and choosing who receives it are separate steps."
+          "source_start": 0.0,
+          "text": "Your software library stores a release once so you can deploy the same version to different devices later. Publishing alone does not install it. Choose Components in the sidebar to publish software."
         },
         {
-          "source_start": 5.625,
-          "text": "The first time you publish, set up your publisher catalog and approve the request. The catalog keeps your releases organized so you can find and reuse them for later deployments."
+          "source_start": 7.434,
+          "text": "Name the component and give the release a semantic version."
         },
         {
-          "source_start": 13.684,
-          "text": "Give the component a recognizable name and the release a version number. Keep versions distinct so operators can tell which release was deployed and compare results when troubleshooting."
+          "source_start": 12.098,
+          "text": "Choose the platform and attach the artifact for it."
         },
         {
-          "source_start": 18.73,
-          "text": "Choose the target operating system and processor architecture, then attach the software file for that platform. Include the installation instructions your platform needs. Matching the platform helps avoid sending a package that the device cannot run."
+          "source_start": 15.926,
+          "text": "Delivery: choose Confidential for proprietary software. This public demo artifact is published unencrypted."
         },
         {
-          "source_start": 19.3,
-          "text": "Choose Confidential for proprietary software and select an access policy. That policy controls who can obtain the decryption keys. This demonstration deliberately uses a public example, so its uploaded files are readable by anyone."
+          "source_start": 19.71,
+          "text": "Review, then upload to Walrus and register the version. Approve the transaction."
         },
         {
-          "source_start": 23.087,
-          "text": "Review the release, upload it to storage, and approve publication. The recorded file fingerprints let the device verify that it received the intended content. Wait for confirmation before treating the version as available."
-        },
-        {
-          "source_start": 73.541,
-          "text": "The published version is now in the library. Publishing has not installed it on any device. Next, choose the devices or group that should receive it and create a deployment."
+          "source_start": 64.951,
+          "text": "Version published. It is now in the library, ready to deploy."
         }
       ],
-      "source_sha256": "0f50277dac8e473884f585b0b4b7ca3b4707ba19fab19fe28dd703edc200d4f2",
-      "source_duration_seconds": 77.6
+      "source_sha256": "89b72f28562be488a6fe899d861fbef53d3f804c74030ab4ca2aac527dcbf064",
+      "source_duration_seconds": 69.1
     },
     {
       "step": "deploy-group",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Device groups let you target a meaningful set of machines together, such as a pilot site, a product model or a test fleet. Create a group with a name your team will recognize, instead of selecting every device for each release."
+          "source_start": 0.0,
+          "text": "Deployments request a published version for selected devices. Use a group to update related machines together. A request is separate from the device installing it and reporting the outcome. On Devices, open the Device groups tab and create a group."
         },
         {
-          "source_start": 12.201,
-          "text": "Open Manage and add the devices that belong in this group. Review membership before deploying, because membership determines which devices can take part when they check the deployment."
+          "source_start": 7.36,
+          "text": "Click Manage and add the device to the group. Reuse the demo group. First-time operators create a group, then use Manage to add devices."
         },
         {
-          "source_start": 20.878,
-          "text": "Choose Deploy this version from the component library. Starting with a published version helps you select the exact release you already prepared and reviewed."
+          "source_start": 16.022,
+          "text": "In the component library, choose Deploy this version."
         },
         {
-          "source_start": 24.456,
-          "text": "Select the group as the target and review the version and recipients. This flow creates a one-time deployment. It does not establish an ongoing rule that automatically brings future group members onto this release."
+          "source_start": 21.28,
+          "text": "Select the group as the target. This example also selects desired state, which keeps this version requested for group members."
         },
         {
-          "source_start": 28.927,
-          "text": "Create the deployment and approve the request. Devices still need to connect, check their eligibility and run the installation. Approval authorizes the deployment; it does not mean all targets have finished."
+          "source_start": 25.292,
+          "text": "Click Deploy and approve. Device clients process this request when ready. Creating it alone does not prove installation."
         },
         {
-          "source_start": 37.605,
-          "text": "Open Deployments to follow each device’s result. Check successes and failures there rather than relying on the deployment-created message. If a device fails, inspect the available failure details before retrying or sending a corrected version."
+          "source_start": 44.876,
+          "text": "Deployment created. Devices report signed results under Deployments."
+        },
+        {
+          "source_start": 48.806,
+          "text": "After the Linux device client processes the update, open Deployments to verify its result. This is a disposable software test, not a physical Raspberry Pi."
+        },
+        {
+          "source_start": 54.607,
+          "text": "Applied is a verified device receipt: the client downloaded the software, completed its configured installer and reported success. It does not prove a long-running service is healthy. Deployment created alone did not prove this."
         }
       ],
-      "source_sha256": "985b48dca00f4bc2154a949ca43e74b05ab5911c0ddcae4d0b78629440f46066",
-      "source_duration_seconds": 43.6
+      "source_sha256": "cdfb44f7c54c0b13d70f8970a104673c9802418e36cf2b14cb0c9f612d9fd8c2",
+      "source_duration_seconds": 58.7
     },
     {
       "step": "staged-rollout",
       "cues": [
         {
-          "source_start": 0,
-          "text": "A staged rollout reduces the risk of releasing to the whole fleet at once. Start with a small test set, observe the results, then expand in groups. Use this when a bad release could disrupt many devices or customer sites."
+          "source_start": 0.0,
+          "text": "A gradual rollout limits how many devices receive an update at once, so you can check results before continuing. Cohorts are batches. Creation alone starts no devices, and you return to approve further progress. Choose Rollouts in the sidebar to release in stages."
         },
         {
-          "source_start": 3.85,
-          "text": "Open Create a gradual rollout and enter the release details shown here. These identify the software and installation instructions that each device must verify before applying the update."
+          "source_start": 3.165,
+          "text": "Open Create a gradual rollout. Choose the published version and matching device platform from your library."
         },
         {
-          "source_start": 13.466,
-          "text": "List the device sets in the order you want to update them. The interface calls these cohorts. Put your pilot devices first, then add larger sets after you have evidence that the release is working."
+          "source_start": 10.004,
+          "text": "A cohort is a batch of devices. Add named devices or groups to the first batch; a device belongs to only one batch."
         },
         {
-          "source_start": 15.143,
-          "text": "Set how quickly devices are admitted, how long each set should be observed and how many failures should stop progress. The observation time is called the bake period. Choose values that allow meaningful health reports to arrive."
+          "source_start": 11.304,
+          "text": "Set the pacing, observation period and failure threshold, then review the exact plan. Creating a rollout does not start any device."
         },
         {
-          "source_start": 22.877,
-          "text": "Creating the rollout does not immediately admit devices. Select it and choose Check device health and continue to evaluate the next admission. This gives you a controlled point to review health before more devices start."
+          "source_start": 19.97,
+          "text": "Select the rollout, then admit the first devices after checking device health."
         },
         {
-          "source_start": 29.852,
-          "text": "Watch the reported results as you proceed. Pause or abort to stop further admissions if there is a problem. A device that has already started an installation may finish; these controls do not automatically undo an update."
+          "source_start": 21.513,
+          "text": "This plan is created with devices waiting, not installed. Only admit devices after reporting is configured and current signed health is available."
+        },
+        {
+          "source_start": 21.521,
+          "text": "Pause stops new devices from starting; it does not undo an update already allowed to start. This example deliberately admits no devices."
+        },
+        {
+          "source_start": 28.745,
+          "text": "The saved plan is paused. Return after reporting is ready to resume and explicitly approve the next batch. This clip does not demonstrate a healthy rollout or automatic advancement."
         }
       ],
-      "source_sha256": "e2418d8ccc2e1c5e1ce4102f1e477c3791829fe25b3c1ded617f33a0bceadca6",
-      "source_duration_seconds": 35.4
+      "source_sha256": "860e59f837598de9bbd910a46224bedcbd418b9bcf298e9ba0429dd0ed21292a",
+      "source_duration_seconds": 32.9
     },
     {
       "step": "access-policy",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Access policies protect confidential software by deciding who may obtain its decryption keys. Use a policy when a release contains proprietary code or should only be readable by approved devices. Start by creating a policy with a recognizable name."
+          "source_start": 0.0,
+          "text": "Access policies are optional controls for confidential software. Choose who can open encrypted files before publishing a private release. They do not give permission to administer the fleet. Open Access policies. A policy controls decryption for confidential releases."
         },
         {
-          "source_start": 8.966,
-          "text": "Choose Group and select the devices’ group, then grant access and approve the request. Current group membership is used when devices request keys. You can reuse the policy for releases intended for the same audience."
+          "source_start": 8.635,
+          "text": "Choose Group and select guide-pilot. Membership determines which devices may request keys."
         },
         {
-          "source_start": 14.0,
-          "text": "Revoking access stops future key requests. It cannot take back software or keys that a device has already received. Review group membership and grants before publishing sensitive software, and keep deployment targeting aligned with the devices that have access."
+          "source_start": 13.936,
+          "text": "The grant is recorded. Revocation stops future requests; it cannot recall bytes already decrypted."
         }
       ],
-      "source_sha256": "50aabdc0c20fe01c55872ecb72f1aec748c967e224a43180673460ea6e2198dd",
-      "source_duration_seconds": 18.1
+      "source_sha256": "4f5a3a3e8acaacec4983fb0a46643a4889f818beec2da179492b303ec099e697",
+      "source_duration_seconds": 18.0
     },
     {
       "step": "fleet-settings",
       "cues": [
         {
-          "source_start": 0,
-          "text": "Fleet settings control how often devices check for updates and report their health. Use this section to balance visibility, responsiveness and network cost. A shorter interval gives you fresher information, while a longer interval reduces reporting activity."
+          "source_start": 0.0,
+          "text": "Fleet settings choose how often devices check for updates and send reports, and how much data they retain. These choices affect freshness and operating cost. Daily reporting is not live monitoring. Open Fleet settings to choose reporting and update intervals."
         },
         {
-          "source_start": 1.931,
-          "text": "Review the estimate before saving. It is a planning aid based on the selected settings, not a guaranteed invoice. Approving Save records the configuration; it does not deposit funds into the network budget."
+          "source_start": 1.604,
+          "text": "Review the estimate, then save. Saving settings does not add money to the budget."
         },
         {
-          "source_start": 3.815,
-          "text": "This demonstration shows a budget warning because the available funds do not cover the estimate. Saving anyway records the settings only. Review the warning and fund the budget separately if you want devices to sustain the planned activity."
+          "source_start": 3.694,
+          "text": "This small demo budget does not cover the estimate. Save anyway records settings only; it adds no funds."
         },
         {
-          "source_start": 7.875,
-          "text": "Devices pick up the saved configuration at their next check, so the change is not instantaneous across the fleet. Check the Devices page for fresh reports, and return to Network budget to monitor funds. You now have the basic workflow from enrollment through controlled software delivery."
+          "source_start": 7.978,
+          "text": "Devices apply settings at their next check. Network budget holds their funds separately."
         }
       ],
-      "source_sha256": "128d3d0977b1ddcd8757b62371492b5455315708788dffbc63adf9be80d4b537",
-      "source_duration_seconds": 14.1
+      "source_sha256": "f9c9c80a36545f414a651549f50085ad86af17adda6db118c02a02d0c01fcf22",
+      "source_duration_seconds": 14.4
     }
   ],
   "engine_version": "0.4.9",

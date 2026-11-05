@@ -18,6 +18,8 @@ import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/compo
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
+import { docsUrl } from "@/lib/device-client";
+import { PilotReadiness } from "@/components/PilotReadiness";
 import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import { usePendingRows } from "@/hooks/usePendingRows";
 
@@ -48,7 +50,8 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const [error, setError] = useState<{ address: string; text: string } | null>(null);
   const [phase, setPhase] = useState<TransactionPhase | null>(null);
   const [estimate, setEstimate] = useState<Estimate | undefined>();
-  const { budget } = useFleetBudget();
+  const budgets = useFleetBudget();
+  const { budget } = budgets;
   const [fromBudget, setFromBudget] = useState(true);
   const budgetCanFund = !!budget && canFundEnrollment(budget);
   // Synchronous guard: a second click can arrive before React re-renders the disabled button.
@@ -66,10 +69,11 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       return (await client.getBalance({ owner: account!.address })).balance.balance;
     },
   });
-  const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0);
+  const capacity = fleet ? { available: fleet.activeDevices < fleet.deviceLimit, administrator: fleet.administrator } : undefined;
+  const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0) && (!capacity || (capacity.available && capacity.administrator));
   const steps = onboardingProgress(!!account,
     state.isSuccess ? { status: "success", value: state.data } : state.isError ? { status: "error" } : { status: "pending" },
-    devices.isSuccess ? { status: "success", value: devices.data.length } : devices.isError ? { status: "error" } : { status: "pending" });
+    devices.isSuccess ? { status: "success", value: devices.data.length } : devices.isError ? { status: "error" } : { status: "pending" }, capacity);
   const next = steps.find((step) => step.state === "current" || step.state === "blocked");
   const accountName = account?.label || currentWallet?.name;
 
@@ -99,11 +103,15 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
       <p className="text-gray-700">Connect your account, add funds for network fees, register a device and send your first update.</p>
       <p className="flex flex-wrap gap-x-4 gap-y-1">
-        <a className={LINK} href="https://docs.suifleet.io/install/">Install the device client</a>
-        <a className={LINK} href="https://docs.suifleet.io/enrollment/">Enrollment guide</a>
-        <a className={LINK} href="https://docs.suifleet.io/components/">Publish and deploy components</a>
+        <a className={LINK} href={docsUrl("install")}>Install the device client</a>
+        <a className={LINK} href={docsUrl("enrollment")}>Enrollment guide</a>
+        <a className={LINK} href={docsUrl("components")}>Publish and deploy components</a>
       </p>
     </header>
+
+    <PilotReadiness connected={!!account} capacity={fleet ? { used: fleet.activeDevices, limit: fleet.deviceLimit, administrator: fleet.administrator } : undefined}
+      balance={state.isSuccess ? state.data : undefined} balanceFailed={state.isError}
+      deviceBudget={budget?.balance} budgetChecked={budgets.isSuccess} budgetFailed={budgets.isError} />
 
     <nav aria-label="Onboarding progress">
       <ol className="grid grid-cols-2 gap-2 md:grid-cols-4">

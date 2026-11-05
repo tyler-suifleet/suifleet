@@ -1,0 +1,19 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:17.181
+Access policies are optional controls for confidential software.
+Choose who can open encrypted files before publishing a private
+release. They do not give permission to administer the fleet.
+Open Access policies. A policy controls decryption for
+confidential releases.
+
+2
+00:00:17.920 --> 00:00:23.445
+Choose Group and select guide-pilot. Membership determines which
+devices may request keys.
+
+3
+00:00:24.160 --> 00:00:30.261
+The grant is recorded. Revocation stops future requests; it
+cannot recall bytes already decrypted.

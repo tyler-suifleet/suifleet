@@ -120,3 +120,40 @@
   select.disabled = false; next.disabled = false; readLocation(); render();
   document.fonts.ready.then(() => render());
 })();
+
+// Buffer the requested overview locally: some static hosts do not serve byte
+// ranges, which otherwise makes native video seeking unavailable. No download
+// happens before playback. Only the reviewed same-origin MP4 is accepted.
+(() => {
+  document.querySelectorAll('.overview-video').forEach(video => {
+    let preparing = false, prepared = false, objectUrl;
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status'); status.hidden = true;
+    video.after(status);
+    video.addEventListener('play', async () => {
+      if (preparing || prepared) return;
+      preparing = true; status.hidden = false; status.textContent = 'Preparing video controls…';
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        const source = new URL(video.querySelector('source[type="video/mp4"]').src);
+        if (source.origin !== location.origin || !source.pathname.startsWith('/media/overview/')) throw Error('Unexpected video source');
+        const response = await fetch(source, { credentials: 'omit', signal: controller.signal });
+        if (!response.ok) throw Error('Video download failed');
+        const bytes = await response.arrayBuffer();
+        const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');
+        if (hash !== video.dataset.mp4Sha256) throw Error('Video integrity mismatch');
+        const position = video.currentTime, resume = !video.paused;
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
+        video.addEventListener('loadedmetadata', () => {
+          video.currentTime = position; prepared = true;
+          video.dataset.overviewPrepared = 'true'; status.hidden = true;
+          if (resume) void video.play().catch(() => { status.hidden = false; status.textContent = 'Press Play to continue.'; });
+        }, { once: true });
+        video.src = objectUrl; video.load();
+      } catch {
+        status.textContent = 'Video controls could not be prepared. Playback remains available; press Play to retry.';
+      } finally { clearTimeout(timer); preparing = false; }
+    });
+    window.addEventListener('pagehide', () => { if (objectUrl) URL.revokeObjectURL(objectUrl); }, { once: true });
+  });
+})();
