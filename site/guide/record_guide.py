@@ -139,6 +139,8 @@ def run(args):
     if runtime == ROOT or ROOT in runtime.parents:
         raise RuntimeError("private recording runtime must be outside the checkout")
     resume = getattr(args, "resume", False)
+    if getattr(args, "resume_new_build", False) and (not resume or not getattr(args, "resume_build_reason", "").strip()):
+        raise RuntimeError("a source-change resume requires --resume and an explicit --resume-build-reason")
     if resume and args.faucet:
         raise RuntimeError("resume cannot request another faucet attempt")
     if runtime.exists() and any(runtime.iterdir()) and not resume:
@@ -161,7 +163,8 @@ def run(args):
         temporary.replace(evidence_path)
     def finish():
         end = live.balance()
-        live.evidence.update(end_balance_mist=end, spent_mist=live.start_balance - end,
+        live.evidence.update(end_balance_mist=end, balance_delta_mist=live.start_balance - end,
+                             spent_mist=sum(t.get("gas_mist", t.get("gas_budget_mist", 0)) + t.get("funding_mist", 0) for t in live.evidence["transactions"]),
                              allowance_used_mist=live.ledger.used,
                              finished=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         persist()
@@ -229,9 +232,20 @@ def run(args):
     manifest_file.write_text(json.dumps(manifest))
     commit = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     if prior and subprocess.run(["git", "diff", "--quiet", prior["console_commit"], commit, "--", "dapp"], cwd=ROOT).returncode:
-        raise RuntimeError("console changed since the interrupted recording")
-    if prior:
+        if not getattr(args, "resume_new_build", False):
+            raise RuntimeError("console changed since the interrupted recording")
+        if any(tx.get("status") not in ("success", "failure", "not_submitted") for tx in prior.get("transactions", [])):
+            raise RuntimeError("unresolved operator outcome forbids source-change resume")
+        for phase in prior.get("browser", {}).get("phases", []):
+            if any(tx.get("status") not in ("success", "failure") for tx in phase.get("transactions", [])):
+                raise RuntimeError("unresolved browser outcome forbids source-change resume")
+        live.evidence.setdefault("source_changes", []).append({"from": prior["console_commit"], "to": commit, "reason": args.resume_build_reason})
+        for phase in prior.get("browser", {}).get("phases", []):
+            for step in phase.get("steps", []):
+                live.evidence.setdefault("video_sources", {}).setdefault(step["step"], {"console_commit": phase.get("console_commit", prior["console_commit"])})
+    elif prior:
         commit = prior["console_commit"]
+    os.environ["GUIDE_CONSOLE_COMMIT"] = commit
     live.evidence.update(package=fixture["head_package"], registry=fixture["registry"], console_commit=commit,
                          walrus_publisher=manifest["walrus"]["publisher_url"])
     if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all", "--", "dapp"], cwd=ROOT, text=True).strip():
@@ -370,6 +384,10 @@ def run(args):
     finally:
         # Recover phase evidence even if Node timed out or failed before returning.
         browser["phases"] = [json.loads(p.read_text()) for p in sorted(runtime.glob("evidence-*.json"))]
+        for phase in browser["phases"]:
+            for step in phase.get("steps", []):
+                if phase.get("console_commit"):
+                    live.evidence.setdefault("video_sources", {})[step["step"]] = {"console_commit": phase["console_commit"]}
         # Independent effects check of everything the browser key executed.
         for phase in browser["phases"]:
             for tx in phase["transactions"]:
@@ -413,6 +431,8 @@ if __name__ == "__main__":
     parser.add_argument("--faucet", action="store_true", help="request testnet SUI once if the balance is below the allowance")
     parser.add_argument("--check", action="store_true", help="read-only chain/fixture preflight; no funding, build or recording")
     parser.add_argument("--capture-only", action="store_true", help="retain private frames without encoding into the local site")
+    parser.add_argument("--resume-new-build", action="store_true", help="Explicitly resume after a fixed UI defect; preserve per-video provenance and original allowance")
+    parser.add_argument("--resume-build-reason", help="Required reason for an explicit changed-source resume; unresolved effects still refuse")
     parser.add_argument("--resume", action="store_true", help="resume an effects-reconciled interrupted run without topping up or resetting its allowance")
     parser.add_argument("--fresh-device", action="store_true", help="record an actual new demo device registration; reuse the other fleet objects")
     parser.add_argument("--resume-top-up-mist", type=int, default=0, help="explicit extra demo funding charged to the ORIGINAL run allowance; never raises its ceiling")

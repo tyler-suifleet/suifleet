@@ -23,6 +23,17 @@ class RecordingTest(unittest.TestCase):
             self.assertEqual(text.count('file 00002.jpg'), 2)
             self.assertNotIn('299', text)
 
+    def test_narration_cues_follow_capped_waits_not_wall_clock(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            (root/'frames.json').write_text(json.dumps([{'file':'00001.jpg','t':1},{'file':'00002.jpg','t':301}]))
+            (root/'cues.json').write_text(json.dumps([{'text':'Why this stage matters.','t':1},{'text':'Wait verified.','t':299},{'text':'Result confirmed.','t':301}]))
+            cues=encode.recorded_instructions(root)
+            self.assertEqual(cues[0]['source_start'],0)
+            self.assertEqual(cues[1]['source_start'],encode.MAX_HOLD)
+            self.assertIn('Result confirmed.',cues[1]['text'])
+            self.assertLess(cues[-1]['source_start'],encode.MAX_HOLD+encode.LAST_HOLD)
+
     def test_bad_frames_rejected_before_ffmpeg(self):
         for frames in [[], [{'file': '../secret.jpg', 't': 1}],
                        [{'file': '00001.jpg', 't': float('nan')}],

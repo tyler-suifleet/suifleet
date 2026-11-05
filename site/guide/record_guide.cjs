@@ -43,7 +43,7 @@ function assertLease() { assertMutationLease(env("SUIFLEET_TESTNET_LOCK_TOKEN"))
 const client = new SuiGrpcClient({ network: manifest.network, baseUrl: manifest.rpc_url });
 const out = env("GUIDE_OUT"), exportDir = path.resolve(env("GUIDE_EXPORT")), phase = env("GUIDE_PHASE");
 const evidencePath = path.join(out, `evidence-${phase}.json`);
-const evidence = { phase, wallet_address: address, transactions: [], steps: [] };
+const evidence = { phase, console_commit: process.env.GUIDE_CONSOLE_COMMIT, wallet_address: address, transactions: [], steps: [] };
 const VIEWPORT = { width: 1280, height: 800 };
 let currentStep = null;
 const VERSION = process.env.GUIDE_VERSION || "1.0.0";
