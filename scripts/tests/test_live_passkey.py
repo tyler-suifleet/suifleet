@@ -407,6 +407,38 @@ class PairTransitionTests(JournalRecoveryTests):
                      pending=dict(operation='proof', digest='digest', gas_budget_mist=20_000_000, expect='success'))
         return live, result, {'fixtures': {'old': old, 'new': new}}, state, old_id, new_id
 
+    def test_legacy_probe_retires_before_pair_transition_without_replay(self):
+        for status in ('success', 'failure', 'unreadable'):
+            live,result,cache,state,old,new = self.fixture()
+            label = 'old package cannot bypass protection'
+            state['pending'].update(operation=label, expect='failure')
+            original = dict(state['pending'])
+            if status == 'unreadable':
+                live.read_back.return_value = {}
+            else:
+                result['effects']['status']['status'] = status
+            with self.subTest(status=status), patch.object(target,'verify_cached_fixture') as verify, \
+                 patch.object(target.tc,'bound',side_effect=lambda r,d:r):
+                if status == 'unreadable':
+                    with self.assertRaisesRegex(RuntimeError, 'exact digest not readable'):
+                        target.select_journal(live,cache,state,new,lambda: None)
+                    self.assertEqual(state['pending'],original)
+                    self.assertEqual(state['active_fixture'],old)
+                    self.assertNotIn('journals',state)
+                else:
+                    target.select_journal(live,cache,state,new,lambda: None)
+                    self.assertEqual(state['active_fixture'],new)
+                    self.assertNotIn('pending',state)
+                    self.assertNotIn(label,state['journals'][old]['completed'])
+                    self.assertEqual(state['retired_probes'][0]['pending'],original)
+                    self.assertEqual(state['retired_probes'][0]['result'],result)
+                    self.assertFalse(live.evidence['retired_native_base_probe']['acceptance'])
+                    self.assertEqual(live.ledger.used,20_000_000)
+                verify.assert_called_once()
+                live.executor.assert_not_called()
+            self.assertTrue(state['require_keys'])
+            self.assertEqual(state['fixtures'][old]['customer'],'retained')
+
     def test_old_pending_parked_and_restored_without_duplicate_submission(self):
         live,result,cache,state,old,new = self.fixture()
         snapshots=[]
