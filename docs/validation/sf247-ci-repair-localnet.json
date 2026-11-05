@@ -1,0 +1,203 @@
+{
+  "result": "PASS",
+  "chain": "a26e98ce",
+  "reportingBase": "54ac232d2cf103b83bc4dde1c4b177a7440345b6",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+  "head": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+  "origins": {
+    "FleetData": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "DeviceKey": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "DeviceData": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "AnchorKey": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "Anchor": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "CompactHeadKey": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "CompactHead": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "HealthUpdated": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "DataAnchored": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+    "AnchorsPruned": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "ExpiredBlobsBurned": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "StreamRetentionKey": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "StreamRetention": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "StreamRetentionChanged": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "LocatorKey": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "DiagnosticKey": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "DiagnosticRequest": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "ItemKey": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "DataItem": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+    "ReadGrantKey": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65"
+  },
+  "digests": {
+    "publish core": "C7qErQtQUbqwey3MmbvCrBJzEmrYHmKE7vMDRp7Xp2HA",
+    "publish WAL": "Gu49DY8MfaLQsqjfYKrQwjfyogjN9SooTzMkzxb65zJu",
+    "publish Walrus": "3SEQokq2q13gSBMpG86F6MdinXRMFS4KXNQLWs1NXjL5",
+    "publish storage": "Vj9opxf34ZRSPagDK3M4ZJdcqNWndA3LUtqnypXe4Rf",
+    "publish base data": "GFcS2XhK3pcgf5WkuZGgWN9X913GYmJfnCbiiDVBnFn6",
+    "register existing device": "7FTCegs7UrZpPdpgz8qfiS8hfi3cjP1zExFzzZcQn6a5",
+    "create budget": "54RqQpj9cHBKbHA3h2M8MnjvDp7jtLT6rwjP4aiacYVN",
+    "enroll account": "65hccK2YVZwMN58BqF4UrJs2e9XhTAoW1J1mAkiLacsA",
+    "create actual storage": "B7rWbF45JYeehqKcoAG2rgy7F3aw6Vi1pRUDSLNnvXeS",
+    "create base fleet": "GQ1hdDY2zE95EnZi8wbMnHBoumYtuvpMhfswnzir97fs",
+    "create base writer": "7TFy1SKEaFyZ8BhYhZha5YQhFETAKWUbvWJXHwHL5nH5",
+    "upgrade core with existing registry/budget/account": "6wtWq9bUp8aHDdz5jfdNRZn5SQWukKrY9yiYVMqSqnV7",
+    "upgrade data": "6LpLYHFkb4pf6BXLyBYNt88mHiQTibf7GWwTTJANzUNf",
+    "publish authoritative locator for existing objects after core/data upgrade": "8Dzmi6NWi7Jv4J2VfNKrwEQeVmaTgoVaUWGeeN2J8hoA",
+    "diagnostics on existing writer": "6PHWBXq8hrdVMnDggUJqsKphFyco8HRHf1vMYeBb9Z47",
+    "legacy fleet support grant": "FTHZmvdFi75cD7as7PDksTfjUZkpjVVWY8TKXdy11gSJ",
+    "scoped stream grant on existing fleet": "Ek1PeMmoPV32j4TFkERALgFPk4UKmPXkPjyCLMoPDf75",
+    "revoke scoped stream grant": "915aMDWmp1Lo6QhFK79RiqoRpqtvpXdChhsFLXKcySrH",
+    "serverless signed services health": "71Wj43crhphmjEiLoYHDWUjAC6z6DTL2ZyE7cAYGPCdW",
+    "revoke device": "ELQoGT41QgSUDfCT7agSLpSDQeEdvZdqTe4XAtqAmDu4",
+    "create managed customer": "D8kurGUfUYeBCmZiCLNFgkPZZXVSzaT6ioTnCynMpWKz",
+    "adopt existing data budget": "2VANa4MoUhraB1vsQZzENEXa7ttoBTSHZFiUtdihyJXn",
+    "rotate managed administrator": "63fEhm9WY96krHJBCr7eg9ckyvhJnuKBtHJ9nvi69WWc",
+    "create independent reporting customer 0": "3BEEzqY2q7FB9Adr5HJsmg5o4Pcq8UztU9NecWsqoe2k",
+    "create independent reporting customer 1": "5i79JN4HME4KeS6HdJh2yQAreXHqx9Yc2MUuswgY46yF",
+    "atomic reporting provisioning 0": "6gPqY353CSykanV949rFPMNniKMZZjijQR7pMQZfPobC",
+    "atomic reporting provisioning 1": "AMhiu9uYkZnCvcn3bHMPQFG6wCHK9E47517hTk4QUmMU",
+    "cross-customer budget locator": "D4q8xwqqgEJm1VkvaWKMUjLrWLd53zm57tjb8jwR6yM7",
+    "duplicate partial setup": "FMifmSYe7RTsPDSTWz1ZiN7AsQ7nASHcmAzirHPWfBPb"
+  },
+  "attacks": {
+    "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163": {
+      "digest": "Cj11JJJpqSaNxhFB1BQrRsGbApLnzTxbvwHGUJ2aLSgh",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x282bf808be869f67b957ef630910bc3522e64897af0dd4ff902da4104b95731f::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x282bf808be869f67b957ef630910bc3522e64897af0dd4ff902da4104b95731f",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65": {
+      "digest": "GP4du5CMUN2CUSU5ZfcmTjdSwkzJpDfkVsgHoa1EfdeB",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x49f477fc9334de06ac13440ad5efecc27c87e5aae03673c465ce5ad7137b032f::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x49f477fc9334de06ac13440ad5efecc27c87e5aae03673c465ce5ad7137b032f",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "scopedChecks": [
+    {
+      "pkg": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+      "fn": "seal_approve_owner",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x432f20db276df5dc37a339ea06aabb6626c12b288533e1e4cdaff96125a93163",
+      "fn": "seal_approve_support",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_owner",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_support",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_scoped_owner",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "0000000000000000000000000000000000000000000000000000000000000000",
+      "success": false
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xdead",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xdbaf59db24dc3fadf25c930598f6f3b52a1dcc967cf692f61dd30495516a7a65",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x4a4dcc92fd8fbe842bb0391c38118749e40d5b1df1a849602f225b1d7916f117",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x6569cbbb4ea54ab651615817a0def062a9359cb843fd234fd740b1566e695b91",
+      "success": true
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x7187071f6f61e6c25924f8a6be45dedb457392858f0caaec1ba86daa0b3761f9",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x6569cbbb4ea54ab651615817a0def062a9359cb843fd234fd740b1566e695b91",
+      "success": false
+    }
+  ],
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ],
+  "repair_sources_sha256": {
+    "contracts/sources/fleet_budget.move": "8d703e2114a9eeebaa7d0e52be66e6e9da41ffaf9b60edd54b6136482378f54e",
+    "contracts/sources/enrollment.move": "dd790bee7381c6167236f0f179a81c3aa788bf16c64c2eb2cc3db6da0597771e"
+  }
+}

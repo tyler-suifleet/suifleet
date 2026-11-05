@@ -358,14 +358,14 @@ export async function fetchFleetDevices(client: SuiGrpcClient, ids: string[]): P
   });
 }
 
-export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise<DeviceGroup[]> {
+export async function fetchGroups(client: SuiGrpcClient, owner: string, inventory?: readonly string[]): Promise<DeviceGroup[]> {
   await verifyDeployment(client);
-  // Creation sender is not the current admin after recipient-confirmed handover.
-  const events = await allEvents(client, moveType("device_group::GroupCreated"));
-  const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
-    .map((event) => event.group_id);
+  // Managed fleet inventory is authoritative even when event history is pruned.
+  const ids = inventory ?? (await allEvents(client, moveType("device_group::GroupCreated")))
+    .map(event => GroupCreatedBcs.parse(event.bcs).group_id);
   const objects = await objectsInBatches(client, [...new Set(ids)]);
   const groups = objects.map((object) => {
+    if (normalizeStructTag(object.type) !== normalizeStructTag(DEVICE_GROUP_TYPE)) throw Error("Unexpected DeviceGroup type");
     const fields = GroupBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported DeviceGroup schema");
     return { objectId: object.objectId, name: fields.name, description: fields.description,

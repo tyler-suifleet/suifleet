@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const { loader, manifestClient, appRequire } = require("./frontend_test_utils.cjs");
 const protocol = JSON.parse(fs.readFileSync("interfaces/fleet-v1.json"));
 const m = JSON.parse(fs.readFileSync("manifests/fixture.localnet.json"));
-for (const name of [...protocol.optional_type_origins.customer, ...protocol.optional_type_origins.fleet_settings]) m.type_origins[name] = m.call_package_id;
+for (const name of [...protocol.optional_type_origins.customer, ...protocol.optional_type_origins.fleet_settings, ...protocol.optional_type_origins.fleet_budget]) m.type_origins[name] = m.call_package_id;
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(m);
 const load = loader();
 const fleets = load("lib/customer-fleets.ts");
@@ -78,6 +78,33 @@ for (const [authority, fn, count] of [
  }
 }
 (async()=>{
+ {
+ // Real coin intent data includes bigint before SDK resolution. Preserve exact
+ // u64 values and capability-loan argument mapping, not only already-BCS pure inputs.
+ const { buildDepositTx } = load("lib/fleet-budget.ts");
+ const { Transaction, Inputs } = appRequire("@mysten/sui/transactions");
+ const { bcs } = appRequire("@mysten/sui/bcs");
+ for (const amount of [1n, 9007199254740993n, 18446744073709551615n]) {
+   const deposit = buildDepositTx(BUD, CAP, amount);
+   const scoped = fleets.withManagedBudgetCap(deposit, base, CAP);
+   const data = scoped.getData();
+   assert.equal(data.commands.find(c => c.$Intent).$Intent.data.balance, amount.toString());
+   assert.ok(data.inputs.every(i => i.UnresolvedObject?.objectId !== CAP));
+   assert.deepEqual(data.commands.filter(c => c.MoveCall).map(c => c.MoveCall.function), ["borrow_budget_cap","deposit","return_budget_cap"]);
+   // Supply deterministic object references. The actual SDK then resolves the
+   // native coin intent and encodes the full transaction kind without a network.
+   data.inputs = data.inputs.map(i => i.UnresolvedObject ? Inputs.SharedObjectRef({objectId:i.UnresolvedObject.objectId,initialSharedVersion:"1",mutable:true}) : i);
+   const resolved = Transaction.from(JSON.stringify(data)); resolved.setSender(A);
+   const bytes = await resolved.build({ onlyTransactionKind:true, client:{core:{getBalance:async()=>({balance:{addressBalance:"0"}})}} });
+   assert.ok(bytes.length > 0);
+   assert.ok(!resolved.getData().commands.some(c => c.$Intent));
+   const amounts=resolved.getData().inputs.filter(i=>i.Pure).map(i=>{try{return bcs.u64().parse(Buffer.from(i.Pure.bytes,"base64"));}catch{return null;}});
+   assert.ok(amounts.includes(amount.toString()), "coin intent must encode the exact amount");
+   assert.equal(fleets.withManagedBudgetCap(deposit,base,id("0x99")),deposit);
+ }
+ console.log("PASS: real managed coin intents resolve and BCS-build exact 1, >2^53 and max-u64 amounts with atomic capability loans");
+ }
+
  const result=await fleets.fetchCustomerFleets(client,A);
  assert.equal(result.length,2);assert.equal(result[0].name,result[1].name,"aliases need not be unique");
  assert.equal(result[0].used,6n);
@@ -199,8 +226,14 @@ for (const [authority, fn, count] of [
   "./DataBrowser":{DataBrowser:props=>{adapter=props.adapter;return React.createElement("p",null,"Data browser reachable");}},
  });
  guestClient.$extend=()=>({walrus:{}});
+ // The reporting hook now reads React Query. Supply the real provider with
+ // this fixture's reporting I/O result; retain the real hook and all authority
+ // checks below (dynamic locator verification has its own reporting suite).
+ const {QueryClient,QueryClientProvider}=appRequire("@tanstack/react-query");
+ const queryClient=new QueryClient();
+ queryClient.setQueryData(["fleet-reporting",selection.identity],cfg);
  const Component=browserLoad("components/FleetDataBrowser.tsx").FleetDataBrowser;
- assert.match(renderToString(React.createElement(Component)),/Data browser reachable/);
+ assert.match(renderToString(React.createElement(QueryClientProvider,{client:queryClient},React.createElement(Component))),/Data browser reachable/);
  const opened=await adapter.open(row);
  assert.match(new TextDecoder().decode(opened),/fixture plaintext/);
  assert.equal(approved.kind,"reader");assert.equal(fetches,1);

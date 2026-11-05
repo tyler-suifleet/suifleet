@@ -39,7 +39,11 @@ def abort_site(package, module, function, code):
             body = functions[guard]
             explicit = re.search(r'if \(code == ' + selector + r'\) abort ' + constant + r';', body)
             fallback = re.search(r'abort ' + constant + r'\s*}\s*$', body)
-            if explicit or fallback:
+            # Exact widening selector: the body must contain only this guard,
+            # and both literal constants above must equal the requested code.
+            # Never accept an arbitrary computed selector or another error.
+            widening = re.fullmatch(r'\s*if \(!condition\) abort \(code as u64\)\s*;?\s*', body)
+            if explicit or fallback or widening:
                 selectors.setdefault(guard, set()).add(selector)
 
     def selected_calls(body, guard):

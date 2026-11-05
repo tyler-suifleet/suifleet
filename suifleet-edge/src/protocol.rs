@@ -1125,6 +1125,7 @@ pub mod fleet_budget {
     pub const TOTAL_WITHDRAWN: &str = "total_withdrawn";
     pub const VERSION: &str = "version";
     pub const WITHDRAW: &str = "withdraw";
+    pub const ATTACH: &str = "attach";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Limits {
         pub float_cap: u64,

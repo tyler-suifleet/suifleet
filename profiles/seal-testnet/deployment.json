@@ -7,9 +7,9 @@
   "rpc_urls": [
     "https://fullnode.testnet.sui.io:443"
   ],
-  "call_package_id": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+  "call_package_id": "0x5b26264a391fc0690081b557529c1c311c077ead75d9841746dc56bc9dc8efd8",
   "upgrade_cap_id": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
-  "package_version": "3",
+  "package_version": "4",
   "type_origins": {
     "device_registry::DeviceRegistry": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
     "device_registry::Device": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
@@ -108,6 +108,29 @@
     "enrollment::ManagedKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
     "customer::PolicyKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
     "deployment_manager::CustomerFleetKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+    "passkey_factor::Enrollment": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "passkey_factor::ProofCreated": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "customer::SecondPersonConfiguration": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::DelayKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::Delays": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::QueuedAtKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::QueuedAt": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::DelayGrantKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::DelayGrant": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::ArgumentsKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::ActionArguments": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::PolicyKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::Policy": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::Action": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::PolicyChanged": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::ActionCreated": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "customer::HandoverConsent": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "enrollment::SecurityRevisionKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "enrollment::SecurityGenerationKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::FactorKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "security_policy::FactorConfiguration": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "customer::HandoverCompleted": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "customer::FleetSecurityKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
     "deployment_manager::ReceiptShardKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
     "deployment_manager::ReceiptDirectory": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
     "deployment_manager::ReceiptKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
@@ -116,7 +139,21 @@
     "deployment_manager::ReceiptShard": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
     "component_catalog::ShardedCatalogBindingKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
     "deployment_manager::ReceiptLayoutChanged": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
-    "deployment_manager::ShardedTargetGroupsKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a"
+    "deployment_manager::ShardedTargetGroupsKey": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+    "deployment_manager::DecisionKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "deployment_manager::DecisionRecord": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "deployment_manager::DecisionCleanupKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "customer::GroupBatchApplied": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "customer::SubscriptionKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "subscription::Offer": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "subscription::Account": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "subscription::Deposited": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "subscription::Collected": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "subscription::PlanChanged": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "subscription::Refunded": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "deployment_manager::RecurringWindowKey": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "deployment_manager::RecurringWindow": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+    "deployment_manager::WeeklySlot": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749"
   },
   "shared_objects": {
     "registry": {
@@ -130,12 +167,23 @@
       "max_exclusive": "0.2.0"
     },
     "edge": {
-      "min": "0.2.2",
+      "min": "0.2.3",
       "max_exclusive": "0.3.0"
     }
   },
   "walrus": {
     "publisher_url": "https://publisher.walrus-testnet.walrus.space",
     "aggregator_url": "https://aggregator.walrus-testnet.walrus.space"
+  },
+  "treasury_payee": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+  "subscription_coins": {
+    "USDC": {
+      "coin_type": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+      "decimals": 6
+    },
+    "SUI": {
+      "coin_type": "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI",
+      "decimals": 9
+    }
   }
 }
