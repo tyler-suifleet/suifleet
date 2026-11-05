@@ -1,0 +1,33 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:14.365
+SuiFleet helps you organize devices and deliver software
+updates. Your wallet is the approval tool for changes to your
+account. A fleet is a workspace for devices managed together.
+Open the console and choose Get started.
+
+2
+00:00:15.080 --> 00:00:19.901
+Click Connect and choose your wallet: Slush, an extension, or
+Google where enabled.
+
+3
+00:00:20.640 --> 00:00:25.547
+This recording uses a scripted test wallet in place of Slush;
+approve the connection.
+
+4
+00:00:26.280 --> 00:00:29.565
+Connected: the card shows your address and the network
+(Testnet).
+
+5
+00:00:30.280 --> 00:00:34.611
+First time only: create your default fleet, then approve the
+transaction.
+
+6
+00:00:36.120 --> 00:00:42.328
+Your fleet is selected. Next check device capacity: network
+funds do not increase your device limit.

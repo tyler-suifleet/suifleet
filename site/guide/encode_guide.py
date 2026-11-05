@@ -40,6 +40,35 @@ def image():
     return tag
 
 
+def recorded_instructions(frames_dir):
+    """Map captured instruction timestamps onto the actual capped-hold edit."""
+    import bisect
+    frames = json.loads((frames_dir / "frames.json").read_text())
+    instructions = json.loads((frames_dir / "cues.json").read_text())
+    if not frames or any(not math.isfinite(float(f["t"])) for f in frames):
+        raise ValueError("invalid frame timeline")
+    times = [float(f["t"]) for f in frames]
+    if any(b < a for a, b in zip(times, times[1:])):
+        raise ValueError("non-monotonic frame timeline")
+    positions = [0.0]
+    for a, b in zip(times, times[1:]):
+        positions.append(positions[-1] + min(MAX_HOLD, max(MIN_HOLD, b-a)))
+    output = []
+    for cue in instructions:
+        stamp = float(cue["t"])
+        if not math.isfinite(stamp) or not isinstance(cue.get("text"), str) or not cue["text"].strip():
+            raise ValueError("invalid captured instruction")
+        index = max(0, min(len(times)-1, bisect.bisect_right(times, stamp)-1))
+        hold = (positions[index+1]-positions[index]) if index+1 < len(times) else LAST_HOLD
+        start = positions[index] + max(0, min(hold, stamp-times[index]))
+        if not output: start = 0.0
+        if output and start <= output[-1]["source_start"] + .001:
+            output[-1]["text"] += " " + cue["text"].strip()
+        else:
+            output.append({"source_start": round(start, 3), "text": cue["text"].strip()})
+    return output
+
+
 def concat_list(frames_dir):
     frames = json.loads((frames_dir / "frames.json").read_text())
     if not frames:

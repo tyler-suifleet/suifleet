@@ -1,0 +1,23 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:09.928
+The network budget pays operating fees, such as sending device
+reports. It is separate from your subscription device limit.
+Choose Network budget in the sidebar.
+
+2
+00:00:10.640 --> 00:00:19.621
+Enter a deposit in SUI. Devices use these operating funds within
+your limits. File and log storage has separate funding controls.
+
+3
+00:00:20.360 --> 00:00:25.501
+Approve the deposit in your wallet. A budget is created only if
+your fleet needs one.
+
+4
+00:00:26.240 --> 00:00:34.581
+Confirmed. The balance under Keep devices reporting shows the
+confirmed deposit. Device readiness and health are checked
+separately.
