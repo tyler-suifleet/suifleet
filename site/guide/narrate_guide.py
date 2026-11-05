@@ -17,6 +17,7 @@ import tempfile
 import wave
 
 from encode_guide import ffmpeg, image, sha256
+from captions import webvtt
 
 
 def timing(cues, source_duration, spoken_durations):
@@ -151,6 +152,10 @@ def main():
                 "source_sha256": clip["source_sha256"],
                 "cues": [dict(text=cue["text"], **segment) for cue, segment in zip(clip["cues"], plan)],
             }
+            video["captions"] = video["step"] + ".en.vtt"
+            caption_path = args.output / video["captions"]
+            caption_path.write_text(webvtt(video["narration"]["cues"], duration), encoding="utf-8")
+            video["captions_sha256"] = sha256(caption_path)
             print(f"Narrated {video['step']}: {duration:.2f}s; full WebM/MP4 decode passed", flush=True)
     manifest["narration"] = {key: config[key] for key in (
         "engine", "engine_version", "voice", "voice_description", "model_sha256", "voices_sha256")}

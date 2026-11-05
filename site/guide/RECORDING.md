@@ -70,8 +70,8 @@ names a new demo component version. Enrollment claims and rollouts are run-owned
 examples. A retained key without matching, reconciled evidence stops the run;
 never recover a key or repeat an uncertain transaction blindly.
 
-Each WebM and MP4 must be at most 15,000,000 bytes; nine steps therefore have a
-270-MB maximum combined video budget, plus posters and text. MP4 is H.264 with
+Each WebM and MP4 must be at most 15,000,000 bytes; ten steps therefore have a
+300-MB maximum combined video budget, plus posters and text. MP4 is H.264 with
 faststart, WebM is VP9. The initial encoder produces silent clips with burned-in
 captions; the narration pass below adds the spoken track. Encoding shortens
 long confirmation waits, without claiming instant network confirmation. Written
@@ -83,7 +83,7 @@ Before committing media, review every video from start to finish for accuracy,
 caption readability, keys, credentials, tokens and non-demo addresses. Keep raw
 frames, browser state, keys and failed captures private outside the checkout.
 Record review evidence and exact console commit with the transaction/cost receipt.
-Do not mark SF-175 Review until the genuine nine-step run and review pass.
+Do not mark SF-175 Review until the genuine configured-step run and review pass.
 
 The recording-only overlay in `recording_overlay.cjs` paints a high-contrast
 pointer into compositor frames. It follows actual pointer events, including
@@ -130,8 +130,91 @@ and full decoding of both outputs. WebM uses Opus and MP4 uses AAC. Public
 `videos.json` records synthetic voice/model provenance and the retimed script.
 Preserve the actual console commit, chain receipts, cursor and posters.
 
-After reviewing all nine outputs, replace `site/media/guide/` with the staged
+After reviewing all configured outputs, replace `site/media/guide/` with the staged
 media, then run the site build/check with `--require-videos`. Native playback
 controls manage volume; no autoplay or third-party player is needed. The written
 guide and burned-in captions remain available without sound. No model or
 synthesis dependency is included in the static website.
+
+## Native English captions (SF-245)
+
+The narration pass now emits `<step>.en.vtt` from each cue's final
+`speech_start` and `speech_end`, after action retiming. It preserves every word
+of the reviewed narration, using segment-level timing rather than guessed
+word alignment. Both video formats share the same native English caption track.
+The manifest includes its SHA-256; `site/check.py --require-videos` requires the
+track and checks its complete contents against the final narration timing and
+encoded duration. The static build copies it and emits a native `<track>`.
+Visitors can switch captions using their browser's video controls.
+
+Captions have also been generated for the existing published recordings without
+re-encoding or changing their historical console revision, transaction evidence
+or speech. Adding captions does **not** establish fresh-current-console recording
+acceptance. SF-245 still requires fresh capture, including capacity checkout and
+an actual verified device result. Preflight must verify an activated
+fixture for the current contracts; a historical fixture is not a substitute.
+The recorder's off-screen `set_entitlement` grant and deployment-created ending
+also need replacement before a new recording may claim that journey.
+
+Run the offline tests and playback checks with:
+
+```sh
+python3 -m unittest discover -s site/tests -v
+python3 site/build.py --out /tmp/suifleet-site-check
+python3 site/check.py /tmp/suifleet-site-check --require-videos
+node site/tests/guide_browser.cjs /tmp/suifleet-site-check
+```
+
+The browser test serves VTT as `text/vtt`, checks every caption's text and timing
+in the native browser text-track parser, tests Space-key play/pause and active
+cues on desktop and phone viewports, and retains the written-guide/navigation
+checks at seven sizes. Chromium emulation does not establish physical mobile,
+Safari or real extension-wallet acceptance.
+
+
+## Current customer journey refresh
+
+SF-245 records the current stacked customer source, including visible capacity
+checkout/activation. Use `--profile profiles/seal-testnet --fresh-customer
+--fresh-device --capture-only` with a fixed allowance, the dedicated testnet
+operator and the mutation lease. An explicit profile is verified on chain and
+must have the operator-owned UpgradeCap; it is not represented as a successful
+package-upgrade cache fixture. Existing fixture mode remains supported.
+
+The capacity stage uses the profile’s explicitly labeled disposable test tariff.
+It does not change commercial pricing. Browser/client identities stay outside
+source and are funded once within the run allowance. Unknown signed outcomes
+must be reconciled before resume; never start a new run to hide them.
+
+The Linux execution phase uses an x86_64 example component and a current locally
+built client. It independently requires an Applied chain receipt before capturing
+success in the console. This is software testnet evidence, not physical Pi or
+manual Slush acceptance. The platform installer is an explicit shell command for
+this benign disposable example; shipped installer/security defaults are unchanged.
+
+On-screen instruction timestamps are captured as private `cues.json` alongside
+frames. Narration must be derived/reviewed against these actual actions, then
+retimed and captioned from the final encoded speech. Preserve the source commit,
+media hashes and complete cue timing; never relabel historical video bytes as
+current recordings. Captions and narration explain why each stage is needed.
+
+## Current ten-stage customer recording
+
+Use `--profile profiles/seal-testnet --fresh-customer --fresh-device` for the
+explicit evaluation configuration and an isolated customer. The current flow
+visibly prepays/applies the disposable capacity offer before operating-fund
+deposits. It does not substitute an administrator entitlement grant.
+
+The current rollout recording selects a published library recipe and named
+devices, creates a plan, then pauses it without admitting devices. Actual
+Linux installation is separately proven by the deployment's authoritative
+Applied receipt; healthy reporting/rollout completion is not invented.
+
+The final narration script is canonical across ten clips. Three bounded
+synthesis batches were used; their exact input hashes and clip lists are in
+`videos.json`. Reconstruct each input by selecting its listed clips from
+`narration.json`, retaining the other configuration keys and formatting with
+`json.dumps(config, indent=2) + "\n"`. A regression verifies every hash and
+spoken cue. Captions use final retimed speech, never original wall-clock times.
+The local review used full decoding, complete ASR and 108 cue-start/midpoint
+frames; this is not a claim of real-time human viewing or Slush approval.
