@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from test_batch_integration import Fixture
 from batch_integration import canonical
 
@@ -144,3 +144,60 @@ class SharedHarnessTests(unittest.TestCase):
                 b['error']=canonical(error)
             with self.assertRaisesRegex(RuntimeError,'identity changed'):
                 c.repair_context(f.project,f.source_prs[1])
+
+
+class PackagePairIncidentTests(SharedHarnessTests):
+    def pair_fixture(self):
+        f,c,b,run,package,security=self.fixture()
+        head='58b0b0828925404219e65853b56431cb19cd1ce1'
+        base='d5702bc6be238f1887df00611ebf382b2bece755'
+        b.update(head=head,base=base)
+        run['id']=42031568923
+        package.update(head=head,base=base)
+        security.update(head=head,transactions=[])
+        error=json.loads(b['error'])
+        error['checks'][0]['detailsUrl']='https://github.com/tyler-suifleet/suifleet/actions/runs/42031568923'
+        b['error']=canonical(error)
+        for pr in f.source_prs.values():pr['baseRefOid']=base
+        original=f.gh.side_effect
+        def gh(project,args):
+            if args[:2]==['run','view']:
+                return 'RuntimeError: unfinished native passkey fixture belongs to another package pair'
+            return original(project,args)
+        f.gh.side_effect=gh
+        # Synthetic authenticated artifacts use their own fixed hashes. Mutating
+        # any downloaded evidence after this point must fail authentication.
+        expected = {name: hashlib.sha256(json.dumps(value).encode()).hexdigest()
+                    for name,value in [('package-upgrade.json',package),('upgrade-security.json',security)]}
+        patcher=patch('batch_integration.PAIR_INCIDENT_HASHES',expected)
+        patcher.start(); self.addCleanup(patcher.stop)
+        return f,c,b,run,package,security
+
+    def test_pair_incident_routes_only_unchanged_victims_to_existing_owner(self):
+        f,c,b,*_=self.pair_fixture()
+        owners=copy.deepcopy(f.owners)
+        for pr in f.source_prs.values():
+            context=c.repair_context(f.project,pr)
+            self.assertNotIn('_batch_failure',context)
+            self.assertEqual(context['_shared_acceptance_wait']['owner_ticket'],'SF-255')
+        self.assertEqual(f.owners,owners)
+        self.assertEqual(f.launched,[])
+        f.source_prs[1]['headRefOid']='a'*40
+        self.assertEqual(c.repair_context(f.project,f.source_prs[1]),{})
+        f.source_prs[2]['baseRefOid']='b'*40
+        self.assertEqual(c.repair_context(f.project,f.source_prs[2]),{})
+
+    def test_pair_diagnostic_and_effects_are_required(self):
+        for case in ('diagnostic','failure','success','chain','run'):
+            f,c,b,run,package,security=self.pair_fixture()
+            if case=='diagnostic':
+                original=f.gh.side_effect
+                f.gh.side_effect=lambda p,a: 'unrelated error' if a[:2]==['run','view'] else original(p,a)
+            if case=='failure':security['transactions']=[dict(status='failure')]
+            if case=='success':security['native_passkey']=dict(success=True)
+            if case=='chain':security['chain']='mainnet'
+            if case=='run':run['id']=1
+            with self.subTest(case=case),self.assertRaises(RuntimeError):
+                c.repair_context(f.project,f.source_prs[1])
+            self.assertEqual(f.db.execute('SELECT count(*) FROM shared_harness_incidents').fetchone()[0],0)
+            self.assertEqual(f.launched,[])

@@ -12,6 +12,10 @@ import uuid
 IDENTITY = 'Tyler Bush <tyler.jonathan.bush@gmail.com>'
 TERMINAL = ('done', 'invalidated', 'failed')
 SHA = re.compile(r'^[0-9a-f]{40}$')
+PAIR_INCIDENT_HASHES = {
+    'package-upgrade.json': '60062f8c4da6b48b678f2feaa96ef3e22c98722bf602b1326c3c3cbc4e180c0c',
+    'upgrade-security.json': '0612fa3a06e7e696dae714c4c081fd5164569d29b74edb8adb04f0a8d2827d60',
+}
 
 
 class BatchInvalidated(RuntimeError):
@@ -747,17 +751,21 @@ class BatchController:
     def shared_harness_incident(self, project, batch, error):
         """Narrow operator-reported incident, authenticated before victim suppression.
 
-        This routes evidence to existing SF-243 ownership, never launches workers,
+        This routes evidence to existing SF-243/SF-255 ownership, never launches workers,
         retries a mutation, changes source receipts, or grants candidate acceptance.
         New signatures require a scoped tracker decision and reviewed code.
         """
+        pair_incident = (batch['head'] == '58b0b0828925404219e65853b56431cb19cd1ce1'
+                         and batch['base'] == 'd5702bc6be238f1887df00611ebf382b2bece755')
+        owner = 'SF-255' if pair_incident else 'SF-243'
+        run_id = 42031568923 if pair_incident else 41914017432
         if (project.get('repository') != 'tyler-suifleet/suifleet'
-                or batch['head'] != 'ebdca15ae1c244376701b323486a94e2ea002799'
-                or batch['base'] != '4aa4344c0a0b0749348ed78544531ed28ac857d3'
+                or (not pair_incident and (batch['head'] != 'ebdca15ae1c244376701b323486a94e2ea002799'
+                or batch['base'] != '4aa4344c0a0b0749348ed78544531ed28ac857d3'))
                 or error.get('kind') != 'candidate_checks_failed'):
             return None
         checks = error.get('checks', [])
-        url = 'https://github.com/tyler-suifleet/suifleet/actions/runs/41914017432'
+        url = f'https://github.com/tyler-suifleet/suifleet/actions/runs/{run_id}'
         if (len(checks) != 1 or checks[0].get('name') != 'testnet/package-upgrade'
                 or checks[0].get('workflowName') != 'Automatic testnet'
                 or checks[0].get('conclusion') != 'FAILURE' or checks[0].get('detailsUrl') != url):
@@ -770,13 +778,13 @@ class BatchController:
             if tuple(existing[:2]) != (batch['manifest_digest'], error_hash):
                 raise RuntimeError('shared harness incident identity changed')
             return json.loads(existing[2])
-        path = 'repos/' + project['repository'] + '/actions/runs/41914017432'
+        path = 'repos/' + project['repository'] + f'/actions/runs/{run_id}'
         read = lambda: json.loads(self.c.gh(project, ['api', path]))
         try:
             run = read()
         except (RuntimeError, subprocess.CalledProcessError):
             return None  # No authenticated receipt: do not suppress owner repair.
-        if (run.get('id') != 41914017432 or run.get('status') != 'completed'
+        if (run.get('id') != run_id or run.get('status') != 'completed'
                 or run.get('conclusion') != 'failure' or run.get('event') != 'workflow_run'
                 or run.get('head_branch') != 'main' or run.get('path') != '.github/workflows/testnet.yml'
                 or run.get('name') != 'Automatic testnet' or type(run.get('run_attempt')) is not int
@@ -785,7 +793,7 @@ class BatchController:
             raise RuntimeError('shared harness run provenance unavailable')
         with tempfile.TemporaryDirectory(prefix='shared-harness-effects-') as directory:
             try:
-                self.c.gh(project, ['run', 'download', '41914017432', '-R', project['repository'],
+                self.c.gh(project, ['run', 'download', str(run_id), '-R', project['repository'],
                     '-n', 'testnet-effects-' + batch['head'], '-D', directory])
             except (RuntimeError, subprocess.CalledProcessError):
                 return None
@@ -801,12 +809,24 @@ class BatchController:
         package, security = evidence['package-upgrade.json'], evidence['upgrade-security.json']
         failures = [tx for tx in security.get('transactions', []) if tx.get('status') == 'failure'
                     and tx.get('label') == 'initialize cached passkey authority']
+        diagnostic_hash = None
+        if pair_incident:
+            try:
+                log = self.c.gh(project, ['run', 'view', str(run_id), '-R', project['repository'], '--log-failed'])
+            except (RuntimeError, subprocess.CalledProcessError):
+                return None
+            if 'RuntimeError: unfinished native passkey fixture belongs to another package pair' not in log:
+                raise RuntimeError('shared harness package-pair diagnostic unavailable')
+            diagnostic_hash = hashlib.sha256(log.encode()).hexdigest()
         if (package.get('base') != batch['base'] or package.get('head') != batch['head']
                 or package.get('chain_identifier', package.get('chain')) != '4c78adac'
                 or security.get('chain_identifier', security.get('chain')) != '4c78adac'
                 or security.get('head') != batch['head']
-                or len(failures) != 1 or failures[0].get('digest') != 'AEbuyHfJEsQjPt9GJq9gM5bMFraHa2VSyrVoUvQGtQkw'
-                or type(failures[0].get('gas_mist')) is not int or failures[0]['gas_mist'] <= 0):
+                or (not pair_incident and (len(failures) != 1
+                    or failures[0].get('digest') != 'AEbuyHfJEsQjPt9GJq9gM5bMFraHa2VSyrVoUvQGtQkw'
+                    or type(failures[0].get('gas_mist')) is not int or failures[0]['gas_mist'] <= 0))
+                or (pair_incident and (hashes != PAIR_INCIDENT_HASHES
+                    or security.get('native_passkey', {}).get('success')))):
             raise RuntimeError('shared harness failure receipt does not match pinned incident')
         try:
             final_run = read()
@@ -814,12 +834,13 @@ class BatchController:
             return None
         if final_run != run:
             raise RuntimeError('shared harness run changed during authentication')
-        receipt = dict(owner_ticket='SF-243', candidate_pr=batch['pr'], candidate_head=batch['head'],
+        receipt = dict(owner_ticket=owner, candidate_pr=batch['pr'], candidate_head=batch['head'],
             candidate_base=batch['base'], run=run['id'], attempt=run['run_attempt'], hashes=hashes,
-            failure_digest=failures[0]['digest'], checks=checks,
-            diagnostic='await scoped SF-243 recovery; unchanged member repairs suppressed; all acceptance gates retained')
+            failure_digest=None if pair_incident else failures[0]['digest'], checks=checks,
+            diagnostic_hash=diagnostic_hash,
+            diagnostic=f'await scoped {owner} recovery; unchanged member repairs suppressed; all acceptance gates retained')
         self.db.execute('INSERT INTO shared_harness_incidents VALUES(?,?,?,?,?,?,?)',
-            (project['id'], batch['id'], 'SF-243', batch['manifest_digest'], error_hash, canonical(receipt), self.clock()))
+            (project['id'], batch['id'], owner, batch['manifest_digest'], error_hash, canonical(receipt), self.clock()))
         self.db.commit()  # Durable attribution precedes scheduling decisions.
         return receipt
 
