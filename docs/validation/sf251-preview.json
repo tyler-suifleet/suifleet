@@ -3,10 +3,10 @@
     {
       "url": "https://characterized-above-chemical-possess.trycloudflare.com/preview-version.json",
       "status": 200,
-      "bytes": 1599,
+      "bytes": 1637,
       "metadata": {
         "ticket": "SF-251",
-        "source_commit": "5841f2411678d4af76a09f97c054175629c11f62",
+        "source_commit": "c170ef874fde4d8641d9245c107537dc73060b01",
         "source_status": "unmerged combined candidate",
         "source_heads": {
           "PR617": "e28c80cb14bd417cc87c2a81586873d4c90198dc",
@@ -27,7 +27,7 @@
           "storageUpgradeCapId": "0xfa48bcbcb152b2c582d00b41c4fd923bf93e361e5ce9a3048a1558dbbaf9c0ab"
         },
         "build_node": "22.22.2",
-        "build_id": "3a89632aef27fdcb03538fa4151f27d14f4b9ef3df80f433a9b50ed1c7987755",
+        "build_id": "670912edb8e948bb0ead633c6c951f7549193e18060369962d984509f628f1db",
         "file_count": 148,
         "limits": [
           "No manual wallet/Pi/mainnet/production provider acceptance",
@@ -37,7 +37,8 @@
           "deployment.json": "1c35e01b253edfcc215de2a5743240d4f44cf3a913265958db89cbbe3041021a",
           "frontend.env": "6dfe58d5cc7cbbd10f8481e9fc9b51490c43d24f8181e536d229e4b1dc961b5f"
         },
-        "storage_readers_verified": true
+        "storage_readers_verified": true,
+        "retention_origins_verified": true
       }
     },
     {
@@ -56,7 +57,7 @@
   "browser": {
     "metadata": {
       "ticket": "SF-251",
-      "source_commit": "5841f2411678d4af76a09f97c054175629c11f62",
+      "source_commit": "c170ef874fde4d8641d9245c107537dc73060b01",
       "source_status": "unmerged combined candidate",
       "source_heads": {
         "PR617": "e28c80cb14bd417cc87c2a81586873d4c90198dc",
@@ -77,7 +78,7 @@
         "storageUpgradeCapId": "0xfa48bcbcb152b2c582d00b41c4fd923bf93e361e5ce9a3048a1558dbbaf9c0ab"
       },
       "build_node": "22.22.2",
-      "build_id": "3a89632aef27fdcb03538fa4151f27d14f4b9ef3df80f433a9b50ed1c7987755",
+      "build_id": "670912edb8e948bb0ead633c6c951f7549193e18060369962d984509f628f1db",
       "file_count": 148,
       "limits": [
         "No manual wallet/Pi/mainnet/production provider acceptance",
@@ -87,7 +88,8 @@
         "deployment.json": "1c35e01b253edfcc215de2a5743240d4f44cf3a913265958db89cbbe3041021a",
         "frontend.env": "6dfe58d5cc7cbbd10f8481e9fc9b51490c43d24f8181e536d229e4b1dc961b5f"
       },
-      "storage_readers_verified": true
+      "storage_readers_verified": true,
+      "retention_origins_verified": true
     },
     "viewport": {
       "width": 375,
@@ -125,8 +127,8 @@
       "Logged-out public mobile render only; actual customer writes and signed daemon checks use application SDK builders and production readers, not a manual wallet session."
     ]
   },
-  "artifact": "~/.local/state/suifleet/sf251-reporting-preview-5841f241",
-  "file_manifest_sha256": "85ce950b4eea12c6e6ef6820fe12d6611f24ead194f7520bee052e35cc59478c",
+  "artifact": "~/.local/state/suifleet/sf251-reporting-preview-c170ef87",
+  "file_manifest_sha256": "28556121d4a0400c9d1c152163df7b574c4da26ebb4d22ad52e350d6c2b389a3",
   "rollback": "~/.local/state/suifleet/serve-latest-preview.before-sf251.py",
   "guide_preserved": "current-customer-guide-0cdeceec"
 }

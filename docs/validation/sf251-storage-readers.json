@@ -20,7 +20,8 @@
               "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
             ]
           }
-        }
+        },
+        "retentionOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48"
       },
       "storageId": "0xdab0537ebce8a85ece4773ba7df018a3900e91cbeecec53a064974b1357c8074"
     },
@@ -47,7 +48,8 @@
               "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
             ]
           }
-        }
+        },
+        "retentionOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48"
       },
       "storageId": "0xf3410aae0e00cc580f87cd4dc4632f8d24159a1a6c765c279ee67da97d81b342"
     },
@@ -74,7 +76,8 @@
               "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
             ]
           }
-        }
+        },
+        "retentionOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48"
       },
       "storageId": "0xa8672461f05846632758881437154117f79223b02df961f09b7b0918efd3c3c4"
     },
@@ -101,7 +104,8 @@
               "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
             ]
           }
-        }
+        },
+        "retentionOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48"
       },
       "storageId": "0x5fac21352624c194b1a1c85ae6b6d9eb29011890de79d88633572714763f160c"
     },
