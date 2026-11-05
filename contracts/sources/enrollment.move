@@ -199,7 +199,6 @@ module sui_edge::enrollment {
 
     /// Enroll the sender's key as a new device of the policy's operator.
     /// Must be sponsored by an unused claim address of this policy.
-    #[allow(lint(self_transfer))]
     public fun enroll(
         policy: &mut EnrollmentPolicy,
         registry: &mut DeviceRegistry,
@@ -208,16 +207,18 @@ module sui_edge::enrollment {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        let cap = enroll_internal(policy, registry, name, arch, clock, ctx, false);
+        let cap = e(policy, registry, name, arch, clock, ctx, false);
         transfer::public_transfer(cap, policy.operator);
     }
     /// Package helper: enroll_managed.
     public(package) fun k9(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext): DeviceOwnerCap {
-        enroll_internal(policy, registry, name, arch, clock, ctx, true)
+        e(policy, registry, name, arch, clock, ctx, true)
     }
+    // DeviceCap intentionally goes to the authenticated enrolling sender.
+    #[allow(lint(self_transfer))]
     /// Private helper: enroll_internal.
-    fun enroll_internal(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
+    fun e(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext, managed: bool): DeviceOwnerCap {
         g1(object::id(registry) == policy.registry, false);
         if (managed) {

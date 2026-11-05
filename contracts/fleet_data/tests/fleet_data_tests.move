@@ -21,6 +21,41 @@ module fleet_data::fleet_data_tests {
     const SUPPORT: address = @0xB1;
     const DAY: u64 = 86_400_000;
 
+    #[test]
+    fun publish_existing_locator_preserves_writer_and_health() {
+        let (mut s, system) = setup(); s.next_tx(OWNER);
+        let mut budget = s.take_shared<FleetBudget>();
+        let cap = s.take_from_sender<BudgetOwnerCap>();
+        let fleet = s.take_shared<FleetData>(); let storage = s.take_shared<FleetStorage>();
+        fleet_data::publish_locator(&fleet, &mut budget, &cap, &storage);
+        let writer = s.take_shared<DeviceData>(); assert!(fleet_data::health_seq(&writer) == 0);
+        ts::return_shared(writer); ts::return_shared(fleet); ts::return_shared(storage);
+        ts::return_shared(budget); ts::return_to_address(OWNER, cap); finish(s, system);
+    }
+
+    fun provision_managed(mode: u8) {
+        let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        if (mode == 1) {
+            customer::set_credential(&mut c, SUPPORT, true, true, s.ctx());
+            customer::set_credential(&mut c, OWNER, false, false, s.ctx());
+        };
+        if (mode == 2) customer::set_security_requirements_for_testing(&mut c, vector[1, 1, 1, 1, 1, 1, 1]);
+        let mut f = s.take_shared_by_id<ManagedFleet>(fid);
+        let (cap, loan) = customer::borrow_budget_cap(&c, &mut f, s.ctx());
+        let mut budget = s.take_shared_by_id<FleetBudget>(bid);
+        fleet_data::provision(&mut budget, &cap, fleet_storage::new_quota(DAY, 1000, 2, 1000, 1000), string::utf8(b"4c78adac"), s.ctx());
+        if (mode == 3) fleet_data::provision(&mut budget, &cap, fleet_storage::new_quota(DAY, 1000, 2, 1000, 1000), string::utf8(b"4c78adac"), s.ctx());
+        customer::return_budget_cap(&mut f, cap, loan);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(budget);
+        finish(s, system);
+    }
+    #[test] fun provision_with_current_managed_authority() { provision_managed(0) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)] fun provision_revoked_administrator_rejected() { provision_managed(1) }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)] fun provision_organization_protection_required() { provision_managed(2) }
+    #[test, expected_failure(abort_code = 0, location = sui::dynamic_field)]
+    fun duplicate_provision_rolls_back() { provision_managed(3) }
+
     fun zeros(n: u64): vector<u8> { let mut v = vector[]; while (v.length() < n) v.push_back(0); v }
     fun clock_at(s: &mut ts::Scenario, at: u64): Clock {
         let mut c = clock::create_for_testing(ts::ctx(s));
