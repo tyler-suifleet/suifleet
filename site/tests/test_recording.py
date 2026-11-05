@@ -152,6 +152,21 @@ class RecordedDeviceTest(unittest.TestCase):
             self.assertNotIn('applied',live.evidence['recorded_device']);process.terminate.assert_called_once()
             self.assertEqual(live.transaction.call_args.kwargs['funding'],50_000_000)
 
+class ResultViewRecovery(unittest.TestCase):
+    def test_only_completed_error_free_result_capture_is_reused(self):
+        import importlib.util, tempfile, json
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location('result_recorder', Path(__file__).resolve().parents[1] / 'guide/record_guide.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); path=root/'evidence-device-result.json'
+            path.write_text(json.dumps({'steps':[{'step':'deploy-group','frames':2}],'page_errors':[]}))
+            self.assertIsNone(module.captured_result_view(root))
+            (root/'frames/deploy-group').mkdir(parents=True);(root/'frames/deploy-group/frames.json').write_text('[{}]')
+            self.assertIsNotNone(module.captured_result_view(root))
+            path.write_text(json.dumps({'steps':[],'page_errors':[]}));self.assertIsNone(module.captured_result_view(root))
+            path.write_text(json.dumps({'steps':[{'step':'deploy-group','frames':2}],'page_errors':['failure']}));self.assertIsNone(module.captured_result_view(root))
+
 class ResumedObjectDiscovery(unittest.TestCase):
     def test_setup_order_and_duplicate_digests_do_not_hide_created_version(self):
         import importlib.util

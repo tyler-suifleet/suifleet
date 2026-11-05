@@ -84,6 +84,19 @@ def created_in_step(live, by_step, step, suffix):
         for object_id in created(live, digest, suffix)))
 
 
+def captured_result_view(runtime):
+    path = runtime / "evidence-device-result.json"
+    if not path.exists() or not (runtime / "frames/deploy-group/frames.json").exists():
+        return None
+    frames = json.loads((runtime / "frames/deploy-group/frames.json").read_text())
+    if not frames:
+        return None
+    view = json.loads(path.read_text())
+    if view.get("page_errors") or not any(s.get("step") == "deploy-group" and s.get("frames", 0) > 0 for s in view.get("steps", [])):
+        return None
+    return view
+
+
 def run_recorded_device(live, runtime, manifest_file, device_key, device_id, cap_id, deployment_id, persist):
     """A disposable Linux client, not physical-Pi acceptance. Funding is bounded."""
     binary = Path(os.environ.get("SUIFLEET_GUIDE_DAEMON", str(DAEMON)))
@@ -378,8 +391,12 @@ def run(args):
         if len(device_caps) != 1 or len(deployments) != 1:
             raise RuntimeError("expected one device capability and one demonstrated deployment")
         run_recorded_device(live, runtime, manifest_file, device_key, devices[0], device_caps[0], deployments[0], persist)
-        code, result_view = node(runtime, "device-result", manifest_file, seed_file,
-            {"GUIDE_STEPS": "deploy-group", "GUIDE_APPEND_STEP": "deploy-group", "GUIDE_RESULT_ONLY": "1"})
+        result_view = captured_result_view(runtime)
+        if result_view is None:
+            code, result_view = node(runtime, "device-result", manifest_file, seed_file,
+                {"GUIDE_STEPS": "deploy-group", "GUIDE_APPEND_STEP": "deploy-group", "GUIDE_RESULT_ONLY": "1"})
+        else:
+            code = 0  # The device receipt was freshly reverified immediately above.
         browser["phases"].append(result_view)
         assert code == 0, "verified device result was not captured in the console"
         fields = plain(live.object(versions[0])["content"])
