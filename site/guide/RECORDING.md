@@ -170,3 +170,30 @@ in the native browser text-track parser, tests Space-key play/pause and active
 cues on desktop and phone viewports, and retains the written-guide/navigation
 checks at seven sizes. Chromium emulation does not establish physical mobile,
 Safari or real extension-wallet acceptance.
+
+
+## Current customer journey refresh
+
+SF-245 records the current stacked customer source, including visible capacity
+checkout/activation. Use `--profile profiles/seal-testnet --fresh-customer
+--fresh-device --capture-only` with a fixed allowance, the dedicated testnet
+operator and the mutation lease. An explicit profile is verified on chain and
+must have the operator-owned UpgradeCap; it is not represented as a successful
+package-upgrade cache fixture. Existing fixture mode remains supported.
+
+The capacity stage uses the profile’s explicitly labeled disposable test tariff.
+It does not change commercial pricing. Browser/client identities stay outside
+source and are funded once within the run allowance. Unknown signed outcomes
+must be reconciled before resume; never start a new run to hide them.
+
+The Linux execution phase uses an x86_64 example component and a current locally
+built client. It independently requires an Applied chain receipt before capturing
+success in the console. This is software testnet evidence, not physical Pi or
+manual Slush acceptance. The platform installer is an explicit shell command for
+this benign disposable example; shipped installer/security defaults are unchanged.
+
+On-screen instruction timestamps are captured as private `cues.json` alongside
+frames. Narration must be derived/reviewed against these actual actions, then
+retimed and captioned from the final encoded speech. Preserve the source commit,
+media hashes and complete cue timing; never relabel historical video bytes as
+current recordings. Captions and narration explain why each stage is needed.

@@ -110,3 +110,33 @@ class RecordingTest(unittest.TestCase):
                 self.assertNotIn('private-fixture-token', ''.join(traceback.format_exception(type(error), error, error.__traceback__)))
             else:
                 self.fail('invalid lease must stop the run')
+
+
+class RecordedDeviceTest(unittest.TestCase):
+    def recorder(self):
+        spec = importlib.util.spec_from_file_location('current_recorder', Path(__file__).resolve().parents[1] / 'guide/record_guide.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
+
+    def test_unresolved_prior_funding_cannot_be_replayed(self):
+        from unittest.mock import Mock, patch
+        record = self.recorder()
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);binary=root/'client';binary.touch()
+            live=Mock();live.evidence={'recorded_device':{'deployment':'deployment'}}
+            with patch.dict('os.environ',{'SUIFLEET_GUIDE_DAEMON':str(binary)}), patch.object(record.subprocess,'check_output',return_value='0x1'):
+                with self.assertRaisesRegex(RuntimeError,'reconcile prior device funding'):
+                    record.run_recorded_device(live,root,root/'deployment.json',root/'key','0xd','0xc','deployment',lambda:None)
+            live.transaction.assert_not_called()
+
+    def test_client_exit_without_chain_receipt_cannot_be_called_applied(self):
+        from unittest.mock import Mock, patch
+        record=self.recorder()
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);binary=root/'client';binary.touch();live=Mock();live.evidence={}
+            live.transaction.return_value={'digest':'fund'};live.receipts.return_value={};live.assert_lock=Mock()
+            process=Mock();process.poll.return_value=0
+            with patch.dict('os.environ',{'SUIFLEET_GUIDE_DAEMON':str(binary)}),patch.object(record.subprocess,'check_output',return_value='0x1'),patch.object(record.subprocess,'Popen',return_value=process):
+                with self.assertRaisesRegex(RuntimeError,'exited before a verified apply'):
+                    record.run_recorded_device(live,root,root/'deployment.json',root/'key','0xd','0xc','deployment',lambda:None)
+            self.assertNotIn('applied',live.evidence['recorded_device']);process.terminate.assert_called_once()
+            self.assertEqual(live.transaction.call_args.kwargs['funding'],50_000_000)
