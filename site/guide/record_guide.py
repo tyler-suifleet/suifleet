@@ -18,9 +18,9 @@ retains private frames for diagnosis. Follow site/guide/RECORDING.md.
 
 Money: a reusable demo browser key is funded from the wallet (charged to the
 run's allowance in full). Its seed stays 0600 beside the wallet, and its
-existing balance is charged before any top-up on later runs. As registry administrator, the wallet
-also grants the new customer a small device/upload entitlement, as SuiFleet
-does for a subscriber. Keys never reach the browser, the frames or the logs.
+existing balance is charged before any top-up on later runs. The current-profile route visibly prepays a disposable subscription and applies
+its due payment to activate device capacity; no off-screen entitlement grant
+stands in for the customer journey. Keys never reach the browser, the frames or the logs.
 """
 import argparse
 import hashlib
@@ -72,6 +72,16 @@ def created(live, digest, suffix):
     found = live.read_back(digest)
     assert found, f"transaction {digest} is not readable"
     return [c["objectId"] for c in found.get("objectChanges", []) if c["type"] == "created" and c["objectType"].endswith(suffix)]
+
+
+def created_in_step(live, by_step, step, suffix):
+    """A resumed phase may end with setup/membership rather than creation.
+
+    Search every reconciled step transaction, deduplicating digests and IDs;
+    callers still require exactly one demonstrated object before using it.
+    """
+    return list(dict.fromkeys(object_id for digest in dict.fromkeys(by_step.get(step, []))
+        for object_id in created(live, digest, suffix)))
 
 
 def run_recorded_device(live, runtime, manifest_file, device_key, device_id, cap_id, deployment_id, persist):
@@ -358,13 +368,13 @@ def run(args):
                 continue
             for tx in phase["transactions"]:
                 by_step.setdefault(tx["step"], []).append(tx["digest"])
-        devices = created(live, by_step["register-device"][-1], "::device_registry::Device") if by_step.get("register-device") else [demo["device"]]
-        versions = created(live, by_step["publish-version"][-1], "::component_catalog::ComponentVersion")
+        devices = created_in_step(live, by_step, "register-device", "::device_registry::Device") if by_step.get("register-device") else [demo["device"]]
+        versions = created_in_step(live, by_step, "publish-version", "::component_catalog::ComponentVersion")
         assert len(devices) == 1 and len(versions) == 1, (devices, versions)
         demo["device"] = devices[0]
         demo_path.write_text(json.dumps(demo))
-        device_caps = created(live, by_step["register-device"][-1], "::device_cap::DeviceCap")
-        deployments = created(live, by_step["deploy-group"][-1], "::deployment_manager::DeploymentRecord")
+        device_caps = created_in_step(live, by_step, "register-device", "::device_cap::DeviceCap")
+        deployments = created_in_step(live, by_step, "deploy-group", "::deployment_manager::DeploymentRecord")
         if len(device_caps) != 1 or len(deployments) != 1:
             raise RuntimeError("expected one device capability and one demonstrated deployment")
         run_recorded_device(live, runtime, manifest_file, device_key, devices[0], device_caps[0], deployments[0], persist)

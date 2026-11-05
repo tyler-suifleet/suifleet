@@ -151,3 +151,17 @@ class RecordedDeviceTest(unittest.TestCase):
                     record.run_recorded_device(live,root,root/'deployment.json',root/'key','0xd','0xc','deployment',lambda:None)
             self.assertNotIn('applied',live.evidence['recorded_device']);process.terminate.assert_called_once()
             self.assertEqual(live.transaction.call_args.kwargs['funding'],50_000_000)
+
+class ResumedObjectDiscovery(unittest.TestCase):
+    def test_setup_order_and_duplicate_digests_do_not_hide_created_version(self):
+        import importlib.util
+        from unittest.mock import patch
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location('step_objects', Path(__file__).resolve().parents[1] / 'guide/record_guide.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with patch.object(module, 'created', side_effect=lambda live,digest,suffix: ['version'] if digest == 'publish' else []) as read:
+            self.assertEqual(module.created_in_step(None, {'publish-version':['publish','catalog','publish']}, 'publish-version', '::ComponentVersion'), ['version'])
+            self.assertEqual(read.call_count, 2)
+        with patch.object(module, 'created', side_effect=RuntimeError('unknown effects')):
+            with self.assertRaisesRegex(RuntimeError, 'unknown effects'):
+                module.created_in_step(None, {'publish-version':['unknown']}, 'publish-version', '::ComponentVersion')
