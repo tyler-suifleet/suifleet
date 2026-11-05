@@ -119,6 +119,37 @@ class FixtureJournal:
             self.run(pending['operation'], None, budget=pending.get('gas_budget_mist'),
                      funding=pending.get('funding_mist', 0), expect=pending['expect'])
 
+    def retire_legacy_base_probe(self):
+        """Reconcile the obsolete co-signed probe without treating it as acceptance.
+
+        Called only after verifying the cached package pair. Preserve exact effects,
+        charge the original reservation, and still run the new wallet-only probe.
+        All other unexpected or unreadable transactions remain fail-closed.
+        """
+        pending = self.state.get('pending')
+        label = 'old package cannot bypass protection'
+        if not pending or pending.get('operation') != label:
+            return
+        if (pending.get('expect') != 'failure'
+                or pending.get('gas_budget_mist') != 20_000_000
+                or pending.get('funding_mist', 0) != 0 or not pending.get('digest')):
+            raise RuntimeError('invalid retained legacy base probe; preserve pending identity')
+        result = self.live.read_back(pending['digest'])
+        if not result:
+            raise RuntimeError('uncertain legacy base probe; exact digest not readable')
+        result = tc.bound(result, pending['digest'])
+        observed = result['effects']['status']['status']
+        if observed not in ('success', 'failure'):
+            raise RuntimeError('invalid legacy base probe effects')
+        original = dict(pending)
+        result = self.run(label, None, expect=observed)
+        self.state.setdefault('retired_probes', []).append(dict(
+            pending=original, result=result, reason='co-signed base is not a bypass test'))
+        self.state['completed'].pop(label)
+        self.save()
+        self.live.evidence['retired_native_base_probe'] = dict(
+            digest=result['digest'], status=observed, acceptance=False)
+
     def wallet(self, label, *ptb, budget=20_000_000, funding=0):
         return self.run(label, self.live.exact_ptb(ptb,
             persist=lambda data: self.pending(label, data, budget)), budget=budget, funding=funding)
@@ -207,9 +238,8 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
     tx('enable native passkey protection',operation='policy',mask=2,sponsor=0,**common)
     tx('wallet plus passkey allows action',operation='rename',fleet=f['fleet'],name='Native co-signed action',sponsor=0,**common)
     tx('wallet alone refused on chain',operation='rename',fleet=f['fleet'],name='must fail',expect='failure',**common)
-    # Package versions remain callable, and a baseline that already supports
-    # native sponsorship legitimately accepts an enrolled co-signer. Probe the
-    # missing factor through both entry points, independent of package identity.
+    # Package identity does not determine security compatibility. A compatible
+    # base may authorize a valid co-signer; wallet-only access must still fail.
     tx('base wallet alone refused', operation='rename', fleet=f['fleet'],
        name='must fail old', expect='failure', **{**common, 'package': f['base']})
     live.evidence['native_old_package_probe'] = 'base-wallet-only'
@@ -290,6 +320,7 @@ def cached_acceptance(live, package_state, private=None):
     native_fixture(live, private, operation='info', requireExistingKeys=bool(f or state.get('pending') or state.get('completed')))
     state['require_keys'] = True
     journal = FixtureJournal(live, state, save)
+    journal.retire_legacy_base_probe()
     journal.recover()
     if not f:
         result = journal.wallet('create cached passkey organization', '--move-call',
