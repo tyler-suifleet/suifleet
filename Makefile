@@ -127,6 +127,7 @@ test-yocto-packaging:
 
 dapp-typecheck:
 	$(RUN) node scripts/test_subscription_checkout.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_billing_progress_browser.cjs
 	$(MAKE) test-testnet
 	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"
@@ -887,6 +888,7 @@ test-subscription-localnet:
 # SF-247 authenticated per-fleet reporting setup and browser interaction tests.
 .PHONY: test-fleet-reporting
 test-fleet-reporting:
-	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_fleet_reporting.py
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live*reporting.py'
 	$(RUN) node scripts/test_fleet_reporting.cjs
+	$(RUN) node scripts/test_evaluation_report_signer.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_reporting_browser.cjs

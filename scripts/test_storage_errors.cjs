@@ -17,7 +17,7 @@ const load = loader({
   '@tanstack/react-query': { useQuery(options) {
     queries.push(options);
     return options.queryKey[0] === 'fleet-budgets' ? { data: [budget], error: budgetError } :
-      { data: storageResult, error: storageError, isLoading: loading };
+      { data: { config, value: storageResult }, error: storageError, isLoading: loading, isSuccess: !storageError && !loading, isRefetchError: !!storageError };
   } },
   './useFleetSelection': { useFleetSelection: () => ({ supported: false }) },
   './useFleetTransaction': { useFleetTransaction: () => ({}) },
@@ -37,13 +37,14 @@ function choice() {
     let html = choice();
     const query = queries.find(q => q.queryKey[0] === 'fleet-storage');
     const empty = await client.fetchQuery(query);
-    assert.equal(empty, null, 'absent storage is valid query data');
+    assert.equal(empty.value, null, 'absent storage is valid query data');
+    assert.equal(empty.config, config, 'verified storage release travels with query data');
     assert.equal(client.getQueryState(query.queryKey).status, 'success');
     readFailure = raw;
     await assert.rejects(client.fetchQuery(query), raw, 'read failures remain errors, never absent storage');
     assert.equal(client.getQueryState(query.queryKey).status, 'error');
     readFailure = undefined;
-    storageResult = empty;
+    storageResult = empty.value;
     html = choice();
     assert.match(html, /Create and fund fleet storage/);
     assert.match(html, /href="\/budget\/">Create or fund fleet storage/);
@@ -53,6 +54,7 @@ function choice() {
     assert.match(choice(), /Loading fleet storage/);
     assert.doesNotMatch(choice(), /href=/);
     loading = false; storageError = raw;
+    assert.equal(hook().target, undefined, 'a failed refetch cannot retain a write target');
     assert.match(choice(), /Fleet storage could not be loaded/);
     assert.doesNotMatch(choice(), /href=/);
     assert.doesNotMatch(choice(), /undefined|fleet-storage|0x1843/);
@@ -63,7 +65,7 @@ function choice() {
       '@mysten/dapp-kit-react': { useCurrentClient: () => ({}) },
       '@tanstack/react-query': { useQuery: options => options.queryKey[0] === 'fleet-budgets'
         ? { data: [budget] } : options.queryKey[0] === 'fleet-storage'
-        ? { data: { id: '0xs' } } : { error: raw } },
+        ? { data: { config, value: { id: '0xs' } }, isSuccess: true } : { error: raw } },
       '@/hooks/useCurrentAccount': { useCurrentAccount: () => ({ address: '0xa' }) },
       './useFleetSelection': { useFleetSelection: () => ({ supported: false }) },
       './useFleetTransaction': { useFleetTransaction: () => ({}) },
@@ -119,7 +121,7 @@ function choice() {
     html = renderToStaticMarkup(createElement(usageLoad('components/DataUsage.tsx').DataUsage));
     assert.match(html, /Storage usage could not be loaded/);
     assert.doesNotMatch(html, /undefined|fleet-storage|0x1843/);
-    console.log('PASS: storage empty/loading/funded/error states, real QueryClient null result, absent archive-policy success/read failure, conditional setup links, safe formatter and rendered usage errors');
+    console.log('PASS: storage empty/loading/funded/error states, real QueryClient null storage value, absent archive-policy success/read failure, conditional setup links, safe formatter and rendered usage errors');
   } finally { client.clear(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
@@ -135,7 +137,7 @@ assert.doesNotMatch(settingsSource, /\$\{(?:walrusError|gasError)\}/, 'price rea
 // Exercise each read-error branch of the publish-period hook with raw internals.
 for (const failed of ['fleet', 'release-schedule', 'release-defaults', 'release-price']) {
   const periodLoad = loader({
-    react: { useState: () => [undefined, () => {}] },
+    react: { useState: () => [undefined, () => {}], useRef: value => ({current:value}) },
     '@/hooks/useCurrentAccount': { useCurrentAccount: () => undefined },
     '@mysten/dapp-kit-react': { useCurrentClient: () => ({}) },
     './useFleetStorage': {
@@ -143,7 +145,7 @@ for (const failed of ['fleet', 'release-schedule', 'release-defaults', 'release-
       useFleetBlobStore: () => ({}),
     },
     './useFleetTransaction': { useFleetTransaction: () => ({}) },
-    '@tanstack/react-query': { useQuery: ({ queryKey }) => ({
+    '@tanstack/react-query': { useQueryClient: () => ({refetchQueries:async()=>{}}), useQuery: ({ queryKey }) => ({
       data: queryKey[0] === 'release-schedule' ? { epoch: 10, epochDurationMs: 86400000, firstEpochStartMs: 1, maxEpochs: 365 } : undefined,
       error: queryKey[0] === failed ? raw : undefined,
     }) },
