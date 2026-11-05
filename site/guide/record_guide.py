@@ -335,7 +335,7 @@ def run(args):
 
         if resume and not demo.get("policy"):
             policies = []
-            for phase in live.evidence.get("browser", {}).get("phases", []):
+            for phase in [json.loads(path.read_text()) for path in runtime.glob("evidence-*.json")]:
                 for transaction in phase.get("transactions", []):
                     if transaction.get("step") == "enroll-batch" and transaction.get("status") == "success":
                         policies += created(live, transaction["digest"], "::enrollment::EnrollmentPolicy")
