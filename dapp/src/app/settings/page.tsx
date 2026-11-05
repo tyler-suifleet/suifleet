@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { StreamRetentionPanel } from "@/components/StreamRetention";
 import { PageHeader } from "@/components/ui";
+import { FleetReportingSetup } from "@/components/FleetReportingSetup";
 import { OrganizationSecurity } from "@/components/OrganizationSecurity";
 import { FleetSettingsPanel, StorageEndpoints } from "@/components/FleetSettings";
 
@@ -44,6 +45,7 @@ export default function SettingsPage() {
               <p className="mt-1 text-sm leading-relaxed text-slate-500">Set the rhythm for software checks and health reports.</p></div>
             <Link href="/budget/" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">View network budget <span aria-hidden="true">↗</span></Link>
           </div>
+          <FleetReportingSetup />
           <FleetSettingsPanel />
         </section>
         <section id="settings-storage" aria-label="Data retention settings" hidden={active !== "storage"} className="space-y-5">
