@@ -4866,6 +4866,30 @@
         "Regression tests and actual current-customer group management pass without historical event availability."
       ],
       "validation": "Frontend tests/typecheck/build and retained SF-245 group testnet result under unchanged allowance."
+    },
+    {
+      "key": "SF-251",
+      "title": "Complete self-service reporting in the public testnet evaluation",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "profiles/seal-testnet",
+        "dapp",
+        "docs/validation",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "Complete the public mobile evaluation's reporting configuration so a NEW customer can set up reporting and download verified settings without an operator rebuild or a per-fleet hardcoded locator. This is the deployment follow-through of SF-246/#614 and SF-247/#616, discovered during the user-requested customer audit. Source-only reporting implementation in PR #621 is not evidence that the shared preview is configured.\n\nUse the tested reporting interface from PR #621 (inspect its exact latest head and evidence) and the existing evaluation profile from SF-246. Stacks are allowed: do not wait solely for merged-main publication. Coordinate exact source/head and do not edit another worker's claimed branch. Dedicated testnet agent wallet only, explicit client-host.yaml, acquire/assert/renew/release network:suifleet-testnet only during shared mutations. SF-245 recording has completed and released its lease. Never touch SF-173's separate publisher wallet or its prior allowance.\n\nDeliverables:\n- Verify whether the retained evaluation core supports fleet_budget::attach. Stage and compatibility-check any necessary additive upgrade, preserving existing registry, objects, ALL prior type origins and subscriptions. Use pinned compiler/network CLI, verify unsigned bytecode before signing, inspect execution effects and re-resolve the manifest. Reuse exact already-published compatible packages; never republish identical code. Reporting packages published against the isolated SF-247 core cannot simply be pointed at incompatible evaluation-core types.\n- Publish/verify the matching storage/data packages if required and configure the app-wide reviewed ReportingRelease (package/cap pairs), with NO per-customer static locator requirement. Preserve old fleet keys, journals, object history and named identities. Coordinate current profile with open profile repair workers before publishing its source changes.\n- Perform a separate durable run for this genuinely new reporting release, bounded at 2,000,000,000 MIST including failures and full child funding. This does NOT reset SF-245/SF-246/SF-173 allowances. Journal each digest before signing, stop/reconcile unknown outcomes, retain exact prior charges on retries, no refunds/faucets replenish the ceiling. Verify balance first; do not request a faucet routinely. Record actual costs, not budgets as charges.\n- Build the combined current customer UI (audit/readiness, funding #620, storage #624, groups #627 and latest billing progress from #617) against the complete verified profile. Test two fresh independent customer fleets and unchanged UI build: actual setup, device network-account enrollment, reporting enrollment/settings download, and real native daemon report with independently verified signature/bindings. Before the report, show unreported; startup degraded is not healthy. No fabricated health or broad fallback on read errors.\n- Supply reproducible profile/evidence and prepared immutable static artifact/handoff to the existing mobile preview services. Public docs/app/site crosslinks must use reachable HTTPS preview origins, not localhost/private WSL addresses. Preserve existing mobile URLs where possible. This authorizes TESTNET preview integration under the user's existing request, not production DNS/credentials, Mainnet, Pi programming or manual Slush claims.\n- Run relevant Move upgrade/old-object, SDK/browser/download/typecheck/build and edge checks for changed code. Shared fixtures and controller gates stay intact. Ordinary source review and CI remain required. Clearly retain deferred physical/provider/manual-wallet acceptance #32/#159.\n\nExisting mobile preview: https://characterized-above-chemical-possess.trycloudflare.com/ (runtime metadata /preview-version.json). Runtime artifacts under ~/.local/state/suifleet; never print keys or lease/claim tokens. Root operator is finishing SF-245 media; reporting work should proceed in its own claimed worktree through the normal dispatcher/review service.\n",
+      "evidence": "Reporting source tested in isolated SF-247 fixture but public shared evaluation still lacks matching complete release configuration.",
+      "acceptance": [
+        "Compatible verified evaluation core/storage/data and app-wide reporting release, preserving retained state and prior origins.",
+        "Two new customers provision and produce independently verified actual daemon reports with the unchanged public app build.",
+        "Durable separate 2 SUI ceiling includes all failures/funding; exact receipts and mobile HTTPS artifact/handoff supplied; normal review/CI and deferred acceptance retained."
+      ],
+      "validation": "Exact-head compatibility, browser/SDK/typecheck/build and actual testnet daemon outcomes; no Mainnet, other-wallet credentials or physical Pi."
     }
   ]
 }

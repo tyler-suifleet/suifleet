@@ -70,8 +70,8 @@ names a new demo component version. Enrollment claims and rollouts are run-owned
 examples. A retained key without matching, reconciled evidence stops the run;
 never recover a key or repeat an uncertain transaction blindly.
 
-Each WebM and MP4 must be at most 15,000,000 bytes; nine steps therefore have a
-270-MB maximum combined video budget, plus posters and text. MP4 is H.264 with
+Each WebM and MP4 must be at most 15,000,000 bytes; ten steps therefore have a
+300-MB maximum combined video budget, plus posters and text. MP4 is H.264 with
 faststart, WebM is VP9. The initial encoder produces silent clips with burned-in
 captions; the narration pass below adds the spoken track. Encoding shortens
 long confirmation waits, without claiming instant network confirmation. Written
@@ -83,7 +83,7 @@ Before committing media, review every video from start to finish for accuracy,
 caption readability, keys, credentials, tokens and non-demo addresses. Keep raw
 frames, browser state, keys and failed captures private outside the checkout.
 Record review evidence and exact console commit with the transaction/cost receipt.
-Do not mark SF-175 Review until the genuine nine-step run and review pass.
+Do not mark SF-175 Review until the genuine configured-step run and review pass.
 
 The recording-only overlay in `recording_overlay.cjs` paints a high-contrast
 pointer into compositor frames. It follows actual pointer events, including
@@ -130,7 +130,7 @@ and full decoding of both outputs. WebM uses Opus and MP4 uses AAC. Public
 `videos.json` records synthetic voice/model provenance and the retimed script.
 Preserve the actual console commit, chain receipts, cursor and posters.
 
-After reviewing all nine outputs, replace `site/media/guide/` with the staged
+After reviewing all configured outputs, replace `site/media/guide/` with the staged
 media, then run the site build/check with `--require-videos`. Native playback
 controls manage volume; no autoplay or third-party player is needed. The written
 guide and burned-in captions remain available without sound. No model or
@@ -197,3 +197,24 @@ frames. Narration must be derived/reviewed against these actual actions, then
 retimed and captioned from the final encoded speech. Preserve the source commit,
 media hashes and complete cue timing; never relabel historical video bytes as
 current recordings. Captions and narration explain why each stage is needed.
+
+## Current ten-stage customer recording
+
+Use `--profile profiles/seal-testnet --fresh-customer --fresh-device` for the
+explicit evaluation configuration and an isolated customer. The current flow
+visibly prepays/applies the disposable capacity offer before operating-fund
+deposits. It does not substitute an administrator entitlement grant.
+
+The current rollout recording selects a published library recipe and named
+devices, creates a plan, then pauses it without admitting devices. Actual
+Linux installation is separately proven by the deployment's authoritative
+Applied receipt; healthy reporting/rollout completion is not invented.
+
+The final narration script is canonical across ten clips. Three bounded
+synthesis batches were used; their exact input hashes and clip lists are in
+`videos.json`. Reconstruct each input by selecting its listed clips from
+`narration.json`, retaining the other configuration keys and formatting with
+`json.dumps(config, indent=2) + "\n"`. A regression verifies every hash and
+spoken cue. Captions use final retimed speech, never original wall-clock times.
+The local review used full decoding, complete ASR and 108 cue-start/midpoint
+frames; this is not a claim of real-time human viewing or Slush approval.

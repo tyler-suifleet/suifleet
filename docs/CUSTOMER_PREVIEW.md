@@ -27,3 +27,23 @@ Artifacts are retained under `~/.local/state/suifleet/`; app startup checks its 
 After a compatible chain upgrade, regenerate **both** browser and device connection manifests, preserving introduction origins. Existing pinned clients reject a stale latest-package reference; distribute the new settings in a controlled rollout without changing their device key or journal. The SF-246 v3 upgrade preserved the existing registry and origins; physical Pi configuration rollout remains unclaimed.
 
 Open work: SF-245/#612 refreshes videos/captions. SF-247/#616 implements self-service reporting/storage setup and dynamic discovery for new fleets; the retained configured evaluation budget alone does not establish that behavior. Production DNS/provider/credential changes and SF-173's separate Walrus Site publisher wallet remain outside this preview operation.
+
+## Current customer-walkthrough follow-through
+
+SF-245 replaces the historical guide with ten current recorded stages, adding
+visible capacity prepayment/application before device operating funds. The
+sample is public software, a scripted test wallet and a real disposable Linux
+installer with an independently verified Applied receipt. It is not physical Pi,
+manual Slush, production billing or healthy-service acceptance. The rollout clip
+creates and pauses a plan without admitting devices; it does not claim a healthy
+rollout. Full receipts, original allowance and media review method are in
+[the current guide evidence](validation/sf245-current-guide.json).
+
+The same walkthrough found and repaired managed coin serialization/batch funding
+(SF-248), optional settings/quote recovery and false expiry forecasts (SF-249),
+and current group discovery (SF-250). The complete public reporting-release
+configuration remains explicitly owned by SF-251/#628; isolated reporting tests
+alone do not establish that the public evaluation is configured. Its dispatcher
+worker must preserve existing objects and publish verified release/artifact
+provenance. Until that deployment is verified, never infer current health from
+registration, setup, funding or an Applied installation result.
