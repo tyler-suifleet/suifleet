@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { loader } = require('./frontend_test_utils.cjs');
+const { loader, appRequire } = require('./frontend_test_utils.cjs');
 const { onboardingConfig, registrationInput, formatSui, displaySui, shortAddress, onboardingProgress } = loader()('lib/onboarding.ts');
 const key = 'enoki_public_fixture', id = 'fixture.apps.googleusercontent.com';
 for (const network of ['localnet', 'devnet', 'unknown']) assert.equal(onboardingConfig(network, key, id).enabled, false);
@@ -51,3 +51,21 @@ const privateKeyCheck = require('node:child_process').spawnSync(process.execPath
 assert.notEqual(privateKeyCheck.status, 0);
 assert.match(privateKeyCheck.stderr, /must be an Enoki public app key/);
 console.log('PASS: frontend build rejects a private Enoki key before bundling');
+
+// Capacity/authority failures must appear before a registration is attempted.
+assert.equal(onboardingProgress(true, ok('5'), ok(0), { available:false, administrator:true })[2].status, 'Device capacity needed');
+assert.equal(onboardingProgress(true, ok('5'), ok(0), { available:true, administrator:false })[2].status, 'Administrator required');
+assert.equal(onboardingProgress(true, ok('5'), ok(1), { available:false, administrator:true })[2].state, 'done');
+console.log('PASS: missing capacity/read-only authority blocks registration guidance, existing inventory stays registered');
+
+// Render real prerequisite copy: unknown data is not success; deposits do not buy capacity.
+const { createElement } = appRequire('react');
+const { renderToStaticMarkup } = appRequire('react-dom/server');
+const { PilotReadiness } = loader()('components/PilotReadiness.tsx');
+const renderReadiness = p => renderToStaticMarkup(createElement(PilotReadiness, { connected:true, balanceFailed:false, budgetChecked:false, budgetFailed:false, ...p }));
+let html = renderReadiness({ capacity:{ used:0n,limit:0n,administrator:true },balance:'0' });
+assert.match(html,/No places available/);assert.match(html,/Checking the fleet budget/);assert.doesNotMatch(html,/Capacity is available/);
+html=renderReadiness({ capacity:{used:0n,limit:2n,administrator:true},balance:'10',budgetChecked:true,deviceBudget:0n });
+assert.match(html,/Capacity is available/);assert.match(html,/fleet budget is empty/);assert.match(html,/separate requirements/);assert.doesNotMatch(html,/healthy|installed successfully/);
+html=renderReadiness({budgetFailed:true});assert.match(html,/could not be verified/);assert.doesNotMatch(html,/No device budget is available/);
+console.log('PASS: actual readiness UI distinguishes missing capacity, account funds, empty budgets and failed verification');
