@@ -763,12 +763,26 @@
         "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "deferred_checks": [
-        "Owner applies the exact provider-returned Cloudflare web DNS/ownership records; verify actual suifleet.io/www/app/docs ownership and TLS, rebuild configured owned-domain crosslinks and recheck served media/navigation. No DNS writes or owned-domain HTTPS success claimed.",
         "Manual Slush/real-wallet screening and signing, physical Pi, production-payment/provider and Mainnet acceptance remain in the existing final acceptance tickets."
       ],
       "retained_gates": [
         "Actual independent public hosted website/app/docs publication receipts and source/configuration hashes; anonymous phone/desktop navigation, actual overview playback/captions, exact DNS download and real read-only customer/reporting/health checks.",
         "Source/security findings, meaningful local/frontend/production build regressions, ordinary exact-head CI, applicable automatic public-Testnet and independent application review remain required. No secrets, fabricated wallet acceptance or weakened deployment protections."
+      ]
+    },
+    "SF-256": {
+      "authorization": "User explicitly chose owner-controlled Cloudflare hosting, completed the Pages OAuth login and manually applied web DNS. Reviewed software/source integration remains required; actual hosting/domain validation is now performed, not waived.",
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "deferred_checks": [
+        "Manual real-wallet/Slush signing and screening, physical Pi, actual Mainnet and production-payment/provider acceptance remain unrun in the existing final acceptance issues.",
+        "Existing protected CI release credential/reviewer setup and full CI/rollback rehearsal are not established by the machine OAuth publication."
+      ],
+      "retained_gates": [
+        "Source/security and ordinary current-head CI/application review; preserve account/zone/project checks, exact sealed source/configuration/asset hashes and static-only publication.",
+        "Actual owner-account Pages upload, custom-domain activation/TLS, real hosted browser/media/read-only customer checks and exact served-byte/response-header evidence."
       ]
     }
   },

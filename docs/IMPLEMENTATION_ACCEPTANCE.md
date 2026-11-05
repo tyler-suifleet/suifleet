@@ -212,8 +212,18 @@ wallet/hardware compatibility or granting production/hardware/mainnet authority.
 
 Independent public HTTPS website/app/docs publication is now verified; see
 [SF-253 evidence](validation/SF253.md) and [deployment receipts](../hosting/final-deployments.json).
-Owned-domain DNS/ownership/TLS cutover remains in SF-087/#159, using the exact
-[owner instructions](../hosting/README.md). Manual real-wallet screening/signing
+Owned-domain DNS/ownership/TLS cutover was subsequently verified in
+[SF-256](validation/SF256.md) on the owner’s Cloudflare account. Manual real-wallet screening/signing
 remains in SF-031/#32. No owned-domain success, DNS writes or real-wallet signing
 are inferred from provider-host delivery or a public-account read-only harness.
 Normal software/CI/testnet and independent review gates remain required.
+
+## Owner-controlled Cloudflare migration (SF-256)
+
+Account/zone ownership, three Pages publications, all four custom-domain statuses,
+actual HTTPS/mobile/desktop/media/data access and sealed served-byte/header checks
+are verified in [SF-256](validation/SF256.md). The owner applied DNS manually.
+This completes the prior domain-activation deferral; it does not establish manual
+Slush signing/screening, Pi/Mainnet or production-payment acceptance in #32/#159.
+Protected CI credential/reviewer setup and a full CI release/rollback rehearsal
+remain separate from this explicitly user-authorized machine publication.
