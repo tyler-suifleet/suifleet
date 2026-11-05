@@ -6,6 +6,20 @@ The core story is understandable: install a device client, register devices, pub
 
 This audit assumes no blockchain knowledge and little Greengrass knowledge. It evaluates discovery, prerequisites, terminology, task order, empty/error states, reporting expectations and instructional media. It does not establish production security, legal compliance, paid-provider readiness or hardware acceptance.
 
+## Follow-through: mobile preview and onboarding (SF-246)
+
+The local-only addresses above were unsuitable for a phone. The evaluation website, app and curated documentation now have verified public HTTPS preview URLs, and all onboarding help links use the configured documentation origin. The site builder/checker accept a constrained public-origin configuration instead of post-build URL rewriting.
+
+The testnet evaluation core was compatibly upgraded to version 3, preserving the registry and every previously recorded type origin. Reporting/storage locators and subscription descriptors are now configured explicitly. Both immutable checkout offers passed the actual frontend readers. The checkout uses **0.01 test SUI or test USDC for a 100-device demonstration**, not commercial pricing; the UI labels the test tariff/conversion and canonical commercial pricing remains unchanged.
+
+A funded disposable identity created an organization, executed the actual frontend SUI prepay and collection builders, and reached 100 devices of verified capacity. This exposed an important two-step explanation: prepay first, then apply the due prepaid payment to activate capacity. Billing now explains that the latter uses the prepaid balance, costs a network fee, and does not debit the wallet again. It refreshes fleet capacity after confirmed changes.
+
+The first-use screen now checks capacity, account fee funds and device operating funds separately. Missing capacity or administrator authority blocks registration guidance before a doomed approval request; existing inventory remains registered. Unknown/failed budget reads are not presented as funded or empty successes.
+
+A deeper remaining feature gap is tracked by SF-247 / #616: reporting/storage provisioning and locator discovery for a **new** fleet currently require operator configuration. A verified evaluation binding does not solve self-service provisioning for every new customer. SF-245 / #612 owns fresh current-UI recordings and native captions; an unmerged recording source alone is not a mandatory merge wait, and the operator explicitly permits the current PR stack.
+
+Existing pinned device clients need the generated version-3 connection settings in a staged rollout. Their keys/journals were not changed, and this work does not claim physical Pi rollout or manual phone-wallet acceptance. Dedicated-agent mutations and child funding stayed within the original 1.2 SUI non-replenishing run allowance; detailed receipts are in `docs/validation/sf246-testnet-preview.json`.
+
 ## Method and evidence
 
 - Starting source: `54ac232d`, current main when this audit began. The existing local app preview was older (`0880dbb7`); the website and video preview also had different source revisions. Source and preview freshness must be distinguished.
