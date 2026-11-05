@@ -19,20 +19,15 @@ owned-domain DNS and deferred production/hardware acceptance.
 | Stale or inaccessible videos | Ten current female-narrated recordings, native captions, complete written alternative, verified install outcome, honest rollout creation/pause. | SF-245:53 tests,20 decoded files, full ASR,108 reviewed frames, seven viewports/all77 instructions; actual public HTTPS playback. |
 | Missing conceptual introduction | Original116.95-second animated overview with landscape/portrait variants; wallet approval, records/files, outbound checks, verification, platform installation and separate reports. | SF-252:56 site tests, four decoded files, full audio ASR98.7%, actual responsive playback/fallback and transcript. |
 | Misleading pricing/privacy/revocation claims | Graduated pricing explained, proposed commercial subscription separated from test funds, optional costs disclosed, no deletion/remote-erasure promise. Public metadata and retention limits explained. | SF-244; pricing generation consistency and customer copy tests. No commercial payment acceptance claimed. |
-| Local-machine-dependent website/app/docs | Three public managed static deployments, immutable source/configuration/file hashes, no WSL origin required. Real HTTPS phone/desktop navigation checks pass. | SF-253; hosting project IDs, publication receipts and reproducible bundles under `hosting/`. |
-| Owned domains not usable | Host-side bindings created for root/www/app/docs; exact provider-issued routing/verification records and DNS-only import file prepared. | **DNS activation still pending owner action:** no Cloudflare DNS credentials are connected. No authoritative DNS writes or owned-domain TLS success are claimed. |
+| Local-machine-dependent website/app/docs | Three static Cloudflare Pages deployments in the user’s own account, with source/configuration/file hashes; no WSL origin required. | SF-256; actual native receipts, all255 public asset digests and14 real HTTPS viewport/page checks. |
+| Owned domains not usable | suifleet.io/www, app.suifleet.io and docs.suifleet.io are active on the owner’s Cloudflare Pages account. The user entered DNS manually; old Sites domain associations were removed. | SF-256; all four domain statuses active, real HTTPS navigation/media/reporting and exact served-byte/header checks. No model DNS-record mutation occurred. |
 
-The public website, app and documentation are hosted through the
-[Sites plugin](plugin://sites@openai-curated-remote), with source provenance in
-the deployment records. All commits use the user's verified Tyler Bush identity.
-Temporary development tunnels may remain for comparison, but the managed hosts
-do not use them as origins.
-
-To complete the owned-domain cutover, follow [the concrete DNS instructions](../hosting/README.md),
-verify ownership/TLS, and rebuild/redeploy the same projects with
-`hosting/production-origins.json`. Existing Google Workspace MX/TXT/DKIM and
-unrelated records remain unchanged. The prepared import contains only the listed
-web routing and host-verification records.
+The current public website, app and documentation use the owner-controlled
+Cloudflare Pages projects in [the hosting runbook](../hosting/README.md).
+[SF-256](validation/SF256.md) records the actual domain cutover, source/collection
+hashes and tests. Historical Sites receipts remain migration evidence; their
+custom-domain associations are removed. No OpenAI verification TXT records are
+required for the current hosting. All commits use the user's verified identity.
 
 Normal application review/CI remains required; publishing an evaluated Testnet
 frontend is not a claim that every PR is merged. Physical Pi, manual wallet,

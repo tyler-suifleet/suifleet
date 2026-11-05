@@ -6,6 +6,11 @@ website, Testnet console and curated docs are independent static deployments.
 project scope; `cloudflare-projects.json` records the actual provider-returned
 project IDs and domains. Reuse these projects; do not create replacements on retry.
 
+All four owned hostnames are active. Actual final deployment IDs/source and domain
+status are recorded in `cloudflare-deployments.json`; validation is in
+[SF-256](../docs/validation/SF256.md). The user applied DNS manually; the model
+performed no DNS-record writes.
+
 | Address | Pages project |
 |---|---|
 | `suifleet.io`, `www.suifleet.io` | `suifleet-marketing` |
