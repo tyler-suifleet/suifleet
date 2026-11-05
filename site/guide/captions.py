@@ -33,4 +33,4 @@ def webvtt(cues, duration):
         output.extend([str(number), f'{timestamp(start)} --> {timestamp(end)}',
                        '\n'.join(textwrap.wrap(escaped, width=64)), ''])
         previous = end
-    return '\n'.join(output) + '\n'
+    return '\n'.join(output)

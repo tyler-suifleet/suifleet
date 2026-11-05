@@ -46,4 +46,3 @@ Applied is a verified device receipt: the client downloaded the
 software, completed its configured installer and reported
 success. It does not prove a long-running service is healthy.
 Deployment created alone did not prove this.
-

@@ -86,6 +86,16 @@ class SiteTest(unittest.TestCase):
             self.assertIn(f'id="{step["id"]}"', guide)
             self.assertIn(f'href="{config["app_url"]}{step["console_route"]}"', guide)
 
+    def test_advanced_guide_paths_are_explicitly_optional(self):
+        steps = json.loads((SITE / "guide/steps.json").read_text())["steps"]
+        by_id = {step["id"]: step for step in steps}
+        guide = (self.out / "guide/index.html").read_text()
+        for step_id in ("enroll-batch", "access-policy", "staged-rollout"):
+            with self.subTest(step=step_id):
+                summary = by_id[step_id]["summary"]
+                self.assertTrue(summary.startswith("Optional "), summary)
+                self.assertIn(summary, guide)
+
     def test_logo_download_preserves_transparency(self):
         for page in json.loads((SITE / "src" / "site.json").read_text())["pages"]:
             html = build.output_path(self.out, page["path"]).read_text()
