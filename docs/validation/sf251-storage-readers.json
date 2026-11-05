@@ -1,0 +1,110 @@
+[
+  {
+    "customer": "0x9882170704524b1e0b73806096093175c7275d0d174827f448c3feee4bb3da7a",
+    "storageId": "0xdab0537ebce8a85ece4773ba7df018a3900e91cbeecec53a064974b1357c8074",
+    "storageRelease": {
+      "config": {
+        "packageId": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "storageOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "walrus": {
+          "walrusPackage": "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611",
+          "walrusOrigin": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66",
+          "system": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "walType": "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL",
+          "exchange": {
+            "package": "0x82593828ed3fcb8c6a235eac9abd0adbe9c5f9bbffa9b1e7a45cdd884481ef9f",
+            "objects": [
+              "0xf4d164ea2def5fe07dc573992a029e010dba09b1a8dcbc44c5c2e79567f39073",
+              "0x19825121c52080bb1073662231cfea5c0e4d905fd13e95f21e9a018f2ef41862",
+              "0x83b454e524c71f30803f4d6c302a86fb6a39e96cdfb873c2d1e93bc1c26a3bc5",
+              "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
+            ]
+          }
+        }
+      },
+      "storageId": "0xdab0537ebce8a85ece4773ba7df018a3900e91cbeecec53a064974b1357c8074"
+    },
+    "health": "degraded"
+  },
+  {
+    "customer": "0xa60da2f2d2f8ec3b5fb4d9e5de18cfbd64598da4cf45c68ef65397046f75b57f",
+    "storageId": "0xf3410aae0e00cc580f87cd4dc4632f8d24159a1a6c765c279ee67da97d81b342",
+    "storageRelease": {
+      "config": {
+        "packageId": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "storageOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "walrus": {
+          "walrusPackage": "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611",
+          "walrusOrigin": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66",
+          "system": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "walType": "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL",
+          "exchange": {
+            "package": "0x82593828ed3fcb8c6a235eac9abd0adbe9c5f9bbffa9b1e7a45cdd884481ef9f",
+            "objects": [
+              "0xf4d164ea2def5fe07dc573992a029e010dba09b1a8dcbc44c5c2e79567f39073",
+              "0x19825121c52080bb1073662231cfea5c0e4d905fd13e95f21e9a018f2ef41862",
+              "0x83b454e524c71f30803f4d6c302a86fb6a39e96cdfb873c2d1e93bc1c26a3bc5",
+              "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
+            ]
+          }
+        }
+      },
+      "storageId": "0xf3410aae0e00cc580f87cd4dc4632f8d24159a1a6c765c279ee67da97d81b342"
+    },
+    "health": "degraded"
+  },
+  {
+    "customer": "0x9a55c5365e4e446394f67b00c5b6e2901aa6641d0cc003ab32300048451fa722",
+    "storageId": "0xa8672461f05846632758881437154117f79223b02df961f09b7b0918efd3c3c4",
+    "storageRelease": {
+      "config": {
+        "packageId": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "storageOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "walrus": {
+          "walrusPackage": "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611",
+          "walrusOrigin": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66",
+          "system": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "walType": "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL",
+          "exchange": {
+            "package": "0x82593828ed3fcb8c6a235eac9abd0adbe9c5f9bbffa9b1e7a45cdd884481ef9f",
+            "objects": [
+              "0xf4d164ea2def5fe07dc573992a029e010dba09b1a8dcbc44c5c2e79567f39073",
+              "0x19825121c52080bb1073662231cfea5c0e4d905fd13e95f21e9a018f2ef41862",
+              "0x83b454e524c71f30803f4d6c302a86fb6a39e96cdfb873c2d1e93bc1c26a3bc5",
+              "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
+            ]
+          }
+        }
+      },
+      "storageId": "0xa8672461f05846632758881437154117f79223b02df961f09b7b0918efd3c3c4"
+    },
+    "health": "degraded"
+  },
+  {
+    "customer": "0xe2f603d3ccc821d03140762038baf1ef7a80129c1e570cf82a1c6a083c1e4c13",
+    "storageId": "0x5fac21352624c194b1a1c85ae6b6d9eb29011890de79d88633572714763f160c",
+    "storageRelease": {
+      "config": {
+        "packageId": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "storageOrigin": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "walrus": {
+          "walrusPackage": "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611",
+          "walrusOrigin": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66",
+          "system": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "walType": "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL",
+          "exchange": {
+            "package": "0x82593828ed3fcb8c6a235eac9abd0adbe9c5f9bbffa9b1e7a45cdd884481ef9f",
+            "objects": [
+              "0xf4d164ea2def5fe07dc573992a029e010dba09b1a8dcbc44c5c2e79567f39073",
+              "0x19825121c52080bb1073662231cfea5c0e4d905fd13e95f21e9a018f2ef41862",
+              "0x83b454e524c71f30803f4d6c302a86fb6a39e96cdfb873c2d1e93bc1c26a3bc5",
+              "0x8d63209cf8589ce7aef8f262437163c67577ed09f3e636a9d8e0813843fb8bf1"
+            ]
+          }
+        }
+      },
+      "storageId": "0x5fac21352624c194b1a1c85ae6b6d9eb29011890de79d88633572714763f160c"
+    },
+    "health": "degraded"
+  }
+]

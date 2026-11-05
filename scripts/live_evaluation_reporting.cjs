@@ -18,7 +18,10 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc');
  }
  const config=await reporting.resolveFleetReporting(client,fleet);
  if(!config)throw Error('Reporting missing');
+ const storageRelease=await reporting.resolveFleetStorageRelease(client,fleet);
+ const storage=await load('lib/fleet-budget.ts').fetchStorage(client,storageRelease.config,fleet.budgetId);
+ if(!storage||storage.id!==config.storageId)throw Error('Reporting storage not discoverable by normal funding reader');
  const settings=await reporting.reportingClientSettings(client,fleet,input.device);
  const health=(await load('lib/fleet-data.ts').fetchChainHealth(client,config,[input.device]))[input.device];
- console.log(JSON.stringify({config,settings,health}));
+ console.log(JSON.stringify({config,settings,health,storageRelease,storageId:storage.id}));
 })().catch(e=>{console.error(String(e));process.exit(1)});

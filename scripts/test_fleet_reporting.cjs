@@ -6,7 +6,9 @@ const {ObjectError} = appRequire('@mysten/sui/client');
 const manifest = JSON.parse(fs.readFileSync('manifests/fixture.localnet.json'));
 const catalog = JSON.parse(fs.readFileSync('interfaces/fleet-v1.json'));
 for(const name of [...catalog.optional_type_origins.fleet_budget,...catalog.optional_type_origins.customer]) manifest.type_origins[name]=manifest.call_package_id;
+manifest.network='testnet'; manifest.chain_identifier='4c78adac';
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(manifest);
+process.env.NEXT_PUBLIC_FLEET_STORAGE_PACKAGE=id('0x999');
 const release={packageId:id('0x81'),upgradeCapId:id('0x82'),storagePackageId:id('0x51'),storageUpgradeCapId:id('0x52')};
 process.env.NEXT_PUBLIC_FLEET_REPORTING_RELEASE=JSON.stringify(release);
 const load=loader(), reporting=load('lib/fleet-reporting.ts'), data=load('lib/fleet-data.ts'), budget=load('lib/fleet-budget.ts'), protocol=load('lib/fleet-protocol.ts'), {UpgradeCapBcs}=load('lib/move-bcs.ts');
@@ -51,6 +53,10 @@ function fixture(options={}) {
  }};
 }
 (async()=>{
+ const selectedStorage=await reporting.resolveFleetStorageRelease(fixture(),fleet(1));
+ assert.equal(selectedStorage.config.packageId,release.storagePackageId);assert.equal(selectedStorage.config.storageOrigin,release.storagePackageId);assert.equal(selectedStorage.storageId,configs[0].storageId);
+ await assert.rejects(()=>reporting.resolveFleetStorageRelease(fixture({rpcError:true}),fleet(1)));
+ const legacyStorage=await reporting.resolveFleetStorageRelease(fixture({absent:true}),fleet(1));assert.equal(legacyStorage.config.packageId,id('0x999'));
  for(let n=1;n<=2;n++)assert.deepEqual(await reporting.resolveFleetReporting(fixture(),fleet(n)),configs[n-1]);
  for(const options of [{crossData:true},{crossStorage:true},{wrongOrigin:true},{staleRelease:true},{spoof:true},{rpcError:true}])await assert.rejects(()=>reporting.resolveFleetReporting(fixture(options),fleet(1)));
  assert.equal(await reporting.resolveFleetReporting(fixture({absent:true}),fleet(1)),undefined);
