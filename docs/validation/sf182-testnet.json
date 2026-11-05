@@ -1,0 +1,213 @@
+{
+  "started": "2026-11-04T01:31:09Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "SF-182 disposable customer and monthly USDC offer",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "mHtoLKNyT2btvx6Ysuuufo8eL4oMp791B1UgpNKLY6f",
+      "gas_mist": 3629778,
+      "allowance_used_mist": 3629778
+    },
+    {
+      "label": "SF-182 frontend payment-link USDC deposit",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+      "gas_mist": 0,
+      "allowance_used_mist": 3629778
+    },
+    {
+      "label": "SF-182 refund explicitly selected cancelled fixture deposit",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "6fMHgp218LYNQyvZWQuz1ojCfXMDtWVze88wD3H3aVn6",
+      "gas_mist": 2322983,
+      "allowance_used_mist": 5952761
+    }
+  ],
+  "checks": [],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf181-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/tmp/sf181-tools/sui-network",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1273,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 8168972152,
+  "max_spend_mist": 100000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.83.0-16d2dc1e05ed"
+  },
+  "head": "a0bffea59276a1c92e07cd2cf70a3b2846ff6aeb",
+  "checkout": {
+    "account": {
+      "id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+      "customer_id": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "balance": {
+        "value": "1000"
+      },
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "9000",
+      "remaining": "0",
+      "period_ms": "2628000000",
+      "next_due_ms": "1796358347693",
+      "term_end_ms": "1825266347693",
+      "cancelled": true
+    },
+    "uri": "https://acceptance.invalid/billing/#chain=4c78adac&package=0x9fa20cc73455f1f6f65ea3f8796856ee5945abac0b895f038dbcc7919e838882&account=0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6&customer=0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa&symbol=USDC&amount=1000",
+    "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+    "receipts": [
+      {
+        "kind": "Deposited",
+        "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+        "amount": "1000",
+        "accountId": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6"
+      },
+      {
+        "kind": "Deposited",
+        "digest": "7E7AVeoXckwNaMow8esTocP3grBTTbSGusxv2KVWNrub",
+        "amount": "1000",
+        "accountId": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6"
+      },
+      {
+        "kind": "Deposited",
+        "digest": "HojvkMaJieViNpxTSZyguCtYuYsSyNgBpwwQXqpsaMhU",
+        "amount": "108000",
+        "accountId": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6"
+      },
+      {
+        "kind": "Collected",
+        "digest": "He5MLcioakduHqp8u8oKLJWaVZsuLRJ92Kr6pHiuiVtf",
+        "amount": "9000",
+        "accountId": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6"
+      },
+      {
+        "kind": "Refunded",
+        "digest": "6SdBmGWm81doWxeMyDmTFkkQ9rLPXG8zBVv8XyRurTJS",
+        "amount": "100000",
+        "accountId": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6"
+      }
+    ],
+    "csv_has_company": true,
+    "limits": [
+      "Existing verified SF-181 cancelled disposable account explicitly selected. Deposit does not reactivate it.",
+      "One dedicated signer exercises the external-wallet deposit protocol; real second-wallet acceptance remains #32/#159.",
+      "Initial plan selection/open is unit-tested; SF-181 records historical on-chain open. No fresh frontend open/renewal is claimed: the agent already has a bound account and replacement offers require 30-day notice.",
+      "The no-op customer-create/offer setup attempt remains charged to this same non-replenishing 0.1 SUI allowance.",
+      "No package publication, faucet, original app objects, mainnet, physical or production-provider acceptance."
+    ]
+  },
+  "refund_digest": "6fMHgp218LYNQyvZWQuz1ojCfXMDtWVze88wD3H3aVn6",
+  "manifest": "docs/validation/sf181-testnet-current-manifest.json",
+  "limits": [
+    "Existing verified SF-181 cancelled disposable account explicitly selected. Deposit does not reactivate it.",
+    "One dedicated signer exercises the external-wallet deposit protocol; real second-wallet acceptance remains #32/#159.",
+    "Initial plan selection/open is unit-tested; SF-181 records historical on-chain open. No fresh frontend open/renewal is claimed: the agent already has a bound account and replacement offers require 30-day notice.",
+    "The no-op customer-create/offer setup attempt remains charged to this same non-replenishing 0.1 SUI allowance.",
+    "No package publication, faucet, original app objects, mainnet, physical or production-provider acceptance."
+  ],
+  "end_balance_mist": 8168293277,
+  "spent_mist": 678875,
+  "allowance_used_mist": 5952761,
+  "finished": "2026-11-04T01:31:16Z",
+  "independent_grpc": {
+    "effects": [
+      {
+        "digest": "mHtoLKNyT2btvx6Ysuuufo8eL4oMp791B1UgpNKLY6f",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4408000",
+          "storageRebate": "1778222",
+          "nonRefundableStorageFee": "178"
+        },
+        "signed_net_gas_mist": "3629778"
+      },
+      {
+        "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4278800",
+          "storageRebate": "6922908",
+          "nonRefundableStorageFee": "692"
+        },
+        "signed_net_gas_mist": "-1644108"
+      },
+      {
+        "digest": "6fMHgp218LYNQyvZWQuz1ojCfXMDtWVze88wD3H3aVn6",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "7151600",
+          "storageRebate": "5828617",
+          "nonRefundableStorageFee": "583"
+        },
+        "signed_net_gas_mist": "2322983"
+      }
+    ],
+    "events": [
+      {
+        "kind": "Deposited",
+        "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+        "account_id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+        "amount": "1000"
+      },
+      {
+        "kind": "Refunded",
+        "digest": "6fMHgp218LYNQyvZWQuz1ojCfXMDtWVze88wD3H3aVn6",
+        "account_id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+        "recipient": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "amount": "1000"
+      }
+    ],
+    "final_account": {
+      "id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+      "customer_id": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "balance": {
+        "value": "0"
+      },
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "9000",
+      "remaining": "0",
+      "period_ms": "2628000000",
+      "next_due_ms": "1796358347693",
+      "term_end_ms": "1825266347693",
+      "cancelled": true
+    }
+  }
+}
