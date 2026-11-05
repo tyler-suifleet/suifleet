@@ -22,6 +22,15 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
 
+def batch_error(batch):
+    """Classify structured failures only; retain legacy diagnostics in storage."""
+    try:
+        value = json.loads(batch.get('error') or '{}')
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def manifest_digest(project, batch_id, base, head, members):
     return hashlib.sha256(canonical(dict(project=project, id=batch_id, base=base,
                                          head=head, members=members)).encode()).hexdigest()
@@ -680,7 +689,7 @@ class BatchController:
     @staticmethod
     def review_failure(batch):
         try:
-            error = json.loads(batch.get('error') or '{}')
+            error = batch_error(batch)
             return error if error.get('kind') == 'candidate_review_changes' else None
         except (ValueError, TypeError, AttributeError):
             return None
@@ -820,7 +829,7 @@ class BatchController:
             members = json.loads(batch['members'])
             if batch['status'] == 'failed' and any(m['pr'] == pr['number'] and m['head'] == pr['headRefOid'] for m in members):
                 try:
-                    shared_error = json.loads(batch['error'] or '{}')
+                    shared_error = batch_error(batch)
                 except (TypeError, ValueError):
                     shared_error = {}
                 # This incident fences only the failed candidate's base. A new
@@ -834,7 +843,7 @@ class BatchController:
             if (batch['status'] == 'failed' and len(members) == 1
                     and members[0]['pr'] == pr['number'] and members[0]['head'] == pr['headRefOid']):
                 try:
-                    error = json.loads(batch['error'] or '{}')
+                    error = batch_error(batch)
                 except (TypeError, ValueError):
                     continue
                 if (error.get('kind') == 'candidate_checks_failed'
@@ -901,7 +910,7 @@ class BatchController:
             if row['status'] != 'failed':
                 continue
             try:
-                kind = json.loads(row['error'] or '{}').get('kind')
+                kind = batch_error(row).get('kind')
                 if (kind not in ('candidate_checks_failed', 'candidate_review_changes')
                         or kind == 'candidate_checks_failed' and row['base'] != base):
                     continue
@@ -989,7 +998,7 @@ class BatchController:
         for batch in reversed(rows):
             if batch['status'] != 'failed' or batch['base'] != base:
                 continue
-            error = json.loads(batch.get('error') or '{}')
+            error = batch_error(batch)
             if not self.infrastructure_only(error):
                 continue
             members = json.loads(batch['members'])
@@ -1447,7 +1456,7 @@ class SharedAcceptanceRepair:
         for batch in reversed(rows):
             if batch['status'] != 'failed':
                 continue
-            error = json.loads(batch.get('error') or '{}')
+            error = batch_error(batch)
             checks = error.get('checks',[])
             members = json.loads(batch['members'])
             if (error.get('kind') != 'candidate_checks_failed' or not checks or len(members) != 1
@@ -1558,7 +1567,7 @@ class SharedAcceptanceRepair:
         for batch in reversed(self.c.batches.rows(project)):
             if batch['status']!='failed': continue
             try:
-                error=json.loads(batch.get('error') or '{}'); checks=error.get('checks',[])
+                error=batch_error(batch); checks=error.get('checks',[])
                 members=json.loads(batch['members'])
             except (ValueError,TypeError): continue
             if (error.get('kind')!='candidate_checks_failed' or not checks

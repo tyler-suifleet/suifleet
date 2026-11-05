@@ -265,3 +265,15 @@ renewal is not claimed.
 Manual real-wallet/multi-wallet, physical/mainnet/provider acceptance remains
 unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+
+## Per-fleet reporting and storage setup
+
+[Reporting setup](FLEET_REPORTING_SETUP.md) adds an administrator flow in Fleet
+settings. A single reviewed package release serves all customers. Dynamic
+`fleet_data::LocatorKey` discovery is scoped to the selected verified budget;
+package origins and registry/budget/storage bindings are checked before exposing
+configuration. Setup and writer enrollment use the existing wallet/managed-cap
+boundary. Pending/failed verification remains explicit; downloaded settings do
+not imply a device has reported. Explicit legacy locators are verified fallback
+only when the authoritative field is absent.

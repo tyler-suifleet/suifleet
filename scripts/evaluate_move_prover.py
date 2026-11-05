@@ -21,8 +21,8 @@ PIN = json.loads((ROOT / "contracts/security-specs/toolchain.json").read_text())
 # Mutations affect only a disposable copy of the actual release implementation.
 MUTATIONS = {
     "return-omit-custody": ("device_registry", "return_device", "dof::add(&mut registry.id, CustodyKey { device_id }, device);", "transfer::public_freeze_object(device);"),
-    "enrollment-claim": ("enrollment", "enroll_internal", "policy.claims.remove(claim);", "let _ = policy.claims.borrow(claim);"),
-    "enrollment-quota": ("enrollment", "enroll_internal", "policy.remaining = policy.remaining - SMALL_1;", ""),
+    "enrollment-claim": ("enrollment", "e", "policy.claims.remove(claim);", "let _ = policy.claims.borrow(claim);"),
+    "enrollment-quota": ("enrollment", "e", "policy.remaining = policy.remaining - SMALL_1;", ""),
     "init-untyped-identity": ("device_registry", "security_actual_init", "        transfer::share_object(registry);", "        let mut registry = registry;\n        let device_id = object::id(&registry);\n        df::add(&mut registry.id, IdentityKey { device_id }, false);\n        transfer::share_object(registry);"),
     "binding-legacy-status": ("deployment_manager", "p1", "df::add(&mut record.id, ReceiptsKey {},      p4());", "df::add(&mut record.id, ReceiptsKey {},      p4());\n        df::add(&mut record.id, StatusesKey {}, vec_map::empty<ID, u8>());"),
     "close-authority": ("enrollment", "close", "p1(policy, ctx);", ""),
