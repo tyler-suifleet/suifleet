@@ -36,8 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Retry transient release-host errors at most three times; each attempt is bounded.
+# Checksums below remain mandatory before extraction.
 # SUI CLI → /usr/local/bin (accessible to all users)
-RUN curl -fL -o /tmp/sui.tgz \
+RUN curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 600 -o /tmp/sui.tgz \
     "https://github.com/MystenLabs/sui/releases/download/${SUI_VERSION}/sui-${SUI_VERSION}-ubuntu-x86_64.tgz" \
     && echo "${SUI_SHA256}  /tmp/sui.tgz" | sha256sum -c - \
     && tar -xzf /tmp/sui.tgz -C /usr/local/bin \
@@ -45,7 +47,7 @@ RUN curl -fL -o /tmp/sui.tgz \
     && sui --version
 
 # Network transaction CLI → /opt/sui-network/sui, never on PATH
-RUN curl -fL -o /tmp/sui-network.tgz \
+RUN curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 600 -o /tmp/sui-network.tgz \
     "https://github.com/MystenLabs/sui/releases/download/${SUI_NETWORK_VERSION}/sui-${SUI_NETWORK_VERSION}-ubuntu-x86_64.tgz" \
     && echo "${SUI_NETWORK_SHA256}  /tmp/sui-network.tgz" | sha256sum -c - \
     && mkdir -p /opt/sui-network \
