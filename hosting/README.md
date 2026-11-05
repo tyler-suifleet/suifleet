@@ -10,7 +10,9 @@ All four owned hostnames are active. The initial three-origin release is recorde
 in `cloudflare-deployments.json` ([SF-256](../docs/validation/SF256.md)). The later
 website/docs-only product-copy update is recorded in
 `cloudflare-product-copy-deployments.json` ([SF-257](../docs/validation/SF257.md));
-the console retains its original Testnet deployment. The user applied DNS manually; the model
+the console retains its original Testnet deployment. The subsequent website-only
+fixed-layout overview video release is in
+`cloudflare-overview-layout-deployment.json` (same SF-257 validation record). The user applied DNS manually; the model
 performed no DNS-record writes.
 
 | Address | Pages project |
