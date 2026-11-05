@@ -61,10 +61,10 @@ export function useFleetSelection() { return useContext(Context); }
 
 /** Remount local forms, decrypted plaintext and sessions on every identity
  * change; unresolved/revoked selection never renders prior fleet content. */
-export function FleetScope({ children, allowWithoutFleet = false }: { children: ReactNode; allowWithoutFleet?: boolean }) {
+export function FleetScope({ children, allowWithoutFleet = false, pendingHeader }: { children: ReactNode; allowWithoutFleet?: boolean; pendingHeader?: ReactNode }) {
   const selection = useFleetSelection();
   if (allowWithoutFleet) return <div key={selection.identity}>{children}</div>;
   const warnings = selection.warnings?.map(message => <p role="status" key={message}>{message}</p>);
-  if (selection.supported && !selection.fleet) return <>{warnings}<p role="status">{selection.loading ? "Verifying fleet access…" : "Select or create a fleet to continue."}</p></>;
+  if (selection.supported && !selection.fleet) return <>{pendingHeader}{warnings}<section className="rounded-xl border border-slate-200 bg-white p-5 space-y-2"><h2 className="font-semibold">{selection.loading ? "Checking your fleet access" : "Choose a fleet to continue"}</h2><p role="status">{selection.loading ? "Loading the workspaces this account can access. Fleet data and actions appear after access is verified." : "A fleet is a workspace for your devices. Use the Fleet selector above to choose one, or create your first fleet if this account is allowed to do so."}</p>{selection.error && <p className="text-sm text-slate-600">Your fleet access could not be verified. Use Retry above; changing accounts or creating another fleet will not repair a connection problem.</p>}</section></>;
   return <div key={selection.identity}>{warnings}{children}</div>;
 }

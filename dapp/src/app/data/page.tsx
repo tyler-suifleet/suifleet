@@ -161,7 +161,7 @@ export default function FleetDataPage() {
       await execute({transaction:tx, support: allowed.kind === 'support' ? { config: DATA_CONFIG, deviceId: device } : undefined});setMessage('Diagnostic request confirmed. The device will upload when online, within its emergency cadence and prepaid limits.');
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
-  return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device data, download verified bytes and manage scoped sharing in your browser" /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
+  return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device files and logs, verify their contents and choose who can access them." /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
     <StreamRetentionPanel />
     {!DATA_CONFIG ? <p>Device data reporting is not set up for this fleet. Ask your administrator to finish the setup.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
