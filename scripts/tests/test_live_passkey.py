@@ -80,10 +80,10 @@ class CachedPasskeyTests(unittest.TestCase):
                 self.assertEqual((root / name).read_text().strip(), value)
                 self.assertEqual((root / name).stat().st_mode & 0o777, 0o600)
 
-    def test_base_probe_requires_missing_factor_only_for_unchanged_root(self):
+    def test_base_probe_requires_missing_factor_for_both_package_pairs(self):
         # Run the real exercise/tx control flow with deterministic signing and
-        # effects fixtures. A sponsored rename succeeds on the current package;
-        # thus the original unchanged-root probe reproduces the CI failure.
+        # effects fixtures. A sponsored rename succeeds on either package;
+        # distinct IDs do not imply that native sponsorship is unsupported.
         import subprocess
         for upgraded, bad_abort in ((False, False), (True, False), (False, True)):
             with self.subTest(upgraded=upgraded, bad_abort=bad_abort):
@@ -107,12 +107,11 @@ class CachedPasskeyTests(unittest.TestCase):
                 def execute(client, label, submit, **kwargs):
                     evidence['transactions'].append({'label': label})
                     submit(20_000_000)
-                    # The base differs only in the real-upgrade case; otherwise
-                    # a valid passkey authorizes this call just like the head.
+                    # Both retained versions support native sponsorship. A valid
+                    # enrolled passkey authorizes either package entry point.
                     status = 'success'
                     if current['operation'] == 'rename' and (
-                            'sponsor' not in current or current['name'] == 'must fail removed'
-                            or current['package'] != head):
+                            'sponsor' not in current or current['name'] == 'must fail removed'):
                         status = 'failure'
                     self.assertEqual(status, kwargs['expect'], label)
                     return {'effects': {'status': {'status': status, 'error': 'fixture'}}}
@@ -139,9 +138,9 @@ class CachedPasskeyTests(unittest.TestCase):
                         Path('/private/state.json'), {}, Mock())
                 probe = next(r for r in requests if r.get('name') == 'must fail old')
                 self.assertEqual(probe['package'], base)
-                self.assertEqual('sponsor' in probe, upgraded)
+                self.assertNotIn('sponsor', probe)
                 self.assertEqual(evidence['native_old_package_probe'],
-                    'distinct-package' if upgraded else 'unchanged-root-wallet-only')
+                    'base-wallet-only')
                 self.assertEqual(len(requests), 9)
 
     def fixture(self, upgraded=False, retained=False):
