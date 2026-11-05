@@ -25,6 +25,7 @@ const server=net.createServer(socket=>{
     if(data.commands.length!==1||!call||call.package!==cfg.package||call.module!=='fleet_data'||call.function!=='report_health')throw Error('Unexpected native call');
     const lock=cp.spawnSync('ticket',['--project','suifleet','lock-assert','network:suifleet-testnet','--lock-token',process.env.SUIFLEET_TESTNET_LOCK_TOKEN],{stdio:'pipe'});
     if(lock.status!==0)throw Error('Mutation lease invalid');
+    if(fs.readdirSync(cfg.journal).length)throw Error('Prior native transaction requires effects reconciliation');
     const digest=await tx.getDigest(),path=cfg.journal+'/'+digest+'.json';
     const fd=fs.openSync(path,'wx',0o600);
     try{fs.writeFileSync(fd,JSON.stringify({digest,sender:address,gas_budget:data.gasData.budget,tx_bytes:request.tx}));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}

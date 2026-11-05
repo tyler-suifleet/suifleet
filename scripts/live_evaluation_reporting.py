@@ -111,8 +111,10 @@ def accept(args):
     daemon = None
     signer = None
     try:
+        expected_operator = live.evidence['operator']
         original_balance = live.evidence.get('start_balance_mist')
         live.assert_lock(); live.preflight(auto_fund=False)
+        assert live.operator == expected_operator == '0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965'
         live.evidence.setdefault('preflights', []).append(dict(balance_mist=live.start_balance, phase='acceptance'))
         if original_balance is not None: live.evidence['start_balance_mist'] = original_balance
         manifest, release = live.evidence['manifest'], live.evidence['reporting_release']
