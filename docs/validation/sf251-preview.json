@@ -1,0 +1,132 @@
+{
+  "https": [
+    {
+      "url": "https://characterized-above-chemical-possess.trycloudflare.com/preview-version.json",
+      "status": 200,
+      "bytes": 1599,
+      "metadata": {
+        "ticket": "SF-251",
+        "source_commit": "5841f2411678d4af76a09f97c054175629c11f62",
+        "source_status": "unmerged combined candidate",
+        "source_heads": {
+          "PR617": "e28c80cb14bd417cc87c2a81586873d4c90198dc",
+          "PR620": "837bb1cb8b8f3869753e35af2f6c322f1f4cd833",
+          "PR624": "46e4d2338036e7d3a59136cda5abf6f37b6270cb",
+          "PR627": "7ac2c7977ca101d8caacca727f880343225f776b",
+          "PR621": "331a0a4cf341ea14fc25ac4b2caa8f482edfccbe"
+        },
+        "network": "testnet",
+        "chain_identifier": "4c78adac",
+        "package": "0x5b26264a391fc0690081b557529c1c311c077ead75d9841746dc56bc9dc8efd8",
+        "package_version": "4",
+        "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+        "reporting_release": {
+          "packageId": "0x4b110c68bca3bfcc2f3cd271ed2a1faf4ec9189f9f72506fa090a87bab480e04",
+          "upgradeCapId": "0x2b14ec593247dfe073ac87e861d20a135ca230bdd6a7886501da7eb5abe328d1",
+          "storagePackageId": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+          "storageUpgradeCapId": "0xfa48bcbcb152b2c582d00b41c4fd923bf93e361e5ce9a3048a1558dbbaf9c0ab"
+        },
+        "build_node": "22.22.2",
+        "build_id": "3a89632aef27fdcb03538fa4151f27d14f4b9ef3df80f433a9b50ed1c7987755",
+        "file_count": 148,
+        "limits": [
+          "No manual wallet/Pi/mainnet/production provider acceptance",
+          "Hosted CI and source review pending"
+        ],
+        "configuration_sha256": {
+          "deployment.json": "1c35e01b253edfcc215de2a5743240d4f44cf3a913265958db89cbbe3041021a",
+          "frontend.env": "6dfe58d5cc7cbbd10f8481e9fc9b51490c43d24f8181e536d229e4b1dc961b5f"
+        },
+        "storage_readers_verified": true
+      }
+    },
+    {
+      "url": "https://nothing-difference-look-color.trycloudflare.com/",
+      "status": 200,
+      "bytes": 10261,
+      "metadata": null
+    },
+    {
+      "url": "https://persian-vessels-ended-structured.trycloudflare.com/device-client/",
+      "status": 200,
+      "bytes": 21013,
+      "metadata": null
+    }
+  ],
+  "browser": {
+    "metadata": {
+      "ticket": "SF-251",
+      "source_commit": "5841f2411678d4af76a09f97c054175629c11f62",
+      "source_status": "unmerged combined candidate",
+      "source_heads": {
+        "PR617": "e28c80cb14bd417cc87c2a81586873d4c90198dc",
+        "PR620": "837bb1cb8b8f3869753e35af2f6c322f1f4cd833",
+        "PR624": "46e4d2338036e7d3a59136cda5abf6f37b6270cb",
+        "PR627": "7ac2c7977ca101d8caacca727f880343225f776b",
+        "PR621": "331a0a4cf341ea14fc25ac4b2caa8f482edfccbe"
+      },
+      "network": "testnet",
+      "chain_identifier": "4c78adac",
+      "package": "0x5b26264a391fc0690081b557529c1c311c077ead75d9841746dc56bc9dc8efd8",
+      "package_version": "4",
+      "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+      "reporting_release": {
+        "packageId": "0x4b110c68bca3bfcc2f3cd271ed2a1faf4ec9189f9f72506fa090a87bab480e04",
+        "upgradeCapId": "0x2b14ec593247dfe073ac87e861d20a135ca230bdd6a7886501da7eb5abe328d1",
+        "storagePackageId": "0xbe536c1ef660cec87a8222a1a53500c986da5ca0616af3c55b57f52f8a67eb48",
+        "storageUpgradeCapId": "0xfa48bcbcb152b2c582d00b41c4fd923bf93e361e5ce9a3048a1558dbbaf9c0ab"
+      },
+      "build_node": "22.22.2",
+      "build_id": "3a89632aef27fdcb03538fa4151f27d14f4b9ef3df80f433a9b50ed1c7987755",
+      "file_count": 148,
+      "limits": [
+        "No manual wallet/Pi/mainnet/production provider acceptance",
+        "Hosted CI and source review pending"
+      ],
+      "configuration_sha256": {
+        "deployment.json": "1c35e01b253edfcc215de2a5743240d4f44cf3a913265958db89cbbe3041021a",
+        "frontend.env": "6dfe58d5cc7cbbd10f8481e9fc9b51490c43d24f8181e536d229e4b1dc961b5f"
+      },
+      "storage_readers_verified": true
+    },
+    "viewport": {
+      "width": 375,
+      "height": 667
+    },
+    "routes": [
+      {
+        "route": "/",
+        "status": 200,
+        "horizontalOverflow": false
+      },
+      {
+        "route": "/devices/",
+        "status": 200,
+        "horizontalOverflow": false
+      },
+      {
+        "route": "/settings/",
+        "status": 200,
+        "horizontalOverflow": false
+      },
+      {
+        "route": "/billing/",
+        "status": 200,
+        "horizontalOverflow": false
+      },
+      {
+        "route": "/data/",
+        "status": 200,
+        "horizontalOverflow": false
+      }
+    ],
+    "pageErrors": [],
+    "limits": [
+      "Logged-out public mobile render only; actual customer writes and signed daemon checks use application SDK builders and production readers, not a manual wallet session."
+    ]
+  },
+  "artifact": "~/.local/state/suifleet/sf251-reporting-preview-5841f241",
+  "file_manifest_sha256": "85ce950b4eea12c6e6ef6820fe12d6611f24ead194f7520bee052e35cc59478c",
+  "rollback": "~/.local/state/suifleet/serve-latest-preview.before-sf251.py",
+  "guide_preserved": "current-customer-guide-0cdeceec"
+}
