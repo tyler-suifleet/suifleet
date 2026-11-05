@@ -16,7 +16,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  for(const [width,height] of [[1440,900],[1280,720],[390,844],[375,667],[320,568],[844,390],[640,360]]){
   const page=await browser.newPage({viewport:{width,height}}),errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});page.on('request',r=>{if(new URL(r.url()).origin!==origin)external.push(r.url())});
   await page.goto(origin+'/guide/',{waitUntil:'networkidle'});await page.waitForFunction(()=>!document.querySelector('[data-guide-next]').disabled);await page.evaluate(()=>document.fonts.ready);
-  await page.locator('[data-guide-next]').click();await page.locator('#fund').waitFor();await page.locator('[data-guide-back]').click();await page.locator('#sign-in').waitFor();
+  await page.locator('[data-guide-next]').click();await page.locator('#capacity-plan').waitFor();await page.locator('[data-guide-back]').click();await page.locator('#sign-in').waitFor();
   const gathered=new Map();let count=0;
   while(!(await page.locator('[data-guide-complete]').isVisible())){
    const value=await page.evaluate(()=>{const stage=[...document.querySelectorAll('.guide-stage')].find(s=>!s.hidden),copy=stage.querySelector('.guide-copy'),controls=document.querySelector('.guide-controls').getBoundingClientRect();return {key:`${stage.id}/${stage.dataset.instruction}`,text:copy.textContent.trim(),width:document.documentElement.scrollWidth,height:document.documentElement.scrollHeight,viewport:[innerWidth,innerHeight],fits:copy.scrollHeight<=copy.clientHeight&&copy.scrollWidth<=copy.clientWidth,copyHeight:copy.clientHeight,controls:[controls.top,controls.bottom],part:Number(stage.dataset.part)}});

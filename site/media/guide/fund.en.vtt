@@ -1,31 +1,24 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:13.555
-The network budget pays the fees needed for device activity. Use
-this section to keep devices reporting without funding each one
-by hand. Open Network budget to see the available balance and
-funding controls.
+00:00:00.200 --> 00:00:09.928
+The network budget pays operating fees, such as sending device
+reports. It is separate from your subscription device limit.
+Choose Network budget in the sidebar.
 
 2
-00:00:14.280 --> 00:00:26.440
-Enter the amount you want to deposit. Your devices use this
-budget within the spending limits you set. How often devices
-report, and how much data they store, affects how quickly the
-budget is used.
+00:00:10.640 --> 00:00:19.621
+Enter a deposit in SUI. Devices use these operating funds within
+your limits. File and log storage has separate funding controls.
 
 3
-00:00:27.160 --> 00:00:40.216
-Review and approve the deposit in your wallet. A budget is
-created if this fleet needs one. The deposit supplies funds for
-activity; changing a reporting setting later does not add money
-to this balance.
+00:00:20.360 --> 00:00:25.501
+Approve the deposit in your wallet. A budget is created only if
+your fleet needs one.
 
 4
-00:00:40.920 --> 00:00:58.520
-Once the deposit is confirmed, check the updated balance under
-Keep devices reporting. Return here to monitor funds, adjust
-spending limits or withdraw available funds. A confirmed deposit
-means the budget is funded; device health is checked separately
-on the Devices page.
+00:00:26.240 --> 00:00:34.581
+Confirmed. The balance under Keep devices reporting shows the
+confirmed deposit. Device readiness and health are checked
+separately.
 

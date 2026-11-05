@@ -39,6 +39,23 @@ class NarrationTest(unittest.TestCase):
             self.assertTrue(all(cue["text"].strip() for cue in clip["cues"]))
             timing(clip["cues"], clip["source_duration_seconds"], [1] * len(clip["cues"]))
 
+    def test_published_batch_sources_reproduce_reviewed_script_and_spoken_text(self):
+        import hashlib
+        script=json.loads((GUIDE/'narration.json').read_text())
+        manifest=json.loads((GUIDE.parent/'media/guide/videos.json').read_text())
+        clips={c['step']:c for c in script['clips']}
+        self.assertEqual(manifest['narration']['script_sha256'],hashlib.sha256((GUIDE/'narration.json').read_bytes()).hexdigest())
+        batches=manifest['narration']['render_batches'];self.assertEqual(len(batches),3)
+        covered=[]
+        for batch in batches:
+            subset={**script,'clips':[clips[id] for id in batch['steps']]}
+            self.assertEqual(hashlib.sha256((json.dumps(subset,indent=2)+'\n').encode()).hexdigest(),batch['script_sha256'])
+            covered.extend(batch['steps'])
+        self.assertEqual(sorted(covered),sorted(clips))
+        for video in manifest['videos']:
+            self.assertEqual([c['text'] for c in video['narration']['cues']], [c['text'] for c in clips[video['step']]['cues']])
+            self.assertEqual(video['narration']['source_sha256'],clips[video['step']]['source_sha256'])
+
 
 class CaptionsTest(unittest.TestCase):
     def test_complete_text_and_encoded_timing(self):

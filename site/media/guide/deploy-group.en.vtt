@@ -1,43 +1,49 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:13.832
-Device groups let you target a meaningful set of machines
-together, such as a pilot site, a product model or a test fleet.
-Create a group with a name your team will recognize, instead of
-selecting every device for each release.
+00:00:00.200 --> 00:00:16.051
+Deployments request a published version for selected devices.
+Use a group to update related machines together. A request is
+separate from the device installing it and reporting the
+outcome. On Devices, open the Device groups tab and create a
+group.
 
 2
-00:00:14.560 --> 00:00:25.483
-Open Manage and add the devices that belong in this group.
-Review membership before deploying, because membership
-determines which devices can take part when they check the
-deployment.
+00:00:16.760 --> 00:00:25.379
+Click Manage and add the device to the group. Reuse the demo
+group. First-time operators create a group, then use Manage to
+add devices.
 
 3
-00:00:26.200 --> 00:00:35.459
-Choose Deploy this version from the component library. Starting
-with a published version helps you select the exact release you
-already prepared and reviewed.
+00:00:26.080 --> 00:00:29.024
+In the component library, choose Deploy this version.
 
 4
-00:00:36.160 --> 00:00:49.515
-Select the group as the target and review the version and
-recipients. This flow creates a one-time deployment. It does not
-establish an ongoing rule that automatically brings future group
-members onto this release.
+00:00:31.360 --> 00:00:39.168
+Select the group as the target. This example also selects
+desired state, which keeps this version requested for group
+members.
 
 5
-00:00:50.240 --> 00:01:03.040
-Create the deployment and approve the request. Devices still
-need to connect, check their eligibility and run the
-installation. Approval authorizes the deployment; it does not
-mean all targets have finished.
+00:00:39.880 --> 00:00:47.347
+Click Deploy and approve. Device clients process this request
+when ready. Creating it alone does not prove installation.
 
 6
-00:01:03.760 --> 00:01:19.461
-Open Deployments to follow each device’s result. Check successes
-and failures there rather than relying on the deployment-created
-message. If a device fails, inspect the available failure
-details before retrying or sending a corrected version.
+00:00:59.480 --> 00:01:03.704
+Deployment created. Devices report signed results under
+Deployments.
+
+7
+00:01:04.440 --> 00:01:14.957
+After the Linux device client processes the update, open
+Deployments to verify its result. This is a disposable software
+test, not a physical Raspberry Pi.
+
+8
+00:01:15.680 --> 00:01:30.443
+Applied is a verified device receipt: the client downloaded the
+software, completed its configured installer and reported
+success. It does not prove a long-running service is healthy.
+Deployment created alone did not prove this.
 

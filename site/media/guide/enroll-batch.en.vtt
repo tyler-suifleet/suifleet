@@ -1,38 +1,36 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:13.789
-Enrollment is for bringing many devices into your fleet without
-registering them one at a time. Reserve their names and serial
-numbers before they leave the factory, then let each device
-claim its own record when it first connects.
+00:00:00.200 --> 00:00:18.525
+Batch enrollment prepares many devices before first boot.
+Reserve names and serial numbers, then securely give each device
+its own single-use credential during manufacturing. This avoids
+registering large fleets one by one. For a production batch,
+choose Enrollment in the sidebar.
 
 2
-00:00:14.520 --> 00:00:27.768
-First, create a batch policy. The quota limits how many devices
-may enroll, and the lifetime limits how long the policy can be
-used. These controls help keep a provisioning batch from
-remaining open indefinitely.
+00:00:19.240 --> 00:00:28.797
+This recording reuses the confirmed batch policy created during
+setup. On first use, choose the device limit and expiry, then
+create the policy.
 
 3
-00:00:28.480 --> 00:00:42.155
-Paste the names and serial numbers from your roster, then choose
-Check. This lets you review the inventory before registering
-claims. Consistent names make the devices easier to identify
-once they appear in the fleet.
+00:00:29.520 --> 00:00:34.555
+2. Reserve names and serial numbers: paste a roster CSV and
+click Check.
 
 4
-00:00:42.880 --> 00:00:56.619
-Download the credentials and keep the exported file private.
-During provisioning, give each unit only its own claim
-credential. Do not put the whole credential file into a shared
-device image or source repository.
+00:00:35.280 --> 00:00:41.040
+Download the credentials: the only copy of the claim keys, for
+your factory provisioning media.
 
 5
-00:00:57.320 --> 00:01:14.173
-Register the pending claims and approve the requests. A claim
-reserves an enrollment opportunity; it does not mean a device is
-online yet. At first boot, each configured client uses its
-credential to enroll. Watch for the record to move from waiting
-to enrolled.
+00:00:41.760 --> 00:00:48.181
+Register the reserved devices and approve the request. Each
+device then enrolls itself at first boot.
+
+6
+00:00:49.800 --> 00:00:54.984
+Claims are registered and waiting for their devices to enroll
+with their installed client.
 

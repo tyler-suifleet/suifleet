@@ -31,7 +31,7 @@ class SiteTest(unittest.TestCase):
         track = self.out / "media/guide/sign-in.en.vtt"
         guide = (self.out / "guide/index.html").read_text()
         self.assertIn('<track kind="captions" src="/media/guide/sign-in.en.vtt" srclang="en" label="English" default>', guide)
-        track.write_text(track.read_text().replace('Welcome to SuiFleet.', 'Wrong narration.'))
+        track.write_text(track.read_text().replace('SuiFleet', 'Wrong narration.', 1))
         rewrite_sums(self.out)
         errors = self.errors(require_videos=True)
         self.assertTrue(any('captions differ from encoded narration' in e for e in errors), errors)
@@ -81,7 +81,7 @@ class SiteTest(unittest.TestCase):
         self.assertIn(">Launch app<", home)
         guide = (self.out / "guide" / "index.html").read_text()
         steps = json.loads((SITE / "guide" / "steps.json").read_text())["steps"]
-        self.assertEqual(len(steps), 9)
+        self.assertEqual([s["id"] for s in steps][:3], ["sign-in", "capacity-plan", "fund"])
         for step in steps:
             self.assertIn(f'id="{step["id"]}"', guide)
             self.assertIn(f'href="{config["app_url"]}{step["console_route"]}"', guide)
@@ -182,7 +182,7 @@ class SiteTest(unittest.TestCase):
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
             self.assertIn('data-console-commit="' + '1' * 40 + '"', guide)
             missing = self.errors(require_videos=True)
-            self.assertEqual(len(missing), 11, missing)
+            self.assertEqual(len(missing), len(json.loads((SITE / "guide" / "steps.json").read_text())["steps"]) + 2, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")
             rewrite_sums(self.out)
             self.assertTrue(any("does not match its recorded digest" in e for e in self.errors()))

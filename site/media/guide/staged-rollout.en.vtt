@@ -1,44 +1,49 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:14.536
-A staged rollout reduces the risk of releasing to the whole
-fleet at once. Start with a small test set, observe the results,
-then expand in groups. Use this when a bad release could disrupt
-many devices or customer sites.
+00:00:00.200 --> 00:00:17.373
+A gradual rollout limits how many devices receive an update at
+once, so you can check results before continuing. Cohorts are
+batches. Creation alone starts no devices, and you return to
+approve further progress. Choose Rollouts in the sidebar to
+release in stages.
 
 2
-00:00:15.240 --> 00:00:27.144
-Open Create a gradual rollout and enter the release details
-shown here. These identify the software and installation
-instructions that each device must verify before applying the
-update.
+00:00:18.080 --> 00:00:24.373
+Open Create a gradual rollout. Choose the published version and
+matching device platform from your library.
 
 3
-00:00:27.880 --> 00:00:39.464
-List the device sets in the order you want to update them. The
-interface calls these cohorts. Put your pilot devices first,
-then add larger sets after you have evidence that the release is
-working.
+00:00:25.080 --> 00:00:32.995
+A cohort is a batch of devices. Add named devices or groups to
+the first batch; a device belongs to only one batch.
 
 4
-00:00:40.200 --> 00:00:53.896
-Set how quickly devices are admitted, how long each set should
-be observed and how many failures should stop progress. The
-observation time is called the bake period. Choose values that
-allow meaningful health reports to arrive.
+00:00:33.720 --> 00:00:42.125
+Set the pacing, observation period and failure threshold, then
+review the exact plan. Creating a rollout does not start any
+device.
 
 5
-00:00:54.600 --> 00:01:08.488
-Creating the rollout does not immediately admit devices. Select
-it and choose Check device health and continue to evaluate the
-next admission. This gives you a controlled point to review
-health before more devices start.
+00:00:42.840 --> 00:00:47.384
+Select the rollout, then admit the first devices after checking
+device health.
 
 6
-00:01:09.200 --> 00:01:23.557
-Watch the reported results as you proceed. Pause or abort to
-stop further admissions if there is a problem. A device that has
-already started an installation may finish; these controls do
-not automatically undo an update.
+00:00:48.120 --> 00:00:57.443
+This plan is created with devices waiting, not installed. Only
+admit devices after reporting is configured and current signed
+health is available.
+
+7
+00:00:58.160 --> 00:01:07.056
+Pause stops new devices from starting; it does not undo an
+update already allowed to start. This example deliberately
+admits no devices.
+
+8
+00:01:07.760 --> 00:01:19.749
+The saved plan is paused. Return after reporting is ready to
+resume and explicitly approve the next batch. This clip does not
+demonstrate a healthy rollout or automatic advancement.
 
