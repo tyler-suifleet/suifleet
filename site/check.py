@@ -24,6 +24,7 @@ import json
 import re
 from pathlib import Path
 import sys
+from build import load_config
 from urllib.parse import unquote, urlsplit
 
 SITE = Path(__file__).resolve().parent
@@ -125,9 +126,9 @@ def check_external(url, config, where, errors):
             errors.append(f"{where}: unexpected repository link {url}")
 
 
-def check(out, require_videos=False):
+def check(out, require_videos=False, config=None):
     out = out.resolve()
-    config = json.loads((SITE / "src" / "site.json").read_text(encoding="utf-8"))
+    config = config or load_config()
     errors, pages = [], {}
     script = SITE / "src/assets/guide.js"
     integrity = "sha256-" + base64.b64encode(hashlib.sha256(script.read_bytes()).digest()).decode("ascii")
@@ -243,8 +244,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("out", type=Path, nargs="?", default=SITE / "dist")
     parser.add_argument("--require-videos", action="store_true")
+    parser.add_argument("--config", type=Path, help="Same public preview overrides used by the builder")
     args = parser.parse_args()
-    errors = check(args.out, args.require_videos)
+    errors = check(args.out, args.require_videos, load_config(args.config))
     for error in errors:
         print("ERROR:", error)
     if errors:
