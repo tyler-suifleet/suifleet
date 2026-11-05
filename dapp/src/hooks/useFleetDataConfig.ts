@@ -1,15 +1,18 @@
 "use client";
-import { DATA_CONFIG, configuredDataFleets } from "@/lib/fleet-data";
-import { normalizeId } from "@/lib/deployment-manifest";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
+import { useQuery } from "@tanstack/react-query";
+import { DATA_CONFIG } from "@/lib/fleet-data";
+import { resolveFleetReporting } from "@/lib/fleet-reporting";
 import { useFleetSelection } from "./useFleetSelection";
-const configured = configuredDataFleets();
-/** Configuration is only a locator. readFleetData rechecks chain, registry,
- * budget and storage bindings on chain before using any report/archive. */
+
+export function useFleetReporting() {
+  const selection = useFleetSelection(), client = useCurrentClient();
+  return useQuery({ queryKey: ["fleet-reporting", selection.identity], enabled: !!selection.fleet,
+    queryFn: () => resolveFleetReporting(client, selection.fleet!), retry: false, refetchInterval: 60_000 });
+}
+/** Only expose the current selection's freshly verified locator. */
 export function useFleetDataConfig() {
-  const selection = useFleetSelection();
+  const selection = useFleetSelection(), query = useFleetReporting();
   if (!selection.supported) return DATA_CONFIG;
-  if (!selection.fleet) return undefined;
-  const matches = configured.filter(c => normalizeId(c.budgetId) === normalizeId(selection.fleet!.budgetId));
-  if (matches.length > 1) throw Error("Multiple fleet-data configurations for one budget");
-  return matches[0];
+  return query.isSuccess && !query.isRefetchError ? query.data : undefined;
 }

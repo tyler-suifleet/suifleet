@@ -80,13 +80,14 @@ class CachedPasskeyTests(unittest.TestCase):
                 self.assertEqual((root / name).read_text().strip(), value)
                 self.assertEqual((root / name).stat().st_mode & 0o777, 0o600)
 
-    def test_base_probe_requires_missing_factor_only_for_unchanged_root(self):
+    def test_base_probe_requires_missing_factor_for_compatible_and_unchanged_packages(self):
         # Run the real exercise/tx control flow with deterministic signing and
-        # effects fixtures. A sponsored rename succeeds on the current package;
-        # thus the original unchanged-root probe reproduces the CI failure.
+        # effects fixtures: compatible packages accept a valid co-signer, while
+        # a sealed legacy package refuses every call. Both reject wallet-only.
         import subprocess
-        for upgraded, bad_abort in ((False, False), (True, False), (False, True)):
-            with self.subTest(upgraded=upgraded, bad_abort=bad_abort):
+        for upgraded, bad_abort, sealed in ((False, False, False), (True, False, False),
+                                             (True, False, True), (False, True, False)):
+            with self.subTest(upgraded=upgraded, bad_abort=bad_abort, sealed=sealed):
                 head, base = '0x' + '2'*64, '0x' + ('3' if upgraded else '2')*64
                 operator = '0x' + '1'*64
                 keys = [dict(address='0x' + c*64) for c in ('4', '5')]
@@ -107,12 +108,12 @@ class CachedPasskeyTests(unittest.TestCase):
                 def execute(client, label, submit, **kwargs):
                     evidence['transactions'].append({'label': label})
                     submit(20_000_000)
-                    # The base differs only in the real-upgrade case; otherwise
-                    # a valid passkey authorizes this call just like the head.
+                    # Distinct compatible packages enforce the same policy. An
+                    # actually sealed legacy version rejects even co-signers.
                     status = 'success'
                     if current['operation'] == 'rename' and (
                             'sponsor' not in current or current['name'] == 'must fail removed'
-                            or current['package'] != head):
+                            or (sealed and current['package'] != head)):
                         status = 'failure'
                     self.assertEqual(status, kwargs['expect'], label)
                     return {'effects': {'status': {'status': status, 'error': 'fixture'}}}
@@ -139,9 +140,9 @@ class CachedPasskeyTests(unittest.TestCase):
                         Path('/private/state.json'), {}, Mock())
                 probe = next(r for r in requests if r.get('name') == 'must fail old')
                 self.assertEqual(probe['package'], base)
-                self.assertEqual('sponsor' in probe, upgraded)
+                self.assertNotIn('sponsor', probe)
                 self.assertEqual(evidence['native_old_package_probe'],
-                    'distinct-package' if upgraded else 'unchanged-root-wallet-only')
+                    'base-wallet-only')
                 self.assertEqual(len(requests), 9)
 
     def fixture(self, upgraded=False, retained=False):
@@ -300,6 +301,37 @@ class JournalRecoveryTests(unittest.TestCase):
             target.FixtureJournal(live, state, Mock()).recover()
         self.assertEqual(live.evidence['transactions'][0]['status'], 'failure')
         self.assertIn('wallet refused', state['completed'])
+
+    def test_legacy_cosigned_probe_is_retired_not_accepted_or_replayed(self):
+        for status in ('success', 'failure'):
+            live, result = self.live(status)
+            pending = dict(operation='old package cannot bypass protection',
+                digest='digest', gas_budget_mist=20_000_000, expect='failure')
+            state = dict(pending=pending.copy())
+            with patch.object(target.tc, 'bound', side_effect=lambda r,d:r):
+                journal = target.FixtureJournal(live, state, Mock())
+                journal.retire_legacy_base_probe()
+                journal.recover()
+            self.assertEqual(live.ledger.used, 20_000_000)
+            self.assertNotIn('pending', state)
+            self.assertNotIn(pending['operation'], state['completed'])
+            self.assertEqual(state['retired_probes'][0]['pending'], pending)
+            self.assertEqual(state['retired_probes'][0]['result'], result)
+            self.assertFalse(live.evidence['retired_native_base_probe']['acceptance'])
+            live.executor.assert_not_called()
+
+    def test_legacy_probe_unknown_or_wrong_digest_is_preserved(self):
+        for case in ('unknown', 'wrong_digest', 'wrong_budget'):
+            live, result = self.live()
+            if case == 'unknown': live.read_back.return_value = {}
+            if case == 'wrong_digest': result['digest'] = 'different'
+            state = dict(pending=dict(operation='old package cannot bypass protection',
+                digest='digest', gas_budget_mist=1 if case == 'wrong_budget' else 20_000_000,
+                expect='failure'))
+            with self.assertRaises((RuntimeError, AssertionError)):
+                target.FixtureJournal(live, state, Mock()).retire_legacy_base_probe()
+            self.assertEqual(state['pending']['digest'], 'digest')
+            live.executor.assert_not_called()
 
     def test_incomplete_pending_never_replays(self):
         live, _ = self.live()
