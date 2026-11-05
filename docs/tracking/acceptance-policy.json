@@ -743,6 +743,18 @@
         "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates.",
         "SF-247 requires two independent new fleets, adversarial locator/authority/partial-failure checks, existing-object compatible upgrades, browser setup/error/retry/download, Rust/OTA and actual bounded dedicated-Testnet daemon health through generated settings before Review."
       ]
+    },
+    "SF-251": {
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "deferred_checks": [
+        "Physical Pi, actual Mainnet, production-provider and manual human/real-wallet acceptance remain unrun until final acceptance."
+      ],
+      "retained_gates": [
+        "All actionable source/security findings, meaningful local/isolated-chain/browser/SDK/build checks, actual bounded public-testnet reporting effects, applicable hosted exact-head/base CI and fresh independent review."
+      ]
     }
   },
   "development_defaults": {
