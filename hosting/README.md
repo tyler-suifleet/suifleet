@@ -12,7 +12,10 @@ website/docs-only product-copy update is recorded in
 `cloudflare-product-copy-deployments.json` ([SF-257](../docs/validation/SF257.md));
 the console retains its original Testnet deployment. The subsequent website-only
 fixed-layout overview video release is in
-`cloudflare-overview-layout-deployment.json` (same SF-257 validation record). The user applied DNS manually; the model
+`cloudflare-overview-layout-deployment.json` (same SF-257 validation record).
+The latest website-only release develops illustrated actions around smaller
+fixed landmarks; its source, served hashes and deployment are recorded in
+`cloudflare-illustrated-overview-deployment.json`. The user applied DNS manually; the model
 performed no DNS-record writes.
 
 | Address | Pages project |
