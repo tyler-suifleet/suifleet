@@ -13,6 +13,13 @@ const fleet={customerId:C,id:F,budgetId:id("0xb")};
 const register=()=>sui.buildRegisterDeviceTx("Pi",id("0xd"),"aarch64",A,fleet);
 (async()=>{
  assert.match(e.deviceCapacityMessage(0n,0n),/0 active devices, limit 0/);
+ const guidance = subscription => loader({"./constants": {PACKAGE_ID:m.call_package_id, REGISTRY_ID:m.shared_objects.registry.id}, "./deployment-manifest": {MANIFEST: subscription, moveType: () => {}, normalizeId: id, verifyDeployment: async () => {}}})("lib/customer-entitlements.ts").deviceCapacityMessage(0n,0n);
+ for (const manifest of [null, {type_origins:{},subscription_coins:{}}, {type_origins:{"subscription::Account":"0x1"}}]) {
+  assert.match(guidance(manifest), /Device capacity.*Plan checkout is not enabled.*service administrator/);
+  assert.doesNotMatch(guidance(manifest), /Plans and billing|Device entitlements|Administration/);
+ }
+ assert.match(guidance({type_origins:{"subscription::Account":"0x1"},subscription_coins:{}}), /Device capacity.*Plans and billing.*service administrator/);
+ assert.match(e.registrationFailure("MoveAbort customer 2"), /Device capacity/);
  await assert.rejects(()=>e.checkDeviceCapacity(client,register()),/Device limit reached.*0 active devices, limit 0/);
  current.device_limit="1"; await e.checkDeviceCapacity(client,register());
  current.active_devices="1"; await assert.rejects(()=>e.checkDeviceCapacity(client,register()),/1 active devices, limit 1/);
