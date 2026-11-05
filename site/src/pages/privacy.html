@@ -11,8 +11,8 @@
 
 <h2>The console and public networks</h2>
 <ul>
-<li>The console at <a href="{{app_url}}">app.suifleet.io</a> is a static web app. It talks directly from your browser to Sui full nodes, Walrus storage and, for encrypted delivery, Seal key servers. SuiFleet operates no server that receives your fleet data.</li>
-<li><strong>Blockchain records are public and permanent.</strong> Device names, addresses, group membership, deployment targets and signed reports written to Sui can be read by anyone and cannot be deleted. Do not use personal data as device or group names.</li>
+<li>The console at <a href="{{app_url}}">app.suifleet.io</a> is a static web app. It talks directly from your browser to the Sui network, Walrus storage and, for private releases, Seal key servers. These providers receive the requests needed to serve your data. SuiFleet operates no server that receives your fleet data.</li>
+<li><strong>Management records are public.</strong> Device names, addresses, group membership, deployment targets and reports recorded on Sui can be read by anyone. Current records can be changed or retired, but historical transactions may remain available from network or archive providers. Retiring a device does not erase that history. Do not put personal or confidential data in device or group names.</li>
 <li>Release artifacts and logs are encrypted in the browser or on the device before upload when you choose confidential delivery. Content you publish as public can be read by anyone.</li>
 <li>Wallets, Google sign-in (through Mysten Labs' Enoki service) and network operators are independent services with their own privacy terms.</li>
 </ul>

@@ -25,7 +25,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <PageHeader title="Dashboard" subtitle="Your fleet at a glance. Track device health, recent updates and active incidents." />
+      <PageHeader title="Dashboard" subtitle="Your fleet at a glance. Health reflects the latest received device report; it is not a live connection test." />
       <Link href="/get-started" className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800 hover:bg-blue-100">New here? Sign in and register your first device</Link>
 
       <SecondPersonApprovals />

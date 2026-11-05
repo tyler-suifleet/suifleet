@@ -93,7 +93,7 @@ def render_guide(config):
                        f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}'
                        'Your browser cannot play this recording.</video>')
             out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
-            out.append(f'<figcaption><span>Testnet recording · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
+            out.append(f'<figcaption><span>Narrated testnet demo · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')

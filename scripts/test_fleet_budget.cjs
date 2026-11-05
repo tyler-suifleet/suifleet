@@ -108,8 +108,8 @@ assert.throws(() => costs.parseToken("-1"), /positive/);
 console.log("PASS: SF-054 scenario reproduced; draws, floats, headroom, data storage and input validation");
 
 // ── Card funding without a server ──
-assert.match(onramp.onrampProvider(undefined).reason, /not configured/);
-assert.match(onramp.onrampProvider("sk_live_secret").reason, /not a public numeric ID/);
+assert.match(onramp.onrampProvider(undefined).reason, /Card funding is not enabled in this workspace/);
+assert.match(onramp.onrampProvider("sk_live_secret").reason, /payment-provider configuration is invalid/);
 const provider = onramp.onrampProvider("12345").provider;
 const wallet = "0x" + "a".repeat(64);
 const url = new URL(onramp.checkoutUrl(provider, wallet, "WAL", "12.5"));
@@ -206,7 +206,7 @@ assert.deepEqual(protocol.modules.fleet_budget.functions.draw_gas.parameters.sli
 console.log("PASS: registration enrolls atomically with its float and reserve; owner budget and account transactions use the reviewed encoders");
 
 // ── Storage and the swap route ──
-assert.match(budget.storageConfig("testnet", undefined).reason, /not configured/);
+assert.match(budget.storageConfig("testnet", undefined).reason, /Storage funding is not enabled in this workspace/);
 assert.match(budget.storageConfig("mainnet", "0x5").reason, /pinned Walrus Testnet/);
 const storage = budget.storageConfig("testnet", "0x5").config;
 assert.equal(budget.swapRoute("testnet").route, "testnet-exchange");
@@ -457,7 +457,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
 // Both registration error handlers must survive integration with entitlement checks.
 const { registrationFailure } = load('lib/customer-entitlements.ts');
 assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in fleet_budget::pay, abort code: 11'))), /no longer has enough SUI/);
-assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in customer::register_device, abort code: 2'))), /Device entitlements/);
+assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in customer::register_device, abort code: 2'))), /Device capacity/);
 
 // Get started renders an honest enrollment preview even for a newly empty budget.
 const React = appRequire('react');
