@@ -199,8 +199,14 @@ for (const [authority, fn, count] of [
   "./DataBrowser":{DataBrowser:props=>{adapter=props.adapter;return React.createElement("p",null,"Data browser reachable");}},
  });
  guestClient.$extend=()=>({walrus:{}});
+ // The reporting hook now reads React Query. Supply the real provider with
+ // this fixture's reporting I/O result; retain the real hook and all authority
+ // checks below (dynamic locator verification has its own reporting suite).
+ const {QueryClient,QueryClientProvider}=appRequire("@tanstack/react-query");
+ const queryClient=new QueryClient();
+ queryClient.setQueryData(["fleet-reporting",selection.identity],cfg);
  const Component=browserLoad("components/FleetDataBrowser.tsx").FleetDataBrowser;
- assert.match(renderToString(React.createElement(Component)),/Data browser reachable/);
+ assert.match(renderToString(React.createElement(QueryClientProvider,{client:queryClient},React.createElement(Component))),/Data browser reachable/);
  const opened=await adapter.open(row);
  assert.match(new TextDecoder().decode(opened),/fixture plaintext/);
  assert.equal(approved.kind,"reader");assert.equal(fetches,1);

@@ -89,6 +89,25 @@ class AbortSiteTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 abort_site(package, 'm', 'action', 0)
 
+    def test_exact_widening_selector_preserves_literal_code_requirement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory)
+            (package / 'sources').mkdir()
+            source = """const EBad: u64 = 0; const BBad: u8 = 0;
+            const EOther: u64 = 1; const BOther: u8 = 1;
+            fun action() { q(nested(false), BBad) }
+            fun q(condition: bool, code: u8) { if (!condition) abort (code as u64) }"""
+            path = package / 'sources/m.move'
+            path.write_text(source)
+            self.assertEqual(abort_site(package, 'm', 'action', 0), 'q')
+            with self.assertRaises(ValueError): abort_site(package, 'm', 'action', 1)
+            for invalid in ['code + 1', '1', 'code']:
+                path.write_text(source.replace('(code as u64)', invalid))
+                with self.assertRaises(ValueError): abort_site(package, 'm', 'action', 0)
+            path.write_text(source.replace('nested(false), BBad', 'nested(false), BOther'))
+            self.assertEqual(abort_site(package, 'm', 'action', 1), 'q')
+            with self.assertRaises(ValueError): abort_site(package, 'm', 'action', 0)
+
     def test_javascript_uses_the_same_selector(self):
         result = subprocess.check_output(['node', '-e', "console.log(require('./scripts/abort_site.cjs').abortSite('contracts','deployment_manager','receipts_mut',5))"], cwd=ROOT, text=True)
         self.assertEqual(result.strip(), 'q')
