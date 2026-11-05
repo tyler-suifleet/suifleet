@@ -1,8 +1,8 @@
 "use client";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useCurrentClient } from '@mysten/dapp-kit-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFleetStorage, useFleetBlobStore } from './useFleetStorage';
 import { fetchFleetSettings } from '@/lib/fleet-settings';
 import { WALRUS_EPOCHS, NETWORK } from '@/lib/constants';
@@ -12,18 +12,30 @@ import { useFleetTransaction } from './useFleetTransaction';
 import { formatStorageQueryError } from '@/lib/storage-errors';
 
 export function useReleasePeriod(sizes: number[]) {
-  const client = useCurrentClient(), account = useCurrentAccount();
+  const client = useCurrentClient(), account = useCurrentAccount(), cache = useQueryClient();
+  const [refreshing,setRefreshing] = useState(false), refreshingGuard = useRef(false);
   const fleet = useFleetStorage(), prepaid = useFleetBlobStore(), execute = useFleetTransaction();
   const [daysOverride, setDays] = useState<number>();
   const schedule = useQuery({ queryKey: ['release-schedule', NETWORK], queryFn: () => storageSchedule(client), staleTime: 60_000 });
   const settings = useQuery({ queryKey: ['release-defaults', NETWORK, fleet.budget?.id], enabled: !!fleet.budget,
-    queryFn: () => fetchFleetSettings(client, fleet.budget!.id) });
+    queryFn: async () => (await fetchFleetSettings(client, fleet.budget!.id)) ?? null });
   const s = schedule.data;
   const days = daysOverride ?? (settings.data?.archiveRetentionEpochs ?? WALRUS_EPOCHS) * (s?.epochDurationMs ?? DAY) / DAY;
   let epochs = 0, error: string | undefined;
   try { if (s) epochs = periodEpochs(days, s); } catch (e) { error = String(e); }
   const quote = useQuery({ queryKey: ['release-price', NETWORK, epochs, sizes], enabled: epochs > 0 && sizes.length > 0 && sizes.every(n => n > 0),
     queryFn: async () => { const w = await releaseWalrus(client); const costs = await Promise.all(sizes.map(n => w.storageCost(n, epochs))); return costs.reduce((sum, c) => sum + c.totalCost, BigInt(0)); } });
+  const refresh = async () => {
+    if (refreshingGuard.current) return;
+    refreshingGuard.current = true; setRefreshing(true);
+    try {
+      await cache.refetchQueries({queryKey:['fleet-budgets',NETWORK],type:'active'});
+      await Promise.all([schedule.refetch(),
+        cache.refetchQueries({queryKey:['release-defaults',NETWORK],type:'active'}),
+        cache.refetchQueries({queryKey:['release-price',NETWORK],type:'active'}),
+        cache.refetchQueries({queryKey:['fleet-storage',NETWORK],type:'active'})]);
+    } finally { refreshingGuard.current = false; setRefreshing(false); }
+  };
   const publisherStore: BlobStore = async (body, progress) => {
     if (!s || error || !epochs || !account) throw Error('Load a valid storage period and connect your wallet before uploading');
     const current = await storageSchedule(client);
@@ -46,10 +58,10 @@ export function useReleasePeriod(sizes: number[]) {
     }
     return blob;
   };
-  return { days, setDays, epochs, schedule: s, expiry: s && epochs ? expiryTime(s.epoch + epochs, s) : undefined,
+  return { days, setDays, epochs, refresh, refreshing, schedule: s, expiry: s && epochs ? expiryTime(s.epoch + epochs, s) : undefined,
     price: quote.data, error: error ?? (fleet.budgetError ? formatStorageQueryError(fleet.budgetError, 'Fleet budget') :
       schedule.error ? formatStorageQueryError(schedule.error, 'Storage schedule') :
       settings.error ? formatStorageQueryError(settings.error, 'Storage defaults') :
       quote.error ? formatStorageQueryError(quote.error, 'Storage price') : undefined),
-    prepaid, loading: !s || fleet.loading || settings.isLoading || quote.isLoading, publisherStore, fleetStore, fleet };
+    prepaid, loading: refreshing || !s || fleet.loading || settings.isLoading || quote.isLoading, publisherStore, fleetStore, fleet };
 }

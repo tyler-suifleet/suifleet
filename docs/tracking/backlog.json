@@ -4820,6 +4820,30 @@
         "Batch enrollment consumes the original funding coin, preserves exact per-recipient amounts and passes actual testnet VM execution without unused-value errors."
       ],
       "validation": "Actual SDK deposit construction/resolution plus managed authority and frontend regressions; resume effects-reconciled SF-245 run without resetting allowance."
+    },
+    {
+      "key": "SF-249",
+      "title": "Recover storage quote failures and stop inferring expiry from historic timing",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/hooks/useReleasePeriod.ts",
+        "dapp/src/components/ReleasePeriod.tsx",
+        "dapp/src/lib/release-storage.ts",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "The real SF-245 novice walkthrough reached software publication after capacity, funding, registration and batch enrollment succeeded. A transient release-defaults read error then blocked upload. The UI says \u201cTry again\u201d, but useReleasePeriod exposes no refetch action, so clicking publish again can reuse the same failed query state. A fresh independent production-reader query returned undefined defaults correctly; do not replace actual read errors with fabricated defaults.\n\nThe same screen showed a \u201cProjected expiry\u201d date already in the past while live Walrus state reported current epoch572 and a new five-period purchase. release-storage.expiryTime uses firstEpochStartMs + endEpoch*currentEpochDurationMs; historic network timing is not established as constant. This forecast must not mark a still-valid blob expired or promise an exact future calendar date without a verified current anchor.\n\nAcceptance:\n- A visible retry near the storage quote refreshes settings/schedule/price/storage reads, clears stale errors only after verified recovery, retains user files/form state and refuses payment/registration while reads remain unknown. Test delayed/recovered reads and repeated clicks at phone size, without duplicate uploads or transactions.\n- Derive validity from authoritative current/end network epochs. Remove invented calendar dates when no verified epoch-time anchor exists; show a clear approximate duration/uncertainty and keep raw epoch counters in technical details. Material storage duration, quoted whole-period charges and expiry/renewal limits must remain visible. Do not silently change purchased epochs or pricing to hide a forecast bug.\n- Audit release warnings and every consumer of expiryTime so a genesis-based estimate cannot mislabel a live release as expired. Test an authoritative future epoch with a misleading historic wall-clock estimate, actual expired epoch, changing durations, unavailable metadata and prepaid longer coverage.\n- Validate typecheck/build, storage quote/presentation/browser regressions and relevant live read-only facts. Coordinate current source/capture with SF-245/#612 and evaluation profile with SF-246/#614. No mainnet, production credentials, hardware or physical acceptance.\n\nSource: dapp/src/hooks/useReleasePeriod.ts, components/ReleasePeriod.tsx, lib/release-storage.ts. Current exact capture source77632f67; private runtime/evidence remains outside Git. SF-245 had no publication upload transaction submitted for the failed attempt; its publisher catalog creation succeeded. Preserve that catalog, current user files where possible, original allowance and all known effects on resume.\n",
+      "evidence": "Actual current-console publication blocked by stale transient defaults query; future Walrus end epoch displayed a past projected date.",
+      "acceptance": [
+        "Visible quote retry refreshes failed dependencies without dropping selected files, inventing defaults or duplicating uploads/payments.",
+        "Storage validity and warnings use authoritative epochs; no unverified calendar expiry forecast, with clear approximate duration/limits.",
+        "Storage/presentation/browser/typecheck/build tests cover unavailable/recovered reads, misleading historic timing, expired epochs and prepaid longer coverage."
+      ],
+      "validation": "Delayed/recovered phone browser checks, quote/expiry invariants and typed read-only live facts; no mainnet/hardware/provider credentials."
     }
   ]
 }
