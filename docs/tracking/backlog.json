@@ -4772,6 +4772,54 @@
       "validation": "Offline script/timing/media checks and desktop/mobile guide playback; public testnet recording with dedicated authorized account only when needed."
     },
     {
+      "key": "SF-246",
+      "title": "Make the mobile customer preview and first-use configuration complete",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "profiles",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "The user explicitly requests fixing every major SF-244 finding, including mobile access and unavailable services, rather than leaving them as audit recommendations.\n\nScope: build a customer-usable public HTTPS evaluation preview with working website/app/installation-documentation links; prevent local addresses from leaking into mobile flows. Make first-use capacity, subscription and network funding prerequisites actionable and clearly ordered. Verify and wire existing supported reporting/storage/data configuration without changing the existing registry or orphaning previously registered devices. Investigate missing subscription configuration and enable it only through a verified compatible testnet deployment; do not substitute a different test fixture registry silently. Add explicit readiness guidance where external configuration is actually missing.\n\nPreserve SF-173's distinct Walrus-Site publisher ownership/allowance; no use of its separate publisher wallet is authorized here. Public HTTPS preview and dedicated-agent testnet acceptance are authorized; no mainnet, production credentials or physical programming. SF-245/#612 already owns rerecording/captions; coordinate the current audit copy and new prerequisites with that worker.\n\nAcceptance:\n- Public HTTPS website, guide, app and installation docs work at a phone viewport, including all cross-origin help/launch links, media and refresh/deep links; no localhost/WSL addresses are shipped in that public preview.\n- First-use UI explains and links capacity, subscriptions, network deposits, device setup, deployment and verified outcomes in correct order without blockchain knowledge; preserve all authority, privacy and spending gates.\n- Read-only live checks verify evaluation manifest/origins/registry and optional service configuration. Where enabling missing contracts is necessary, use dedicated-agent testnet with compatibility validation, a durable non-replenishing allowance and network lease; preserve existing device inventory.\n- Validate desktop/mobile presentation, wallet error/rejection/transaction handling, typecheck/build and relevant cross-layer tests. Record exact enabled/unavailable features and unrun acceptance honestly.\n- Publish contained Tyler-authored commits/PR and keep public preview provenance and runtime lease recovery documented.\n",
+      "evidence": "User requests all customer-audit findings fixed and mobile access on 2026-11-04.",
+      "acceptance": [
+        "Mobile public HTTPS website/app/docs/media and cross-links work without localhost/private addresses.",
+        "Actionable ordered capacity/subscription/funding/device onboarding with verified supported service configuration; preserve registry/inventory and authority/spending gates.",
+        "Relevant browser/build/compatibility checks pass; exact enabled features and limits documented."
+      ],
+      "validation": "Read-only live profile validation, phone-viewport public-host browser checks, frontend typecheck/build and onboarding regressions; dedicated-agent testnet mutations only if needed with compatibility/allowance/lease."
+    },
+    {
+      "key": "SF-247",
+      "title": "Provision reporting and storage per fleet without rebuilding the app",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts",
+        "dapp/src",
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "SF-244/SF-246 customer audit found a deeper provisioning gap: useFleetDataConfig resolves only build-time NEXT_PUBLIC_FLEET_DATA_CONFIGS entries matched by budget ID. The retained evaluation FleetData binding is verified and can be enabled, but a newly created customer fleet cannot set up its own reporting/data path without an operator provisioning objects and rebuilding configuration. This must be fixed, not hidden as an empty dashboard.\n\nImplement an authenticated per-fleet setup path for device reporting/storage: authorized customer administrator can create/configure the required storage/data objects, publish an authoritative locator bound to the correct registry/budget, download the matching client settings and see pending/verified/failed readiness. Resolve it dynamically without rebuilding the app for each customer. Preserve explicit legacy locators as a verified migration fallback. Never trust a URL query, localStorage or arbitrary shared-object address as authority; verify registry/budget/storage/type origins and configured organization protections. Use additive APIs/migrations, preserve old public signatures/layouts and existing device keys/journals. Devices with no report must remain unreported.\n\nAcceptance: two independent new fleets complete setup without app rebuild, cross-customer locator spoofing/revoked authority/partial transaction failures are rejected, and the actual daemon publishes a verified signed health sample through the generated settings on automated testnet. Include browser setup/error/retry/download tests, Move old/new-object compatibility where needed, Rust/OTA verification and exact bounded testnet evidence. Physical Pi/mainnet/provider acceptance remain deferred. Coordinate profile/first-use interfaces with SF-246/#614 and guide flow with SF-245/#612. This is separate from SF-173's restricted Walrus Site publisher wallet.\n",
+      "evidence": "SF-246 verified static FleetData locator only applies to retained evaluation budget; new customer fleets need rebuild/operator setup.",
+      "acceptance": [
+        "Authorized administrators provision per-fleet reporting/storage and authoritative registry/budget-bound locators, discoverable without frontend rebuild.",
+        "Two isolated new fleets, spoofed locators, revoked authority and partial-failure recovery tested; generated client settings yield verified daemon health on automated testnet."
+      ],
+      "validation": "Move additive API/existing-object/upgrade tests where needed, browser provisioning/error/retry/download tests, Rust/OTA and bounded live testnet daemon evidence; no physical/mainnet/provider acceptance."
+    },
+    {
       "key": "SF-248",
       "title": "Fix native coin-intent handling for fleet and enrollment funding",
       "priority": "P1",
@@ -4794,6 +4842,76 @@
         "Batch enrollment consumes the original funding coin, preserves exact per-recipient amounts and passes actual testnet VM execution without unused-value errors."
       ],
       "validation": "Actual SDK deposit construction/resolution plus managed authority and frontend regressions; resume effects-reconciled SF-245 run without resetting allowance."
+    },
+    {
+      "key": "SF-249",
+      "title": "Recover storage quote failures and stop inferring expiry from historic timing",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/hooks/useReleasePeriod.ts",
+        "dapp/src/components/ReleasePeriod.tsx",
+        "dapp/src/lib/release-storage.ts",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "The real SF-245 novice walkthrough reached software publication after capacity, funding, registration and batch enrollment succeeded. A transient release-defaults read error then blocked upload. The UI says \u201cTry again\u201d, but useReleasePeriod exposes no refetch action, so clicking publish again can reuse the same failed query state. A fresh independent production-reader query returned undefined defaults correctly; do not replace actual read errors with fabricated defaults.\n\nThe same screen showed a \u201cProjected expiry\u201d date already in the past while live Walrus state reported current epoch572 and a new five-period purchase. release-storage.expiryTime uses firstEpochStartMs + endEpoch*currentEpochDurationMs; historic network timing is not established as constant. This forecast must not mark a still-valid blob expired or promise an exact future calendar date without a verified current anchor.\n\nAcceptance:\n- A visible retry near the storage quote refreshes settings/schedule/price/storage reads, clears stale errors only after verified recovery, retains user files/form state and refuses payment/registration while reads remain unknown. Test delayed/recovered reads and repeated clicks at phone size, without duplicate uploads or transactions.\n- Derive validity from authoritative current/end network epochs. Remove invented calendar dates when no verified epoch-time anchor exists; show a clear approximate duration/uncertainty and keep raw epoch counters in technical details. Material storage duration, quoted whole-period charges and expiry/renewal limits must remain visible. Do not silently change purchased epochs or pricing to hide a forecast bug.\n- Audit release warnings and every consumer of expiryTime so a genesis-based estimate cannot mislabel a live release as expired. Test an authoritative future epoch with a misleading historic wall-clock estimate, actual expired epoch, changing durations, unavailable metadata and prepaid longer coverage.\n- Validate typecheck/build, storage quote/presentation/browser regressions and relevant live read-only facts. Coordinate current source/capture with SF-245/#612 and evaluation profile with SF-246/#614. No mainnet, production credentials, hardware or physical acceptance.\n\nSource: dapp/src/hooks/useReleasePeriod.ts, components/ReleasePeriod.tsx, lib/release-storage.ts. Current exact capture source77632f67; private runtime/evidence remains outside Git. SF-245 had no publication upload transaction submitted for the failed attempt; its publisher catalog creation succeeded. Preserve that catalog, current user files where possible, original allowance and all known effects on resume.\n",
+      "evidence": "Actual current-console publication blocked by stale transient defaults query; future Walrus end epoch displayed a past projected date.",
+      "acceptance": [
+        "Visible quote retry refreshes failed dependencies without dropping selected files, inventing defaults or duplicating uploads/payments.",
+        "Storage validity and warnings use authoritative epochs; no unverified calendar expiry forecast, with clear approximate duration/limits.",
+        "Storage/presentation/browser/typecheck/build tests cover unavailable/recovered reads, misleading historic timing, expired epochs and prepaid longer coverage."
+      ],
+      "validation": "Delayed/recovered phone browser checks, quote/expiry invariants and typed read-only live facts; no mainnet/hardware/provider credentials."
+    },
+    {
+      "key": "SF-251",
+      "title": "Complete self-service reporting in the public testnet evaluation",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "profiles/seal-testnet",
+        "dapp",
+        "docs/validation",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "Complete the public mobile evaluation's reporting configuration so a NEW customer can set up reporting and download verified settings without an operator rebuild or a per-fleet hardcoded locator. This is the deployment follow-through of SF-246/#614 and SF-247/#616, discovered during the user-requested customer audit. Source-only reporting implementation in PR #621 is not evidence that the shared preview is configured.\n\nUse the tested reporting interface from PR #621 (inspect its exact latest head and evidence) and the existing evaluation profile from SF-246. Stacks are allowed: do not wait solely for merged-main publication. Coordinate exact source/head and do not edit another worker's claimed branch. Dedicated testnet agent wallet only, explicit client-host.yaml, acquire/assert/renew/release network:suifleet-testnet only during shared mutations. SF-245 recording has completed and released its lease. Never touch SF-173's separate publisher wallet or its prior allowance.\n\nDeliverables:\n- Verify whether the retained evaluation core supports fleet_budget::attach. Stage and compatibility-check any necessary additive upgrade, preserving existing registry, objects, ALL prior type origins and subscriptions. Use pinned compiler/network CLI, verify unsigned bytecode before signing, inspect execution effects and re-resolve the manifest. Reuse exact already-published compatible packages; never republish identical code. Reporting packages published against the isolated SF-247 core cannot simply be pointed at incompatible evaluation-core types.\n- Publish/verify the matching storage/data packages if required and configure the app-wide reviewed ReportingRelease (package/cap pairs), with NO per-customer static locator requirement. Preserve old fleet keys, journals, object history and named identities. Coordinate current profile with open profile repair workers before publishing its source changes.\n- Perform a separate durable run for this genuinely new reporting release, bounded at 2,000,000,000 MIST including failures and full child funding. This does NOT reset SF-245/SF-246/SF-173 allowances. Journal each digest before signing, stop/reconcile unknown outcomes, retain exact prior charges on retries, no refunds/faucets replenish the ceiling. Verify balance first; do not request a faucet routinely. Record actual costs, not budgets as charges.\n- Build the combined current customer UI (audit/readiness, funding #620, storage #624, groups #627 and latest billing progress from #617) against the complete verified profile. Test two fresh independent customer fleets and unchanged UI build: actual setup, device network-account enrollment, reporting enrollment/settings download, and real native daemon report with independently verified signature/bindings. Before the report, show unreported; startup degraded is not healthy. No fabricated health or broad fallback on read errors.\n- Supply reproducible profile/evidence and prepared immutable static artifact/handoff to the existing mobile preview services. Public docs/app/site crosslinks must use reachable HTTPS preview origins, not localhost/private WSL addresses. Preserve existing mobile URLs where possible. This authorizes TESTNET preview integration under the user's existing request, not production DNS/credentials, Mainnet, Pi programming or manual Slush claims.\n- Run relevant Move upgrade/old-object, SDK/browser/download/typecheck/build and edge checks for changed code. Shared fixtures and controller gates stay intact. Ordinary source review and CI remain required. Clearly retain deferred physical/provider/manual-wallet acceptance #32/#159.\n\nExisting mobile preview: https://characterized-above-chemical-possess.trycloudflare.com/ (runtime metadata /preview-version.json). Runtime artifacts under ~/.local/state/suifleet; never print keys or lease/claim tokens. Root operator is finishing SF-245 media; reporting work should proceed in its own claimed worktree through the normal dispatcher/review service.\n",
+      "evidence": "Reporting source tested in isolated SF-247 fixture but public shared evaluation still lacks matching complete release configuration.",
+      "acceptance": [
+        "Compatible verified evaluation core/storage/data and app-wide reporting release, preserving retained state and prior origins.",
+        "Two new customers provision and produce independently verified actual daemon reports with the unchanged public app build.",
+        "Durable separate 2 SUI ceiling includes all failures/funding; exact receipts and mobile HTTPS artifact/handoff supplied; normal review/CI and deferred acceptance retained."
+      ],
+      "validation": "Exact-head compatibility, browser/SDK/typecheck/build and actual testnet daemon outcomes; no Mainnet, other-wallet credentials or physical Pi."
+    },
+    {
+      "key": "SF-252",
+      "title": "Create an animated customer introduction before the app walkthroughs",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "docs",
+        "scripts",
+        ".github/workflows"
+      ],
+      "resources": [],
+      "description": "The user explicitly requests a visual how-it-works introduction, not screen recordings of app controls. Implement a polished original animated diagram with the established three-boat branding and female narration, plus native captions and an accessible transcript. Explain operator/wallet approval, publishing release metadata versus stored files, target selection, device-initiated checks of shared Sui records, verified download from Walrus (Seal for confidential software), platform-owned installation/reboot, and separately signed install/health reports. Never imply pushes, perpetual file storage, automatic healthy status or a wallet/private key sent to a device. Provide landscape and phone-friendly portrait video, WebM/MP4 fallbacks, a poster and purposeful integration on How it works and before guided app usage. Version reproducible source/storyboard/assets; meaningful media/text/hash/phone/browser tests. Source overlays are illustrative animation, explicitly not live hardware footage or testnet acceptance. Build on current guide #615, preserving its ten current narrated recordings. Record actual implementation/model/tests and normal review; no mainnet, physical programming or production credentials.",
+      "evidence": "Explicit user request to finish customer-audit implementations, permanent customer domains and a visual conceptual introduction.",
+      "acceptance": [
+        "The user explicitly requests a visual how-it-works introduction, not screen recordings of app controls. Implement a polished original animated diagram with the established three-boat branding and female narration, plus native captions and an accessible transcript. Explain operator/wallet approval, publishing release metadata versus stored files, target selection, device-initiated checks of shared Sui records, verified download from Walrus (Seal for confidential software), platform-owned installation/reboot, and separately signed install/health reports. Never imply pushes, perpetual file storage, automatic healthy status or a wallet/private key sent to a device. Provide landscape and phone-friendly portrait video, WebM/MP4 fallbacks, a poster and purposeful integration on How it works and before guided app usage. Version reproducible source/storyboard/assets; meaningful media/text/hash/phone/browser tests. Source overlays are illustrative animation, explicitly not live hardware footage or testnet acceptance. Build on current guide #615, preserving its ten current narrated recordings. Record actual implementation/model/tests and normal review; no mainnet, physical programming or production credentials."
+      ],
+      "validation": "Meaningful browser/mobile/media/deployment verification, exact provenance and explicit remaining access/acceptance boundaries."
     }
   ]
 }

@@ -1,0 +1,222 @@
+{
+  "network": "testnet",
+  "chain": "4c78adac",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "started": "2026-11-05T05:31:05Z",
+  "finished": "2026-11-05T06:57:07Z",
+  "console_commit": "88d2364047a358f0a99bb1c1cb4f98744d5cf017",
+  "package": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+  "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+  "max_spend_mist": 350000000,
+  "allowance_used_mist": 335964000,
+  "browser_address": "0xc0ecad1e859847da2f5975ef6ba8e8c8d09535d1b1b344d2b815f4a9a2f58f4d",
+  "funding_transactions": [
+    {
+      "label": "top up the reusable guide browser key",
+      "digest": "8poa9vi6x5kQoXmwm4mt1MnLk8AtPRYp74BaeVrxukPC",
+      "gas_mist": 1988000,
+      "funding_mist": 220000000
+    },
+    {
+      "label": "fund the disposable recorded Linux device",
+      "digest": "5B6sWNtiQceqLCosgsnK1iHvytutSYTs9h18NpNhTKcH",
+      "gas_mist": 1988000,
+      "funding_mist": 50000000
+    },
+    {
+      "label": "top up the reusable guide browser key",
+      "digest": "2hSNufe3D93mMLZY58v2PcTzxKnzYJ4oAfNUoW3cEezg",
+      "gas_mist": 1988000,
+      "funding_mist": 60000000
+    }
+  ],
+  "browser_transactions": [
+    {
+      "step": "capacity-plan",
+      "digest": "C9JgGAsYRVKT5bBn7PkKizT12fAv1HCLxUCWyQb137vw",
+      "effects_status": "success",
+      "net_gas_mist": 6305183
+    },
+    {
+      "step": "capacity-plan",
+      "digest": "4w3Wa3RY9Bqpd7GxjcrNamZArDDiA9Q7H9bJqKkRA1dS",
+      "effects_status": "success",
+      "net_gas_mist": 1988677
+    },
+    {
+      "step": "fund",
+      "digest": "8ZSrn1upt8ddq9jH1NZGwYjPE6ubeDX9bqADSwrZmHit",
+      "effects_status": "success",
+      "net_gas_mist": 1000575
+    },
+    {
+      "step": "register-device",
+      "digest": "B1m2JfWWhMHKwm2w1FUTiPxQTGiuvZvStWjPoWYjwz8r",
+      "effects_status": "success",
+      "net_gas_mist": 27654237
+    },
+    {
+      "step": "enroll-batch",
+      "digest": "HQKgzQPM2Yzm3XDM6B5w8MYHck2sndk427AFXkPFUJrL",
+      "effects_status": "success",
+      "net_gas_mist": 5393128
+    },
+    {
+      "step": "enroll-batch",
+      "digest": "6ynSYRuqVKmcbVvnWrnve9LfjGKZCfpJfE3yni3gFUjw",
+      "effects_status": "success",
+      "net_gas_mist": 9983536
+    },
+    {
+      "step": "publish-version",
+      "digest": "8DS3iAzqu81qiSqYmxTyduTy4Epap1Kn2cfkfa49bdco",
+      "effects_status": "success",
+      "net_gas_mist": 2694899
+    },
+    {
+      "step": "publish-version",
+      "digest": "Gv6EqV2ECRkEAqZi1Z2dagpAjhdnat77SXd46uRt3Dax",
+      "effects_status": "success",
+      "net_gas_mist": 5301868
+    },
+    {
+      "step": "deploy-group",
+      "digest": "FkUzW9N7gPcFcB72qxSTGTQ5ZeGbJxkt4b4SPVeNhMqd",
+      "effects_status": "success",
+      "net_gas_mist": 3082752
+    },
+    {
+      "step": "deploy-group",
+      "digest": "EyTwSk2BYYaj5nzsLimoW8Q76XSbeVH2DZot96dcjayM",
+      "effects_status": "success",
+      "net_gas_mist": 1243968
+    },
+    {
+      "step": "deploy-group",
+      "digest": "E7MMAYHoBLsFKJqYLYJcoWEtZK9kvfyMNk5jHWv8sfHw",
+      "effects_status": "success",
+      "net_gas_mist": 56267784
+    },
+    {
+      "step": "access-policy",
+      "digest": "8BzcWMqxB2Jhmq67BMA1mDXcgQ3zbmfE845gPUoGrTTY",
+      "effects_status": "success",
+      "net_gas_mist": 7764401
+    },
+    {
+      "step": "access-policy",
+      "digest": "HEviyH2e6wiqj6YCC94ayWcvNb5rfVHwnhfnSkGLexYT",
+      "effects_status": "success",
+      "net_gas_mist": 1243461
+    },
+    {
+      "step": "fleet-settings",
+      "digest": "8TvnMy38ZXpitThvRZhKFKw4U9rjR37BjeRT97rDLGXu",
+      "effects_status": "success",
+      "net_gas_mist": 3577120
+    },
+    {
+      "step": "staged-rollout",
+      "digest": "8nrVNaoutpu7fBX8bGaR6nATVSXm1xAQR4rd6CCJDzRn",
+      "effects_status": "success",
+      "net_gas_mist": 58046148
+    },
+    {
+      "step": "staged-rollout",
+      "digest": "J9ESmH9jjQvPDYK8wUFf9VF7ktkF9wMn6zxHJvyp14p4",
+      "effects_status": "success",
+      "net_gas_mist": 4283929
+    },
+    {
+      "step": "sign-in",
+      "digest": "CHWuiwvmwXUBTAgWcTLJzgP9DWajZTzKUd26uKE1wrD2",
+      "effects_status": "success",
+      "net_gas_mist": 23496277
+    }
+  ],
+  "browser_and_parent_network_fees_mist": 225291943,
+  "network_fee_scope": "Parent funding transactions plus browser transactions; device gas is bounded by its separately precharged 50M funding, not included in this fee subtotal.",
+  "recorded_device": {
+    "device": "0xca118cb406ab977afc84f60f31266cd84fffb7c01397accb100042f0146c5065",
+    "address": "0x97d6da12eb81ad574f13b2b99883c23addc4b5093080de6ded7476f8234cc020",
+    "deployment": "0xbfa21b45c98e7d55cfebb2e1d14b042693ea37e589ee7882b62e843dfac38124",
+    "funding_mist": 50000000,
+    "funding_digest": "5B6sWNtiQceqLCosgsnK1iHvytutSYTs9h18NpNhTKcH",
+    "applied": true,
+    "remaining_balance_mist": 43907558
+  },
+  "authoritative_receipt": {
+    "network": "testnet",
+    "chain": "4c78adac",
+    "deployment": "0xbfa21b45c98e7d55cfebb2e1d14b042693ea37e589ee7882b62e843dfac38124",
+    "device": "0xca118cb406ab977afc84f60f31266cd84fffb7c01397accb100042f0146c5065",
+    "verified": true,
+    "statuses": {
+      "0xca118cb406ab977afc84f60f31266cd84fffb7c01397accb100042f0146c5065": 1
+    }
+  },
+  "media_review": [
+    {
+      "step": "sign-in",
+      "normalized_script_transcript_similarity_percent": 98.0,
+      "review_frames": 12
+    },
+    {
+      "step": "capacity-plan",
+      "normalized_script_transcript_similarity_percent": 97.9,
+      "review_frames": 10
+    },
+    {
+      "step": "fund",
+      "normalized_script_transcript_similarity_percent": 100.0,
+      "review_frames": 8
+    },
+    {
+      "step": "register-device",
+      "normalized_script_transcript_similarity_percent": 98.3,
+      "review_frames": 8
+    },
+    {
+      "step": "enroll-batch",
+      "normalized_script_transcript_similarity_percent": 99.2,
+      "review_frames": 12
+    },
+    {
+      "step": "publish-version",
+      "normalized_script_transcript_similarity_percent": 100.0,
+      "review_frames": 12
+    },
+    {
+      "step": "deploy-group",
+      "normalized_script_transcript_similarity_percent": 100.0,
+      "review_frames": 16
+    },
+    {
+      "step": "staged-rollout",
+      "normalized_script_transcript_similarity_percent": 100.0,
+      "review_frames": 16
+    },
+    {
+      "step": "access-policy",
+      "normalized_script_transcript_similarity_percent": 100.0,
+      "review_frames": 6
+    },
+    {
+      "step": "fleet-settings",
+      "normalized_script_transcript_similarity_percent": 100.0,
+      "review_frames": 8
+    }
+  ],
+  "review_method": "Full WebM and MP4 audio/video decode; complete audio ASR/script comparison; inspected start/midpoint frames of every spoken segment (108 frames across ten clips). This is not manual real-time human watching or manual Slush acceptance.",
+  "limitations": [
+    "Scripted test wallet on Testnet; test subscription tariff has no monetary value.",
+    "Disposable actual Linux daemon applies sample installer; no physical Pi/reboot or healthy long-running service claim.",
+    "Rollout created and paused with zero devices admitted; healthy rollout completion not shown.",
+    "New self-service reporting evaluation configuration proceeds separately in SF-251/#628.",
+    "Original fixed allowance retained through all retries; no faucet and no unknown outcome replay."
+  ],
+  "editing": [
+    "Shortened network waits; natural action order retained.",
+    "Removed duplicate result-view footage added by later-step retries; original private frames and edit receipt retained."
+  ]
+}

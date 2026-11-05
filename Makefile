@@ -128,6 +128,7 @@ test-yocto-packaging:
 dapp-typecheck:
 	$(RUN) node scripts/test_subscription_card.cjs
 	$(RUN) node scripts/test_subscription_checkout.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_billing_progress_browser.cjs
 	$(MAKE) test-testnet
 	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"

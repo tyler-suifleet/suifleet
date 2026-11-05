@@ -1,0 +1,54 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:10.782
+SuiFleet helps you deliver software to devices and see what
+happened. Start with one machine, then organize a fleet into
+groups. Here is the idea behind the controls.
+
+2
+00:00:12.000 --> 00:00:25.035
+Your wallet is the app you use to approve management changes. It
+signs your request so the network can check your authority. Each
+device has its own identity. Your wallet's private key is not
+sent to the devices.
+
+3
+00:00:26.250 --> 00:00:43.914
+Publishing puts a version and its verification details in shared
+Sui records. The software files live in Walrus storage for a
+chosen period. Confidential releases are encrypted, with Seal
+controlling who can obtain the keys to open them. Publishing
+alone installs nothing.
+
+4
+00:00:45.150 --> 00:01:00.446
+You approve a deployment for a device or group. The shared
+records describe the approved version and targets. Each device
+client checks those records on its configured schedule when
+connected. This is not a remote session pushing files into your
+machines.
+
+5
+00:01:01.650 --> 00:01:20.061
+A targeted device downloads the files, verifies the approved
+release and runs its configured installer. Your platform handles
+system update details, including any reboot or rollback. An
+offline device can catch up later, while the deployment permits
+it and the files remain available.
+
+6
+00:01:21.300 --> 00:01:38.879
+The device authenticates its result so the console can show
+whether installation succeeded or failed. Health is reported
+separately. A deployment request does not mean installed, and
+installed does not mean healthy. Reporting frequency determines
+how fresh that picture is.
+
+7
+00:01:40.100 --> 00:01:56.079
+The console, shared records, file storage and device clients
+work together without a SuiFleet application server. Network
+providers, connectivity and operating funds are still needed.
+Try one device first, then use groups and staged rollouts to
+expand.
