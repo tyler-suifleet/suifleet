@@ -37,10 +37,14 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await prepay.dispatchEvent('click'); assert.equal(await page.evaluate(() => window.billing.calls), 1);
     await page.evaluate(() => window.billing.release()); await visible(prepay, 'Do not pay again');
     await page.evaluate(() => window.billing.release()); await page.getByRole('status').filter({ hasText: 'Confirmed.' }).waitFor();
+    assert.match(await page.getByRole('status').innerText(), /Submitted digest: fixture-digest/);
     const collect = page.getByRole('button', { name: 'Apply due prepaid payment' });
     await collect.click(); await visible(collect, 'Checking payment details');
+    assert.doesNotMatch(await page.getByRole('status').innerText(), /Submitted digest|fixture-digest/);
     await page.evaluate(() => window.billing.release()); await visible(collect, 'Approve this billing action');
+    assert.doesNotMatch(await page.getByRole('status').innerText(), /Submitted digest|fixture-digest/);
     await page.evaluate(() => window.billing.release()); await visible(collect, 'Do not pay again');
+    assert.match(await page.getByRole('status').innerText(), /Submitted digest: fixture-digest/);
     await page.evaluate(() => { window.billing.fail = true; window.billing.release(); });
     await page.getByRole('status').filter({ hasText: 'Confirmation unavailable' }).waitFor();
     assert.match(await page.getByRole('status').innerText(), /Check a submitted digest before retrying/);

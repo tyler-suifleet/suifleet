@@ -51,6 +51,7 @@ function Billing() {
     inFlight.current = true;
     setBusy(true);
     setActiveAction(actionName);
+    setDigest('');
     const captured = context;
     setMessage('Checking payment details and network…');
     try {
