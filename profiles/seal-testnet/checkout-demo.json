@@ -1,0 +1,139 @@
+{
+  "quotes": [
+    {
+      "offerId": "0x8762e18e1a4654c34ff0247e3d7c093ce4b0b24ffd02c48094efab02d6db9c1e",
+      "symbol": "USDC",
+      "usdPerCoin": 1,
+      "observedAt": 1793854903674,
+      "source": "Testnet demonstration conversion; test tokens have no monetary value"
+    },
+    {
+      "offerId": "0x8c364f442148c5bcadac8acfbb1ea5bd73637db3e53ef81aba7010f7d04805fa",
+      "symbol": "SUI",
+      "usdPerCoin": 1,
+      "observedAt": 1793854903674,
+      "source": "Testnet demonstration conversion; test tokens have no monetary value"
+    }
+  ],
+  "price_table": {
+    "data": {
+      "includedBytesPerDeviceMonth": 10000000,
+      "includedRetentionDays": 42,
+      "writeUsdPerGB": 0.1,
+      "storageUsdPerGBMonth": 0.05
+    },
+    "source": "Testnet demonstration tariff only; not commercial pricing. Test tokens have no monetary value.",
+    "currency": "USD",
+    "base": {
+      "tiers": [
+        {
+          "upToDevices": 100,
+          "usdPerDeviceMonth": 0.0001
+        }
+      ],
+      "customFromUsdPerDeviceMonth": 0.0001,
+      "monthlyMinimumUsd": 0.01,
+      "activationUsdPerDevice": 0,
+      "annualPrepayDiscountPercent": 10
+    },
+    "settings": {
+      "checkIntervalMs": [
+        {
+          "label": "Every 5 minutes",
+          "value": 300000,
+          "usdPerDeviceMonth": 0.05
+        },
+        {
+          "label": "Every 15 minutes",
+          "value": 900000,
+          "usdPerDeviceMonth": 0.01
+        },
+        {
+          "label": "Every 30 minutes",
+          "value": 1800000,
+          "usdPerDeviceMonth": 0,
+          "default": true
+        },
+        {
+          "label": "Hourly",
+          "value": 3600000,
+          "usdPerDeviceMonth": 0
+        }
+      ],
+      "rolloutCheckIntervalMs": [
+        {
+          "label": "Every 60 seconds during rollouts",
+          "value": 60000,
+          "usdPerDeviceMonth": 0,
+          "default": true
+        },
+        {
+          "label": "Every 5 minutes during rollouts",
+          "value": 300000,
+          "usdPerDeviceMonth": 0
+        },
+        {
+          "label": "Off (normal checks only)",
+          "value": 0,
+          "usdPerDeviceMonth": 0
+        }
+      ],
+      "healthIntervalMs": [
+        {
+          "label": "Hourly",
+          "value": 3600000,
+          "usdPerDeviceMonth": 0.12
+        },
+        {
+          "label": "Every 6 hours",
+          "value": 21600000,
+          "usdPerDeviceMonth": 0.03
+        },
+        {
+          "label": "Daily",
+          "value": 86400000,
+          "usdPerDeviceMonth": 0,
+          "default": true
+        }
+      ],
+      "archiveIntervalMs": [
+        {
+          "label": "Daily",
+          "value": 86400000,
+          "usdPerDeviceMonth": 0.08
+        },
+        {
+          "label": "Weekly",
+          "value": 604800000,
+          "usdPerDeviceMonth": 0,
+          "default": true
+        }
+      ],
+      "archiveRetentionDays": [
+        {
+          "label": "6 weeks",
+          "value": 42,
+          "usdPerDeviceMonth": 0,
+          "default": true
+        },
+        {
+          "label": "6 months",
+          "value": 182,
+          "usdPerDeviceMonth": 0.02
+        },
+        {
+          "label": "1 year",
+          "value": 365,
+          "usdPerDeviceMonth": 0.04
+        }
+      ]
+    },
+    "addOns": {
+      "encryptedDelivery": {
+        "label": "Encrypted delivery (Seal)",
+        "usdPerDeviceMonth": 0.02
+      }
+    }
+  },
+  "purpose": "Testnet demonstration only. Canonical commercial proposal is unchanged."
+}

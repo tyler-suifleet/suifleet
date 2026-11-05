@@ -1,0 +1,14 @@
+{
+  "ticket": "SF-248",
+  "network": "testnet",
+  "chain": "4c78adac",
+  "deposit_digest": "8ZSrn1upt8ddq9jH1NZGwYjPE6ubeDX9bqADSwrZmHit",
+  "effects": "success",
+  "deposit_mist": 1000000,
+  "net_gas_mist": 1000575,
+  "context": "Actual console Network budget Deposit, managed customer cap loan, actual SDK coin intent; resumed original SF-245 run after pre-submission serialization failure. No completed capacity transaction replayed, no allowance reset.",
+  "limits": [
+    "Not manual Slush or hardware acceptance.",
+    "SDK max-u64 regression uses deterministic object references; real chain deposit is0.001SUI."
+  ]
+}

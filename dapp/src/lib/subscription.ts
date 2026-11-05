@@ -111,7 +111,7 @@ export function warnings(a: Account, now = Date.now()) {
   else {
     if (BigInt(a.balance.value) < BigInt(a.fee) * BigInt(a.remaining)) result.push('Low subscription balance: remaining periods are not fully funded.');
     if (Number(a.term_end_ms) - now <= 7 * 86400000) result.push(Number(a.term_end_ms) <= now ? 'Subscription term expired. Choose a renewal offer.' : 'Subscription term ends within seven days. Review a renewal offer before expiry.');
-    if (BigInt(a.remaining) > BigInt(0) && now >= Number(a.next_due_ms)) result.push('A collection is due. Collection needs an on-chain transaction; it is not a timer.');
+    if (BigInt(a.remaining) > BigInt(0) && now >= Number(a.next_due_ms)) result.push('A prepaid payment is due. Apply it here to activate or extend device capacity using your existing subscription balance; approval costs a network fee.');
   }
   return result;
 }
