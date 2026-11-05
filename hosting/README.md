@@ -6,9 +6,11 @@ website, Testnet console and curated docs are independent static deployments.
 project scope; `cloudflare-projects.json` records the actual provider-returned
 project IDs and domains. Reuse these projects; do not create replacements on retry.
 
-All four owned hostnames are active. Actual final deployment IDs/source and domain
-status are recorded in `cloudflare-deployments.json`; validation is in
-[SF-256](../docs/validation/SF256.md). The user applied DNS manually; the model
+All four owned hostnames are active. The initial three-origin release is recorded
+in `cloudflare-deployments.json` ([SF-256](../docs/validation/SF256.md)). The later
+website/docs-only product-copy update is recorded in
+`cloudflare-product-copy-deployments.json` ([SF-257](../docs/validation/SF257.md));
+the console retains its original Testnet deployment. The user applied DNS manually; the model
 performed no DNS-record writes.
 
 | Address | Pages project |
