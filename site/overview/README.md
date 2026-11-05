@@ -38,17 +38,20 @@ English captions, an MP4 fallback and the complete transcript. Plain diagrams,
 full narration and readable text provide alternatives; colors alone never
 explain a state. No third-party scripts or remote assets are introduced.
 
-The revised animation uses separate scene compositions rather than a repeated
-fixed diagram: devices enter and regroup, a signed approval travels to shared
-records, metadata and encrypted files follow separate paths, device requests
-and responses travel in opposite directions, a download fills before verification
-and installer motion, and installation results remain separate from health.
-Narration is not burned into the frames. Short object labels describe the diagram;
-full narration is available only as a selectable caption track or transcript.
+The animation keeps four persistent landmarks in the same positions in every
+chapter: console and wallet at top left, Sui shared records at top right, device
+client at bottom left, and Walrus software files at bottom right. Both landscape
+and portrait use that same arrangement. Inactive landmarks remain visible with
+quieter emphasis; they never move, disappear or swap places. One animated flow
+at a time shows the current action. The narration and native optional captions
+remain separate from the graphics. Background particles, chapter entrance
+transitions and multiple simultaneous flows are avoided to reduce visual load.
 
 `site/tests/motion_browser.cjs` compares core-scene pixels at distinct times in
 every scene and aspect ratio, excluding the header/progress line, so movement
-cannot be established by a changing progress bar alone. Visual inspection is
+cannot be established by a changing progress bar alone. It also checks identical
+landmark bounds across all seven chapters. Samples avoid a complete particle
+cycle so a moving packet is not mistaken for a static frame. Visual inspection is
 still required; pixel change does not establish animation quality.
 
 For a completed matching frame render, `--reuse-frames` verifies its timeline and

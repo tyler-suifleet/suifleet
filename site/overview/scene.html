@@ -20,24 +20,94 @@ function ring(x,y,r,t,color=B){c.save();c.globalAlpha=(1-t)*.65;c.strokeStyle=co
 function packet(a,b,p,kind='dot',color=G){p=clamp(p);const x=lerp(a[0],b[0],p),y=lerp(a[1],b[1],p);c.save();c.shadowBlur=18;c.shadowColor=color;if(kind==='file')file(x,y,.6,true);else{box(x,y,kind==='request'?40:25,kind==='request'?18:25,color,6)}c.restore()}
 function connection(a,b,t,{color=B,count=3,reverse=false,kind='dot'}={}){line(a,b,'#294e6b',2);const end=reverse?a:b,start=reverse?b:a;for(let i=0;i<count;i++)packet(start,end,(t*.21+i/count)%1,kind,color);const ang=Math.atan2(end[1]-start[1],end[0]-start[0]);c.save();c.translate(...end);c.rotate(ang);c.fillStyle=color;c.beginPath();c.moveTo(0,0);c.lineTo(-13,-6);c.lineTo(-13,6);c.fill();c.restore()}
 function pill(s,x,y,color=B,w=180){box(x,y,w,42,'#0e304b',12);label(s,x,y+7,19,color)}
-function place(draw,x,y,t,delay=0,s=1){const p=ease((t-delay)/1.1);c.save();c.globalAlpha=p;c.translate(0,(1-p)*65);draw(x,y,s);c.restore()}
-function stageFleet(t){const points=[[-355,-85],[-120,-85],[120,-85],[355,-85],[-355,135],[-120,135],[120,135],[355,135]];const p=ease(t/2),group=ease((t-4)/2);for(let i=0;i<8;i++){const [x,y]=points[i],gx=(i<4?-230:230)+(i%4-1.5)*95,gy=i<4?-10:110;const ax=lerp(x,gx,group),ay=lerp(y,gy,group);device(lerp(Math.cos(i)*600,ax,p),lerp(Math.sin(i)*350,ay,p)+Math.sin(t*1.2+i)*5,.66,`Device ${i+1}`,t+i)}if(group>0){c.globalAlpha=group;pill('Group A',-230,-150,B);pill('Group B',230,-150,G);c.globalAlpha=1;}ring(0,0,270,(t*.17)%1)}
-function stageApprove(t){const a=[-285,20],b=[275,20];place(wallet,...a,t);place(records,...b,t,.6,1.1);label('Your wallet',a[0],125,25);label('Shared records',b[0],125,25);if(t>2){connection([-180,20],[165,20],t-2,{count:1,kind:'request'});pill(t<5?'Review request':'Approve change',0,-110,G,230)}if(t>4){const p=clamp((t-4)/1.3);line([-320,35],[-320+35*p,35-20*p],G,4);check(275,20,clamp((t-6)/.8),34);ring(275,20,80,((t-6)*.3)%1,G)}pill('Private key stays here',-285,190,M,250);c.save();c.translate(-350,-75);c.rotate(Math.sin(t)*.08);box(0,0,25,22,'#13413f',4);c.strokeStyle=G;c.beginPath();c.arc(0,-13,9,Math.PI,0);c.stroke();c.restore()}
-function stagePublish(t){consoleIcon(-330,40,1.1);records(305,-100);store(305,135);label('Web console',-330,165,23);label('Sui · release record',305,-185,23);label('Walrus · files',305,235,23);if(t>1){connection([-220,0],[210,-100],t,{count:2,color:B});pill('Version + verification',0,-150,B,250)}if(t>4){connection([-220,80],[210,135],t,{count:2,kind:'file'});pill('Encrypted release',0,195,G,230)}ring(305,135,70,(t*.2)%1,G);file(-330,35,.65,t>5)}
-function stagePoll(t){records(0,-110,1.1);label('Approved targets',0,-200,25);const ps=[[-345,130],[0,180],[345,130]];ps.forEach((p,i)=>{device(...p,.72,`Device ${i+1}`,t+i);const cycle=(t+i*1.7)%6,top=[p[0]*.25,-35],bottom=[p[0],p[1]-55];line(top,bottom,'#2c526f',2);if(cycle<3)packet(bottom,top,cycle/3,'request',B);else packet(top,bottom,(cycle-3)/3,'dot',G);ring(...p,55,cycle/6)});pill('Devices ask',-250,-30,B);pill('Read approved update',235,-30,G,250)}
-function stageInstall(t){store(-330,-40,1.15);device(290,20,1.45,'Target device',0);label('Stored release',-330,100,24);const p=clamp((t-2)/6);if(t>1&&t<9)connection([-225,-40],[180,-40],t,{kind:'file',count:3});box(0,100,290,24,'#102b43',6);c.fillStyle=B;c.fillRect(-140,93,280*p,14);pill(t<8?'Download':t<12?'Verify release':'Run platform installer',0,-150,t<8?B:G,290);if(t>=8){c.save();c.translate(0,-10);c.rotate(t*.6);c.strokeStyle=G;c.lineWidth=4;for(let i=0;i<8;i++){c.rotate(Math.PI/4);line([36,0],[49,0],G,5)}c.beginPath();c.arc(0,0,29,0,7);c.stroke();c.restore();check(290,0,clamp((t-10)/1.5),30)}if(t>12)pill('Version updated',290,190,G,220)}
-function stageReport(t){device(-325,20,1.12,'Device',1);records(295,-80);label('Shared records',295,-180,24);box(290,130,245,110,'#102e46');label('Console',290,115,22);pill('Install result',-10,-100,G,210);if(t>1)connection([-220,-15],[205,-80],t,{count:1,color:G,kind:'request'});if(t>4){label('Applied',290,153,23,G);check(385,150,1,15)}if(t>6){pill('Separate health sample',-25,150,B,265);connection([-220,70],[155,130],t-6,{count:1,color:B});ring(290,130,70,((t-6)*.2)%1,B)}label('Requested',-335,-150,22,M);if(t>3)label('≠',-180,-150,31,B);if(t>5)label('Applied',-70,-150,22,G);if(t>7)label('≠ Healthy',80,-150,22,B)}
-function stageOverview(t){const a=[-355,0],b=[-20,-100],d=[325,130],f=[325,-105];place(consoleIcon,...a,t);place(records,...b,t,.6);place(store,...f,t,1.2);place(device,...d,t,1.8);if(t>2){connection([-265,-10],[-100,-90],t,{count:1});connection([65,-105],[245,-105],t,{kind:'file',count:1});connection([315,-35],[315,50],t,{count:1});connection([245,100],[40,-50],t,{count:1,color:G})}label('Console + wallet',a[0],115,22);label('Shared records',b[0],10,22);label('Files',f[0],-200,22);label('Device client',d[0],245,22);pill('Approve',-355,-145,B);pill('Check · verify · report',0,200,G,310)}
-function stagePortrait(id,t){
- if(id==='fleet'){for(let i=0;i<8;i++){const x=(i%2?155:-155),y=-255+Math.floor(i/2)*180,p=ease(t/2);device(lerp(Math.cos(i)*650,x,p),lerp(Math.sin(i)*500,y,p)+Math.sin(t+i)*5,.82,`Device ${i+1}`,t+i)}if(t>4){pill('Group A',-155,-385,B,180);pill('Group B',155,-385,G,180)}return}
- if(id==='approve'){wallet(0,-230,1.35);label('Your wallet',0,-130,28);records(0,220,1.3);label('Shared records',0,340,28);connection([0,-90],[0,120],t,{count:1,kind:'request'});pill(t<5?'Review → approve':'Signed approval',185,0,G,225);pill('Key stays private',0,-345,M,260);if(t>6)check(0,220,clamp((t-6)),32);return}
- if(id==='publish'){consoleIcon(0,-245,1.25);label('Web console',0,-145,28);records(-175,120,1.1);store(175,120,1.1);label('Sui records',-175,245,27);label('Walrus files',175,245,27);connection([-45,-110],[-175,35],t,{count:1});if(t>4)connection([45,-110],[175,35],t,{count:1,kind:'file'});pill('Version + proof',-170,315,B,260);pill('Encrypted file',170,375,G,260);return}
- if(id==='poll'){records(0,-240,1.35);label('Approved targets',0,-115,29);[-210,0,210].forEach((x,i)=>{device(x,205,.9,'',t+i);const q=(t+i*1.5)%6;line([x,140],[x*.1,-70],'#315875',2);if(q<3)packet([x,140],[x*.1,-70],q/3,'request',B);else packet([x*.1,-70],[x,140],(q-3)/3,'dot',G);ring(x,205,50,q/6)});pill('Devices ask',0,345,B,245);return}
- if(id==='install'){store(0,-245,1.3);label('Stored release',0,-125,29);device(0,215,1.5,'Target device',0);if(t<9)connection([0,-80],[0,105],t,{kind:'file',count:2});pill(t<8?'Download':t<12?'Verify release':'Platform installer',195,0,t<8?B:G,250);const p=clamp((t-2)/6);box(0,375,410,23,'#122e45',6);c.fillStyle=B;c.fillRect(-200,368,400*p,14);if(t>10)check(0,200,clamp((t-10)),35);return}
- if(id==='report'){device(0,-250,1.05,'Device',1);records(-170,200);box(175,200,225,130);label('Console',175,180,27);if(t>1)connection([-50,-150],[-170,110],t,{count:1,kind:'request',color:G});if(t>5){connection([50,-150],[175,120],t,{count:1,color:B});label('Applied',175,230,25,G)}label('Shared records',-170,310,26);pill('Install result',-165,-30,G,240);pill('Health sample',165,40,B,240);label('Applied ≠ Healthy',0,395,29,M);return}
- consoleIcon(0,-310,1.15);label('Console + wallet',0,-205,27);records(-175,0);store(175,0);label('Shared records',-175,115,25);label('Stored files',175,115,25);device(0,285,1.08,'Device client',t);if(t>2){connection([-50,-180],[-175,-70],t,{count:1});connection([50,-180],[175,-70],t,{count:1,kind:'file'});connection([140,85],[45,205],t,{count:1});connection([-45,205],[-140,85],t,{count:1,color:G})}
+// The same four landmarks stay visible at the same coordinates in every chapter.
+function layout(width,height){
+ const portrait=height>width;
+ return {portrait,cardWidth:portrait?260:300,cardHeight:portrait?210:170,
+  console:[portrait?180:260,portrait?380:305],sui:[portrait?540:1020,portrait?380:305],
+  device:[portrait?180:260,portrait?850:540],walrus:[portrait?540:1020,portrait?850:540],
+  action:[width/2,portrait?230:185]};
 }
-window.renderFrame=async function({width,height,scene,localTime,index,total}){await window.ready;canvas.width=width;canvas.height=height;const portrait=height>width;const t=localTime;c.fillStyle='#07182e';c.fillRect(0,0,width,height);const grad=c.createRadialGradient(width*.5,height*.5,0,width*.5,height*.5,width);grad.addColorStop(0,'#163d5c');grad.addColorStop(1,'#07182e');c.fillStyle=grad;c.fillRect(0,0,width,height);c.save();c.globalAlpha=.12;for(let i=0;i<24;i++){const x=(i*133+t*7)%width,y=(i*89+t*3)%height;c.fillStyle=B;c.beginPath();c.arc(x,y,1.4,0,7);c.fill()}c.restore();c.drawImage(logo,36,28,44,44);label('SuiFleet',96,59,25,W,'left');label(`${index+1} / ${total}`,width-40,57,18,M,'right');
-const title=scene.title.split(' '),size=portrait?40:42,max=width-85;let row='',lines=[];c.font=`600 ${size}px Inter`;for(const word of title){if(c.measureText(row+' '+word).width>max&&row){lines.push(row);row=word}else row+=(row?' ':'')+word}lines.push(row);lines.forEach((s,i)=>label(s,width/2,(portrait?145:130)+i*size*1.2,size));
-const centerY=portrait?height*.55:height*.58,scale=portrait?.93:1;c.save();c.translate(width/2,centerY);c.scale(scale,scale);const alpha=Math.min(ease(t/.65),ease((scene.duration-t)/.6));c.globalAlpha=alpha;c.translate(0,(1-ease(t/.8))*35);if(portrait)stagePortrait(scene.id,t);else ({fleet:stageFleet,approve:stageApprove,publish:stagePublish,poll:stagePoll,install:stageInstall,report:stageReport,overview:stageOverview})[scene.id](t);c.restore();c.fillStyle='#294765';c.fillRect(40,height-34,width-80,3);c.fillStyle=B;c.fillRect(40,height-34,(width-80)*(index+clamp(t/scene.duration))/total,3);return canvas.toDataURL('image/png').split(',')[1];};
+const chapters={
+ fleet:{active:['console','sui','device'],caption:'Organize devices into groups'},
+ approve:{active:['console','sui'],caption:'Review and approve'},
+ publish:{active:['console','sui','walrus'],caption:'Save the release, then its files'},
+ poll:{active:['device','sui'],caption:'The device checks for an update'},
+ install:{active:['device','walrus'],caption:'Download · verify · install'},
+ report:{active:['device','sui','console'],caption:'Report the result'},
+ overview:{active:['console','sui','device','walrus'],caption:'One shared system'}
+};
+function landmark(id,point,L,active,t,scene){
+ const [x,y]=point,w=L.cardWidth,h=L.cardHeight;
+ c.save();c.globalAlpha=active?1:.65;
+ box(x,y,w,h,active?'#103651':'#0b2239',18);
+ if(active){c.strokeStyle=B;c.lineWidth=2;c.beginPath();c.roundRect(x-w/2,y-h/2,w,h,18);c.stroke()}
+ const iconY=y-(L.portrait?25:18),scale=L.portrait?.7:.6;
+ if(id==='console'){
+  consoleIcon(x-35,iconY,scale);wallet(x+65,iconY+5,.38);
+ }else if(id==='sui')records(x,iconY,scale);
+ else if(id==='walrus')store(x,iconY,scale);
+ else{
+  device(x,iconY,.53,'',scene==='report'?1:0);
+  if(scene==='fleet'){
+   device(x-82,iconY,.3,'',0);device(x+82,iconY,.3,'',0);
+   ring(x,iconY,32,(t*.25)%1,G);
+  }
+ }
+ const names={console:'Console + wallet',sui:'Sui · shared records',device:'Device client',walrus:'Walrus · software files'};
+ label(names[id],x,y+h/2-23,22,W);
+ c.restore();
+}
+function route(L,from,to,t,{color=B,kind='dot',reverse=false}={}){
+ const a=L[from],b=L[to],dx=b[0]-a[0],dy=b[1]-a[1];
+ // Clip the line to the card edges. Nothing crosses an icon or its label.
+ const fraction=Math.min(dx?L.cardWidth/2/Math.abs(dx):Infinity,dy?L.cardHeight/2/Math.abs(dy):Infinity)+.025;
+ const start=[a[0]+dx*fraction,a[1]+dy*fraction],end=[b[0]-dx*fraction,b[1]-dy*fraction];
+ connection(start,end,t,{color,count:1,kind,reverse});
+}
+function systemScene(L,scene,t){
+ const chapter=chapters[scene];
+ // One flow at a time makes the moving item easy to follow.
+ if(scene==='fleet')route(L,'console','sui',t,{kind:'request'});
+ if(scene==='approve')route(L,'console','sui',t,{kind:'request',color:G});
+ if(scene==='publish'){
+  if(t<7)route(L,'console','sui',t,{kind:'request'});
+  else route(L,'console','walrus',t,{kind:'file',color:G});
+ }
+ if(scene==='poll')route(L,'device','sui',t,{kind:t%6<3?'request':'dot',reverse:t%6>=3,color:t%6<3?B:G});
+ if(scene==='install')route(L,'walrus','device',t,{kind:'file',color:G});
+ if(scene==='report'){
+  if(t<7)route(L,'device','sui',t,{kind:'request',color:G});
+  else route(L,'sui','console',t,{color:G});
+ }
+ if(scene==='overview'){
+  const flows=[['console','sui'],['device','sui'],['walrus','device'],['device','sui']];
+  const [from,to]=flows[Math.floor(t/4)%flows.length];route(L,from,to,t,{color:G});
+ }
+ for(const id of ['console','sui','device','walrus'])landmark(id,L[id],L,chapter.active.includes(id),t,scene);
+ let caption=chapter.caption;
+ if(scene==='publish')caption=t<7?'Save release details':'Store software files';
+ if(scene==='install')caption=t<8?'Download the software':t<12?'Verify the release':'Run your platform installer';
+ if(scene==='report')caption=t<7?'Installation result':'View results · health is separate';
+ // A fixed action label above the diagram leaves the flow paths unobstructed.
+ const [x,y]=L.action;box(x,y,L.portrait?620:550,58,'#07182e',14);label(caption,x,y+8,L.portrait?26:25,G);
+ if(scene==='install'){
+  const p=clamp((t-2)/6),y=L.device[1]+L.cardHeight/2+20;
+  box(L.device[0],y,L.cardWidth-20,8,'#183a54',4);
+  c.fillStyle=G;c.fillRect(L.device[0]-(L.cardWidth-20)/2,y-3,(L.cardWidth-20)*p,6);
+ }
+}
+window.renderFrame=async function({width,height,scene,localTime,index,total}){
+ await window.ready;canvas.width=width;canvas.height=height;
+ const L=layout(width,height),t=localTime;
+ c.fillStyle='#07182e';c.fillRect(0,0,width,height);
+ c.drawImage(logo,36,28,44,44);label('SuiFleet',96,59,25,W,'left');label(`${index+1} / ${total}`,width-40,57,18,M,'right');
+ const size=L.portrait?38:42,max=width-85;let row='',lines=[];c.font=`600 ${size}px Inter`;
+ for(const word of scene.title.split(' ')){if(c.measureText(row+' '+word).width>max&&row){lines.push(row);row=word}else row+=(row?' ':'')+word}
+ lines.push(row);lines.forEach((s,i)=>label(s,width/2,(L.portrait?145:130)+i*size*1.2,size));
+ systemScene(L,scene.id,t);
+ c.fillStyle='#294765';c.fillRect(40,height-34,width-80,3);c.fillStyle=B;c.fillRect(40,height-34,(width-80)*(index+clamp(t/scene.duration))/total,3);
+ window.renderedLandmarks=Object.fromEntries(['console','sui','device','walrus'].map(id=>[id,{x:L[id][0],y:L[id][1],width:L.cardWidth,height:L.cardHeight}]));
+ return canvas.toDataURL('image/png').split(',')[1];
+};
 </script>
