@@ -1,0 +1,35 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:18.525
+Batch enrollment prepares many devices before first boot.
+Reserve names and serial numbers, then securely give each device
+its own single-use credential during manufacturing. This avoids
+registering large fleets one by one. For a production batch,
+choose Enrollment in the sidebar.
+
+2
+00:00:19.240 --> 00:00:28.797
+This recording reuses the confirmed batch policy created during
+setup. On first use, choose the device limit and expiry, then
+create the policy.
+
+3
+00:00:29.520 --> 00:00:34.555
+2. Reserve names and serial numbers: paste a roster CSV and
+click Check.
+
+4
+00:00:35.280 --> 00:00:41.040
+Download the credentials: the only copy of the claim keys, for
+your factory provisioning media.
+
+5
+00:00:41.760 --> 00:00:48.181
+Register the reserved devices and approve the request. Each
+device then enrolls itself at first boot.
+
+6
+00:00:49.800 --> 00:00:54.984
+Claims are registered and waiting for their devices to enroll
+with their installed client.

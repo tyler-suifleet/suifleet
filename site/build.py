@@ -25,6 +25,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 SITE = Path(__file__).resolve().parent
@@ -32,6 +33,7 @@ ROOT = SITE.parent
 SRC = SITE / "src"
 GUIDE = SITE / "guide"
 MEDIA = SITE / "media"
+OVERVIEW_MEDIA = SITE / "media" / "overview"
 TOKEN = re.compile(r"\{\{([a-z_]+)(?::([^}]*))?\}\}")
 
 
@@ -41,6 +43,34 @@ class BuildError(Exception):
 
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_config(overrides=None):
+    config = load_json(SRC / "site.json")
+    if overrides is None:
+        return config
+    values = load_json(overrides)
+    if not isinstance(values, dict) or set(values) - {"origin", "app_url", "docs_url"}:
+        raise BuildError("preview config may override only origin, app_url and docs_url")
+    for key, value in values.items():
+        if not isinstance(value, str):
+            raise BuildError("preview URL must be a string")
+        url = urlsplit(value)
+        if (url.scheme != "https" or not url.hostname or url.username or url.password
+                or url.query or url.fragment or url.hostname in {"localhost", "127.0.0.1", "::1"}
+                or (key == "origin" and url.path not in {"", "/"})):
+            raise BuildError("preview URLs must be public HTTPS addresses without credentials, queries or fragments")
+        import ipaddress
+        try:
+            address = ipaddress.ip_address(url.hostname)
+        except ValueError:
+            address = None
+        if address is not None and not address.is_global:
+            raise BuildError("preview URLs must not point to a private network")
+        config[key] = value.rstrip("/") + ("" if key == "origin" else "/")
+        if url.hostname not in config["external_hosts"]:
+            config["external_hosts"].append(url.hostname)
+    return config
 
 
 def sha256(path):
@@ -83,14 +113,16 @@ def render_guide(config):
         video = videos.get(step["id"])
         out.append('<figure class="guide-media">')
         if video:
-            for key in ("file", "poster", "fallback"):
+            for key in ("file", "poster", "fallback", "captions"):
                 name = video.get(key)
                 if name and Path(name).name != name:
                     raise BuildError(f"unsafe guide media filename: {name}")
             poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
             fallback = f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else ""
+            captions = (f'<track kind="captions" src="/media/guide/{html.escape(video["captions"])}" '
+                        'srclang="en" label="English" default>' if video.get("captions") else "")
             out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
-                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}'
+                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
             out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
             out.append(f'<figcaption><span>Narrated testnet demo · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
@@ -108,6 +140,43 @@ def render_guide(config):
         out.append('</ol></section>')
     return "\n".join(out)
 
+def overview_manifest():
+    manifest=load_json(OVERVIEW_MEDIA/'manifest.json')
+    if manifest.get('kind') != 'illustrative-animation' or {v.get('name') for v in manifest.get('variants',[])} != {'landscape','portrait'}:
+        raise BuildError('Overview must contain both verified animation variants')
+    expected_sources={'site/overview/storyboard.json','site/overview/scene.html','site/overview/render_frames.cjs','site/overview/render_overview.py'}
+    if set(manifest.get('source_sha256',{})) != expected_sources or any(sha256(ROOT/name) != digest for name,digest in manifest['source_sha256'].items()):
+        raise BuildError('Overview render source changed; regenerate the animation')
+    story=load_json(ROOT/'site/overview/storyboard.json')
+    if [s['text'] for s in manifest['scenes']] != [s['text'] for s in story['scenes']]:
+        raise BuildError('Overview narration differs from reviewed storyboard')
+    for variant in manifest['variants']:
+        if (variant.get('width'),variant.get('height')) != ((1280,720) if variant['name']=='landscape' else (720,1280)):
+            raise BuildError('Unexpected overview dimensions')
+        for key in ['file','fallback','poster']:
+            name=variant[key]
+            if Path(name).name != name or sha256(OVERVIEW_MEDIA/name) != variant[key+'_sha256']:
+                raise BuildError('Overview media failed digest verification')
+    if Path(manifest['captions']).name != manifest['captions'] or sha256(OVERVIEW_MEDIA/manifest['captions']) != manifest['captions_sha256']:
+        raise BuildError('Overview captions failed digest verification')
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('overview_captions',GUIDE/'captions.py');captions=importlib.util.module_from_spec(spec);spec.loader.exec_module(captions)
+    if (OVERVIEW_MEDIA/manifest['captions']).read_text() != captions.webvtt(manifest['cues'],manifest['duration_seconds']):
+        raise BuildError('Overview captions differ from complete narration')
+    return manifest
+
+
+def overview_player():
+    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A two-minute animated introduction to approvals, shared records, software files and device clients. Female narration and English captions; no app controls to learn yet.</p>']
+    for video in manifest['variants']:
+        parts.append(f'<video class="overview-video overview-{video["name"]}" controls playsinline preload="none" width="{video["width"]}" height="{video["height"]}" poster="/media/overview/{video["poster"]}" aria-label="How SuiFleet works, {video["name"]} version" aria-describedby="overview-description"><source src="/media/overview/{video["file"]}" type="video/webm"><source src="/media/overview/{video["fallback"]}" type="video/mp4"><track kind="captions" src="/media/overview/{manifest["captions"]}" srclang="en" label="English" default>Your browser cannot play the video. Read the transcript below.</video>')
+    parts.append('<p class="overview-caption">Illustrative animation. Installation results and current health are different; your platform controls its installer and any reboot.</p><details><summary>Read the complete narration</summary><ol class="overview-transcript">')
+    for scene in manifest['scenes']:
+        parts.append('<li><strong>'+html.escape(scene['title'])+'</strong><p>'+html.escape(scene['text'])+'</p></li>')
+    parts.append('</ol></details><p><a class="button primary" href="/guide/">Continue to the product guide →</a></p></section>')
+    return ''.join(parts)
+
+
 def expand(text, config, source):
     def replace(match):
         name, arg = match.group(1), match.group(2)
@@ -117,9 +186,13 @@ def expand(text, config, source):
             return config["app_url"] + arg.lstrip("/")
         if name == "repo" and arg is not None:
             return repo_url(config, arg)
+        if name == "guide_count" and arg is None:
+            return str(len(load_json(GUIDE / "steps.json")["steps"]))
         if name == "guide_options" and arg is None:
             steps = load_json(GUIDE / "steps.json")["steps"]
             return "".join(f'<option value="{step["id"]}">{index}. {html.escape(step["title"])}</option>' for index, step in enumerate(steps, 1)) + '<option value="complete">Walkthrough complete</option>'
+        if name == "overview_player" and arg is None:
+            return overview_player()
         if name == "guide_steps" and arg is None:
             return render_guide(config)
         raise BuildError(f"{source}: unknown token {match.group(0)}")
@@ -131,8 +204,8 @@ def output_path(out, page_path):
     return out / (rel + "index.html" if rel == "" or rel.endswith("/") else rel)
 
 
-def build(out):
-    config = load_json(SRC / "site.json")
+def build(out, config=None):
+    config = config or load_config()
     layout = (SRC / "layout.html").read_text(encoding="utf-8")
     if out.exists():
         # Only ever replace a previous build output, never an arbitrary directory.
@@ -169,9 +242,13 @@ def build(out):
     if manifest:
         (out / "media" / "guide").mkdir(parents=True)
         for video in manifest["videos"]:
-            for key in ("file", "poster", "fallback"):
+            for key in ("file", "poster", "fallback", "captions"):
                 if video.get(key):
                     shutil.copyfile(MEDIA / "guide" / video[key], out / "media" / "guide" / video[key])
+    overview=overview_manifest()
+    (out/'media/overview').mkdir(parents=True)
+    names=[overview['captions'],'manifest.json']+[v[key] for v in overview['variants'] for key in ['file','fallback','poster']]
+    for name in names:shutil.copyfile(OVERVIEW_MEDIA/name,out/'media/overview'/name)
     for name in ("_headers", "robots.txt"):
         if name == "_headers":
             headers = (SRC / name).read_text(encoding="utf-8")
@@ -194,9 +271,10 @@ def build(out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out", type=Path, default=SITE / "dist")
+    parser.add_argument("--config", type=Path, help="Public HTTPS origin/app/docs overrides for an evaluation deployment")
     args = parser.parse_args()
     try:
-        files = build(args.out.resolve())
+        files = build(args.out.resolve(), load_config(args.config))
     except BuildError as error:
         sys.exit(f"site build failed: {error}")
     print(f"built {len(files)} files into {args.out}")

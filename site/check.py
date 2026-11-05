@@ -24,6 +24,7 @@ import json
 import re
 from pathlib import Path
 import sys
+from build import load_config
 from urllib.parse import unquote, urlsplit
 
 SITE = Path(__file__).resolve().parent
@@ -125,9 +126,9 @@ def check_external(url, config, where, errors):
             errors.append(f"{where}: unexpected repository link {url}")
 
 
-def check(out, require_videos=False):
+def check(out, require_videos=False, config=None):
     out = out.resolve()
-    config = json.loads((SITE / "src" / "site.json").read_text(encoding="utf-8"))
+    config = config or load_config()
     errors, pages = [], {}
     script = SITE / "src/assets/guide.js"
     integrity = "sha256-" + base64.b64encode(hashlib.sha256(script.read_bytes()).digest()).decode("ascii")
@@ -208,6 +209,8 @@ def check_videos(out, require):
         errors.append("guide videos must be recorded on Sui testnet (chain 4c78adac)")
     if not re.fullmatch(r"[0-9a-f]{40}", manifest.get("console_commit", "")):
         errors.append("guide video console_commit must identify a full Git commit")
+    sys.path.insert(0, str(SITE / "guide"))
+    from captions import webvtt
     seen = set()
     for video in manifest.get("videos", []):
         if not re.fullmatch(r"[0-9a-f]{40}", video.get("console_commit", manifest.get("console_commit", ""))):
@@ -217,11 +220,19 @@ def check_videos(out, require):
         if video["step"] in seen:
             errors.append(f"duplicate video for {video['step']}")
         seen.add(video["step"])
+        if video.get("captions"):
+            try:
+                expected = webvtt(video["narration"]["cues"], video["duration_seconds"])
+                name = video["captions"]
+                if Path(name).name != name or (out / "media" / "guide" / name).read_text(encoding="utf-8") != expected:
+                    errors.append(f"guide {video['step']} captions differ from encoded narration")
+            except (KeyError, ValueError, OSError, TypeError):
+                errors.append(f"guide {video['step']} invalid narration/caption timing")
         if require:
-            for required in ("poster", "fallback"):
+            for required in ("poster", "fallback", "captions"):
                 if not video.get(required):
                     errors.append(f"guide {video['step']} missing {required}")
-        for key in ("file", "poster", "fallback"):
+        for key in ("file", "poster", "fallback", "captions"):
             name = video.get(key)
             if not name:
                 continue
@@ -243,8 +254,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("out", type=Path, nargs="?", default=SITE / "dist")
     parser.add_argument("--require-videos", action="store_true")
+    parser.add_argument("--config", type=Path, help="Same public preview overrides used by the builder")
     args = parser.parse_args()
-    errors = check(args.out, args.require_videos)
+    errors = check(args.out, args.require_videos, load_config(args.config))
     for error in errors:
         print("ERROR:", error)
     if errors:

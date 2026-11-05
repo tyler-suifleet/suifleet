@@ -4,7 +4,7 @@ import type { FleetStorageTarget } from './fleet-upload';
 import { NETWORK } from './constants';
 
 export const DAY = 86_400_000;
-export interface StorageSchedule { epoch: number; epochDurationMs: number; firstEpochStartMs: number; maxEpochs: number }
+export interface StorageSchedule { epoch: number; epochDurationMs: number; firstEpochStartMs: number; currentEpochStartMs?: number; maxEpochs: number }
 export function periodEpochs(days: number, schedule: StorageSchedule) {
   if (!Number.isSafeInteger(schedule.epoch) || schedule.epoch < 0 || !Number.isSafeInteger(schedule.maxEpochs) || schedule.maxEpochs < 1 || !Number.isSafeInteger(schedule.firstEpochStartMs) || schedule.firstEpochStartMs < 0) throw Error('Walrus storage schedule unavailable');
   if (!Number.isFinite(days) || days <= 0 || !Number.isSafeInteger(schedule.epochDurationMs) || schedule.epochDurationMs <= 0) throw Error('Choose a positive storage period in days');
@@ -12,15 +12,32 @@ export function periodEpochs(days: number, schedule: StorageSchedule) {
   if (!Number.isSafeInteger(epochs) || epochs < 1 || epochs > schedule.maxEpochs) throw Error(`Storage period exceeds the network limit of ${schedule.maxEpochs} epochs`);
   return epochs;
 }
-export function expiryTime(endEpoch: number, schedule: StorageSchedule) {
-  const ms = schedule.firstEpochStartMs + endEpoch * schedule.epochDurationMs;
-  if (!Number.isSafeInteger(endEpoch) || endEpoch < 0 || !Number.isSafeInteger(ms) || ms < 0) throw Error('Invalid storage expiry');
-  return ms;
+/** Calendar estimates require an independently verified current-epoch anchor.
+ * A genesis timestamp plus today's duration cannot reconstruct historic pauses. */
+export function expiryTime(endEpoch: number, schedule: StorageSchedule): number | undefined {
+  const anchor = schedule.currentEpochStartMs;
+  if (!Number.isSafeInteger(endEpoch) || endEpoch < 0 || !Number.isSafeInteger(schedule.epoch) || schedule.epoch < 0
+      || anchor === undefined || !Number.isSafeInteger(anchor) || anchor < 0
+      || !Number.isSafeInteger(schedule.epochDurationMs) || schedule.epochDurationMs <= 0) return undefined;
+  const value = anchor + (endEpoch-schedule.epoch)*schedule.epochDurationMs;
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
-export function expiryWarning(endMs: number | undefined, now = Date.now()) {
-  if (endMs === undefined) return 'Storage expiry unknown; future downloads are not guaranteed.';
-  if (endMs <= now) return 'Storage expired. Offline devices cannot download this release; restore verified bytes before deploying.';
-  if (endMs - now <= 7 * DAY) return 'Storage expires within 7 days. Extend it so offline and newly targeted devices can download this release.';
+export function storageRemaining(endEpoch: number | undefined, schedule?: StorageSchedule): string | undefined {
+  if (endEpoch === undefined || !schedule || !Number.isSafeInteger(endEpoch) || endEpoch < 0
+      || !Number.isSafeInteger(schedule.epoch) || schedule.epoch < 0 || !Number.isSafeInteger(schedule.epochDurationMs) || schedule.epochDurationMs <= 0) return undefined;
+  const periods = endEpoch-schedule.epoch;
+  if (periods <= 0) return 'Expired';
+  const maximum = periods*schedule.epochDurationMs, minimum = Math.max(0,periods-1)*schedule.epochDurationMs;
+  if (!Number.isSafeInteger(maximum) || !Number.isSafeInteger(minimum)) return undefined;
+  const unit = maximum >= DAY ? DAY : maximum >= 3_600_000 ? 3_600_000 : 60_000;
+  const label = unit === DAY ? 'days' : unit === 3_600_000 ? 'hours' : 'minutes';
+  const format = (n: number) => n.toLocaleString('en-US',{maximumFractionDigits:1});
+  return `About ${format(minimum/unit)}–${format(maximum/unit)} ${label} remaining at the current network timing`;
+}
+export function expiryWarning(endEpoch: number | undefined, schedule?: StorageSchedule) {
+  if (endEpoch === undefined || !schedule || storageRemaining(endEpoch,schedule) === undefined) return 'Storage expiry is unknown. Refresh its details before relying on this release.';
+  if (endEpoch <= schedule.epoch) return 'Storage has expired. Restore verified software files before deploying.';
+  if (Math.max(0,endEpoch-schedule.epoch-1)*schedule.epochDurationMs <= 7*DAY) return 'Storage may expire within 7 days. Extend it so offline and newly targeted devices can download this release.';
   return undefined;
 }
 export async function releaseWalrus(client: SuiGrpcClient) {
