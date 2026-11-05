@@ -6606,6 +6606,27 @@ export const MOVE_ABI = {
         "returns": [
           "sui::coin::Coin<sui::sui::SUI>"
         ]
+      },
+      "attach": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "K",
+            "constraints": [
+              "Copy",
+              "Drop",
+              "Store"
+            ]
+          }
+        ],
+        "parameters": [
+          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::BudgetOwnerCap",
+          "K",
+          "sui::object::ID"
+        ],
+        "returns": []
       }
     },
     "structs": {

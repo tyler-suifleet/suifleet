@@ -12,10 +12,13 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
 
 const src = path.resolve(__dirname, "../dapp/src"), fakes = path.resolve(__dirname, "browser/fleet-settings-fakes.js");
-const importers = new Set([path.join(src, "components/OrganizationSecurity.tsx"), path.join(src, "components/MultisigAdministrator.tsx"), path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
+const importers = new Set([path.join(src, "components/OrganizationSecurity.tsx"), path.join(src, "components/MultisigAdministrator.tsx"), path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts"), path.join(src, "components/FleetReportingSetup.tsx"), path.join(src, "hooks/useFleetDataConfig.ts")]);
 // The full settings page includes organization security; its wallet hooks use
 // the same controlled boundary as the reporting/storage panels. Include the
-// nested multisig panel: it reads wallet/client hooks even before enrollment.
+// nested multisig and reporting panels: they read wallet/client hooks even
+// before enrollment. Dynamic reporting resolution also reads the client in
+// useFleetDataConfig, including the legacy selection used by this fixture.
+// Keep the real reporting hook and component; only their SDK boundary is faked.
 // Account reads now enter through the hydration-safe application hook. Keep
 // this component fixture on its controlled wallet boundary, like the SDK reads.
 const faked = new Set(["@/hooks/useCurrentAccount", "@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction"]);

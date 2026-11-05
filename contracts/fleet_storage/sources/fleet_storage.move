@@ -480,6 +480,12 @@ module fleet_storage::fleet_storage {
 
     /// Share storage for `budget`; only its owner may manage it.
     public fun create(budget: &FleetBudget, cap: &BudgetOwnerCap, default_quota: Quota, ctx: &mut TxContext) {
+        transfer::share_object(new_storage(budget, cap, default_quota, ctx));
+    }
+
+    /// Return an unshared storage object for atomic reporting setup. The caller
+    /// must share it through share_storage in the same transaction.
+    public fun new_storage(budget: &FleetBudget, cap: &BudgetOwnerCap, default_quota: Quota, ctx: &mut TxContext): FleetStorage {
         fleet_budget::assert_owner(budget, cap);
         let storage = FleetStorage {
             id: object::new(ctx),
@@ -493,8 +499,10 @@ module fleet_storage::fleet_storage {
             total_write_fees: 0,
         };
         event::emit(StorageCreated { storage_id: object::id(&storage), budget_id: storage.budget_id });
-        transfer::share_object(storage);
+        storage
     }
+
+    public fun share_storage(storage: FleetStorage) { transfer::share_object(storage); }
 
     public fun deposit_storage(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, storage: Storage) {
         assert_owner(fs, budget, cap);
