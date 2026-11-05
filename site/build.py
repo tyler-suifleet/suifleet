@@ -25,6 +25,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 SITE = Path(__file__).resolve().parent
@@ -41,6 +42,34 @@ class BuildError(Exception):
 
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_config(overrides=None):
+    config = load_json(SRC / "site.json")
+    if overrides is None:
+        return config
+    values = load_json(overrides)
+    if not isinstance(values, dict) or set(values) - {"origin", "app_url", "docs_url"}:
+        raise BuildError("preview config may override only origin, app_url and docs_url")
+    for key, value in values.items():
+        if not isinstance(value, str):
+            raise BuildError("preview URL must be a string")
+        url = urlsplit(value)
+        if (url.scheme != "https" or not url.hostname or url.username or url.password
+                or url.query or url.fragment or url.hostname in {"localhost", "127.0.0.1", "::1"}
+                or (key == "origin" and url.path not in {"", "/"})):
+            raise BuildError("preview URLs must be public HTTPS addresses without credentials, queries or fragments")
+        import ipaddress
+        try:
+            address = ipaddress.ip_address(url.hostname)
+        except ValueError:
+            address = None
+        if address is not None and not address.is_global:
+            raise BuildError("preview URLs must not point to a private network")
+        config[key] = value.rstrip("/") + ("" if key == "origin" else "/")
+        if url.hostname not in config["external_hosts"]:
+            config["external_hosts"].append(url.hostname)
+    return config
 
 
 def sha256(path):
@@ -95,7 +124,7 @@ def render_guide(config):
                        f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
             out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
-            out.append(f'<figcaption><span>Testnet recording · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
+            out.append(f'<figcaption><span>Narrated testnet demo · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')
@@ -133,8 +162,8 @@ def output_path(out, page_path):
     return out / (rel + "index.html" if rel == "" or rel.endswith("/") else rel)
 
 
-def build(out):
-    config = load_json(SRC / "site.json")
+def build(out, config=None):
+    config = config or load_config()
     layout = (SRC / "layout.html").read_text(encoding="utf-8")
     if out.exists():
         # Only ever replace a previous build output, never an arbitrary directory.
@@ -196,9 +225,10 @@ def build(out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out", type=Path, default=SITE / "dist")
+    parser.add_argument("--config", type=Path, help="Public HTTPS origin/app/docs overrides for an evaluation deployment")
     args = parser.parse_args()
     try:
-        files = build(args.out.resolve())
+        files = build(args.out.resolve(), load_config(args.config))
     except BuildError as error:
         sys.exit(f"site build failed: {error}")
     print(f"built {len(files)} files into {args.out}")

@@ -71,8 +71,8 @@ export default function RolloutsPage() {
   }
   return <div className="max-w-4xl space-y-4">
     <PageHeader title="Staged rollouts" subtitle="Send updates to a small group first, then expand once device health checks pass" />
-    <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 text-sm text-slate-600"><h2 className="text-slate-900">How staged rollouts work</h2><p>Advance to admit the first cohort. After devices report verified health following an update, advance again to evaluate the gate. Progress is saved if you close the browser. Return here to approve each next step.</p>
-    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p></section>
+    <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 text-sm text-slate-600"><h2 className="text-slate-900">How staged rollouts work</h2><p>Divide devices into batches (called cohorts). Advance starts the first batch. After those devices report their update results and health, advance again to check whether the next batch may start. Progress is saved if you close the browser; return here to approve each next step.</p>
+    <p>Devices already allowed to start still occupy their rollout slots if they go offline. Pausing or aborting stops new starts; an update already allowed to start may finish. Each device sends a separate health report after its update result, so rollout checks do not wait for the normal daily report.</p></section>
     {!account && <p>Connect your wallet to create or control rollouts. You can still view available rollout records.</p>}
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     {message && <p role="status" className="break-all">{message} {created && <a className="underline" href="#rollout-panel" onClick={()=>{setSelected(created);setCandidates("");}}>Open created rollout panel</a>}</p>}

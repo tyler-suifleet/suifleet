@@ -18,6 +18,8 @@ import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/compo
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
+import { docsUrl } from "@/lib/device-client";
+import { PilotReadiness } from "@/components/PilotReadiness";
 import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import { usePendingRows } from "@/hooks/usePendingRows";
 
@@ -48,7 +50,8 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const [error, setError] = useState<{ address: string; text: string } | null>(null);
   const [phase, setPhase] = useState<TransactionPhase | null>(null);
   const [estimate, setEstimate] = useState<Estimate | undefined>();
-  const { budget } = useFleetBudget();
+  const budgets = useFleetBudget();
+  const { budget } = budgets;
   const [fromBudget, setFromBudget] = useState(true);
   const budgetCanFund = !!budget && canFundEnrollment(budget);
   // Synchronous guard: a second click can arrive before React re-renders the disabled button.
@@ -66,10 +69,11 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       return (await client.getBalance({ owner: account!.address })).balance.balance;
     },
   });
-  const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0);
+  const capacity = fleet ? { available: fleet.activeDevices < fleet.deviceLimit, administrator: fleet.administrator } : undefined;
+  const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0) && (!capacity || (capacity.available && capacity.administrator));
   const steps = onboardingProgress(!!account,
     state.isSuccess ? { status: "success", value: state.data } : state.isError ? { status: "error" } : { status: "pending" },
-    devices.isSuccess ? { status: "success", value: devices.data.length } : devices.isError ? { status: "error" } : { status: "pending" });
+    devices.isSuccess ? { status: "success", value: devices.data.length } : devices.isError ? { status: "error" } : { status: "pending" }, capacity);
   const next = steps.find((step) => step.state === "current" || step.state === "blocked");
   const accountName = account?.label || currentWallet?.name;
 
@@ -84,7 +88,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       const result = await mutation.mutateAsync({ transaction, onProgress: setPhase });
       form.current?.reset();
       pending.add([{ id: device.deviceAddress, label: device.name, kind: "create" }]);
-      setMessage({ address, text: `Confirmed transaction ${result.digest}. The device is registered to your account; it is not online until its daemon starts and reports in.` });
+      setMessage({ address, text: `Confirmed transaction ${result.digest}. The device is registered to your account; it is not online until its device client starts and reports in.` });
       await cache.invalidateQueries({ queryKey: ["first-run-account"] });
     } catch (cause) {
       setError({ address, text: `${registrationFailure(enrollmentError(cause))}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
@@ -99,11 +103,15 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
       <p className="text-gray-700">Connect your account, add funds for network fees, register a device and send your first update.</p>
       <p className="flex flex-wrap gap-x-4 gap-y-1">
-        <a className={LINK} href="https://docs.suifleet.io/install/">Install the device client</a>
-        <a className={LINK} href="https://docs.suifleet.io/enrollment/">Enrollment guide</a>
-        <a className={LINK} href="https://docs.suifleet.io/components/">Publish and deploy components</a>
+        <a className={LINK} href={docsUrl("install")}>Install the device client</a>
+        <a className={LINK} href={docsUrl("enrollment")}>Enrollment guide</a>
+        <a className={LINK} href={docsUrl("components")}>Publish and deploy components</a>
       </p>
     </header>
+
+    <PilotReadiness connected={!!account} capacity={fleet ? { used: fleet.activeDevices, limit: fleet.deviceLimit, administrator: fleet.administrator } : undefined}
+      balance={state.isSuccess ? state.data : undefined} balanceFailed={state.isError}
+      deviceBudget={budget?.balance} budgetChecked={budgets.isSuccess} budgetFailed={budgets.isError} />
 
     <nav aria-label="Onboarding progress">
       <ol className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -161,7 +169,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           {state.isFetching && !state.isPending && <span className="text-gray-600">Refreshing…</span>}
         </div>
         <Disclosure summary="How to fund this address">
-          <p>Send SUI on this network to your address from another wallet. For localnet use your disposable node’s faucet; for testnet use the Sui testnet faucet. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
+          <p>Send SUI on this network to your address from another wallet. For the testnet preview, use the <a className={LINK} href="https://faucet.sui.io/" target="_blank" rel="noopener noreferrer">official testnet faucet</a> to request free test SUI. For a local development network, ask its operator for test funds. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
         </Disclosure>
         {budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
           <h3 className="font-semibold">Prepay network costs</h3>
@@ -185,9 +193,9 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
 
     <StepCard id="register" index={3} title="Register your first device" state={steps[2].state}>
       {!account ? <p className="text-gray-700">Connect your account and add funds first.</p> : <>
-        <p className="text-gray-700">Install and start the SuiFleet client on the device, then copy the device address it prints. Registration adds the device to your account and authorizes it to connect. It does not install software or confirm that the device is online.</p>
+        <p className="text-gray-700">Check that your organization has device capacity, then install the SuiFleet client on the device, then copy the device address it prints. Registration adds the device to your account and authorizes it to connect. It does not install software or confirm that the device is online.</p>
         <DeviceClientHelp variant="address" />
-        {fleet && <p role="status">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link className={LINK} href="/entitlements">Device entitlements</Link></p>}
+        {fleet && <p role="status">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link className={LINK} href="/entitlements">Device capacity</Link></p>}
         {devices.error && <p role="alert" className="text-red-800">Inventory unavailable: {devices.error.message}. Refresh before retrying a registration.</p>}
         {devices.isLoading && <p role="status">Loading inventory…</p>}
         {pending.waiting.map((row) => <p key={row.id} role="status" className="text-gray-700">{row.label}: registered · adding to your inventory…</p>)}
@@ -200,7 +208,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
               {devices.data.slice(0, 5).map((device) => <li key={device.objectId} className="rounded-full bg-gray-100 px-3 py-1 text-gray-800">{device.name}</li>)}
               {devices.data.length > 5 && <li className="px-1 py-1 text-gray-600">and {devices.data.length - 5} more</li>}
             </ul>
-            <p className="mt-1 text-gray-700">Online health appears on the <Link className={LINK} href="/devices">Devices page</Link> once a daemon reports.</p>
+            <p className="mt-1 text-gray-700">Online health appears on the <Link className={LINK} href="/devices">Devices page</Link> once its device client reports.</p>
           </div>)}
         {/* SF-100 adds address-free naming and bulk enrollment; integrate it here once its API is merged. */}
         <form ref={form} key={account.address} className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => {
@@ -240,7 +248,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </StepCard>
 
     <StepCard id="update" index={4} title="Deploy a first update" state={steps[3].state}>
-      <p className="text-gray-700">Package a component and target your device. The update applies after the device’s daemon is running and picks it up; check results on Deployments.</p>
+      <p className="text-gray-700">Publish a version in Components, then choose the device that should receive it. The update applies after the device client is running and picks it up; check results on Deployments.</p>
       {steps[3].state === "current"
         ? <Link className={PRIMARY} href="/firmware">Deploy a component</Link>
         : <p className="text-gray-600">Available after you register a device.</p>}

@@ -4701,6 +4701,101 @@
         "Scoped user-authored PR closes this issue; normal coordinator integration and merged-only activation."
       ],
       "validation": "Focused recovery/dispatcher tests and complete offline coordinator suite; compile/diff checks. User authorized infrastructure local-test integration applies."
+    },
+    {
+      "key": "SF-244",
+      "title": "Audit and improve the complete customer-facing site, console and guide",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "dapp/src",
+        "docs"
+      ],
+      "resources": [],
+      "description": "User requests a prospective-customer deep dive across the full landing website, application and narrated guides, assuming no blockchain knowledge and limited Greengrass knowledge. Evaluate the actual journey, plain-language explanations, feature/cost/security claims, prerequisites, task sequence and consistency between current main, previews and recordings; fix clear copy gaps and track larger proven issues.",
+      "evidence": "User request 2026-11-04. Current app preview still identifies source0880dbb7 and landing mixes d45a4e96 layout with9b0f5ee1 media, while main has later billing and other features. Audit must distinguish stale previews and historic demo footage from current implementation rather than implying latest UI was exercised.",
+      "acceptance": [
+        "Visit every landing page and current application route in desktop and mobile customer journeys, including logged-out/onboarding and safe populated/read-only states. Record exact scope, sources, observations and limitations; never claim real wallet/hardware actions that did not run.",
+        "Review all nine guide videos, their spoken scripts and visual sequencing for purpose, prerequisites, correct terminology, action/result distinctions and consistency with current UI. Identify obsolete footage, missing explanations and misleading claims.",
+        "Produce an itemized customer-readiness audit with page/flow-specific evidence, severity, fixes and remaining gaps. Improve clear customer-facing copy and navigation without changing authority/payment/security behavior or inventing production readiness.",
+        "Run meaningful presentation/content regressions, typecheck and production builds for changed UI. Refresh local previews from verified current source and preserve narrated videos; keep genuine wallet/hardware/production acceptance and product decisions explicit."
+      ],
+      "validation": "Browser walkthrough and screenshots/text extraction across all routes at desktop/mobile, guide playback/transcript review, factual checks against current code/configuration and pricing documents, frontend typecheck/build and relevant site/presentation tests. No customer-wallet, mainnet, physical or provider-account writes."
+    },
+    {
+      "key": "SF-245",
+      "title": "Refresh narrated customer walkthroughs and add synchronized captions",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site/guide",
+        "site/media/guide",
+        "site/build.py",
+        "site/tests"
+      ],
+      "resources": [],
+      "description": "Customer audit SF-244 found that all nine narrated clips use older console source 79675b48. Their narration is coherent, but the current UI has newer capacity/billing prerequisites and changed labels. The guide now discloses the older demo layout; that does not replace fresh recordings.\n\nAcceptance:\n- Record the current console through the basic one-device journey: connect/select fleet, obtain device capacity, fund network costs, register, publish, deploy and inspect a verified result.\n- Keep bulk enrollment, private access and staged rollouts explicitly optional; show their actual prerequisites.\n- Keep female narration explaining why and how, visible cursor/click emphasis, accurate action/result sequencing, and a source revision per recording.\n- Add native English WebVTT captions for the complete narration, matching the final encoded timing, with keyboard/mobile playback checks.\n- Use a scripted disposable test wallet where necessary and label it; do not present it as real Slush, Pi or production-payment acceptance.\n- Verify the viewport-fitted written guide, full audio/video decoding, captions and media digests. No production credentials, mainnet or hardware programming are authorized by this ticket.\n\nEvidence: docs/CUSTOMER_EXPERIENCE_AUDIT.md in SF-244; full local ASR of all nine clips matched scripts 98\u2013100%, but representative frames show older UI and no capacity/checkout walkthrough.\n",
+      "evidence": "SF-244 customer audit, current UI54ac232d versus recording79675b48.",
+      "acceptance": [
+        "Fresh current-UI narrated one-device journey includes capacity and funding prerequisites, with optional advanced paths clearly identified.",
+        "Native English captions match full narration and encoded timing; cursor emphasis, source provenance, viewport/navigation/media checks pass."
+      ],
+      "validation": "Offline script/timing/media checks and desktop/mobile guide playback; public testnet recording with dedicated authorized account only when needed."
+    },
+    {
+      "key": "SF-246",
+      "title": "Make the mobile customer preview and first-use configuration complete",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "profiles",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "The user explicitly requests fixing every major SF-244 finding, including mobile access and unavailable services, rather than leaving them as audit recommendations.\n\nScope: build a customer-usable public HTTPS evaluation preview with working website/app/installation-documentation links; prevent local addresses from leaking into mobile flows. Make first-use capacity, subscription and network funding prerequisites actionable and clearly ordered. Verify and wire existing supported reporting/storage/data configuration without changing the existing registry or orphaning previously registered devices. Investigate missing subscription configuration and enable it only through a verified compatible testnet deployment; do not substitute a different test fixture registry silently. Add explicit readiness guidance where external configuration is actually missing.\n\nPreserve SF-173's distinct Walrus-Site publisher ownership/allowance; no use of its separate publisher wallet is authorized here. Public HTTPS preview and dedicated-agent testnet acceptance are authorized; no mainnet, production credentials or physical programming. SF-245/#612 already owns rerecording/captions; coordinate the current audit copy and new prerequisites with that worker.\n\nAcceptance:\n- Public HTTPS website, guide, app and installation docs work at a phone viewport, including all cross-origin help/launch links, media and refresh/deep links; no localhost/WSL addresses are shipped in that public preview.\n- First-use UI explains and links capacity, subscriptions, network deposits, device setup, deployment and verified outcomes in correct order without blockchain knowledge; preserve all authority, privacy and spending gates.\n- Read-only live checks verify evaluation manifest/origins/registry and optional service configuration. Where enabling missing contracts is necessary, use dedicated-agent testnet with compatibility validation, a durable non-replenishing allowance and network lease; preserve existing device inventory.\n- Validate desktop/mobile presentation, wallet error/rejection/transaction handling, typecheck/build and relevant cross-layer tests. Record exact enabled/unavailable features and unrun acceptance honestly.\n- Publish contained Tyler-authored commits/PR and keep public preview provenance and runtime lease recovery documented.\n",
+      "evidence": "User requests all customer-audit findings fixed and mobile access on 2026-11-04.",
+      "acceptance": [
+        "Mobile public HTTPS website/app/docs/media and cross-links work without localhost/private addresses.",
+        "Actionable ordered capacity/subscription/funding/device onboarding with verified supported service configuration; preserve registry/inventory and authority/spending gates.",
+        "Relevant browser/build/compatibility checks pass; exact enabled features and limits documented."
+      ],
+      "validation": "Read-only live profile validation, phone-viewport public-host browser checks, frontend typecheck/build and onboarding regressions; dedicated-agent testnet mutations only if needed with compatibility/allowance/lease."
+    },
+    {
+      "key": "SF-247",
+      "title": "Provision reporting and storage per fleet without rebuilding the app",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts",
+        "dapp/src",
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "SF-244/SF-246 customer audit found a deeper provisioning gap: useFleetDataConfig resolves only build-time NEXT_PUBLIC_FLEET_DATA_CONFIGS entries matched by budget ID. The retained evaluation FleetData binding is verified and can be enabled, but a newly created customer fleet cannot set up its own reporting/data path without an operator provisioning objects and rebuilding configuration. This must be fixed, not hidden as an empty dashboard.\n\nImplement an authenticated per-fleet setup path for device reporting/storage: authorized customer administrator can create/configure the required storage/data objects, publish an authoritative locator bound to the correct registry/budget, download the matching client settings and see pending/verified/failed readiness. Resolve it dynamically without rebuilding the app for each customer. Preserve explicit legacy locators as a verified migration fallback. Never trust a URL query, localStorage or arbitrary shared-object address as authority; verify registry/budget/storage/type origins and configured organization protections. Use additive APIs/migrations, preserve old public signatures/layouts and existing device keys/journals. Devices with no report must remain unreported.\n\nAcceptance: two independent new fleets complete setup without app rebuild, cross-customer locator spoofing/revoked authority/partial transaction failures are rejected, and the actual daemon publishes a verified signed health sample through the generated settings on automated testnet. Include browser setup/error/retry/download tests, Move old/new-object compatibility where needed, Rust/OTA verification and exact bounded testnet evidence. Physical Pi/mainnet/provider acceptance remain deferred. Coordinate profile/first-use interfaces with SF-246/#614 and guide flow with SF-245/#612. This is separate from SF-173's restricted Walrus Site publisher wallet.\n",
+      "evidence": "SF-246 verified static FleetData locator only applies to retained evaluation budget; new customer fleets need rebuild/operator setup.",
+      "acceptance": [
+        "Authorized administrators provision per-fleet reporting/storage and authoritative registry/budget-bound locators, discoverable without frontend rebuild.",
+        "Two isolated new fleets, spoofed locators, revoked authority and partial-failure recovery tested; generated client settings yield verified daemon health on automated testnet."
+      ],
+      "validation": "Move additive API/existing-object/upgrade tests where needed, browser provisioning/error/retry/download tests, Rust/OTA and bounded live testnet daemon evidence; no physical/mainnet/provider acceptance."
     }
   ]
 }

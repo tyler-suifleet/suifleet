@@ -9,11 +9,12 @@ const { loader, appRequire } = require('./frontend_test_utils.cjs');
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const client = loader()('lib/device-client.ts');
-const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, guideUrl } = client;
+const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, guideUrl, docsUrl } = client;
 
 // Public slugs are curated independently of source filenames. The docs Python
 // regression checks these sections against actual rendered HTML.
 const pages = JSON.parse(read('site/docs/pages.json')).pages;
+for (const slug of ['install','enrollment','components','budget','pricing']) assert.ok(pages.some(p => p.slug === slug) && docsUrl(slug) === DOCS_BASE + slug + '/', slug);
 const page = pages.find((page) => `${page.slug}/` === GUIDE_FILE);
 assert.equal(page?.source, 'docs/INSTALL_DEVICE_CLIENT.md');
 const docPath = (url) => {
@@ -84,7 +85,7 @@ for (const variant of ['address', 'enroll']) {
   for (const section of ['yocto', 'macos', 'linux', 'debian', 'manifest']) assert.ok(hrefs.includes(guideUrl(section)), `${variant}: no ${section} link`);
   for (const href of hrefs) docPath(href);
   assert.ok(html.includes('Install the device client'));
-  assert.ok(html.includes('Download deployment.json'));
+  assert.ok(html.includes('Download connection settings'));
   assert.match(html, /rel="noopener noreferrer"/);
   assert.ok(hrefs.includes(guideUrl('signer')) && html.includes('/etc/suifleet/signer.toml'), `${variant}: no signer.toml step`);
   if (variant === 'address') {
@@ -95,7 +96,7 @@ for (const variant of ['address', 'enroll']) {
     assert.ok(hrefs.includes(guideUrl('enroll')));
   }
 }
-assert.ok(!render(undefined, 'address').includes('Download deployment.json'), 'an unconfigured build offers no manifest');
+assert.ok(!render(undefined, 'address').includes('Download connection settings'), 'an unconfigured build offers no manifest');
 console.log('PASS: Get started, Devices and Enrollment render guide links, address/enroll commands and the manifest download');
 
 async function online() {
