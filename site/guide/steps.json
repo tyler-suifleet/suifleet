@@ -33,7 +33,7 @@
       "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the fleet budget for device activity. Check capacity before depositing operating funds. Review the capacity and price shown in the console before approving a purchase.",
       "before": [
         "Connect and choose your fleet.",
-        "Obtain free test SUI for approvals. An organization administrator must choose the plan."
+        "Have funds for account fees on the network shown in the console. An organization administrator must choose the plan."
       ],
       "actions": [
         "Open Device capacity to check how many device places are available.",

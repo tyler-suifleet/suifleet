@@ -14,17 +14,21 @@ class VisibleText(HTMLParser):
   if tag in {'script','style'}:self.hidden=max(0,self.hidden-1)
  def handle_data(self,text):
   if not self.hidden:self.parts.append(text)
+BOILERPLATE=re.compile(r'\b(?:testnet|mainnet|test tokens|test SUI|faucet|free test|test tariff)\b|public preview',re.I)
 class ProductMessagingTest(unittest.TestCase):
+ def test_environment_boilerplate_pattern_covers_token_funding_language(self):
+  for phrase in ('test SUI','faucet','free test','test tariff','TEST TOKENS'):
+   with self.subTest(phrase=phrase):self.assertRegex(phrase,BOILERPLATE)
  def test_every_marketing_page_is_independent_of_app_network_stage(self):
   with tempfile.TemporaryDirectory() as temporary:
    out=Path(temporary)/'site';build.build(out,build.load_config())
    for file in out.rglob('*.html'):
     parser=VisibleText();parser.feed(file.read_text());text=' '.join(parser.parts)
-    self.assertNotRegex(text,re.compile(r'\b(?:testnet|mainnet|test tokens)\b|public preview',re.I),str(file.relative_to(out)))
+    self.assertNotRegex(text,BOILERPLATE,str(file.relative_to(out)))
  def test_guide_speech_is_product_facing_without_falsifying_recording_provenance(self):
   script=json.loads((ROOT/'site/guide/narration.json').read_text())
   for clip in script['clips']:
-   for cue in clip['cues']:self.assertNotRegex(cue['text'],re.compile(r'\b(?:testnet|mainnet|test tokens)\b',re.I))
+   for cue in clip['cues']:self.assertNotRegex(cue['text'],BOILERPLATE)
   manifest=json.loads((ROOT/'site/media/guide/videos.json').read_text())
   self.assertEqual(manifest['network'],'testnet');self.assertEqual(manifest['chain'],'4c78adac')
   profile=json.loads((ROOT/'profiles/seal-testnet/deployment.json').read_text());self.assertEqual(profile['network'],'testnet')
