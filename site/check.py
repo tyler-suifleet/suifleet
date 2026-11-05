@@ -121,7 +121,7 @@ def check_external(url, config, where, errors):
             local = ROOT.joinpath(*rest[2:])
             if not local.exists() or (rest[0] == "blob") != local.is_file():
                 errors.append(f"{where}: repository path does not exist here: {'/'.join(rest[2:])}")
-        elif rest not in ([""], ["issues"]):
+        elif rest not in ([""], ["issues"], ["security", "advisories", "new"]):
             errors.append(f"{where}: unexpected repository link {url}")
 
 

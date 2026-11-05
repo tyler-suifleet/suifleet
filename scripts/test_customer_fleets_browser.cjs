@@ -29,7 +29,7 @@ const root=path.resolve(__dirname,"..");
   await page.evaluate(B=>window.fleetTest.wallet(B),B);await wait("Separate customer device");assert.ok(!(await page.textContent("body")).includes("Beta device"));
   await page.evaluate(B=>window.fleetTest.wallet(B,"testnet"),B);await wait("Wallet network does not match");assert.ok(!(await page.textContent("body")).includes("Separate customer device"));
   await page.evaluate(A=>window.fleetTest.wallet(A),A);await wait("Beta device");
-  await page.evaluate(()=>window.fleetTest.revoke());await page.getByRole("button",{name:"Refresh fleets"}).click();await wait("Select or create a fleet");assert.ok(!(await page.textContent("body")).includes("Beta device"));
+  await page.evaluate(()=>window.fleetTest.revoke());await page.getByRole("button",{name:"Refresh fleets"}).click();await wait("Choose a fleet to continue");assert.ok(!(await page.textContent("body")).includes("Beta device"));
   await page.evaluate(()=>window.fleetTest.revoke(false));await page.getByRole("button",{name:"Refresh fleets"}).click();await wait("Beta device");
   await page.getByRole("button",{name:"Create fleet",exact:true}).click();await page.getByLabel("Fleet name").fill("Experiments");await page.getByRole("button",{name:"Create",exact:true}).click();await page.waitForFunction(()=>[...document.querySelector("select").options].some(o=>o.textContent.includes("Experiments")));
   const commands=await page.evaluate(()=>window.fleetTest.state.transactions[0].commands);assert.equal(commands[0].MoveCall.function,"create_fleet");

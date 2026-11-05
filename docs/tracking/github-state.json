@@ -1339,6 +1339,20 @@
       "id": 6218138141,
       "node_id": "I_kwDOSXKBE88AAAABcqFCHQ",
       "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhGMOww"
+    },
+    "SF-244": {
+      "number": 611,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/611",
+      "id": 6216589881,
+      "node_id": "I_kwDOSXKBE88AAAABcomiOQ",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhGK0O8"
+    },
+    "SF-245": {
+      "number": 612,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/612",
+      "id": 6216891482,
+      "node_id": "I_kwDOSXKBE88AAAABco48Wg",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhGLFiM"
     }
   }
 }
