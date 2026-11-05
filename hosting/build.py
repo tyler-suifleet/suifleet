@@ -19,7 +19,9 @@ def main():
   if not line or line.startswith('#'):continue
   key,value=line.split('=',1)
   if not key.startswith('NEXT_PUBLIC_'):raise ValueError('Refuse nonpublic frontend configuration')
-  env[key]=shlex.split(value)[0]
+  parts=shlex.split(value)
+  if len(parts)!=1:raise ValueError('Expected one nonempty frontend value: '+key)
+  env[key]=parts[0]
  env['NEXT_PUBLIC_DEVICE_DOCS_BASE']=origins['docs_url'];env['PATH']=str(a.node.parent)+os.pathsep+env['PATH']
  version=subprocess.check_output([str(a.node),'--version'],text=True).strip()
  if version!='v22.22.2':raise ValueError('Use pinned Node22.22.2')

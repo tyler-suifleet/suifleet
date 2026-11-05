@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import html
 from html.parser import HTMLParser
 import json
 from pathlib import Path
@@ -100,6 +101,16 @@ def prepare(source, out, kind, revision):
                 routes.append('/' + page.relative_to(out).as_posix().removesuffix('index.html'))
         # No external scripts; network grants follow the reviewed profile/constants.
         policy = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' " + ' '.join(sorted(hashes)) + "; style-src 'self' 'unsafe-inline'; img-src 'self' data: " + ' '.join(images) + "; font-src 'self'; connect-src 'self' " + ' '.join(connect) + "; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        # Meta CSP is enforced even on hosts that ignore conventional _headers.
+        # frame-ancestors needs a real response header; never imply otherwise.
+        meta_policy = policy.replace("; frame-ancestors 'none'", "")
+        for page in sorted(out.rglob('*.html')):
+            document = page.read_text()
+            meta = '<meta http-equiv="Content-Security-Policy" content="' + html.escape(meta_policy, quote=True) + '"><meta name="referrer" content="strict-origin-when-cross-origin">'
+            match = re.search(r'<head(?:\s[^>]*)?>', document, re.IGNORECASE)
+            if not match:
+                raise ValueError('console HTML must have a head: ' + str(page))
+            page.write_text(document[:match.end()] + meta + document[match.end():])
         (out / '_headers').write_text('/*\n  Content-Security-Policy: ' + policy + '\n  Strict-Transport-Security: max-age=31536000\n  Referrer-Policy: strict-origin-when-cross-origin\n  X-Content-Type-Options: nosniff\n')
         (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\nSitemap: https://app.suifleet.io/sitemap.xml\n')
         (out / 'sitemap.xml').write_text('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join('<url><loc>https://app.suifleet.io' + r + '</loc></url>' for r in routes) + '</urlset>\n')

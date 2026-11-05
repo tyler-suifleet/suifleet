@@ -10,7 +10,7 @@ class DNSTest(unittest.TestCase):
   self.assertFalse(any(' IN MX ' in l or ' IN NS ' in l or '_domainkey' in l for l in lines))
   for b in bindings:
    for v in b['validation_records']:self.assertIn(json.dumps(v['value']),text)
- def test_hosted_download_bytes_and_headers(self):
+ def test_bundle_download_bytes_and_header_configuration(self):
   spec=importlib.util.spec_from_file_location('host_build',ROOT/'build.py');build=importlib.util.module_from_spec(spec);spec.loader.exec_module(build)
   with tempfile.TemporaryDirectory() as directory:
    output=Path(directory);(output/'_headers').write_text('/*\n  X-Content-Type-Options: nosniff\n')

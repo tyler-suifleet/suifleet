@@ -71,3 +71,23 @@ actual downloadable DNS bytes. The customer check only reads the recorded
 public Testnet customer's configuration and signed native startup report; it
 contains no signing key and rejects every signing/execution request. Its sample
 can age out. It is not manual Slush or production-wallet acceptance.
+
+## Response security gate (required after publication)
+
+Run `python3 hosting/check_headers.py hosting/provisioning-origins.json`
+alongside the browser checks. It asserts actual HTTP response headers for all
+three hosts and the DNS download. Generated `_headers` files describe intended
+configuration; the current Sites host does not apply them. Existing deployment
+receipts therefore do not prove security-header acceptance.
+
+Console preparation also inserts a hash-based meta CSP before scripts and a
+referrer meta policy. These provide browser restrictions even on a host ignoring
+`_headers`, but cannot provide frame-ancestors, HSTS or nosniff. Choose/configure
+a provider-supported response-header mechanism and pass the live gate before
+claiming this finding resolved. No production publication is authorized by this
+documentation.
+
+For a prepared local console, run:
+`CHROME_EXECUTABLE=/path/to/chrome node hosting/test_console_csp.cjs /path/to/prepared/app`.
+This checks hydration and blocks an unreviewed inline script without serving
+response CSP. It does not establish remote deployment or framing protection.
