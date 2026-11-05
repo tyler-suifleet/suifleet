@@ -7,7 +7,7 @@ const { UpgradeCapBcs } = loader()('lib/move-bcs.ts');
 const dir = path.resolve(__dirname, '../profiles/seal-testnet');
 test('committed profile passes full application verification with matching chain facts', async () => {
   const result = await checkProfile(dir, manifestClient);
-  assert.equal(result.version, '3');
+  assert.equal(result.version, JSON.parse(fs.readFileSync(path.join(dir, 'deployment.json'))).package_version);
 });
 test('upgrade without profile update fails with actionable stale-cap diagnostic', async () => {
   await assert.rejects(checkProfile(dir, m => {
