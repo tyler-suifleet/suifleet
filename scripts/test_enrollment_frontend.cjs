@@ -19,6 +19,37 @@ const group = (n, name, deviceIds = []) => ({ objectId: id(`0x6${n}`), name, des
 const commands = (tx) => tx.getData().commands;
 
 (async () => {
+  {
+    const { Transaction, Inputs } = appRequire("@mysten/sui/transactions");
+    const { bcs } = appRequire("@mysten/sui/bcs");
+    for (const amounts of [[5000000n],[3000000n,7000000n],[9007199254740993n,7n]]) {
+      const payments=amounts.map((mist,i)=>({claim:id(`0xa${i+1}`),mist}));
+      for (const scope of [undefined,{customerId:id("0xc00"),id:id("0xf00")}]) {
+        const tx=e.buildClaimsTx(policyId,payments.map(p=>p.claim),payments,scope);tx.setSender(operator);
+        const data=tx.getData(), fundingIndex=data.commands.findIndex(c=>c.$Intent?.name==="CoinWithBalance");
+        const total=amounts.reduce((sum,n)=>sum+n,0n);
+        assert.equal(BigInt(data.commands[fundingIndex].$Intent.data.balance),total);
+        const transfers=data.commands.filter(c=>c.TransferObjects).map(c=>c.TransferObjects);
+        assert.equal(transfers.length,payments.length);
+        const originalCoin=transfers.at(-1).objects[0];
+        assert.equal(originalCoin.Result??originalCoin.NestedResult?.[0],fundingIndex,"funding coin itself must be transferred, not left as an unused zero coin");
+        let splitTotal=0n;
+        for(const [index,command] of data.commands.entries()) if(command.SplitCoins) {
+          for(const [part,arg] of command.SplitCoins.amounts.entries()) {
+            splitTotal+=BigInt(bcs.u64().parse(Buffer.from(data.inputs[arg.Input].Pure.bytes,"base64")));
+            assert.ok(transfers.some(t=>t.objects.some(a=>a.NestedResult?.[0]===index&&a.NestedResult[1]===part)),"every split coin must be consumed");
+          }
+        }
+        assert.equal(total-splitTotal,amounts.at(-1),"last recipient receives its exact intended amount");
+        transfers.forEach((t,i)=>assert.equal(bcs.Address.parse(Buffer.from(data.inputs[t.address.Input].Pure.bytes,"base64")),payments[i].claim));
+        data.inputs=data.inputs.map(i=>i.UnresolvedObject?Inputs.SharedObjectRef({objectId:i.UnresolvedObject.objectId,initialSharedVersion:"1",mutable:true}):i);
+        const resolved=Transaction.from(JSON.stringify(data,(_key,value)=>typeof value==="bigint"?value.toString():value));
+        const encoded=await resolved.build({onlyTransactionKind:true,client:{core:{getBalance:async()=>({balance:{addressBalance:"0"}})}}});
+        assert.ok(encoded.length>0);assert.ok(!resolved.getData().commands.some(c=>c.$Intent));
+      }
+    }
+    console.log("PASS: single/multiple legacy and managed claim funding consumes all coins, preserves uneven/>2^53 amounts and builds with the actual SDK");
+  }
   // ── CSV and naming templates ─────────────────────────────────────────────
   assert.deepEqual(e.parseCsv('serial,alias\r\n"SN,1","a ""b"""\n\n2,\n'), [["serial", "alias"], ["SN,1", 'a "b"'], ["2", ""]]);
   assert.throws(() => e.parseCsv('serial\n"open'), /quoted/);
