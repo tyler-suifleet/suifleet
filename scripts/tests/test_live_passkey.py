@@ -195,6 +195,34 @@ class CachedPasskeyTests(unittest.TestCase):
         self.assertIs(target.retained_fixture(live, {'fixtures': {new_key: other}}, source,
             dict(active_fixture=state['active_fixture'], completed={})), other)
 
+    def test_cached_acceptance_reaches_verified_pair_transition(self):
+        from live_package_upgrade import fixture_key
+        for journal in ({'completed': {'earlier': {'digest': 'known'}}},
+                        {'pending': {'digest': 'uncertain'}}):
+            with self.subTest(journal=journal), TemporaryDirectory() as directory:
+                root = Path(directory)
+                live, cached, source, facts, cap = self.fixture()
+                live.wallet = root / 'client.yaml'
+                private = root / 'live-passkey-state.json'
+                state = dict(active_fixture='previous', **journal)
+                private.write_text(json.dumps(state))
+                cache = {'fixtures': {fixture_key(source, source): cached}}
+                # Stop at reconciliation: neither old guard may intercept it,
+                # and no signing/new fixture work may precede reconciliation.
+                with patch('live_package_upgrade.load_state', return_value=cache), \
+                     patch.object(target, 'contracts_digest', return_value=source), \
+                     patch.object(target.dm, 'chain_facts', return_value=facts), \
+                     patch.object(target, 'select_fixture', side_effect=RuntimeError('reconciliation reached')) as select, \
+                     patch.object(target, 'native_fixture') as native:
+                    with self.assertRaisesRegex(RuntimeError, 'reconciliation reached'):
+                        target.cached_acceptance(live, root / 'package.json')
+                select.assert_called_once()
+                self.assertEqual(select.call_args.args[2], state)
+                self.assertEqual(select.call_args.args[3], target.fixture_identity(live, cached))
+                self.assertEqual(json.loads(private.read_text()), state)
+                native.assert_not_called()
+                live.transaction.assert_not_called()
+
     def test_verified_unchanged_and_upgraded_origins(self):
         for upgraded, retained in ((False, False), (True, False), (True, True)):
             with self.subTest(upgraded=upgraded, retained=retained):

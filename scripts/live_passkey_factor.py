@@ -325,7 +325,7 @@ def fixture_identity(live, cached):
         cached['base_package'], cached['head_package']]).encode()).hexdigest()
 
 
-def retained_fixture(live, cache, source, state):
+def retained_fixture(live, cache, source, state, *, allow_transition=False):
     """Resume an unfinished exact-source pair before considering another cache hit.
 
     Multiple base/head pairs can share the same head bytecode. Cache ordering
@@ -340,7 +340,9 @@ def retained_fixture(live, cache, source, state):
                 if (fixture_identity(live, candidate) == active
                         and head_fixture({'fixtures': {key: candidate}}, source)):
                     return candidate
-            raise RuntimeError('unfinished native passkey fixture requires its exact source package pair')
+            if not allow_transition:
+                raise RuntimeError('unfinished native passkey fixture requires its exact source package pair')
+            # select_fixture verifies and reconciles the old pair before switching.
     return head_fixture(cache, source)
 
 
@@ -357,7 +359,7 @@ def cached_acceptance(live, package_state, private=None):
     if private.resolve().is_relative_to(Path.cwd().resolve()):
         raise RuntimeError('private signing state must stay outside the checkout')
     state = json.loads(private.read_text()) if private.exists() else {}
-    cached = retained_fixture(live, cache, source, state)
+    cached = retained_fixture(live, cache, source, state, allow_transition=True)
     if not cached:
         raise RuntimeError('native passkey acceptance requires the exact cached package gate fixture')
     head, base = cached['head_package'], cached['base_package']
@@ -365,8 +367,6 @@ def cached_acceptance(live, package_state, private=None):
     def save():
         save_state(private, state)
     identity = fixture_identity(live, cached)
-    if state.get('active_fixture', identity) != identity and (state.get('pending') or state.get('completed')):
-        raise RuntimeError('unfinished native passkey fixture belongs to another package pair')
     select_fixture(live, cache, state, identity, private.with_suffix('.keys.json'), save)
     state['active_fixture'] = identity
     f = state.setdefault('fixtures', {}).get(identity)
