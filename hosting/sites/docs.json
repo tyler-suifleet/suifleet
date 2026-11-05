@@ -3,5 +3,10 @@
   "role": "docs",
   "hostname": "docs.suifleet.io",
   "expected_url": "https://suifleet-docs.classiccrow.chatgpt.site",
-  "status": "registered-unpublished"
+  "status": "published",
+  "access_mode": "public",
+  "deployment_id": "appgdep_6aec357730f88191946f7864bf8bb1ed",
+  "saved_version_id": "appgprj_6aec307f34d88191bd7a9f661dd3a257~appgver_2189cf1b8aac81919c9a2d182c9d0b54",
+  "live_url": "https://suifleet-docs.classiccrow.chatgpt.site",
+  "domain_status": "pending_dns"
 }
