@@ -5,6 +5,11 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,path):
  spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
+def add_dns_download(website_out):
+ directory=website_out/'setup';directory.mkdir()
+ (directory/'suifleet-dns.zone').write_bytes((ROOT/'hosting/dns-records.zone').read_bytes())
+ with (website_out/'_headers').open('a') as stream:
+  stream.write('\n/setup/suifleet-dns.zone\n  Content-Type: text/plain; charset=utf-8\n  Content-Disposition: attachment; filename="suifleet-dns.zone"\n  X-Robots-Tag: noindex\n')
 def main():
  p=argparse.ArgumentParser();p.add_argument('--origins',type=Path,required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--node',type=Path,required=True);a=p.parse_args()
  if a.out.exists():raise ValueError('Output must be a new immutable directory')
@@ -26,6 +31,7 @@ def main():
  docs=module('hosting_docs',ROOT/'site/docs/build.py');docs.build(a.out/'docs-source',{'origin':origins['docs_url'].rstrip('/'),'website_url':origins['origin'],'app_url':origins['app_url']})
  prepare.prepare(a.out/'docs-source',a.out/'docs','docs',revision)
  website.build(a.out/'website',config)
+ add_dns_download(a.out/'website')
  subprocess.run([str(a.node),'scripts/check_profiles.cjs'],cwd=ROOT,env=env,check=True)
  receipt={'source_commit':revision,'node':version,'network':'testnet','origins':origins,'configuration_sha256':{n:hashlib.sha256((ROOT/'profiles/seal-testnet'/n).read_bytes()).hexdigest() for n in ['deployment.json','frontend.env']},'roles':{}}
  for role in ['website','app','docs']:
