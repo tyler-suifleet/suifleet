@@ -1,0 +1,44 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:14.536
+A staged rollout reduces the risk of releasing to the whole
+fleet at once. Start with a small test set, observe the results,
+then expand in groups. Use this when a bad release could disrupt
+many devices or customer sites.
+
+2
+00:00:15.240 --> 00:00:27.144
+Open Create a gradual rollout and enter the release details
+shown here. These identify the software and installation
+instructions that each device must verify before applying the
+update.
+
+3
+00:00:27.880 --> 00:00:39.464
+List the device sets in the order you want to update them. The
+interface calls these cohorts. Put your pilot devices first,
+then add larger sets after you have evidence that the release is
+working.
+
+4
+00:00:40.200 --> 00:00:53.896
+Set how quickly devices are admitted, how long each set should
+be observed and how many failures should stop progress. The
+observation time is called the bake period. Choose values that
+allow meaningful health reports to arrive.
+
+5
+00:00:54.600 --> 00:01:08.488
+Creating the rollout does not immediately admit devices. Select
+it and choose Check device health and continue to evaluate the
+next admission. This gives you a controlled point to review
+health before more devices start.
+
+6
+00:01:09.200 --> 00:01:23.557
+Watch the reported results as you proceed. Pause or abort to
+stop further admissions if there is a problem. A device that has
+already started an installation may finish; these controls do
+not automatically undo an update.
+

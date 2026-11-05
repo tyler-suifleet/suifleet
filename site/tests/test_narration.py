@@ -38,3 +38,34 @@ class NarrationTest(unittest.TestCase):
         for clip in script["clips"]:
             self.assertTrue(all(cue["text"].strip() for cue in clip["cues"]))
             timing(clip["cues"], clip["source_duration_seconds"], [1] * len(clip["cues"]))
+
+
+class CaptionsTest(unittest.TestCase):
+    def test_complete_text_and_encoded_timing(self):
+        from captions import webvtt
+        text = 'A device & its <public> identity.'
+        result = webvtt([dict(text=text, speech_start=1.234, speech_end=3.456)], 4)
+        self.assertIn('00:00:01.234 --> 00:00:03.456', result)
+        self.assertIn('A device &amp; its &lt;public&gt; identity.', result)
+        self.assertTrue(result.startswith('WEBVTT\n\n'))
+
+    def test_reject_overlap_truncation_nonfinite_and_invalid_text(self):
+        from captions import webvtt
+        good = dict(text='Hello.', speech_start=0, speech_end=1)
+        for changes in [dict(speech_start=-1), dict(speech_end=5),
+                        dict(speech_start=float('nan')), dict(text=''),
+                        dict(text='a --> b'), dict(speech_end=0.0001)]:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                webvtt([good | changes], 4)
+        with self.assertRaises(ValueError):
+            webvtt([good, good], 4)
+
+    def test_all_published_captions_match_full_encoded_narration(self):
+        from captions import webvtt
+        import hashlib
+        media = GUIDE.parent / 'media/guide'
+        manifest = json.loads((media / 'videos.json').read_text())
+        for video in manifest['videos']:
+            caption = media / video['captions']
+            self.assertEqual(caption.read_text(), webvtt(video['narration']['cues'], video['duration_seconds']))
+            self.assertEqual(hashlib.sha256(caption.read_bytes()).hexdigest(), video['captions_sha256'])

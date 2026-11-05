@@ -27,6 +27,16 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_native_caption_digest_and_narration_timing_are_enforced(self):
+        track = self.out / "media/guide/sign-in.en.vtt"
+        guide = (self.out / "guide/index.html").read_text()
+        self.assertIn('<track kind="captions" src="/media/guide/sign-in.en.vtt" srclang="en" label="English" default>', guide)
+        track.write_text(track.read_text().replace('Welcome to SuiFleet.', 'Wrong narration.'))
+        rewrite_sums(self.out)
+        errors = self.errors(require_videos=True)
+        self.assertTrue(any('captions differ from encoded narration' in e for e in errors), errors)
+        self.assertTrue(any('does not match its recorded digest' in e for e in errors), errors)
+
     def test_sitemap_and_robots_use_canonical_origin(self):
         build.build(self.out)
         tree = ET.fromstring((self.out / "sitemap.xml").read_text())
@@ -172,7 +182,7 @@ class SiteTest(unittest.TestCase):
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
             self.assertIn('data-console-commit="' + '1' * 40 + '"', guide)
             missing = self.errors(require_videos=True)
-            self.assertEqual(len(missing), 10, missing)
+            self.assertEqual(len(missing), 11, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")
             rewrite_sums(self.out)
             self.assertTrue(any("does not match its recorded digest" in e for e in self.errors()))

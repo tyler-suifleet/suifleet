@@ -10,7 +10,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  const policy=(await fs.readFile(path.join(root,'_headers'),'utf8')).split('Content-Security-Policy: ')[1].split('\n')[0];
  const steps=JSON.parse(await fs.readFile(path.join(repo,'site/guide/steps.json'))).steps;
  const expected=new Map(steps.flatMap(step=>[step.summary,...step.before,...step.actions,step.result].map((text,i)=>[`${step.id}/${i}`,text.replace(/\s+/g,' ').trim()])));
- server=http.createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://local').pathname;if(missingMedia.has(pathname)){res.statusCode=404;res.end();return;}let name=path.resolve(root,'.'+pathname);if(!name.startsWith(root+path.sep))throw Error('outside root');if(pathname.endsWith('/'))name=path.join(name,'index.html');const data=await fs.readFile(name);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.woff2':'font/woff2','.webm':'video/webm','.mp4':'video/mp4'})[path.extname(name)]||'application/octet-stream');res.setHeader('Content-Security-Policy',policy);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Length',data.length);res.end(data)}catch{res.statusCode=404;res.end()}});
+ server=http.createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://local').pathname;if(missingMedia.has(pathname)){res.statusCode=404;res.end();return;}let name=path.resolve(root,'.'+pathname);if(!name.startsWith(root+path.sep))throw Error('outside root');if(pathname.endsWith('/'))name=path.join(name,'index.html');const data=await fs.readFile(name);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.woff2':'font/woff2','.webm':'video/webm','.mp4':'video/mp4','.vtt':'text/vtt'})[path.extname(name)]||'application/octet-stream');res.setHeader('Content-Security-Policy',policy);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Length',data.length);res.end(data)}catch{res.statusCode=404;res.end()}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
  browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||undefined,headless:true,args:['--no-sandbox']});if(shots)await fs.mkdir(shots,{recursive:true});
  for(const [width,height] of [[1440,900],[1280,720],[390,844],[375,667],[320,568],[844,390],[640,360]]){
@@ -100,6 +100,42 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  assert.ok(await page.locator('#fund video').evaluate(v=>v.currentSrc.endsWith('fund.mp4')),'MP4 plays after WebM 404');
  assert.equal(await page.locator('#fund [data-video-error]').isVisible(),false,'working MP4 is not marked unavailable');
  missingMedia.clear();
+ // Native captions load from the same origin on desktop and mobile. Keyboard
+ // focus stays on the native player; Space must start/pause real playback.
+ for(const viewport of [{width:1280,height:720},{width:390,height:844}]) {
+  const captionsPage=await browser.newPage({viewport});
+  await captionsPage.goto(origin+'/guide/',{waitUntil:'networkidle'});
+  const player=captionsPage.locator('#sign-in video');
+  await player.evaluate(v=>{v.load();v.textTracks[0].mode='showing'});
+  await captionsPage.waitForFunction(()=>{
+   const v=document.querySelector('#sign-in video');return v.textTracks[0]?.cues?.length>0;
+  });
+  const manifest=JSON.parse(await fs.readFile(path.join(repo,'site/media/guide/videos.json'),'utf8'));
+  for(const recording of manifest.videos) {
+   const loaded=await captionsPage.locator(`#${recording.step} video`).evaluate(async v=>{
+    const track=v.querySelector('track');
+    if(track.readyState!==2)await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('caption track did not load')),10000);track.addEventListener('load',()=>{clearTimeout(timeout);resolve()},{once:true});track.addEventListener('error',()=>{clearTimeout(timeout);reject(Error('caption load failed'))},{once:true});track.track.mode='hidden';v.preload='metadata';v.load()});
+    return {language:track.srclang,kind:track.kind,cues:[...track.track.cues].map(c=>({start:c.startTime,end:c.endTime,text:c.text}))};
+   });
+   assert.equal(loaded.language,'en');assert.equal(loaded.kind,'captions');
+   assert.equal(loaded.cues.length,recording.narration.cues.length);
+   loaded.cues.forEach((cue,i)=>{
+    const spoken=recording.narration.cues[i];
+    assert.ok(Math.abs(cue.start-spoken.speech_start)<0.0011);
+    assert.ok(Math.abs(cue.end-spoken.speech_end)<0.0011);
+    assert.equal(cue.text.replace(/\s+/g,' ').trim(),spoken.text);
+   });
+  }
+  await player.focus();await captionsPage.keyboard.press('Space');
+  await captionsPage.waitForFunction(()=>!document.querySelector('#sign-in video').paused);
+  await captionsPage.keyboard.press('Space');
+  await captionsPage.waitForFunction(()=>document.querySelector('#sign-in video').paused);
+  await player.evaluate(async v=>{v.textTracks[0].mode='showing';v.currentTime=v.textTracks[0].cues[0].startTime+0.1;await v.play()});
+  await captionsPage.waitForFunction(()=>document.querySelector('#sign-in video').textTracks[0].activeCues.length===1);
+  await player.evaluate(v=>v.pause());
+  console.log(`PASS native English captions: every full narration/timing, keyboard Space playback, active caption at ${viewport.width}x${viewport.height}`);
+  await captionsPage.close();
+ }
  assert.equal(await page.locator('video source[type="video/mp4"]').count(),steps.length);console.log('PASS real recording playback, inactive video pause, MP4 fallbacks and video-error instructions');await page.close();
  } finally {if(browser)await browser.close();if(server)await new Promise(r=>server.close(r));if(temporary)await fs.rm(temporary,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1});

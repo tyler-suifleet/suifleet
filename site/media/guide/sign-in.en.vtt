@@ -1,0 +1,36 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:14.899
+Welcome to SuiFleet. Start here to connect the account that
+manages your devices. Your wallet is the approval tool for
+changes such as registering devices and deploying software.
+Choose Connect Wallet, then pick your sign-in method.
+
+2
+00:00:15.600 --> 00:00:26.416
+This demonstration uses a scripted test wallet. In your own
+session, your wallet asks you to approve the connection. Read
+each request so you know which account you are connecting.
+
+3
+00:00:27.120 --> 00:00:39.259
+After connecting, check the account and network shown here. This
+guide uses testnet, where the tokens are for testing. Confirming
+these details helps you avoid making changes with the wrong
+account.
+
+4
+00:00:39.960 --> 00:00:52.120
+A fleet is a workspace for a set of devices and their management
+settings. On your first visit, create the default fleet and
+approve the request. This gives you a workspace to organize your
+devices.
+
+5
+00:00:52.840 --> 00:01:05.811
+The fleet switcher shows which workspace you are managing. Check
+it before making changes, especially if your account manages
+several fleets. With your account connected and fleet selected,
+you can fund the network budget.
+

@@ -79,7 +79,9 @@
             "speech_end": 65.81066666666668
           }
         ]
-      }
+      },
+      "captions": "sign-in.en.vtt",
+      "captions_sha256": "85ed9b364d49ec3504270bf11f308cd1b5870cb80cb6de9c9d2fd0c934f9c871"
     },
     {
       "step": "fund",
@@ -140,7 +142,9 @@
             "speech_end": 58.52
           }
         ]
-      }
+      },
+      "captions": "fund.en.vtt",
+      "captions_sha256": "d63757d55daf0040b7a98c668e8fe7a488ba4ade88abcdee4d990a28662fca0a"
     },
     {
       "step": "register-device",
@@ -201,7 +205,9 @@
             "speech_end": 63.29066666666667
           }
         ]
-      }
+      },
+      "captions": "register-device.en.vtt",
+      "captions_sha256": "be692d7e83ece42edb01e1c905bec894f55966575279e8c81b1456f82bcd58fa"
     },
     {
       "step": "enroll-batch",
@@ -272,7 +278,9 @@
             "speech_end": 74.17333333333333
           }
         ]
-      }
+      },
+      "captions": "enroll-batch.en.vtt",
+      "captions_sha256": "35fc12f8b65fdaa6a923daf800862b2eece0a2f4e57a8a7b25177f11bfcfc7e8"
     },
     {
       "step": "publish-version",
@@ -361,7 +369,9 @@
             "speech_end": 130.648
           }
         ]
-      }
+      },
+      "captions": "publish-version.en.vtt",
+      "captions_sha256": "1c3262c9e981f5bc6530b023c55199383b9d475b6ad9f5d30d1316be7311172c"
     },
     {
       "step": "deploy-group",
@@ -442,7 +452,9 @@
             "speech_end": 79.46133333333334
           }
         ]
-      }
+      },
+      "captions": "deploy-group.en.vtt",
+      "captions_sha256": "e7e6314dc7511ae6f7307b083bd73c80220c94ffd0fe117607ef5d1699ef5269"
     },
     {
       "step": "staged-rollout",
@@ -522,7 +534,9 @@
             "speech_end": 83.55733333333333
           }
         ]
-      }
+      },
+      "captions": "staged-rollout.en.vtt",
+      "captions_sha256": "d405abbc01baaa356b6e4dc95de7f3743c885ca3134368dc009e5efea0f091ad"
     },
     {
       "step": "access-policy",
@@ -575,7 +589,9 @@
             "speech_end": 48.397333333333336
           }
         ]
-      }
+      },
+      "captions": "access-policy.en.vtt",
+      "captions_sha256": "126e682726060584ebca1251f1ba5e6e6bf546b332393a6e6afb5e1db4461f74"
     },
     {
       "step": "fleet-settings",
@@ -636,7 +652,9 @@
             "speech_end": 63.98133333333334
           }
         ]
-      }
+      },
+      "captions": "fleet-settings.en.vtt",
+      "captions_sha256": "16001c3173e86939aba36746f3f5d1474ee26551300ce3c55fadf2893e684e80"
     }
   ],
   "recording_tools_commit": "88012a7aa227019200861545933366facfac0059",

@@ -1,0 +1,24 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:17.053
+Access policies protect confidential software by deciding who
+may obtain its decryption keys. Use a policy when a release
+contains proprietary code or should only be readable by approved
+devices. Start by creating a policy with a recognizable name.
+
+2
+00:00:17.760 --> 00:00:31.093
+Choose Group and select the devices’ group, then grant access
+and approve the request. Current group membership is used when
+devices request keys. You can reuse the policy for releases
+intended for the same audience.
+
+3
+00:00:31.800 --> 00:00:48.397
+Revoking access stops future key requests. It cannot take back
+software or keys that a device has already received. Review
+group membership and grants before publishing sensitive
+software, and keep deployment targeting aligned with the devices
+that have access.
+

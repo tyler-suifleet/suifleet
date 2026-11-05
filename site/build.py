@@ -83,14 +83,16 @@ def render_guide(config):
         video = videos.get(step["id"])
         out.append('<figure class="guide-media">')
         if video:
-            for key in ("file", "poster", "fallback"):
+            for key in ("file", "poster", "fallback", "captions"):
                 name = video.get(key)
                 if name and Path(name).name != name:
                     raise BuildError(f"unsafe guide media filename: {name}")
             poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
             fallback = f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else ""
+            captions = (f'<track kind="captions" src="/media/guide/{html.escape(video["captions"])}" '
+                        'srclang="en" label="English" default>' if video.get("captions") else "")
             out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
-                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}'
+                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
             out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
             out.append(f'<figcaption><span>Testnet recording · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
@@ -169,7 +171,7 @@ def build(out):
     if manifest:
         (out / "media" / "guide").mkdir(parents=True)
         for video in manifest["videos"]:
-            for key in ("file", "poster", "fallback"):
+            for key in ("file", "poster", "fallback", "captions"):
                 if video.get(key):
                     shutil.copyfile(MEDIA / "guide" / video[key], out / "media" / "guide" / video[key])
     for name in ("_headers", "robots.txt"):

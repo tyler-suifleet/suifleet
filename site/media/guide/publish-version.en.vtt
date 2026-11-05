@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:13.576
+Components is your software release library. Use it to prepare a
+named version once, then deploy that version to selected devices
+or groups. Publishing a release and choosing who receives it are
+separate steps.
+
+2
+00:00:14.280 --> 00:00:24.968
+The first time you publish, set up your publisher catalog and
+approve the request. The catalog keeps your releases organized
+so you can find and reuse them for later deployments.
+
+3
+00:00:25.680 --> 00:00:36.987
+Give the component a recognizable name and the release a version
+number. Keep versions distinct so operators can tell which
+release was deployed and compare results when troubleshooting.
+
+4
+00:00:37.720 --> 00:00:53.187
+Choose the target operating system and processor architecture,
+then attach the software file for that platform. Include the
+installation instructions your platform needs. Matching the
+platform helps avoid sending a package that the device cannot
+run.
+
+5
+00:00:53.920 --> 00:01:08.768
+Choose Confidential for proprietary software and select an
+access policy. That policy controls who can obtain the
+decryption keys. This demonstration deliberately uses a public
+example, so its uploaded files are readable by anyone.
+
+6
+00:01:09.480 --> 00:01:23.453
+Review the release, upload it to storage, and approve
+publication. The recorded file fingerprints let the device
+verify that it received the intended content. Wait for
+confirmation before treating the version as available.
+
+7
+00:01:59.960 --> 00:02:10.648
+The published version is now in the library. Publishing has not
+installed it on any device. Next, choose the devices or group
+that should receive it and create a deployment.
+

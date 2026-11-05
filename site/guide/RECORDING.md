@@ -135,3 +135,38 @@ media, then run the site build/check with `--require-videos`. Native playback
 controls manage volume; no autoplay or third-party player is needed. The written
 guide and burned-in captions remain available without sound. No model or
 synthesis dependency is included in the static website.
+
+## Native English captions (SF-245)
+
+The narration pass now emits `<step>.en.vtt` from each cue's final
+`speech_start` and `speech_end`, after action retiming. It preserves every word
+of the reviewed narration, using segment-level timing rather than guessed
+word alignment. Both video formats share the same native English caption track.
+The manifest includes its SHA-256; `site/check.py --require-videos` requires the
+track and checks its complete contents against the final narration timing and
+encoded duration. The static build copies it and emits a native `<track>`.
+Visitors can switch captions using their browser's video controls.
+
+Captions have also been generated for the existing published recordings without
+re-encoding or changing their historical console revision, transaction evidence
+or speech. Adding captions does **not** establish fresh-current-console recording
+acceptance. SF-245 still requires fresh capture, including capacity checkout and
+an actual verified device result. Preflight must verify an activated
+fixture for the current contracts; a historical fixture is not a substitute.
+The recorder's off-screen `set_entitlement` grant and deployment-created ending
+also need replacement before a new recording may claim that journey.
+
+Run the offline tests and playback checks with:
+
+```sh
+python3 -m unittest discover -s site/tests -v
+python3 site/build.py --out /tmp/suifleet-site-check
+python3 site/check.py /tmp/suifleet-site-check --require-videos
+node site/tests/guide_browser.cjs /tmp/suifleet-site-check
+```
+
+The browser test serves VTT as `text/vtt`, checks every caption's text and timing
+in the native browser text-track parser, tests Space-key play/pause and active
+cues on desktop and phone viewports, and retains the written-guide/navigation
+checks at seven sizes. Chromium emulation does not establish physical mobile,
+Safari or real extension-wallet acceptance.

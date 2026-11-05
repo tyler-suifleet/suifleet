@@ -1,0 +1,32 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:16.413
+Fleet settings control how often devices check for updates and
+report their health. Use this section to balance visibility,
+responsiveness and network cost. A shorter interval gives you
+fresher information, while a longer interval reduces reporting
+activity.
+
+2
+00:00:17.120 --> 00:00:29.920
+Review the estimate before saving. It is a planning aid based on
+the selected settings, not a guaranteed invoice. Approving Save
+records the configuration; it does not deposit funds into the
+network budget.
+
+3
+00:00:30.640 --> 00:00:45.659
+This demonstration shows a budget warning because the available
+funds do not cover the estimate. Saving anyway records the
+settings only. Review the warning and fund the budget separately
+if you want devices to sustain the planned activity.
+
+4
+00:00:46.360 --> 00:01:03.981
+Devices pick up the saved configuration at their next check, so
+the change is not instantaneous across the fleet. Check the
+Devices page for fresh reports, and return to Network budget to
+monitor funds. You now have the basic workflow from enrollment
+through controlled software delivery.
+

@@ -1,0 +1,31 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:13.555
+The network budget pays the fees needed for device activity. Use
+this section to keep devices reporting without funding each one
+by hand. Open Network budget to see the available balance and
+funding controls.
+
+2
+00:00:14.280 --> 00:00:26.440
+Enter the amount you want to deposit. Your devices use this
+budget within the spending limits you set. How often devices
+report, and how much data they store, affects how quickly the
+budget is used.
+
+3
+00:00:27.160 --> 00:00:40.216
+Review and approve the deposit in your wallet. A budget is
+created if this fleet needs one. The deposit supplies funds for
+activity; changing a reporting setting later does not add money
+to this balance.
+
+4
+00:00:40.920 --> 00:00:58.520
+Once the deposit is confirmed, check the updated balance under
+Keep devices reporting. Return here to monitor funds, adjust
+spending limits or withdraw available funds. A confirmed deposit
+means the budget is funded; device health is checked separately
+on the Devices page.
+

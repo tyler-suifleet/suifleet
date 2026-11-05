@@ -1,0 +1,43 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:13.832
+Device groups let you target a meaningful set of machines
+together, such as a pilot site, a product model or a test fleet.
+Create a group with a name your team will recognize, instead of
+selecting every device for each release.
+
+2
+00:00:14.560 --> 00:00:25.483
+Open Manage and add the devices that belong in this group.
+Review membership before deploying, because membership
+determines which devices can take part when they check the
+deployment.
+
+3
+00:00:26.200 --> 00:00:35.459
+Choose Deploy this version from the component library. Starting
+with a published version helps you select the exact release you
+already prepared and reviewed.
+
+4
+00:00:36.160 --> 00:00:49.515
+Select the group as the target and review the version and
+recipients. This flow creates a one-time deployment. It does not
+establish an ongoing rule that automatically brings future group
+members onto this release.
+
+5
+00:00:50.240 --> 00:01:03.040
+Create the deployment and approve the request. Devices still
+need to connect, check their eligibility and run the
+installation. Approval authorizes the deployment; it does not
+mean all targets have finished.
+
+6
+00:01:03.760 --> 00:01:19.461
+Open Deployments to follow each device’s result. Check successes
+and failures there rather than relying on the deployment-created
+message. If a device fails, inspect the available failure
+details before retrying or sending a corrected version.
+

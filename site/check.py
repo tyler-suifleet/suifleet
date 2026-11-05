@@ -208,6 +208,8 @@ def check_videos(out, require):
         errors.append("guide videos must be recorded on Sui testnet (chain 4c78adac)")
     if not re.fullmatch(r"[0-9a-f]{40}", manifest.get("console_commit", "")):
         errors.append("guide video console_commit must identify a full Git commit")
+    sys.path.insert(0, str(SITE / "guide"))
+    from captions import webvtt
     seen = set()
     for video in manifest.get("videos", []):
         if not re.fullmatch(r"[0-9a-f]{40}", video.get("console_commit", manifest.get("console_commit", ""))):
@@ -217,11 +219,19 @@ def check_videos(out, require):
         if video["step"] in seen:
             errors.append(f"duplicate video for {video['step']}")
         seen.add(video["step"])
+        if video.get("captions"):
+            try:
+                expected = webvtt(video["narration"]["cues"], video["duration_seconds"])
+                name = video["captions"]
+                if Path(name).name != name or (out / "media" / "guide" / name).read_text(encoding="utf-8") != expected:
+                    errors.append(f"guide {video['step']} captions differ from encoded narration")
+            except (KeyError, ValueError, OSError, TypeError):
+                errors.append(f"guide {video['step']} invalid narration/caption timing")
         if require:
-            for required in ("poster", "fallback"):
+            for required in ("poster", "fallback", "captions"):
                 if not video.get(required):
                     errors.append(f"guide {video['step']} missing {required}")
-        for key in ("file", "poster", "fallback"):
+        for key in ("file", "poster", "fallback", "captions"):
             name = video.get(key)
             if not name:
                 continue

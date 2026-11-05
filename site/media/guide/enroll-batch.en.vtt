@@ -1,0 +1,38 @@
+WEBVTT
+
+1
+00:00:00.200 --> 00:00:13.789
+Enrollment is for bringing many devices into your fleet without
+registering them one at a time. Reserve their names and serial
+numbers before they leave the factory, then let each device
+claim its own record when it first connects.
+
+2
+00:00:14.520 --> 00:00:27.768
+First, create a batch policy. The quota limits how many devices
+may enroll, and the lifetime limits how long the policy can be
+used. These controls help keep a provisioning batch from
+remaining open indefinitely.
+
+3
+00:00:28.480 --> 00:00:42.155
+Paste the names and serial numbers from your roster, then choose
+Check. This lets you review the inventory before registering
+claims. Consistent names make the devices easier to identify
+once they appear in the fleet.
+
+4
+00:00:42.880 --> 00:00:56.619
+Download the credentials and keep the exported file private.
+During provisioning, give each unit only its own claim
+credential. Do not put the whole credential file into a shared
+device image or source repository.
+
+5
+00:00:57.320 --> 00:01:14.173
+Register the pending claims and approve the requests. A claim
+reserves an enrollment opportunity; it does not mean a device is
+online yet. At first boot, each configured client uses its
+credential to enroll. Watch for the record to move from waiting
+to enrolled.
+
