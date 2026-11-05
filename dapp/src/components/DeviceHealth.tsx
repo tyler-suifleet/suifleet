@@ -1,8 +1,9 @@
+import { ReportingReadiness } from "./ReportingReadiness";
 import Link from "next/link";
 import { describeServices, type DeviceHealth } from "@/lib/telemetry";
 
 export function TelemetrySettings({ configured }: { configured: boolean }) {
-  return <p className="text-xs text-gray-500">{configured ? "Health comes from verified device reports." : "Device health reporting is not set up for this fleet. Ask your administrator to finish the setup."} <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></p>;
+  return <div className="text-xs text-gray-500">{configured ? <p>Health comes from verified device reports.</p> : <ReportingReadiness />} <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></div>;
 }
 
 export function HealthDetails({ health }: { health?: DeviceHealth }) {

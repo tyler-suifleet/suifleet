@@ -1,0 +1,118 @@
+[
+  {
+    "id": "appgdom_6aec35dc01cc8191b164929a39f00610",
+    "project_id": "appgprj_6aec305355dc819181c4011690b539fd",
+    "hostname": "suifleet.io",
+    "worker_name": "site---6aec305355dc819181c4011690b539fd",
+    "status": "pending",
+    "provider_status": "pending",
+    "ssl_status": "initializing",
+    "cname_target": "custom-domains.chatgpt.site.",
+    "apex_proxy_ipv4_targets": [
+      "162.159.143.30",
+      "172.66.3.26"
+    ],
+    "validation_records": [
+      {
+        "record_type": "TXT",
+        "name": "_openai-site-verification.suifleet.io",
+        "value": "openai-site-verification=f6WtGnvWSzRB8OTKhzm_R6FqJvxQxy4YrGzLIBgn3xs"
+      },
+      {
+        "record_type": "TXT",
+        "name": "_cf-custom-hostname.suifleet.io",
+        "value": "4cf374c8-4b4e-432f-b991-7805f2d1aabd"
+      }
+    ],
+    "last_error": null,
+    "created_at": "2026-11-05T07:53:00.007379+00:00",
+    "updated_at": "2026-11-05T07:53:00.837539+00:00"
+  },
+  {
+    "id": "appgdom_6aec35ddd3cc819187941d16bbefbae0",
+    "project_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34",
+    "hostname": "app.suifleet.io",
+    "worker_name": "site---6aec307b6ec081919a43e49d6b8f0a34",
+    "status": "pending",
+    "provider_status": "pending",
+    "ssl_status": "initializing",
+    "cname_target": "custom-domains.chatgpt.site.",
+    "apex_proxy_ipv4_targets": [
+      "162.159.143.30",
+      "172.66.3.26"
+    ],
+    "validation_records": [
+      {
+        "record_type": "TXT",
+        "name": "_openai-site-verification.app.suifleet.io",
+        "value": "openai-site-verification=DxCWb31kJEJvqMzEUOEyrPmCWIU-J5F_vK1_5OwAjmo"
+      },
+      {
+        "record_type": "TXT",
+        "name": "_cf-custom-hostname.app.suifleet.io",
+        "value": "ee1826d4-c142-46f8-bdee-f37d5279e876"
+      }
+    ],
+    "last_error": null,
+    "created_at": "2026-11-05T07:53:01.827703+00:00",
+    "updated_at": "2026-11-05T07:53:03.407736+00:00"
+  },
+  {
+    "id": "appgdom_6aec35e066888191bd5ea5d4c33f4c86",
+    "project_id": "appgprj_6aec307f34d88191bd7a9f661dd3a257",
+    "hostname": "docs.suifleet.io",
+    "worker_name": "site---6aec307f34d88191bd7a9f661dd3a257",
+    "status": "pending",
+    "provider_status": "pending",
+    "ssl_status": "initializing",
+    "cname_target": "custom-domains.chatgpt.site.",
+    "apex_proxy_ipv4_targets": [
+      "162.159.143.30",
+      "172.66.3.26"
+    ],
+    "validation_records": [
+      {
+        "record_type": "TXT",
+        "name": "_openai-site-verification.docs.suifleet.io",
+        "value": "openai-site-verification=cds3hVxPijxFHlwGbTYwCx9Tyqx3cQrOpbtKYdysEhQ"
+      },
+      {
+        "record_type": "TXT",
+        "name": "_cf-custom-hostname.docs.suifleet.io",
+        "value": "cfc36443-4165-432d-86c5-8edf9e437e2e"
+      }
+    ],
+    "last_error": null,
+    "created_at": "2026-11-05T07:53:04.400832+00:00",
+    "updated_at": "2026-11-05T07:53:05.061247+00:00"
+  },
+  {
+    "id": "appgdom_6aec35e20e148191b29f187c5e970cd9",
+    "project_id": "appgprj_6aec305355dc819181c4011690b539fd",
+    "hostname": "www.suifleet.io",
+    "worker_name": "site---6aec305355dc819181c4011690b539fd",
+    "status": "pending",
+    "provider_status": "pending",
+    "ssl_status": "initializing",
+    "cname_target": "custom-domains.chatgpt.site.",
+    "apex_proxy_ipv4_targets": [
+      "162.159.143.30",
+      "172.66.3.26"
+    ],
+    "validation_records": [
+      {
+        "record_type": "TXT",
+        "name": "_openai-site-verification.www.suifleet.io",
+        "value": "openai-site-verification=EB6h8y4qD72zMtFmY849v_lZFjK-ARY4XSERkzEGu7E"
+      },
+      {
+        "record_type": "TXT",
+        "name": "_cf-custom-hostname.www.suifleet.io",
+        "value": "e8f1a8f3-e4cc-41e2-8757-804333458f69"
+      }
+    ],
+    "last_error": null,
+    "created_at": "2026-11-05T07:53:06.055299+00:00",
+    "updated_at": "2026-11-05T07:53:07.183607+00:00"
+  }
+]
