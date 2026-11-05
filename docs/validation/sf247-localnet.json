@@ -1,0 +1,205 @@
+{
+  "result": "PASS",
+  "chain": "54314951",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+  "head": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+  "origins": {
+    "FleetData": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "DeviceKey": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "DeviceData": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "AnchorKey": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "Anchor": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "CompactHeadKey": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "CompactHead": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "HealthUpdated": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "DataAnchored": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+    "AnchorsPruned": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "ExpiredBlobsBurned": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "StreamRetentionKey": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "StreamRetention": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "StreamRetentionChanged": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "LocatorKey": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "DiagnosticKey": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "DiagnosticRequest": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "ItemKey": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "DataItem": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+    "ReadGrantKey": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648"
+  },
+  "digests": {
+    "publish core": "3mTigsDU7GU6xyN7z7npCNhc3UPQG5XcStX6WvJjsyyp",
+    "publish WAL": "BGWNMHZA4q7ufWnure1MWNMHYETCbjFHU1FzRPBrhLKB",
+    "publish Walrus": "EHpvfwSU24rxsiDXoKu568uo4dW85oCa6FwddkmHddZC",
+    "publish storage": "Cqe4TJCBG9MWzWrdVocyLq8xrNVTow7zXdbXRBMKvA9",
+    "publish base data": "GcybxinwBfa1pMvWaNZZj9stKXxNdUNDNRUQJUoDgMFZ",
+    "register existing device": "D5uMvQ1QCnb2AqusPKxPrn2o9UkYNjQDrBn6725fonmZ",
+    "create budget": "F4Uw65t4SG1QuXPDCfbjig9Q6T9jVCysFRtGQfvhcdPL",
+    "enroll account": "8udHpSA7TD3RQRDsZjaKwp5kQrMsNjRik7Jsc5AJBaeq",
+    "create actual storage": "S7gEXVponQQNCZF9RBZpF37xByeyCK3WCE8gutnh1J4",
+    "create base fleet": "C65iy61NJmfkNfg2J9ZuTFiPSezV1kzjxEjeSeiJemTJ",
+    "create base writer": "2coKNjEhchS47agJNQTXcRwBxPrXKHvRFGN2PLAbpnZu",
+    "upgrade core with existing registry/budget/account": "Gyvt3W8pUJdMPDJXy3EsUy5gLw3RyN8HCsWQMwZCZCvj",
+    "upgrade data": "4Wf9ftiJwRY46dfNScNx45Czpmt5yzztvsKtAPHre3pV",
+    "publish authoritative locator for existing objects after core/data upgrade": "EaYTqxoYZTW71a159dhsc8MYFFdTdQEm9AiNe5XW4oFK",
+    "diagnostics on existing writer": "6r5zPukZ84nbLdJpBvQVzSL2a2BqZEWVYucmpGghCrGS",
+    "legacy fleet support grant": "EdykCkKySvg1q2xJC3GPHreX6GAjdWE6MgQwdnKSzSDH",
+    "scoped stream grant on existing fleet": "7PFASv9g9WaKrzoc6HpYKNbSkP3Tn7gPPgwj7NRAjppE",
+    "revoke scoped stream grant": "7Z3iMhS5nuVYSVPemsEu88P8hH9sP4NDNeEgSPnuvGi6",
+    "serverless signed services health": "H4i8YESP4wYkzw6oq3V7ZhMhYHA262o9AuCuidF9reTY",
+    "revoke device": "2epp8rNxUKKLPhG5vcCPuFahAVUENLLJpq8WweaH8p5Z",
+    "create managed customer": "Nx2awtH57tE9Veg7Z1WtFsnyEy7CXQS2sUg8UEYgU5Q",
+    "adopt existing data budget": "DH4x2MfS1N2RMZjPXANX5fjeatJN5f87GFn4zcWyaKiq",
+    "rotate managed administrator": "EJn7kRsY9KxsSovMwtRLHZEras6zitHm8c2mLyzbSTnS",
+    "create independent reporting customer 0": "3cvgngtXHMdPFnxMWXjaeo5enSty9iNvGSw3xyv1E7VA",
+    "create independent reporting customer 1": "3pRK2ZPxnFUvETyPTPECVuxQVunsnLXayFcGZZLF2b4s",
+    "atomic reporting provisioning 0": "7CkbdB58n1ySHKmHMcW6WkHHi6oKhgf2iidPnW2uBmd",
+    "atomic reporting provisioning 1": "DGQvkEf4UAsudnkJvdH4sHFjV3Gh2y8zr6GzwJ8DK9KN",
+    "cross-customer budget locator": "5DYbQsh8dEA7oy2iX7YtBtwdcFJjeNqyc91HzJvFzZRr",
+    "duplicate partial setup": "B948mgKNqhb365Pbm41D9PToQeAh1kiK8oDQ8a9iiW4"
+  },
+  "attacks": {
+    "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889": {
+      "digest": "AnEryiA4m6edVo7mmPEJXLjwj5ftHFoHQR5BH7VUFN53",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xe529a0f05a03f71b25d3d6da43e34b729cfda7b32ac288afb4b710ff1dfa4fc8::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xe529a0f05a03f71b25d3d6da43e34b729cfda7b32ac288afb4b710ff1dfa4fc8",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648": {
+      "digest": "2uxT3gYyqVaR7j7MPc4D4kMYQWPN4MJCWRp2EdLvgupR",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x0153fc59bea40bceeee8e35a614513095c7a1ad84b1c8912624961e19b006788::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x0153fc59bea40bceeee8e35a614513095c7a1ad84b1c8912624961e19b006788",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "scopedChecks": [
+    {
+      "pkg": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+      "fn": "seal_approve_owner",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x6c65cc7f716586cf5811bd16cb3dd667dae4f6193ca71a26bc57e166f8255889",
+      "fn": "seal_approve_support",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_owner",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_support",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_scoped_owner",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "0000000000000000000000000000000000000000000000000000000000000000",
+      "success": false
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xdead",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xab4ee0576e78c56884643c25470a87a0cf1e6e4ab5c3dc4f17f40efc73734648",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xa6d2571be76c9750969038ff59550e77a328fefcda98cf85702e0731f68f7441",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x99d88c5e2f6c1215341b00d4b6e9fbf8f6f6838a6c8027cf6a6c83c611ce45e9",
+      "success": true
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x7388a7e39813c1009870b60a16abefc33b439829e705182eb13d12b6778d6071",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x99d88c5e2f6c1215341b00d4b6e9fbf8f6f6838a6c8027cf6a6c83c611ce45e9",
+      "success": false
+    }
+  ],
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ],
+  "core_base_ref": "54ac232d2cf103b83bc4dde1c4b177a7440345b6",
+  "command": "SF247_REPORTING=1 docker run --rm --network none --user 1001:1001 -e SF247_REPORTING=1 -v WORKTREE:/workspace -v GIT_COMMON_DIR:GIT_COMMON_DIR:ro -v sui_move-cache:/home/dev/.move -w /workspace suifleet-sf164:protocol140 python3 scripts/test_protocol_localnet.py --fleet-data-upgrade",
+  "limits": [
+    "Disposable network-none local chain; no shared wallets or external network",
+    "Baseline used the named core commit before the additive extension API; existing data baseline is baseRef",
+    "No physical/Mainnet/provider/manual-wallet result"
+  ]
+}
