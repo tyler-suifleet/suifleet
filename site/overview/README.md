@@ -38,20 +38,22 @@ English captions, an MP4 fallback and the complete transcript. Plain diagrams,
 full narration and readable text provide alternatives; colors alone never
 explain a state. No third-party scripts or remote assets are introduced.
 
-The animation keeps four persistent landmarks in the same positions in every
-chapter: console and wallet at top left, Sui shared records at top right, device
-client at bottom left, and Walrus software files at bottom right. Both landscape
-and portrait use that same arrangement. Inactive landmarks remain visible with
-quieter emphasis; they never move, disappear or swap places. One animated flow
-at a time shows the current action. The narration and native optional captions
-remain separate from the graphics. Background particles, chapter entrance
-transitions and multiple simultaneous flows are avoided to reduce visual load.
+Four small persistent landmarks keep the viewer oriented: console and wallet at
+top left, Sui shared records at top right, device client at bottom left, and
+Walrus software files at bottom right. Their positions stay fixed in every
+chapter in both aspect ratios. The main stage is an illustrated explanation:
+one device grows into grouped devices, a signature is drawn on a request and
+stamped, software is unpacked into release details and files, an access lock
+closes, a device asks for its update, files download, a magnifier checks release
+proof, platform installer gears turn, and a result receipt remains distinct from
+a separately drawn health trace. Objects draw, assemble and change state in
+step with the existing female narration. No UI screencast or whiteboard stock
+footage is used. Native optional captions remain separate from the illustration.
 
 `site/tests/motion_browser.cjs` compares core-scene pixels at distinct times in
 every scene and aspect ratio, excluding the header/progress line, so movement
 cannot be established by a changing progress bar alone. It also checks identical
-landmark bounds across all seven chapters. Samples avoid a complete particle
-cycle so a moving packet is not mistaken for a static frame. Visual inspection is
+landmark bounds across all seven chapters. Samples compare the developing illustration at different times in the chapter. Visual inspection is
 still required; pixel change does not establish animation quality.
 
 For a completed matching frame render, `--reuse-frames` verifies its timeline and

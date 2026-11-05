@@ -16,86 +16,180 @@ function file(x,y,s=1,locked=false){c.save();c.translate(x,y);c.scale(s,s);box(0
 function store(x,y,s=1){c.save();c.translate(x,y);c.scale(s,s);for(let i=0;i<3;i++)box(0,-30+i*32,115,26,'#17435d',7);c.restore()}
 function wallet(x,y,s=1){c.save();c.translate(x,y);c.scale(s,s);box(0,0,135,88,'#133e61',15);box(44,0,65,36,'#1c5a80',8);c.fillStyle=G;c.beginPath();c.arc(32,0,5,0,7);c.fill();c.restore()}
 function consoleIcon(x,y,s=1){c.save();c.translate(x,y);c.scale(s,s);box(0,-8,150,95,'#123650',10);box(0,-10,127,70,'#071a30',4);line([-30,53],[30,53],M,5);line([0,40],[0,52],M,5);line([-45,-25],[17,-25],B,4);line([-45,-9],[43,-9],G,3);line([-45,7],[27,7],M,3);c.restore()}
-function ring(x,y,r,t,color=B){c.save();c.globalAlpha=(1-t)*.65;c.strokeStyle=color;c.lineWidth=3;c.beginPath();c.arc(x,y,r+55*t,0,7);c.stroke();c.restore()}
-function packet(a,b,p,kind='dot',color=G){p=clamp(p);const x=lerp(a[0],b[0],p),y=lerp(a[1],b[1],p);c.save();c.shadowBlur=18;c.shadowColor=color;if(kind==='file')file(x,y,.6,true);else{box(x,y,kind==='request'?40:25,kind==='request'?18:25,color,6)}c.restore()}
-function connection(a,b,t,{color=B,count=3,reverse=false,kind='dot'}={}){line(a,b,'#294e6b',2);const end=reverse?a:b,start=reverse?b:a;for(let i=0;i<count;i++)packet(start,end,(t*.21+i/count)%1,kind,color);const ang=Math.atan2(end[1]-start[1],end[0]-start[0]);c.save();c.translate(...end);c.rotate(ang);c.fillStyle=color;c.beginPath();c.moveTo(0,0);c.lineTo(-13,-6);c.lineTo(-13,6);c.fill();c.restore()}
-function pill(s,x,y,color=B,w=180){box(x,y,w,42,'#0e304b',12);label(s,x,y+7,19,color)}
-// The same four landmarks stay visible at the same coordinates in every chapter.
+// Persistent landmarks orient the viewer; the central illustration tells the story.
 function layout(width,height){
  const portrait=height>width;
- return {portrait,cardWidth:portrait?260:300,cardHeight:portrait?210:170,
-  console:[portrait?180:260,portrait?380:305],sui:[portrait?540:1020,portrait?380:305],
-  device:[portrait?180:260,portrait?850:540],walrus:[portrait?540:1020,portrait?850:540],
-  action:[width/2,portrait?230:185]};
+ return {portrait,cardWidth:260,cardHeight:140,
+  console:[portrait?160:165,portrait?350:300],sui:[portrait?560:1115,portrait?350:300],
+  device:[portrait?160:165,portrait?1090:580],walrus:[portrait?560:1115,portrait?1090:580],
+  action:[width/2,portrait?230:185],stage:[width/2,portrait?715:435],scale:portrait?.94:1};
 }
 const chapters={
- fleet:{active:['console','sui','device'],caption:'Organize devices into groups'},
- approve:{active:['console','sui'],caption:'Review and approve'},
- publish:{active:['console','sui','walrus'],caption:'Save the release, then its files'},
- poll:{active:['device','sui'],caption:'The device checks for an update'},
- install:{active:['device','walrus'],caption:'Download · verify · install'},
- report:{active:['device','sui','console'],caption:'Report the result'},
- overview:{active:['console','sui','device','walrus'],caption:'One shared system'}
+ fleet:{active:['console','device'],caption:'Start with one. Organize many.'},
+ approve:{active:['console','sui'],caption:'Your approval authorizes the change'},
+ publish:{active:['console','sui','walrus'],caption:'Release details + software files'},
+ poll:{active:['device','sui'],caption:'Devices initiate their own checks'},
+ install:{active:['device','walrus'],caption:'Download. Verify. Run your installer.'},
+ report:{active:['device','sui','console'],caption:'Installation results and health are separate'},
+ overview:{active:['console','sui','device','walrus'],caption:'One release. A whole fleet.'}
 };
-function landmark(id,point,L,active,t,scene){
- const [x,y]=point,w=L.cardWidth,h=L.cardHeight;
- c.save();c.globalAlpha=active?1:.65;
- box(x,y,w,h,active?'#103651':'#0b2239',18);
- if(active){c.strokeStyle=B;c.lineWidth=2;c.beginPath();c.roundRect(x-w/2,y-h/2,w,h,18);c.stroke()}
- const iconY=y-(L.portrait?25:18),scale=L.portrait?.7:.6;
- if(id==='console'){
-  consoleIcon(x-35,iconY,scale);wallet(x+65,iconY+5,.38);
- }else if(id==='sui')records(x,iconY,scale);
- else if(id==='walrus')store(x,iconY,scale);
- else{
-  device(x,iconY,.53,'',scene==='report'?1:0);
-  if(scene==='fleet'){
-   device(x-82,iconY,.3,'',0);device(x+82,iconY,.3,'',0);
-   ring(x,iconY,32,(t*.25)%1,G);
-  }
- }
+function landmark(id,point,L,active){
+ const [x,y]=point;c.save();c.globalAlpha=active?1:.6;
+ const cy=y-15;
+ if(id==='console'){consoleIcon(x-26,cy,.48);wallet(x+54,cy+5,.3)}
+ else if(id==='sui')records(x,cy,.55);
+ else if(id==='walrus')store(x,cy,.55);
+ else device(x,cy,.44);
  const names={console:'Console + wallet',sui:'Sui · shared records',device:'Device client',walrus:'Walrus · software files'};
- label(names[id],x,y+h/2-23,22,W);
+ label(names[id],x,y+62,20,W);
+ if(active){line([x-32,y+77],[x+32,y+77],G,3)}c.restore();
+}
+// Draw a line progressively, including its final moving pen tip.
+function drawPath(points,p,color=B,width=4,pen=false){
+ p=clamp(p);const lengths=points.slice(1).map((b,i)=>Math.hypot(b[0]-points[i][0],b[1]-points[i][1]));
+ let remaining=lengths.reduce((a,b)=>a+b,0)*p,last=points[0];
+ c.beginPath();c.moveTo(...last);c.lineCap='round';c.lineJoin='round';
+ for(let i=0;i<lengths.length;i++){
+  const b=points[i+1],q=lengths[i]?Math.min(1,remaining/lengths[i]):1;
+  last=[lerp(points[i][0],b[0],q),lerp(points[i][1],b[1],q)];c.lineTo(...last);remaining-=lengths[i];if(q<1)break;
+ }
+ c.strokeStyle=color;c.lineWidth=width;c.stroke();
+ if(pen&&p>0&&p<1){c.save();c.translate(...last);c.rotate(-.6);c.fillStyle=W;c.beginPath();c.moveTo(0,0);c.lineTo(5,-34);c.lineTo(16,-29);c.closePath();c.fill();c.restore()}
+}
+function arrow(a,b,p,color=B){
+ const end=[lerp(a[0],b[0],clamp(p)),lerp(a[1],b[1],clamp(p))];drawPath([a,b],p,color,3);
+ if(p>.05){const angle=Math.atan2(b[1]-a[1],b[0]-a[0]);c.save();c.translate(...end);c.rotate(angle);drawPath([[-12,-6],[0,0],[-12,6]],1,color,3);c.restore()}
+}
+function appear(p,draw){if(p<=0)return;c.save();c.globalAlpha=clamp(p*3);const q=ease(p);c.translate(0,(1-q)*25);c.scale(.9+.1*q,.9+.1*q);draw();c.restore()}
+function sheet(x,y,p,title='Release 1.2',color=B){
+ c.save();c.translate(x,y);box(0,0,150,178,'#0b233a',12);
+ drawPath([[-75,89],[-75,-89],[45,-89],[75,-59],[75,89],[-75,89]],p,color,4);
+ if(p>.25){label(title,0,-42,20,W);for(let i=0;i<3;i++)drawPath([[-48,-10+i*22],[38-i*8,-10+i*22]],clamp((p-.25-i*.12)*4),M,3)}c.restore();
+}
+function packageBox(x,y,p,open=0){
+ c.save();c.translate(x,y);const k=clamp(open);
+ c.fillStyle='#123d57';c.beginPath();c.moveTo(-90,-20);c.lineTo(0,15);c.lineTo(90,-20);c.lineTo(90,85);c.lineTo(0,120);c.lineTo(-90,85);c.closePath();c.fill();
+ drawPath([[-90,-20],[0,15],[90,-20],[90,85],[0,120],[-90,85],[-90,-20]],p,B,4);
+ drawPath([[0,15],[0,120]],p,B,3);
+ drawPath([[-90,-20],[-50-35*k,-65-35*k],[0,-30],[50+35*k,-65-35*k],[90,-20]],p,G,4);
+ if(p>.5)label('SOFTWARE',0,68,17,W);c.restore();
+}
+function bigDevice(x,y,p,version='1.1',scale=1){
+ c.save();c.translate(x,y);c.scale(scale,scale);
+ box(0,0,130,180,'#0d2b44',16);drawPath([[-65,90],[-65,-90],[65,-90],[65,90],[-65,90]],p,B,4);
+ box(0,-15,101,103,'#07182e',6);if(p>.5){label(version,0,-5,27,G);c.fillStyle=G;c.beginPath();c.arc(0,64,5,0,7);c.fill()}c.restore();
+}
+function lockIcon(x,y,p,opened=false){
+ c.save();c.translate(x,y);box(0,15,62,54,'#163d45',9);
+ const shift=opened?22:0;drawPath([[-20,-9],[-20,-33],[-10,-47],[10,-47],[20,-33],[20,-9-shift]],p,G,5);
+ c.fillStyle=G;c.beginPath();c.arc(0,12,5,0,7);c.fill();line([0,16],[0,26],G,4);c.restore();
+}
+function magnifier(x,y,p){
+ c.save();c.translate(x,y);c.fillStyle='#103650';c.beginPath();c.arc(0,0,44,0,7);c.fill();c.strokeStyle=G;c.lineWidth=5;c.beginPath();c.arc(0,0,44,-Math.PI/2,-Math.PI/2+Math.PI*2*clamp(p));c.stroke();drawPath([[31,31],[66,66]],p,G,10);c.restore();
+}
+function gear(x,y,t,p){
+ c.save();c.translate(x,y);c.rotate(t*.7);c.globalAlpha=clamp(p*3);
+ for(let i=0;i<8;i++){c.rotate(Math.PI/4);drawPath([[33,0],[48,0]],1,G,10)}
+ c.strokeStyle=G;c.lineWidth=6;c.beginPath();c.arc(0,0,31,0,7);c.stroke();c.beginPath();c.arc(0,0,12,0,7);c.stroke();c.restore();
+}
+function stamp(x,y,p,text='APPROVED'){
+ p=clamp(p);if(!p)return;c.save();c.translate(x,y);c.rotate(-.12);c.globalAlpha=clamp(p*3);const s=1+.4*(1-ease(p));c.scale(s,s);c.strokeStyle=G;c.lineWidth=4;c.strokeRect(-92,-23,184,46);label(text,0,8,23,G);c.restore();
+}
+function phase(t,start,length=1){return clamp((t-start)/length)}
+function visualFleet(t){
+ const spread=ease(phase(t,2,3));
+ // A single device becomes a group, rather than a row of unrelated symbols.
+ for(let i=0;i<6;i++){
+  const target=[(i%3-1)*145,(i<3?-75:90)];
+  const p=i?phase(t,2+i*.3,1):phase(t,0,1);
+  if(p)appear(p,()=>bigDevice(lerp(0,target[0],spread),lerp(0,target[1],spread),p,'',.54));
+ }
+ drawPath([[-245,-150],[45,-150],[45,175],[-245,175],[-245,-150]],phase(t,6,2),G,3);
+ drawPath([[75,-150],[245,-150],[245,175],[75,175],[75,-150]],phase(t,7,2),B,3);
+ if(t>7){label('Workshop',-100,-168,23,G);label('Field',160,-168,23,B)}
+}
+function visualApprove(t){
+ sheet(-75,0,phase(t,0,2),'Update fleet');
+ if(t>2){drawPath([[-128,48],[-110,20],[-111,60],[-82,35],[-71,50],[-42,29],[-33,46],[-12,41]],phase(t,2,3),G,4,true)}
+ stamp(-72,110,phase(t,5,1.2));
+ if(t>6){arrow([28,-15],[142,-15],phase(t,6,1.6),G);appear(phase(t,7,1),()=>{records(218,-15,1);check(215,-15,phase(t,8,1),28)})}
+ if(t>10){lockIcon(200,115,phase(t,10,1));label('Key stays private',110,195,23,G)}
+}
+function visualPublish(t){
+ const split=ease(phase(t,2,2));
+ sheet(lerp(0,-165,split),lerp(-15,-40,split),phase(t,0,1.5),'Version 1.2');
+ if(t>2){appear(phase(t,2,1),()=>packageBox(150,15,phase(t,2,2),phase(t,4,2)))}
+ if(t>5){
+  c.save();c.globalAlpha=phase(t,5,1);file(155,lerp(-10,-100,ease(phase(t,5,2))),.9,false);c.restore();
+  label('Release details',-165,100,24,B);label('Software files',150,175,24,G);
+ }
+ if(t>10){lockIcon(156,-85,phase(t,10,1.4));label('Private release: encrypted',0,-165,24,G)}
+ if(t>14){label('Access checked by Seal',0,220,23,M)}
+}
+function visualPoll(t){
+ bigDevice(-170,55,phase(t,0,1),'1.1',1);sheet(180,0,phase(t,1,1.5),'Version 1.2');
+ const cycle=Math.max(0,t-2)%6;
+ if(t>2&&cycle<3){
+  arrow([-80,0],[80,0],cycle/2,B);
+  const q=clamp(cycle/2);c.save();c.translate(lerp(-75,75,q),-20);label('?',0,0,40,B);c.restore();
+ }else if(t>2){
+  arrow([80,35],[-80,35],(cycle-3)/2,G);
+  if(cycle>4)check(-170,35,clamp(cycle-4),25);
+ }
+ if(t>5){label('Check → approved update',0,200,25,W)}
+}
+function visualInstall(t){
+ const download=phase(t,0,6),verify=phase(t,6,4),install=phase(t,10,5);
+ bigDevice(165,20,1,install>=1?'1.2':'1.1',1.15);
+ if(t<7){
+  packageBox(-170,15,1,phase(t,0,2));
+  for(let i=0;i<3;i++){
+   const p=clamp((t-i*.8)/3);if(p>0&&p<1)file(lerp(-130,120,ease(p)),lerp(-60,-15,p),.55,false);
+  }
+  label('Downloading software',0,-155,26,W);
+ }else if(t<11){
+  sheet(-165,0,1,'Release proof');magnifier(lerp(-210,-130,verify),lerp(-40,20,verify),verify);
+  if(verify>.6)check(-165,40,phase(t,8.4,1),25);
+  label('Checking the approved release',0,-155,25,W);
+ }else{
+  gear(-145,0,t,install);arrow([-70,0],[60,0],install,G);
+  label('Your platform installer',0,-155,26,W);
+  if(install>=1){stamp(0,160,phase(t,15,1),'INSTALLED')}
+ }
+ const y=205;line([-245,y],[245,y],'#254961',8);line([-245,y],[-245+490*download,y],B,8);
+ if(t>6){line([-245,y],[-245+490*verify,y],G,8)}
+}
+function visualReport(t){
+ if(t<9){
+  sheet(-155,0,phase(t,0,1.5),'Install result');
+  check(-155,45,phase(t,1.5,1),28);arrow([-55,0],[80,0],phase(t,3,2),G);
+  consoleIcon(180,0,1);if(t>5)stamp(178,110,phase(t,5,1),'APPLIED');
+ }else{
+  // A separate sampled trace: installation success is never a fabricated health signal.
+  sheet(-165,0,1,'Applied');check(-165,45,1,25);
+  label('≠',-10,15,46,M);
+  const points=[[55,30],[85,30],[105,5],[123,65],[145,-35],[165,30],[200,30],[220,10],[242,30]];
+  drawPath(points,phase(t,9,6),G,5);
+  label('Health sample',150,130,25,G);label('Reported separately',0,-155,26,W);
+ }
+}
+function visualOverview(t){
+ const stage=Math.min(3,Math.floor(t/4));
+ if(stage===0){packageBox(-155,10,1,phase(t,0,2));sheet(135,-10,phase(t,1,1),'Release 1.2');arrow([-45,10],[40,10],phase(t,1,2),G)}
+ if(stage===1){visualApprove(Math.min(9,t-4+2))}
+ if(stage===2){
+  for(let i=0;i<3;i++){const x=(i-1)*165;appear(phase(t,8+i*.5,1),()=>{bigDevice(x,0,1,'1.2',.8);check(x,8,phase(t,9+i*.5,1),20)})}
+  label('Roll out to a group',0,170,27,G);
+ }
+ if(stage===3){
+  for(let i=0;i<6;i++){const x=(i%3-1)*165,y=i<3?-85:90;appear(phase(t,12+i*.3,1),()=>bigDevice(x,y,1,'1.2',.52))}
+  label('Expand in stages',0,205,27,G);
+ }
+}
+function centralIllustration(L,scene,t){
+ c.save();c.translate(...L.stage);c.scale(L.scale,L.scale);
+ ({fleet:visualFleet,approve:visualApprove,publish:visualPublish,poll:visualPoll,install:visualInstall,report:visualReport,overview:visualOverview})[scene](t);
  c.restore();
-}
-function route(L,from,to,t,{color=B,kind='dot',reverse=false}={}){
- const a=L[from],b=L[to],dx=b[0]-a[0],dy=b[1]-a[1];
- // Clip the line to the card edges. Nothing crosses an icon or its label.
- const fraction=Math.min(dx?L.cardWidth/2/Math.abs(dx):Infinity,dy?L.cardHeight/2/Math.abs(dy):Infinity)+.025;
- const start=[a[0]+dx*fraction,a[1]+dy*fraction],end=[b[0]-dx*fraction,b[1]-dy*fraction];
- connection(start,end,t,{color,count:1,kind,reverse});
-}
-function systemScene(L,scene,t){
- const chapter=chapters[scene];
- // One flow at a time makes the moving item easy to follow.
- if(scene==='fleet')route(L,'console','sui',t,{kind:'request'});
- if(scene==='approve')route(L,'console','sui',t,{kind:'request',color:G});
- if(scene==='publish'){
-  if(t<7)route(L,'console','sui',t,{kind:'request'});
-  else route(L,'console','walrus',t,{kind:'file',color:G});
- }
- if(scene==='poll')route(L,'device','sui',t,{kind:t%6<3?'request':'dot',reverse:t%6>=3,color:t%6<3?B:G});
- if(scene==='install')route(L,'walrus','device',t,{kind:'file',color:G});
- if(scene==='report'){
-  if(t<7)route(L,'device','sui',t,{kind:'request',color:G});
-  else route(L,'sui','console',t,{color:G});
- }
- if(scene==='overview'){
-  const flows=[['console','sui'],['device','sui'],['walrus','device'],['device','sui']];
-  const [from,to]=flows[Math.floor(t/4)%flows.length];route(L,from,to,t,{color:G});
- }
- for(const id of ['console','sui','device','walrus'])landmark(id,L[id],L,chapter.active.includes(id),t,scene);
- let caption=chapter.caption;
- if(scene==='publish')caption=t<7?'Save release details':'Store software files';
- if(scene==='install')caption=t<8?'Download the software':t<12?'Verify the release':'Run your platform installer';
- if(scene==='report')caption=t<7?'Installation result':'View results · health is separate';
- // A fixed action label above the diagram leaves the flow paths unobstructed.
- const [x,y]=L.action;box(x,y,L.portrait?620:550,58,'#07182e',14);label(caption,x,y+8,L.portrait?26:25,G);
- if(scene==='install'){
-  const p=clamp((t-2)/6),y=L.device[1]+L.cardHeight/2+20;
-  box(L.device[0],y,L.cardWidth-20,8,'#183a54',4);
-  c.fillStyle=G;c.fillRect(L.device[0]-(L.cardWidth-20)/2,y-3,(L.cardWidth-20)*p,6);
- }
 }
 window.renderFrame=async function({width,height,scene,localTime,index,total}){
  await window.ready;canvas.width=width;canvas.height=height;
@@ -105,7 +199,9 @@ window.renderFrame=async function({width,height,scene,localTime,index,total}){
  const size=L.portrait?38:42,max=width-85;let row='',lines=[];c.font=`600 ${size}px Inter`;
  for(const word of scene.title.split(' ')){if(c.measureText(row+' '+word).width>max&&row){lines.push(row);row=word}else row+=(row?' ':'')+word}
  lines.push(row);lines.forEach((s,i)=>label(s,width/2,(L.portrait?145:130)+i*size*1.2,size));
- systemScene(L,scene.id,t);
+ label(chapters[scene.id].caption,...L.action,L.portrait?25:24,M);
+ for(const id of ['console','sui','device','walrus'])landmark(id,L[id],L,chapters[scene.id].active.includes(id));
+ centralIllustration(L,scene.id,t);
  c.fillStyle='#294765';c.fillRect(40,height-34,width-80,3);c.fillStyle=B;c.fillRect(40,height-34,(width-80)*(index+clamp(t/scene.duration))/total,3);
  window.renderedLandmarks=Object.fromEntries(['console','sui','device','walrus'].map(id=>[id,{x:L[id][0],y:L[id][1],width:L.cardWidth,height:L.cardHeight}]));
  return canvas.toDataURL('image/png').split(',')[1];

@@ -103,7 +103,7 @@
   ],
   "source_sha256": {
     "site/overview/storyboard.json": "997803451e442987eaab39aa8db287e3b242436a85d96797d4ee2337f5d51cb6",
-    "site/overview/scene.html": "48ed68038b2818fe3d0d683ad7628e1378d31badd481e4314e4c8e01582d038d",
+    "site/overview/scene.html": "900f1fe156cb887db9883280fabddbb2ef1632f565b4c9ef3d87629e589d66d6",
     "site/overview/render_frames.cjs": "071c7c86c9a4465bd787a4947f010edf8ab94d0d9c6f2cda5025e67d6d0ad905",
     "site/overview/render_overview.py": "552fe7a73415dfdf39a070a3c00e9774b0de53b99bdcbe26c04a2bd45e554f16"
   },
@@ -113,22 +113,22 @@
       "width": 1280,
       "height": 720,
       "fallback": "overview-landscape.mp4",
-      "fallback_sha256": "ea6ffebc61d517630463ca2cd4b985779a34d6438bca89686a400ea0f8b2bee1",
+      "fallback_sha256": "f2b2af7498ca60b20d46c55bf1af385a100bad0bc7d2aa8334cd35096accd260",
       "file": "overview-landscape.webm",
-      "file_sha256": "3121624f9e6d989ae9600ff8b4e7fd5f2e33cf69b5c628517efb1c1cb876139d",
+      "file_sha256": "c34eed67e2797119ab7dd266c79788856be628eafcd4ee18b43788ad99f7ab7e",
       "poster": "overview-landscape.jpg",
-      "poster_sha256": "0de24b1f01df8c649bf76c4fae5aa1e53d307ee7ea3e5db620408e5038979cb3"
+      "poster_sha256": "96bf81edc01fd72e6a171ccd7f18659c55a3e91cfea301fcb2c45f4af89d9a1d"
     },
     {
       "name": "portrait",
       "width": 720,
       "height": 1280,
       "fallback": "overview-portrait.mp4",
-      "fallback_sha256": "80e25a4c867ec90076ac5c506dd1f34240d746b9fc79270ec0967c6aa87440fc",
+      "fallback_sha256": "5f8ebf58bed8a0a3bd379e96e107a147aa5e3e4ae73499a8a86cdef371ab0017",
       "file": "overview-portrait.webm",
-      "file_sha256": "c1ccb69bee74ae456f5d7fc9373894845f5d02662703d9cdbdaa2ffb40b9d5ee",
+      "file_sha256": "e2d9051f0fa8ab91487e09cae2b741beda5bc53235691d403f624ad8680b7b23",
       "poster": "overview-portrait.jpg",
-      "poster_sha256": "5f2dbb678dee3e28a716500d5111db149c9ffd2ec8a963581a5bcc7f580b7424"
+      "poster_sha256": "d7cefe601a4b0db0db67f2aa6f3141d0a71469a15cfc06fa5f7a701813c2be69"
     }
   ],
   "captions": "overview.en.vtt",
