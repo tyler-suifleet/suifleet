@@ -1,6 +1,9 @@
 // Public documentation paths are stable across source repository moves.
 // Override at build time when serving the curated docs on another origin/path.
 export const DOCS_BASE = (process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE || "https://docs.suifleet.io/").replace(/\/?$/, "/");
+export type DocsPage = "install" | "enrollment" | "components" | "budget" | "pricing";
+/** All customer help links use the same configured documentation origin. */
+export function docsUrl(page: DocsPage) { return `${DOCS_BASE}${page}/`; }
 export const GUIDE_FILE = "device-client/";
 
 /** Guide sections, by heading anchor. */

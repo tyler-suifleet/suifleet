@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "kind": "illustrative-animation",
+  "title": "How SuiFleet works",
+  "duration_seconds": 116.95,
+  "voice": "af_heart",
+  "language": "en-us",
+  "synthetic_voice": true,
+  "scenes": [
+    {
+      "id": "fleet",
+      "title": "One fleet. Many devices.",
+      "subtitle": "Your software, across the devices you manage.",
+      "text": "SuiFleet helps you deliver software to devices and see what happened. Start with one machine, then organize a fleet into groups. Here is the idea behind the controls.",
+      "start": 0,
+      "duration": 11.65
+    },
+    {
+      "id": "approve",
+      "title": "You approve the changes.",
+      "subtitle": "A wallet is your approval app.",
+      "text": "Your wallet is the app you use to approve management changes. It signs your request so the network can check your authority. Each device has its own identity. Your wallet's private key is not sent to the devices.",
+      "start": 11.65,
+      "duration": 14.25
+    },
+    {
+      "id": "publish",
+      "title": "Publish once. Choose who can read it.",
+      "subtitle": "Release records and software files have different jobs.",
+      "text": "Publishing puts a version and its verification details in shared Sui records. The software files live in Walrus storage for a chosen period. Confidential releases are encrypted, with Seal controlling who can obtain the keys to open them. Publishing alone installs nothing.",
+      "start": 25.9,
+      "duration": 18.9
+    },
+    {
+      "id": "poll",
+      "title": "Devices check for their updates.",
+      "subtitle": "The device initiates the connection.",
+      "text": "You approve a deployment for a device or group. The shared records describe the approved version and targets. Each device client checks those records on its configured schedule when connected. This is not a remote session pushing files into your machines.",
+      "start": 44.8,
+      "duration": 16.5
+    },
+    {
+      "id": "install",
+      "title": "Download. Verify. Install.",
+      "subtitle": "Your platform controls the installer and reboot.",
+      "text": "A targeted device downloads the files, verifies the approved release and runs its configured installer. Your platform handles system update details, including any reboot or rollback. An offline device can catch up later, while the deployment permits it and the files remain available.",
+      "start": 61.3,
+      "duration": 19.65
+    },
+    {
+      "id": "report",
+      "title": "A request is not a result.",
+      "subtitle": "Requested \u2192 Applied. Health is a separate report.",
+      "text": "The device authenticates its result so the console can show whether installation succeeded or failed. Health is reported separately. A deployment request does not mean installed, and installed does not mean healthy. Reporting frequency determines how fresh that picture is.",
+      "start": 80.94999999999999,
+      "duration": 18.8
+    },
+    {
+      "id": "overview",
+      "title": "Approve. Check. Verify. Report.",
+      "subtitle": "Start small. Expand with confidence.",
+      "text": "The console, shared records, file storage and device clients work together without a SuiFleet application server. Network providers, connectivity and operating funds are still needed. Try one device first, then use groups and staged rollouts to expand.",
+      "start": 99.74999999999999,
+      "duration": 17.2
+    }
+  ],
+  "cues": [
+    {
+      "text": "SuiFleet helps you deliver software to devices and see what happened. Start with one machine, then organize a fleet into groups. Here is the idea behind the controls.",
+      "speech_start": 0.35,
+      "speech_end": 10.782
+    },
+    {
+      "text": "Your wallet is the app you use to approve management changes. It signs your request so the network can check your authority. Each device has its own identity. Your wallet's private key is not sent to the devices.",
+      "speech_start": 12.0,
+      "speech_end": 25.034666666666666
+    },
+    {
+      "text": "Publishing puts a version and its verification details in shared Sui records. The software files live in Walrus storage for a chosen period. Confidential releases are encrypted, with Seal controlling who can obtain the keys to open them. Publishing alone installs nothing.",
+      "speech_start": 26.25,
+      "speech_end": 43.914
+    },
+    {
+      "text": "You approve a deployment for a device or group. The shared records describe the approved version and targets. Each device client checks those records on its configured schedule when connected. This is not a remote session pushing files into your machines.",
+      "speech_start": 45.15,
+      "speech_end": 60.446
+    },
+    {
+      "text": "A targeted device downloads the files, verifies the approved release and runs its configured installer. Your platform handles system update details, including any reboot or rollback. An offline device can catch up later, while the deployment permits it and the files remain available.",
+      "speech_start": 61.65,
+      "speech_end": 80.06066666666666
+    },
+    {
+      "text": "The device authenticates its result so the console can show whether installation succeeded or failed. Health is reported separately. A deployment request does not mean installed, and installed does not mean healthy. Reporting frequency determines how fresh that picture is.",
+      "speech_start": 81.29999999999998,
+      "speech_end": 98.87866666666665
+    },
+    {
+      "text": "The console, shared records, file storage and device clients work together without a SuiFleet application server. Network providers, connectivity and operating funds are still needed. Try one device first, then use groups and staged rollouts to expand.",
+      "speech_start": 100.09999999999998,
+      "speech_end": 116.07866666666665
+    }
+  ],
+  "source_sha256": {
+    "site/overview/storyboard.json": "997803451e442987eaab39aa8db287e3b242436a85d96797d4ee2337f5d51cb6",
+    "site/overview/scene.html": "5193b88f1a38b802b0da42739391ea37e286d0d2810e491dbc65586b00b62595",
+    "site/overview/render_frames.cjs": "071c7c86c9a4465bd787a4947f010edf8ab94d0d9c6f2cda5025e67d6d0ad905",
+    "site/overview/render_overview.py": "552fe7a73415dfdf39a070a3c00e9774b0de53b99bdcbe26c04a2bd45e554f16"
+  },
+  "variants": [
+    {
+      "name": "landscape",
+      "width": 1280,
+      "height": 720,
+      "fallback": "overview-landscape.mp4",
+      "fallback_sha256": "9e992f119030041f5077cb648362d145fee7748adea9d9c50f7bb3b4a512487f",
+      "file": "overview-landscape.webm",
+      "file_sha256": "a5acd26dd9d8c038542278dacca9f6da13238280737d7f5f4f89603bc23abb5d",
+      "poster": "overview-landscape.jpg",
+      "poster_sha256": "779b42a02044e9517c13dcddd45620c76682855f12dbb42d0949723952b09ebc"
+    },
+    {
+      "name": "portrait",
+      "width": 720,
+      "height": 1280,
+      "fallback": "overview-portrait.mp4",
+      "fallback_sha256": "16ae9d9727d3feac2cf6d6b91cddbb93e1be6d4f11990677d2ad64c147a1cf09",
+      "file": "overview-portrait.webm",
+      "file_sha256": "38b2809d0ad76f4729289ad27152bbbee2ceb13a675be307b389571f3c126ba6",
+      "poster": "overview-portrait.jpg",
+      "poster_sha256": "0204607b2eabd1dbca00275c2938928774bd15f2c0c4fcda5dead02726ede6ad"
+    }
+  ],
+  "captions": "overview.en.vtt",
+  "captions_sha256": "f6642de8198f08d7abfccc838059aeca72ef4f63f4c25b19b6361dd1cac0b91e"
+}

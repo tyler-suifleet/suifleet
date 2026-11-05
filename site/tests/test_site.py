@@ -27,6 +27,16 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_native_caption_digest_and_narration_timing_are_enforced(self):
+        track = self.out / "media/guide/sign-in.en.vtt"
+        guide = (self.out / "guide/index.html").read_text()
+        self.assertIn('<track kind="captions" src="/media/guide/sign-in.en.vtt" srclang="en" label="English" default>', guide)
+        track.write_text(track.read_text().replace('SuiFleet', 'Wrong narration.', 1))
+        rewrite_sums(self.out)
+        errors = self.errors(require_videos=True)
+        self.assertTrue(any('captions differ from encoded narration' in e for e in errors), errors)
+        self.assertTrue(any('does not match its recorded digest' in e for e in errors), errors)
+
     def test_sitemap_and_robots_use_canonical_origin(self):
         build.build(self.out)
         tree = ET.fromstring((self.out / "sitemap.xml").read_text())
@@ -71,10 +81,20 @@ class SiteTest(unittest.TestCase):
         self.assertIn(">Launch app<", home)
         guide = (self.out / "guide" / "index.html").read_text()
         steps = json.loads((SITE / "guide" / "steps.json").read_text())["steps"]
-        self.assertEqual(len(steps), 9)
+        self.assertEqual([s["id"] for s in steps][:3], ["sign-in", "capacity-plan", "fund"])
         for step in steps:
             self.assertIn(f'id="{step["id"]}"', guide)
             self.assertIn(f'href="{config["app_url"]}{step["console_route"]}"', guide)
+
+    def test_advanced_guide_paths_are_explicitly_optional(self):
+        steps = json.loads((SITE / "guide/steps.json").read_text())["steps"]
+        by_id = {step["id"]: step for step in steps}
+        guide = (self.out / "guide/index.html").read_text()
+        for step_id in ("enroll-batch", "access-policy", "staged-rollout"):
+            with self.subTest(step=step_id):
+                summary = by_id[step_id]["summary"]
+                self.assertTrue(summary.startswith("Optional "), summary)
+                self.assertIn(summary, guide)
 
     def test_logo_download_preserves_transparency(self):
         for page in json.loads((SITE / "src" / "site.json").read_text())["pages"]:
@@ -172,7 +192,7 @@ class SiteTest(unittest.TestCase):
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
             self.assertIn('data-console-commit="' + '1' * 40 + '"', guide)
             missing = self.errors(require_videos=True)
-            self.assertEqual(len(missing), 10, missing)
+            self.assertEqual(len(missing), len(json.loads((SITE / "guide" / "steps.json").read_text())["steps"]) + 2, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")
             rewrite_sums(self.out)
             self.assertTrue(any("does not match its recorded digest" in e for e in self.errors()))

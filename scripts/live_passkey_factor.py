@@ -240,13 +240,11 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
     tx('enable native passkey protection',operation='policy',mask=2,sponsor=0,**common)
     tx('wallet plus passkey allows action',operation='rename',fleet=f['fleet'],name='Native co-signed action',sponsor=0,**common)
     tx('wallet alone refused on chain',operation='rename',fleet=f['fleet'],name='must fail',expect='failure',**common)
-    # A co-signed call to an unchanged base/head is authorized, not a bypass.
-    # Only a distinct old package must refuse even with a valid factor.
-    distinct_base = dm.object_id(f['base']) != dm.object_id(f['head'])
-    tx('old package cannot bypass protection' if distinct_base else 'unchanged base wallet alone refused',
-       operation='rename',fleet=f['fleet'],name='must fail old',expect='failure',
-       **({'sponsor': 0} if distinct_base else {}), **{**common,'package':f['base']})
-    live.evidence['native_old_package_probe'] = 'distinct-package' if distinct_base else 'unchanged-root-wallet-only'
+    # Package identity does not determine security compatibility. A compatible
+    # base may authorize a valid co-signer; wallet-only access must still fail.
+    tx('base wallet alone refused', operation='rename', fleet=f['fleet'],
+       name='must fail old', expect='failure', **{**common, 'package': f['base']})
+    live.evidence['native_old_package_probe'] = 'base-wallet-only'
     tx('backup passkey recovers lost primary',operation='remove',administrator=live.operator,key=0,sponsor=1,**common)
     tx('removed primary refused',operation='rename',fleet=f['fleet'],name='must fail removed',sponsor=0,expect='failure',**common)
     tx('surviving backup allows action',operation='rename',fleet=f['fleet'],name='Recovered with backup',sponsor=1,**common)
@@ -338,25 +336,47 @@ def select_journal(live, cache, state, identity, save):
     save()
 
 
+def retained_fixture(live, cache, source, state):
+    """Resume an unfinished exact-source pair before considering another cache hit.
+
+    Multiple base/head pairs can share the same head bytecode. Cache ordering
+    must never rotate the organization underneath a retained transaction journal.
+    The caller still verifies publication, ownership and type origins on chain.
+    """
+    from live_wallet_gate import head_fixture
+    if state.get('pending') or state.get('completed'):
+        active = state.get('active_fixture')
+        if active:
+            for key, candidate in cache['fixtures'].items():
+                if (fixture_identity(live, candidate) == active
+                        and head_fixture({'fixtures': {key: candidate}}, source)):
+                    return candidate
+            if not any(fixture_identity(live, candidate) == active
+                       for candidate in cache['fixtures'].values()):
+                raise RuntimeError('unfinished native passkey fixture requires its exact source package pair')
+            # A source change uses select_journal to verify and reconcile the old
+            # pair before parking it; selection itself never mutates the journal.
+    return head_fixture(cache, source)
+
+
 def cached_acceptance(live, package_state, private=None):
     """Use the package gate's exact source fixture and existing security ledger.
 
     CI preserves these files only inside its authenticated encrypted state.
     No publication, new operator wallet, faucet or extra allowance is introduced.
     """
-    from live_wallet_gate import head_fixture
     from live_package_upgrade import load_state, save_state
     cache = load_state(package_state, live.chain, live.operator)
     source = contracts_digest(Path('contracts'))
-    cached = head_fixture(cache, source)
-    if not cached:
-        raise RuntimeError('native passkey acceptance requires the exact cached package gate fixture')
-    head, base = cached['head_package'], cached['base_package']
-    origins = verify_cached_fixture(live, cached, source)
     private = Path(private) if private else live.wallet.parent / 'live-passkey-state.json'
     if private.resolve().is_relative_to(Path.cwd().resolve()):
         raise RuntimeError('private signing state must stay outside the checkout')
     state = json.loads(private.read_text()) if private.exists() else {}
+    cached = retained_fixture(live, cache, source, state)
+    if not cached:
+        raise RuntimeError('native passkey acceptance requires the exact cached package gate fixture')
+    head, base = cached['head_package'], cached['base_package']
+    origins = verify_cached_fixture(live, cached, source)
     def save():
         save_state(private, state)
     identity = fixture_identity(live, cached)
@@ -372,6 +392,7 @@ def cached_acceptance(live, package_state, private=None):
     state['require_keys'] = True
     save()
     journal = FixtureJournal(live, state, save)
+    journal.retire_legacy_base_probe()
     journal.recover()
     if not f:
         result = journal.wallet('create cached passkey organization', '--move-call',

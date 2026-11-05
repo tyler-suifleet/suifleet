@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFleetStorage } from '@/hooks/useFleetStorage';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { NETWORK } from '@/lib/constants';
-import { DAY, storageSchedule, releaseWalrus, releaseObjects, periodEpochs, expiryTime, expiryWarning, requireDirectExtension, buildExtendFleetReleaseTx, buildExtendWalletReleaseTx } from '@/lib/release-storage';
+import { DAY, storageSchedule, releaseWalrus, releaseObjects, periodEpochs, storageRemaining, expiryWarning, requireDirectExtension, buildExtendFleetReleaseTx, buildExtendWalletReleaseTx } from '@/lib/release-storage';
 import { useDeploymentStorage } from '@/hooks/useDeploymentStorage';
 import { deploymentRecipeDigest } from '@/lib/release-recipe';
 import { ConfidentialRecipeStorage } from './ConfidentialRecipeStorage';
@@ -24,8 +24,9 @@ export function ReleaseStorageStatus({ blobId, blobObjectId: _hint }: { blobId: 
   const status = useQuery({ queryKey: ['release-expiry', NETWORK, blobId], queryFn: async () => (await releaseWalrus(client)).getVerifiedBlobStatus({ blobId }), refetchInterval: 60_000 });
   const object = owned.data?.find(o => o.blobId === blobId);
   const end = status.data?.type === 'permanent' ? status.data.endEpoch : object?.endEpoch;
-  const endMs = end !== undefined && schedule.data ? expiryTime(end, schedule.data) : undefined;
-  const warning = expiryWarning(endMs);
+  const remaining = storageRemaining(end,schedule.data);
+  const active = end !== undefined && !!schedule.data && end > schedule.data.epoch;
+  const warning = expiryWarning(end,schedule.data);
   let epochs = 0;
   try { if (schedule.data) epochs = periodEpochs(days, schedule.data); } catch { /* invalid period disables action */ }
   const quote = useQuery({ queryKey: ['release-extension-price', NETWORK, object?.size, epochs], enabled: !!object && epochs > 0,
@@ -48,11 +49,12 @@ export function ReleaseStorageStatus({ blobId, blobObjectId: _hint }: { blobId: 
     } catch (e) { setMessage(String(e)); } finally { inFlight.current = false; setBusy(false); }
   }
   return <div className="text-xs space-y-1 break-words">
-    <p>Storage expiry: {endMs === undefined ? status.isLoading ? 'checking…' : 'unknown' : `${new Date(endMs).toISOString().slice(0, 10)} (epoch ${end}) · projected from current epoch duration`}</p>
+    <p>Storage term: {remaining ?? (status.isLoading || schedule.isLoading ? 'checking…' : 'unknown')}. Calendar expiry is not verified.</p>
+    {end !== undefined && schedule.data && <details><summary>Storage period details</summary><p>Current network period: {schedule.data.epoch}. Stored through period: {end}. Network timing can change.</p></details>}
     {warning && <p className="text-amber-700" role="status">{warning}</p>}
     {(status.error || owned.error || schedule.error) && <p>Storage details unavailable: {String(status.error ?? owned.error ?? schedule.error)}</p>}
     {object?.retained && <p role="status">Scheduled retention is attached. Manage its renewal target on the Network budget page; direct extension is disabled to preserve prepaid storage.</p>}
-    {object && !object.retained && <div><label>Extend storage by days <input className="border w-20 p-1" type="number" min="1" value={days} disabled={busy} onChange={e => setDays(Number(e.target.value))} /></label><p>{quote.data !== undefined ? `Estimated ${formatToken(quote.data)} WAL from ${object.fleet ? 'fleet funds' : 'your wallet'}, plus SUI gas` : 'Loading extension price…'}{schedule.data && end !== undefined && epochs > 0 ? ` · new projected expiry ${new Date(expiryTime(end + epochs, schedule.data)).toISOString().slice(0, 10)}` : ''}</p><button className="rounded border px-2 py-1" disabled={busy || !epochs || quote.data === undefined || !endMs || endMs <= Date.now()} onClick={extend}>{busy ? 'Extending…' : 'Extend storage'}</button></div>}
+    {object && !object.retained && <div><label>Extend storage by days <input className="border w-20 p-1" type="number" min="1" value={days} disabled={busy} onChange={e => setDays(Number(e.target.value))} /></label><p>{quote.data !== undefined ? `Estimated ${formatToken(quote.data)} WAL from ${object.fleet ? 'fleet funds' : 'your wallet'}, plus SUI gas` : 'Loading extension price…'}{schedule.data && end !== undefined && epochs > 0 ? ` · after extension: ${storageRemaining(end + epochs, schedule.data)}` : ''}</p><button className="rounded border px-2 py-1" disabled={busy || !epochs || quote.data === undefined || !active} onClick={extend}>{busy ? 'Extending…' : 'Extend storage'}</button></div>}
     {!object && !owned.isLoading && <p>Connect the storage owner or select its fleet to extend this blob.</p>}
     {message && <p role="status">{message}</p>}
   </div>;

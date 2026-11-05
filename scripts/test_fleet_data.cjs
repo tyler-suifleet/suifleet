@@ -76,12 +76,21 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
   assert.doesNotMatch(detail + header, /NEXT_PUBLIC_/);
  }
  // A global locator must not make an unrelated selected fleet look configured.
- let selection = { supported: true, fleet: { budgetId: id('0x999') } };
- const scoped = loader({ '@/lib/fleet-data': { DATA_CONFIG: config, configuredDataFleets: () => [config] },
+ let selection = { supported: true, identity: 'unrelated', fleet: { budgetId: id('0x999') } };
+ const verifiedQueries = new Map();
+ const scoped = loader({ '@/lib/fleet-data': { DATA_CONFIG: config },
+  '@mysten/dapp-kit-react': { useCurrentClient: () => client() },
+  '@tanstack/react-query': { useQuery: options => verifiedQueries.get(options.queryKey[1]) ?? { isSuccess: false } },
   './useFleetSelection': { useFleetSelection: () => selection } })('hooks/useFleetDataConfig.ts');
  assert.equal(scoped.useFleetDataConfig(), undefined);
- selection = { supported: true, fleet: { budgetId: config.budgetId } };
+ selection = { supported: true, identity: 'matching', fleet: { budgetId: config.budgetId } };
+ assert.equal(scoped.useFleetDataConfig(), undefined, 'pending configuration is not verified');
+ verifiedQueries.set('matching', { isSuccess: true, data: config });
  assert.equal(scoped.useFleetDataConfig(), config);
+ verifiedQueries.set('matching', { isSuccess: true, isRefetchError: true, data: config });
+ assert.equal(scoped.useFleetDataConfig(), undefined, 'failed refetch cannot expose cached configuration');
+ selection = { supported: true, identity: 'unrelated', fleet: { budgetId: id('0x999') } };
+ assert.equal(scoped.useFleetDataConfig(), undefined, 'selection key never reuses another fleet query');
  selection = { supported: false };
  assert.equal(scoped.useFleetDataConfig(), config);
  assert.equal(absentConfig.status, 'unavailable');

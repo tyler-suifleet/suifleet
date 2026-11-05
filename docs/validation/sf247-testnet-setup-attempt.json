@@ -1,0 +1,174 @@
+{
+  "started": "2026-11-05T05:43:58Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "publish reporting fixture fleet_data",
+      "gas_budget_mist": 300000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Eay9yJDduWxSfsotNzitcyKrsLsnyUXejVCTiA6Gst7n",
+      "gas_mist": 101114800,
+      "allowance_used_mist": 101114800
+    },
+    {
+      "label": "fund isolated customer/device identity",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 80000000,
+      "status": "success",
+      "digest": "6KWkQj8SwDWVhdmssH32qHWZ23VBF3JHoN8LWeCrYERj",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 183102800
+    },
+    {
+      "label": "create first independent fleet",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "GGHJsHFeXpMnxgx6NGBkQ7PtQp4NiF8Gxj1UE3GBu1Fn",
+      "gas_mist": 23587477,
+      "allowance_used_mist": 23587477
+    },
+    {
+      "label": "create second independent fleet",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "AFQWw1biGcnFnF3eR1gbQ51wnsBpN89NN1RmpTsBz28h",
+      "gas_mist": 14414392,
+      "allowance_used_mist": 38001869
+    },
+    {
+      "label": "atomic reporting setup fleet 1",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "DuAsszzG4MBmiAkAd5cY7RCzVjtXWgNi7BgP4M6nuSxD",
+      "gas_mist": 8091375,
+      "allowance_used_mist": 46093244
+    },
+    {
+      "label": "atomic reporting setup fleet 2",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "7ihGkQ9PH1jz7YZhmuMLWkRRf5aoKKxRz2oWteHbYKtF",
+      "gas_mist": 8091383,
+      "allowance_used_mist": 54184627
+    },
+    {
+      "label": "grant only test customer device capacity",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2aL8QR4x9LDJBWDC7zAT2QyELpT2EXsdv1kRMmtqK2kw",
+      "gas_mist": 1000318,
+      "allowance_used_mist": 184103118
+    },
+    {
+      "label": "register device in first managed fleet",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "2hiH7XgZCkxUtFBseXLbdr1EbyQg9o6nUupcTWtSEjmY",
+      "gas_mist": 1001070,
+      "allowance_used_mist": 55185697
+    }
+  ],
+  "checks": [
+    "reverified cached reporting package 0x6407607e6564bac420295d7c8bdb2020dc0e999d3d68b919f874869f9ac6edfd",
+    "reverified cached reporting package 0x8a275a69f085ce6875f7f8b6217f5a06bf16b83fdb77d3baada52008cb8dadfe"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/usr/local/bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/opt/sui-network/sui",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1274,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 5812990608,
+  "max_spend_mist": 400000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.83.0-16d2dc1e05ed"
+  },
+  "head": "734a8d79d68c245fa9a4577d68bd230940070fdd",
+  "runtime": "/home/tyler/.local/state/suifleet/sf247-runtime/sf247-reporting-v2bk_roj",
+  "completed": false,
+  "source_files_sha256": {
+    "contracts/sources/component_catalog.move": "5fe72412205496acf2eabf06115ce97b57108ef5f5691f0219019410ed736db4",
+    "contracts/sources/customer.move": "b102f45ae27bf0307246ea452c6fb58fc6503bfbb163a13eaadcf745f4e3e746",
+    "contracts/sources/deployment_manager.move": "019f79840490d85a2e65f63b2c773cd5edaad7fdfabffb70145d132b41e560f8",
+    "contracts/sources/desired_state.move": "09837b76a564e3d6c58f5294af3c3527bffff3c5064a73bac5bcfcfda6de69ee",
+    "contracts/sources/device_cap.move": "292eef95e2329de1d101cc4dcbdcc8801e22189c9666cc66d50e74b954fce411",
+    "contracts/sources/device_group.move": "7f2499651c802debe373500aead4d458a2e9b6963c02ef2cfb14c933fb209861",
+    "contracts/sources/device_registry.move": "8d6b693d08e19c745943ef34a5aca5bdfbbb7f7c8c2076fb02ae34c19bc2d67b",
+    "contracts/sources/enrollment.move": "8525556b5a887d2a5b497aedab90b45922649c627319a0cf9eb20679d9500d45",
+    "contracts/sources/fleet_budget.move": "4aa8d2c68d8101958e1641027d0970635cd065514e5ad2b9d6df5113d8ba9768",
+    "contracts/sources/fleet_handover.move": "26969cdbe6cd5be366928e6b6dc23b235d83c0e6fcde0065f291aa2007d36285",
+    "contracts/sources/fleet_inbox.move": "d8ef8a19251dfe04e4af95f1af200782fc80c222cd5e3a63c80dca6a915351f2",
+    "contracts/sources/fleet_settings.move": "2dbe0ed419655f3c54d2aed34ea1f4388287211164355b44eb8a3ae24567e54d",
+    "contracts/sources/multisig_admin.move": "9b09da186e5107f5db265ef696d98bedcfd1fcad6713738d59510a8297b1d5b1",
+    "contracts/sources/passkey_factor.move": "c34ca5c21e5494fc25dcf2968df05c0ee3f053d68daec048daff7f517425554f",
+    "contracts/sources/roles.move": "f65a2a1c7578ed25c01de4380f961d02085a15dadc4dbe9c6e226970cb855544",
+    "contracts/sources/seal_policy.move": "ad0475af01af3c1605b13fd97ccdd6f56381d7dd79a378f5e0008ceb459532b2",
+    "contracts/sources/security_policy.move": "6204eeb9062576d63b923a65d8e80c614f6ebe1baa395d8ae4dca1ce5772abcc",
+    "contracts/sources/subscription.move": "19d9fa7fd73e17d94dfeb560916ad9ed9e5bed39e4f36617677985ea9eca8bda",
+    "contracts/fleet_storage/sources/fleet_storage.move": "3602c757ec51271af22ac9477bbe546e6f97669672ef95fc0424e2991e3fb42a",
+    "contracts/fleet_data/sources/fleet_data.move": "676a0820d81c2085b7ad3c02cf0788ce0970cf886bde27ab73d2045150b999bf",
+    "dapp/src/lib/fleet-reporting.ts": "da1f2ced820b4010a797f41a09b5ab66e05a3c325e83caaeab243110359e5cbb",
+    "dapp/src/lib/fleet-data.ts": "2383827b399905c888d522ced84ffb674249a8726f4f8cea6bc4d6081a1dcdce",
+    "suifleet-edge/src/fleet_data.rs": "46865536aee033bf206adcb96d1057e7111e39865143c726df2854c9b2633ae1",
+    "scripts/live_fleet_reporting.py": "ba53f0a83c03188a250eaa799a17fab44c9b47ff9a20e02167189b90277a7563",
+    "scripts/live_fleet_reporting.cjs": "50c8f8ed49d3f24a49330d24e72ae2e1c3b6c386c728aac16b670ed7c862f181"
+  },
+  "prior_publication_run": {
+    "evidence": "docs/validation/sf247-testnet-publication-attempt.json",
+    "spent_mist": 937545200,
+    "allowance_used_mist": 937545200,
+    "max_spend_mist": 1000000000,
+    "failed_digest": "GssbbaSxPQfizmvdRwTmNfutWqyAaUZs4SkFArzUGsco"
+  },
+  "verified_package_transactions": {
+    "publish reporting fixture fleet_data": {
+      "kind": "publish",
+      "modules": 1,
+      "digest": "d5d20933685e4377188cda40b0b42e5609db30c81dfa71691cc6d564114ede46",
+      "dependencies": [
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "0x8a275a69f085ce6875f7f8b6217f5a06bf16b83fdb77d3baada52008cb8dadfe",
+        "0x6407607e6564bac420295d7c8bdb2020dc0e999d3d68b919f874869f9ac6edfd",
+        "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a",
+        "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611"
+      ]
+    }
+  },
+  "end_balance_mist": 5628887490,
+  "spent_mist": 184103118,
+  "allowance_used_mist": 184103118,
+  "finished": "2026-11-05T05:44:22Z"
+}
