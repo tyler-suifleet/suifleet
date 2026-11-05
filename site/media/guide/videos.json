@@ -14,14 +14,14 @@
     {
       "step": "sign-in",
       "file": "sign-in.webm",
-      "file_sha256": "8178a8abcafd71c222fd1e8bce3de3f67b6ff3e3ecbe1d8eefecea84b6619f6b",
+      "file_sha256": "97113acfc2deb4addf2a00b7afa019dea868fa4b04be530a4192e83b807a79f0",
       "fallback": "sign-in.mp4",
-      "fallback_sha256": "46973035664afd1274e2c513786439df32c888fc18361d8c873ac0996eedb94c",
+      "fallback_sha256": "59d5f58e041651fb4adf3e15018dfe18a7b84fe13df815091defb48969e6d721",
       "poster": "sign-in.jpg",
       "poster_sha256": "bde330c6c23fe3ec8f18af2fe8bd2bf9bf111673ce2dc317a5f643f6630588d6",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 42.84,
+      "duration_seconds": 43.12,
       "caption": "Screencast: Sign in.",
       "console_commit": "ad3da5a98f79ec769aad46f7fc6109fcbd6e65ea",
       "transactions": [
@@ -61,49 +61,48 @@
             "speech_end": 25.546666666666667
           },
           {
-            "text": "Connected: the card shows your address and the network (Testnet).",
+            "text": "Connected: the account card shows your address and current connection.",
             "source_start": 6.003,
             "source_end": 8.33,
             "start": 26.080000000000002,
-            "duration": 4.0,
+            "duration": 4.28,
             "speech_start": 26.28,
-            "speech_end": 29.565333333333335
+            "speech_end": 29.842666666666666
           },
           {
             "text": "First time only: create your default fleet, then approve the transaction.",
             "source_start": 8.33,
             "source_end": 14.143,
-            "start": 30.080000000000002,
+            "start": 30.360000000000003,
             "duration": 5.84,
-            "speech_start": 30.28,
-            "speech_end": 34.61066666666667
+            "speech_start": 30.560000000000002,
+            "speech_end": 34.89066666666667
           },
           {
             "text": "Your fleet is selected. Next check device capacity: network funds do not increase your device limit.",
             "source_start": 14.143,
             "source_end": 19.4,
-            "start": 35.92,
+            "start": 36.2,
             "duration": 6.92,
-            "speech_start": 36.120000000000005,
-            "speech_end": 42.328
+            "speech_start": 36.400000000000006,
+            "speech_end": 42.608000000000004
           }
-        ],
-        "synthesis_script_sha256": "f53643bb624cdc65d607f03dbe513ab4ec67a7d9eec26cef88d2b547a9abdcf3"
+        ]
       },
       "captions": "sign-in.en.vtt",
-      "captions_sha256": "44cb4746e8ecf0dfdeb8f829e4ec9470af3637980d9fbc598a003662704e7813"
+      "captions_sha256": "a250468eda45230f4de7339d7c5b55b7a24c23b4c11efc67ca6675c865043bd4"
     },
     {
       "step": "capacity-plan",
       "file": "capacity-plan.webm",
-      "file_sha256": "3a0f271733b06ae0b193c31ecc00e9c2901445fed9a1d41cb4444af111dc9c04",
+      "file_sha256": "3c87183cb48ebf7d557e2cfa7aca7f9a151a74540d8b77428d5ab0324cf1465e",
       "fallback": "capacity-plan.mp4",
-      "fallback_sha256": "7d3843188f6add87430560fdcb34f22673c5f830bcc1f123bc16616bdf33da81",
+      "fallback_sha256": "adc0de77e1778adf9728931755e395439b9d1a3f9706890b17caf85b6620dbcb",
       "poster": "capacity-plan.jpg",
       "poster_sha256": "a6ae5683dc66e44321a9f4595e4570c254467e05d4fa735d119e58fcc48d4eb5",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 47.28,
+      "duration_seconds": 45.56,
       "caption": "Screencast: Enable device capacity.",
       "console_commit": "ad3da5a98f79ec769aad46f7fc6109fcbd6e65ea",
       "transactions": [
@@ -126,51 +125,50 @@
             "speech_end": 9.074666666666666
           },
           {
-            "text": "Choose Plans and billing. This demonstration uses test tokens and a disposable test tariff, not commercial pricing.",
+            "text": "Choose Plans and billing. Review device capacity and the price shown before approving your selection.",
             "source_start": 3.814,
             "source_end": 10.412,
             "start": 9.6,
-            "duration": 8.36,
+            "duration": 6.64,
             "speech_start": 9.799999999999999,
-            "speech_end": 17.43733333333333
+            "speech_end": 15.709333333333333
           },
           {
             "text": "Review the device limit, token amount and verified payment recipient, then approve prepayment. It is separate from device operating funds.",
             "source_start": 10.412,
             "source_end": 17.657,
-            "start": 17.96,
+            "start": 16.24,
             "duration": 9.2,
-            "speech_start": 18.16,
-            "speech_end": 26.650666666666666
+            "speech_start": 16.439999999999998,
+            "speech_end": 24.930666666666664
           },
           {
             "text": "Apply the due prepaid payment to activate capacity. This uses the subscription balance, not another wallet payment; approval still costs a network fee.",
             "source_start": 17.657,
             "source_end": 28.538,
-            "start": 27.16,
+            "start": 25.439999999999998,
             "duration": 10.92,
-            "speech_start": 27.36,
-            "speech_end": 36.78933333333333
+            "speech_start": 25.639999999999997,
+            "speech_end": 35.06933333333333
           },
           {
             "text": "The organization now has capacity for 100 devices. Next, fund device activity; no software has been installed yet.",
             "source_start": 28.538,
             "source_end": 32.72,
-            "start": 38.08,
+            "start": 36.36,
             "duration": 9.2,
-            "speech_start": 38.28,
-            "speech_end": 46.77066666666667
+            "speech_start": 36.56,
+            "speech_end": 45.05066666666667
           }
-        ],
-        "synthesis_script_sha256": "f53643bb624cdc65d607f03dbe513ab4ec67a7d9eec26cef88d2b547a9abdcf3"
+        ]
       },
       "captions": "capacity-plan.en.vtt",
-      "captions_sha256": "14a15eb4c96dfd5327e7d7271855808fcc51041697fe15d5ec0d7e56951dafdc"
+      "captions_sha256": "8f8c41f2489e7fd0682dc285ebec4375d67135ed75a7569f9ebe8cb6bcb254c0"
     },
     {
       "step": "fund",
       "file": "fund.webm",
-      "file_sha256": "46055345852d08fb176ab2249efdf2020428a6e40b7b3f8b4f26e5a4dc05a92c",
+      "file_sha256": "c7092d462b2c5237fe9a226837ec89f6f242d612c17f48971380ab303d70f468",
       "fallback": "fund.mp4",
       "fallback_sha256": "d5bcae670cf44556ad6d2690da8c53ea66f072f8f7c82ffb7aa5b64374591253",
       "poster": "fund.jpg",
@@ -225,8 +223,7 @@
             "speech_start": 26.24,
             "speech_end": 34.58133333333333
           }
-        ],
-        "synthesis_script_sha256": "f53643bb624cdc65d607f03dbe513ab4ec67a7d9eec26cef88d2b547a9abdcf3"
+        ]
       },
       "captions": "fund.en.vtt",
       "captions_sha256": "bae44503d47261d2b5d9c33938a8405d5f1241f7d958f324e6f4031f0daed4ee"
@@ -234,7 +231,7 @@
     {
       "step": "register-device",
       "file": "register-device.webm",
-      "file_sha256": "af484e59ef5334f513dd7187f902e994ea7bbbd96b741ac52d64208d7836e6a5",
+      "file_sha256": "ad5572b672b5a740e33d156a2cc235beac15d956b0799941325bcfb6abb2a3fa",
       "fallback": "register-device.mp4",
       "fallback_sha256": "ebed9957f785a66035cba34befc95f2b9d909f1d12e69979dc1d23e1b093a3fd",
       "poster": "register-device.jpg",
@@ -289,8 +286,7 @@
             "speech_start": 29.16,
             "speech_end": 38.141333333333336
           }
-        ],
-        "synthesis_script_sha256": "f53643bb624cdc65d607f03dbe513ab4ec67a7d9eec26cef88d2b547a9abdcf3"
+        ]
       },
       "captions": "register-device.en.vtt",
       "captions_sha256": "8bf54dd329a3a9fed100ac6e90f54775dadb4e64973a152a956c1fe5cbffe8c2"
@@ -298,7 +294,7 @@
     {
       "step": "enroll-batch",
       "file": "enroll-batch.webm",
-      "file_sha256": "7c1d8bfec3828d26c92718fb5169389fded8b30ef0e90cc528b4243ad5e6f31a",
+      "file_sha256": "3fae0e3cdd0a8411ecf2147f3875b989162f96fbc92ef7ca526bdc6758e6deb8",
       "fallback": "enroll-batch.mp4",
       "fallback_sha256": "1c2743ae7e02ed6216f1b6dd1e823b79c71c1ff5c182986cd519fb7de3791b9a",
       "poster": "enroll-batch.jpg",
@@ -372,8 +368,7 @@
             "speech_start": 49.800000000000004,
             "speech_end": 54.984
           }
-        ],
-        "synthesis_script_sha256": "f53643bb624cdc65d607f03dbe513ab4ec67a7d9eec26cef88d2b547a9abdcf3"
+        ]
       },
       "captions": "enroll-batch.en.vtt",
       "captions_sha256": "bc95405b685fa636c1ed8710096614b900c724516727d999f2a9fd19c0245398"
@@ -792,7 +787,7 @@
     "voice_description": "Female, American English; synthetic Kokoro Heart voice",
     "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
     "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
-    "script_sha256": "3722a6f69da2a9aa28555573166e4e7342340cf4c8bc61eeeaf540b936ef684a",
+    "script_sha256": "b30853526c00920afc0db049649a9a8b8a9f71769a0a07aa0a7e92c6e62c4dea",
     "render_batches": [
       {
         "steps": [
@@ -802,7 +797,7 @@
           "register-device",
           "enroll-batch"
         ],
-        "script_sha256": "f53643bb624cdc65d607f03dbe513ab4ec67a7d9eec26cef88d2b547a9abdcf3"
+        "script_sha256": "a611c637d542f0a88ebefb06c4eb5fc04595f0a833be87063694a319af8e190d"
       },
       {
         "steps": [
