@@ -33,7 +33,24 @@ license information is retained in `site/guide/RECORDING.md`. Review the complet
 spoken text, frames and output before replacing `site/media/overview`. Changing
 render source or storyboard invalidates build checks until regeneration.
 
-The player has native controls, no autoplay, a phone-specific portrait video,
+The player has native caption controls, captions off by default, no autoplay, a phone-specific portrait video,
 English captions, an MP4 fallback and the complete transcript. Plain diagrams,
 full narration and readable text provide alternatives; colors alone never
 explain a state. No new page scripts or remote assets are introduced.
+
+The revised animation uses separate scene compositions rather than a repeated
+fixed diagram: devices enter and regroup, a signed approval travels to shared
+records, metadata and encrypted files follow separate paths, device requests
+and responses travel in opposite directions, a download fills before verification
+and installer motion, and installation results remain separate from health.
+Narration is not burned into the frames. Short object labels describe the diagram;
+full narration is available only as a selectable caption track or transcript.
+
+`site/tests/motion_browser.cjs` compares core-scene pixels at distinct times in
+every scene and aspect ratio, excluding the header/progress line, so movement
+cannot be established by a changing progress bar alone. Visual inspection is
+still required; pixel change does not establish animation quality.
+
+For a completed matching frame render, `--reuse-frames` verifies its timeline and
+scene/renderer source receipt and exact frame count, then regenerates narration
+from the pinned engine before encoding. A stale receipt is rejected.
