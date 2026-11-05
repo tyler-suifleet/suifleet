@@ -207,3 +207,13 @@ provider and actual mainnet acceptance remain in
 [SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62). The explicit
 SF-201 policy entry records this user-authorized ordering without claiming final
 wallet/hardware compatibility or granting production/hardware/mainnet authority.
+
+## Customer-hosting follow-through (SF-253)
+
+Independent public HTTPS website/app/docs publication is now verified; see
+[SF-253 evidence](validation/SF253.md) and [deployment receipts](../hosting/final-deployments.json).
+Owned-domain DNS/ownership/TLS cutover remains in SF-087/#159, using the exact
+[owner instructions](../hosting/README.md). Manual real-wallet screening/signing
+remains in SF-031/#32. No owned-domain success, DNS writes or real-wallet signing
+are inferred from provider-host delivery or a public-account read-only harness.
+Normal software/CI/testnet and independent review gates remain required.

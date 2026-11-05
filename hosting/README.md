@@ -2,7 +2,7 @@
 
 The customer website, Testnet app and curated docs are deployed as public static
 Sites. They run independently of this WSL machine. Their project IDs are retained
-under `sites/`; native publication receipts are in `initial-deployments.json`.
+under `sites/`; initial receipts are in `initial-deployments.json` and current evaluated publication receipts are in `final-deployments.json`.
 Keep those IDs when updating. Never commit Site source credentials or wallet keys.
 
 The requested final domains are `suifleet.io` / `www.suifleet.io`,
@@ -58,3 +58,16 @@ The current customer sites are public. Do not change their audience on updates.
 
 Physical Pi, manual wallet, production-provider/payment and Mainnet acceptance
 are separate from successful static-host publication. The app remains Testnet.
+
+Live checks (run from the repository root with Chrome available):
+
+```sh
+CHROME_EXECUTABLE=/path/to/chrome node hosting/test_overview_browser.cjs
+CHROME_EXECUTABLE=/path/to/chrome node hosting/test_customer_readonly.cjs
+```
+
+The overview check plays both layouts with native captions and verifies the
+actual downloadable DNS bytes. The customer check only reads the recorded
+public Testnet customer's configuration and signed native startup report; it
+contains no signing key and rejects every signing/execution request. Its sample
+can age out. It is not manual Slush or production-wallet acceptance.

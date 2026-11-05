@@ -755,6 +755,21 @@
       "retained_gates": [
         "All actionable source/security findings, meaningful local/isolated-chain/browser/SDK/build checks, actual bounded public-testnet reporting effects, applicable hosted exact-head/base CI and fresh independent review."
       ]
+    },
+    "SF-253": {
+      "authorization": "User requests independent hosted customer website/app/docs and real owned domains; standing testnet-first policy permits reviewed software implementation before final provider/DNS/manual-wallet/hardware/Mainnet acceptance. Native public hosting is authorized; missing DNS account access is not permission to invent writes or waive review.",
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/159",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Owner applies the exact provider-returned Cloudflare web DNS/ownership records; verify actual suifleet.io/www/app/docs ownership and TLS, rebuild configured owned-domain crosslinks and recheck served media/navigation. No DNS writes or owned-domain HTTPS success claimed.",
+        "Manual Slush/real-wallet screening and signing, physical Pi, production-payment/provider and Mainnet acceptance remain in the existing final acceptance tickets."
+      ],
+      "retained_gates": [
+        "Actual independent public hosted website/app/docs publication receipts and source/configuration hashes; anonymous phone/desktop navigation, actual overview playback/captions, exact DNS download and real read-only customer/reporting/health checks.",
+        "Source/security findings, meaningful local/frontend/production build regressions, ordinary exact-head CI, applicable automatic public-Testnet and independent application review remain required. No secrets, fabricated wallet acceptance or weakened deployment protections."
+      ]
     }
   },
   "development_defaults": {
