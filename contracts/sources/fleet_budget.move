@@ -267,7 +267,7 @@ module sui_edge::fleet_budget {
         min_draw_interval_ms: u64,
     ): Limits {
         let limits = Limits { float_cap, period_ms, period_allowance, max_draws_per_period, min_draw_interval_ms };
-        p1(&limits);
+        b(&limits);
         limits
     }
 
@@ -290,7 +290,7 @@ module sui_edge::fleet_budget {
     /// Package helper: new_budget.
     public(package) fun k1(registry: &DeviceRegistry, deposit: Coin<SUI>,
         default_limits: Limits, low_balance_threshold: u64, ctx: &mut TxContext): (FleetBudget, BudgetOwnerCap) {
-        p1(&default_limits);
+        b(&default_limits);
         let id = object::new(ctx);
         let budget_id = id.to_inner();
         let cap = BudgetOwnerCap { id: object::new(ctx), budget_id };
@@ -334,7 +334,7 @@ module sui_edge::fleet_budget {
         budget.total_withdrawn = budget.total_withdrawn + amount;
         let coin = coin::take(&mut budget.balance, amount, ctx);
         event::emit(Withdrawn { budget_id: object::id(budget), amount, balance: budget.balance.value() });
-        p8(budget);
+        i(budget);
         coin
     }
 
@@ -347,7 +347,7 @@ module sui_edge::fleet_budget {
 
     public fun configure(budget: &mut FleetBudget, cap: &BudgetOwnerCap, default_limits: Limits, low_balance_threshold: u64) {
         assert_owner(budget, cap);
-        p1(&default_limits);
+        b(&default_limits);
         budget.default_limits = default_limits;
         budget.low_balance_threshold = low_balance_threshold;
         event::emit(BudgetConfigured { budget_id: object::id(budget), default_limits, low_balance_threshold });
@@ -369,7 +369,7 @@ module sui_edge::fleet_budget {
         ctx: &mut TxContext,
     ): ID {
         q(budget.version == VERSION, BWrongVersion);
-        h0(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
+        j(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
     }
 
     /// Package helper: enroll_managed.
@@ -378,11 +378,11 @@ module sui_edge::fleet_budget {
         owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
     ): ID {
         q(budget.version == MANAGED_VERSION, BWrongVersion);
-        h0(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
+        j(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
     }
 
     /// Private helper: enroll_internal.
-    fun h0(
+    fun j(
         budget: &mut FleetBudget, cap: &BudgetOwnerCap, registry: &DeviceRegistry,
         owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
     ): ID {
@@ -420,8 +420,8 @@ module sui_edge::fleet_budget {
         df::add(&mut budget.id, DeviceKey { device_id }, account_id);
         budget.device_count = budget.device_count + SMALL_1;
         event::emit(DeviceStateChanged { budget_id, device_id, account_id, enrolled: true, suspended: false, limits });
-        if (reserve > SMALL_0) p4(budget, &mut account, reserve);
-        if (float > SMALL_0) pay(budget, device_id, device_registry::identity_signer(&identity), float, ctx);
+        if (reserve > SMALL_0) e(budget, &mut account, reserve);
+        if (float > SMALL_0) y(budget, device_id, device_registry::identity_signer(&identity), float, ctx);
         transfer::share_object(account);
         account_id
     }
@@ -429,10 +429,10 @@ module sui_edge::fleet_budget {
     /// Move `amount` from the budget into a device's reserve, for its draws.
     public fun fund_reserve(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, amount: u64) {
         assert_owner(budget, cap);
-        p2(budget, account);
+        c(budget, account);
         q(amount > SMALL_0, BZeroAmount);
         q(account.reserve.value() + amount <= MAX_LIMIT_MIST, BOverReserve);
-        p4(budget, account, amount);
+        e(budget, account, amount);
     }
 
     /// Move `amount` of a device's unused reserve back into the budget.
@@ -442,7 +442,7 @@ module sui_edge::fleet_budget {
         q(account.budget_id == object::id(budget), BWrongAccount);
         q(amount > SMALL_0, BZeroAmount);
         q(account.reserve.value() >= amount, BInsufficientBalance);
-        p5(budget, account, amount);
+        f(budget, account, amount);
     }
 
     /// Owner-paid refill from the budget, for a device too empty to pay for
@@ -458,7 +458,7 @@ module sui_edge::fleet_budget {
     ) {
         assert_owner(budget, cap);
         q(object::id(registry) == budget.registry_id, BWrongRegistry);
-        p2(budget, account);
+        c(budget, account);
         q(amount > SMALL_0, BZeroAmount);
         q(amount <= account.limits.float_cap, BOverFloat);
         let device_id = account.device_id;
@@ -467,49 +467,49 @@ module sui_edge::fleet_budget {
         let identity = identity.destroy_some();
         q(!device_registry::identity_revoked(&identity), BInactiveDevice);
         account.total_drawn = account.total_drawn + amount;
-        pay(budget, device_id, device_registry::identity_signer(&identity), amount, ctx);
+        y(budget, device_id, device_registry::identity_signer(&identity), amount, ctx);
     }
 
     /// Owner changes to one account read the budget only to authorize.
     public fun set_device_limits(budget: &FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, limits: Limits) {
         assert_owner(budget, cap);
-        p2(budget, account);
-        p1(&limits);
+        c(budget, account);
+        b(&limits);
         account.limits = limits;
-        p7(account, true);
+        h(account, true);
     }
 
     /// Stop or resume one device's draws and uploads without touching its
     /// registry identity.
     public fun set_device_suspended(budget: &FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, suspended: bool) {
         assert_owner(budget, cap);
-        p2(budget, account);
+        c(budget, account);
         account.suspended = suspended;
-        p7(account, true);
+        h(account, true);
     }
 
     /// Remove a device (for example after a handover to another owner): its
     /// account is closed for good and its reserve returns to the budget.
     public fun remove_device(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
         q(budget.version == VERSION, BWrongVersion);
-        p0(budget, cap, account);
+        a(budget, cap, account);
     }
     /// Package helper: remove_managed.
     public(package) fun k3(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
         q(budget.version == MANAGED_VERSION, BWrongVersion);
-        p0(budget, cap, account);
+        a(budget, cap, account);
     }
     /// remove_internal: compact private symbol to bound published bytecode storage.
-    fun p0(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
+    fun a(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
         assert_owner(budget, cap);
-        p2(budget, account);
+        c(budget, account);
         let _: ID = df::remove(&mut budget.id, DeviceKey { device_id: account.device_id });
         budget.device_count = budget.device_count - SMALL_1;
         account.closed = true;
         account.suspended = true;
         let rest = account.reserve.value();
-        if (rest > SMALL_0) p5(budget, account, rest);
-        p7(account, false);
+        if (rest > SMALL_0) f(budget, account, rest);
+        h(account, false);
     }
 
     /// Move the budget to this package version. Older versions then refuse
@@ -540,7 +540,7 @@ module sui_edge::fleet_budget {
         assert_may_draw(budget, account, registry, cap, ctx);
         q(amount > SMALL_0, BZeroAmount);
         let now = clock.timestamp_ms();
-        p3(account, now);
+        d(account, now);
         let limits = account.limits;
         q(amount <= limits.float_cap, BOverFloat);
         q(account.draws_in_period < limits.max_draws_per_period, BRateLimited);
@@ -574,11 +574,11 @@ module sui_edge::fleet_budget {
     /// registry identity still bound to the enrolled owner cap. Reads only.
     /// Used by `fleet_storage`.
     public fun assert_may_draw(budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry, cap: &DeviceCap, ctx: &TxContext) {
-        q(budget.version == VERSION || (budget.version == MANAGED_VERSION && df::exists(&budget.id, CustomerManagedKey {})), BWrongVersion);
+        q(v(budget), BWrongVersion);
         assert!(!budget.paused, EPaused);
         q(object::id(registry) == budget.registry_id, BWrongRegistry);
         q(account.device_id == device_cap::device_id(cap), BWrongAccount);
-        p2(budget, account);
+        c(budget, account);
         assert!(!account.suspended, ESuspended);
         device_cap::assert_active(cap, registry, ctx);
         let identity = device_registry::identity(registry, account.device_id).destroy_some();
@@ -587,7 +587,7 @@ module sui_edge::fleet_budget {
 
     /// Abort unless `cap` manages `budget` (for `fleet_storage`).
     public fun assert_owner(budget: &FleetBudget, cap: &BudgetOwnerCap) {
-        q(budget.version == VERSION || (budget.version == MANAGED_VERSION && df::exists(&budget.id, CustomerManagedKey {})), BWrongVersion);
+        q(v(budget), BWrongVersion);
         q(object::id(cap) == budget.owner_cap_id, BNotOwner); q(cap.budget_id == object::id(budget), BNotOwner);
     }
 
@@ -602,13 +602,13 @@ module sui_edge::fleet_budget {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     /// assert_valid: compact private symbol to bound published bytecode storage.
-    fun p1(limits: &Limits) {
+    fun b(limits: &Limits) {
         q(limits.period_ms > SMALL_0, BInvalidLimits); q(limits.max_draws_per_period > SMALL_0, BInvalidLimits); q(limits.float_cap <= MAX_LIMIT_MIST, BInvalidLimits); q(limits.period_allowance <= MAX_LIMIT_MIST, BInvalidLimits);
     }
 
     /// The account belongs to this budget and is its device's current one.
     /// assert_current: compact private symbol to bound published bytecode storage.
-    fun p2(budget: &FleetBudget, account: &GasAccount) {
+    fun c(budget: &FleetBudget, account: &GasAccount) {
         q(account.budget_id == object::id(budget), BWrongAccount);
         let key = DeviceKey { device_id: account.device_id };
         q(!account.closed, BNotEnrolled); q(df::exists(&budget.id, key), BNotEnrolled);
@@ -616,7 +616,7 @@ module sui_edge::fleet_budget {
     }
 
     /// roll_period: compact private symbol to bound published bytecode storage.
-    fun p3(account: &mut GasAccount, now: u64) {
+    fun d(account: &mut GasAccount, now: u64) {
         if (now >= account.period_start_ms + account.limits.period_ms) {
             account.period_start_ms = now;
             account.drawn_in_period = SMALL_0;
@@ -625,23 +625,23 @@ module sui_edge::fleet_budget {
     }
 
     /// allocate: compact private symbol to bound published bytecode storage.
-    fun p4(budget: &mut FleetBudget, account: &mut GasAccount, amount: u64) {
+    fun e(budget: &mut FleetBudget, account: &mut GasAccount, amount: u64) {
         q(budget.balance.value() >= amount, BInsufficientBalance);
         account.reserve.join(budget.balance.split(amount));
         budget.total_allocated = budget.total_allocated + amount;
-        p6(budget, account, true, amount);
-        p8(budget);
+        g(budget, account, true, amount);
+        i(budget);
     }
 
     /// reclaim: compact private symbol to bound published bytecode storage.
-    fun p5(budget: &mut FleetBudget, account: &mut GasAccount, amount: u64) {
+    fun f(budget: &mut FleetBudget, account: &mut GasAccount, amount: u64) {
         budget.balance.join(account.reserve.split(amount));
         budget.total_reclaimed = budget.total_reclaimed + amount;
-        p6(budget, account, false, amount);
+        g(budget, account, false, amount);
     }
 
     /// emit_reserve: compact private symbol to bound published bytecode storage.
-    fun p6(budget: &FleetBudget, account: &GasAccount, allocated: bool, amount: u64) {
+    fun g(budget: &FleetBudget, account: &GasAccount, allocated: bool, amount: u64) {
         event::emit(ReserveChanged {
             budget_id: object::id(budget),
             device_id: account.device_id,
@@ -654,7 +654,7 @@ module sui_edge::fleet_budget {
     }
 
     /// emit_state: compact private symbol to bound published bytecode storage.
-    fun p7(account: &GasAccount, enrolled: bool) {
+    fun h(account: &GasAccount, enrolled: bool) {
         event::emit(DeviceStateChanged {
             budget_id: account.budget_id,
             device_id: account.device_id,
@@ -665,15 +665,15 @@ module sui_edge::fleet_budget {
         });
     }
 
-    fun pay(budget: &mut FleetBudget, device_id: ID, recipient: address, amount: u64, ctx: &mut TxContext) {
+    fun y(budget: &mut FleetBudget, device_id: ID, recipient: address, amount: u64, ctx: &mut TxContext) {
         q(budget.balance.value() >= amount, BInsufficientBalance);
         budget.total_paid = budget.total_paid + amount;
         transfer::public_transfer(coin::take(&mut budget.balance, amount, ctx), recipient);
         event::emit(DeviceFunded { budget_id: object::id(budget), device_id, device_address: recipient, amount, balance: budget.balance.value() });
-        p8(budget);
+        i(budget);
     }
 
-    fun p8(budget: &FleetBudget) {
+    fun i(budget: &FleetBudget) {
         let balance = budget.balance.value();
         if (balance < budget.low_balance_threshold || balance == SMALL_0) {
             event::emit(BudgetLow { budget_id: object::id(budget), balance, threshold: budget.low_balance_threshold });
@@ -735,7 +735,7 @@ module sui_edge::fleet_budget {
     /// custodied capability; unrelated old accounts remain retired by identity.
     /// Package helper: rebind_account.
     public(package) fun k5(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
-        p2(budget, account);
+        c(budget, account);
         q(object::id(registry) == budget.registry_id, BWrongAccount); q(account.device_id == device_registry::owner_cap_device_id(cap), BWrongAccount);
         let identity = device_registry::identity(registry, account.device_id).destroy_some();
         q(device_registry::identity_owner_cap(&identity) == object::id(cap), BOwnerChanged);
@@ -767,10 +767,28 @@ module sui_edge::fleet_budget {
 
     // Private named guards retain module-local error codes; selectors are fixed at each call.
 
-    // Every private call selects a B* u8 whose value equals its E* u64.
-    // Widening preserves the exact abort code/site while leaving room for the
-    // additive extension API under the chain's 100 KiB package limit.
+    // Share the read-only version predicate; refusal remains in q.
+    fun v(budget: &FleetBudget): bool {
+        if (budget.version == VERSION) return true;
+        if (budget.version != MANAGED_VERSION) return false;
+        df::exists(&budget.id, CustomerManagedKey {})
+    }
+
     fun q(condition: bool, code: u8) {
-        if (!condition) abort (code as u64)
+        if (!condition) {
+            if (code == BZeroAmount) abort EZeroAmount;
+            if (code == BWrongVersion) abort EWrongVersion;
+            if (code == BWrongAccount) abort EWrongAccount;
+            if (code == BInsufficientBalance) abort EInsufficientBalance;
+            if (code == BInactiveDevice) abort EInactiveDevice;
+            if (code == BNotOwner) abort ENotOwner;
+            if (code == BInvalidLimits) abort EInvalidLimits;
+            if (code == BWrongRegistry) abort EWrongRegistry;
+            if (code == BOwnerChanged) abort EOwnerChanged;
+            if (code == BOverFloat) abort EOverFloat;
+            if (code == BOverReserve) abort EOverReserve;
+            if (code == BRateLimited) abort ERateLimited;
+            abort ENotEnrolled
+        }
     }
 }
