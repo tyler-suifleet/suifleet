@@ -17,4 +17,3 @@ devices may request keys.
 00:00:24.160 --> 00:00:30.261
 The grant is recorded. Revocation stops future requests; it
 cannot recall bytes already decrypted.
-
