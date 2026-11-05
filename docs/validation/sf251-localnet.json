@@ -1,0 +1,199 @@
+{
+  "result": "PASS",
+  "chain": "7a50b9d7",
+  "reportingBase": "54ac232d2cf103b83bc4dde1c4b177a7440345b6",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+  "head": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+  "origins": {
+    "FleetData": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "DeviceKey": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "DeviceData": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "AnchorKey": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "Anchor": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "CompactHeadKey": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "CompactHead": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "HealthUpdated": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "DataAnchored": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+    "AnchorsPruned": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "ExpiredBlobsBurned": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "StreamRetentionKey": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "StreamRetention": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "StreamRetentionChanged": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "LocatorKey": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "DiagnosticKey": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "DiagnosticRequest": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "ItemKey": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "DataItem": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+    "ReadGrantKey": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa"
+  },
+  "digests": {
+    "publish core": "FQW7gmsGGVc7RhjJLkK9WV4FpwQBYzb9VN3NuxcBcm6U",
+    "publish WAL": "BKda9iXX1iVYhez2JxALzGgS9is6VCFUPfQbMRwSmMuD",
+    "publish Walrus": "AaLXtSDvQtudvsqNqunJSLX3itFyKykLDFvD9mbQRJTP",
+    "publish storage": "8TB6CGBoPQZp1WVYqjifRnMXHUpoEtmst8oj3oE1SGhB",
+    "publish base data": "Bg2ZeUu1CG5SoHTX8qpWMzswgrBJDWAy4vR6ToiyECxA",
+    "register existing device": "Dwdydo4ooDXQb146shpaD1NBgsbGjSXTbif97Q3TPiVE",
+    "create budget": "4eY5r5oMYCZbzf4u5KhhtUXFhPvomrDwkapGTy2Efq1W",
+    "enroll account": "6KpiYnepH3LCGcX8iA19d6AuuX8DUCFXwTBbWycCd4B9",
+    "create actual storage": "DX4uBmL66PsavgvThCoj3qU1X8DtxHCxtXvViHei8k8f",
+    "create base fleet": "EEQpzkEsvZSbhQTLYu3HpMFkLCicTeJQ9qYx97qGRBin",
+    "create base writer": "7NEoRvPwq1LFcxfCpco8xKaVUrcsNxf3HpRTdMmN5n73",
+    "upgrade core with existing registry/budget/account": "BEXc2HMVbPa9vkUb3zy3cBa6eyyxwoSjpEyyFzQpA7Jp",
+    "upgrade data": "uPZE9zgKdJVojbKwWvCumhckLziizw3SoTTBevoHSUG",
+    "publish authoritative locator for existing objects after core/data upgrade": "7y42V5Mr1WBJacypJn2sZXkgCbzpH1uYbpPziejELt34",
+    "diagnostics on existing writer": "3h8nFgWGFPMvcyzDpT1nwe1kCr6YupDZKpHUMU8cMPmo",
+    "legacy fleet support grant": "3DdHVsqXX3pPueMPiXqABXNZ8WX4fJMUZ8LDRP3KHPhh",
+    "scoped stream grant on existing fleet": "DsWpa32t9yKjfBxoiagqdUn8eEwauHPYfiRqzT3FFjsi",
+    "revoke scoped stream grant": "8GhL3LuR6QXYCWjaUoTnkgLYsbXmqfb4rmpFZV4w2Qk6",
+    "serverless signed services health": "2rUJ4dc3t68s35zxGxVGiHyAoLnG8Pj1PfQ6RhsMdf6e",
+    "revoke device": "FQD24cFmWUfNJnRjPtPjQcm8ZECuivqchaZ6S4z6PQtE",
+    "create managed customer": "2UmFAoY2y6mnoYhfK7vk6eesABipHuUbwUb948CLpPpV",
+    "adopt existing data budget": "BNuLvrGJRY6E1xysqTayA7VhdfiQ5BpsXNvxik1mh9L7",
+    "rotate managed administrator": "3nuaftEfmu7Cc2vk3gUWKzLtDAkXqDRC6WkuAi4MiKNP",
+    "create independent reporting customer 0": "CfjF7S5qoEh2TM3aRLq1juKkmQxoXcvxgWPDDezp1JYk",
+    "create independent reporting customer 1": "D4NZxCzYk6jZvot58bWncQUfienf2392XKLAWfabtMTE",
+    "atomic reporting provisioning 0": "94RuE3fzJN6tr4JCpLH19DjjDdBQAdhGFz8Co6Rs2UBJ",
+    "atomic reporting provisioning 1": "TLF8ym7YarkBiseaoMzJ6JLXR8HK8rj8ZuXvMoPASh8",
+    "cross-customer budget locator": "FpmcRSjYX5csdPf9BiX8jPYrMv541rqERuNw5XrVGQbf",
+    "duplicate partial setup": "4hYePciE7dH5NMi3mUTKo3UEWJDVvBx7k3tNaSu8wA3B"
+  },
+  "attacks": {
+    "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3": {
+      "digest": "43FVzuGmXDsNXyxLWpKAVBhBzjCkrtyHbDkCr8mMMYZH",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xe73a64d42013e00ff576e56dc70c7b6f84baca864577eb8bee7c210812511616::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xe73a64d42013e00ff576e56dc70c7b6f84baca864577eb8bee7c210812511616",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa": {
+      "digest": "AaJFa3cMa7NoTp3EDuEkmkMQUEa42Q23Hof34WdTHH6H",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xf6a1970944eec1d849c6da9dadbab53c1844c5b8b38d9e6a293077f48e79184f::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xf6a1970944eec1d849c6da9dadbab53c1844c5b8b38d9e6a293077f48e79184f",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "scopedChecks": [
+    {
+      "pkg": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+      "fn": "seal_approve_owner",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x31b1814c3038db819918a37517bcde0317fc9e87d567a415aa1c37a3a8c9d3b3",
+      "fn": "seal_approve_support",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_owner",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_support",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_scoped_owner",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "0000000000000000000000000000000000000000000000000000000000000000",
+      "success": false
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xdead",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x01a29bf8a7e98649bf1c5867b7101bb1f8b85ce9404667166c5025e1d5a4f1fa",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x283bc7bd5cc81793c62ec3322b33896784e9144d20d4c4bb80d152c0c0d4ae64",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0xa41aaf0e707c3cae21315c261b09e0e9e2c4c6f29779b5b10270a8fbcff5ffa5",
+      "success": true
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0xdad7c8527ad62fbc9b73dcffe0de62fdd80fa507d7ce08fb707cd0d580746acc",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0xa41aaf0e707c3cae21315c261b09e0e9e2c4c6f29779b5b10270a8fbcff5ffa5",
+      "success": false
+    }
+  ],
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ]
+}

@@ -9,11 +9,12 @@ const { loader, appRequire } = require('./frontend_test_utils.cjs');
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const client = loader()('lib/device-client.ts');
-const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, guideUrl } = client;
+const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, guideUrl, docsUrl } = client;
 
 // Public slugs are curated independently of source filenames. The docs Python
 // regression checks these sections against actual rendered HTML.
 const pages = JSON.parse(read('site/docs/pages.json')).pages;
+for (const slug of ['install','enrollment','components','budget','pricing']) assert.ok(pages.some(p => p.slug === slug) && docsUrl(slug) === DOCS_BASE + slug + '/', slug);
 const page = pages.find((page) => `${page.slug}/` === GUIDE_FILE);
 assert.equal(page?.source, 'docs/INSTALL_DEVICE_CLIENT.md');
 const docPath = (url) => {
