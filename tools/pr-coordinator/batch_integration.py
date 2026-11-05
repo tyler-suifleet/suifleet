@@ -197,6 +197,37 @@ class BatchController:
                 outstanding.append(review)
         return outstanding
 
+    @staticmethod
+    def stale_base_hold(evidence):
+        """Recognize the existing isolated SF-146 hold for collection only.
+
+        Never settle it or change funding/spend. A combined candidate still
+        executes the protected harness, including its full historical hold.
+        Unknown reservations remain ineligible for this routing exception.
+        """
+        held = evidence.get('funding', {}).get('held_mist')
+        quarantine = evidence.get('quarantine')
+        if type(held) is not int:
+            return False
+        if not quarantine:
+            return held == 0
+        if not isinstance(quarantine, dict) or set(quarantine) != {'sf146-run40095854988'}:
+            return False
+        record = quarantine['sf146-run40095854988']
+        return (isinstance(record, dict)
+            and evidence.get('operator') == '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
+            and held == 400_000_000
+            and record.get('status') == 'unresolved'
+            and type(record.get('reserved_mist')) is int
+            and record['reserved_mist'] == held
+            and record.get('source') == {
+                'run': 40095854988, 'head': 'c50d39902848278b550717a29cd044e73485afd2',
+                'base': 'b9e8053f4f034ca725686d19870cde6f3f756d63',
+                'epoch': 1262, 'checkpoint': 398674879}
+            and type(record.get('quarantined')) in (int, float) and record['quarantined'] > 0
+            and all(record.get(key) is None for key in
+                    ('resolved', 'digest', 'gas_mist', 'isolated_objects')))
+
     def annotate_stale_base(self, project, pr):
         """Read-only exception for a proven pre-submission stale-contract rejection.
 
@@ -273,9 +304,8 @@ class BatchController:
             if (evidence.get('head') != head or evidence.get('base') != base
                     or evidence.get('network') != 'testnet' or evidence.get('chain') != '4c78adac'
                     or evidence.get('success') is not False or evidence.get('failure_class') != 'source'
-                    or evidence.get('funding', {}).get('held_mist') != 0
+                    or not self.stale_base_hold(evidence)
                     or evidence.get('reconciliations') != [] or evidence.get('cleanup_error')
-                    or evidence.get('quarantine')
                     or not transactions or transactions[-1].get('label') != 'upgrade to head'
                     or transactions[-1].get('status') != 'not_submitted' or transactions[-1].get('digest')
                     or not error.startswith('test-upgrade could not build a transaction:')
@@ -313,7 +343,8 @@ class BatchController:
             pr['_stale_base_contracts'] = dict(head=head, base=base, ancestor=ancestor,
                 source_tree=source, base_tree=current, source_feedback=source_feedback(pr),
                 status_hash=hashlib.sha256(json.dumps(pr['_testnet_status'], sort_keys=True).encode()).hexdigest(), run=int(run_id), attempt=run['run_attempt'],
-                evidence_sha256=hashlib.sha256(raw).hexdigest(), allowance_used_mist=used)
+                evidence_sha256=hashlib.sha256(raw).hexdigest(), allowance_used_mist=used,
+                held_mist=evidence['funding']['held_mist'])
         except Exception:
             # Missing, ambiguous, changed or unavailable evidence is no exception.
             return
