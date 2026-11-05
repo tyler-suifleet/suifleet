@@ -1,54 +1,54 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:10.782
-SuiFleet helps you deliver software to devices and see what
-happened. Start with one machine, then organize a fleet into
-groups. Here is the idea behind the controls.
+00:00:00.350 --> 00:00:14.366
+SuiFleet manages software updates across connected devices.
+Publish a release, deploy it to selected devices, and track
+installation results. Organize devices into groups to manage
+rollouts across your fleet.
 
 2
-00:00:12.000 --> 00:00:25.035
-Your wallet is the app you use to approve management changes. It
-signs your request so the network can check your authority. Each
-device has its own identity. Your wallet's private key is not
-sent to the devices.
+00:00:15.600 --> 00:00:28.848
+Your wallet is your secure approval app. Use it to authorize
+fleet management changes. The network verifies your approval,
+and each device uses its own identity. Your wallet's private key
+stays in your wallet.
 
 3
-00:00:26.250 --> 00:00:43.914
-Publishing puts a version and its verification details in shared
-Sui records. The software files live in Walrus storage for a
-chosen period. Confidential releases are encrypted, with Seal
-controlling who can obtain the keys to open them. Publishing
-alone installs nothing.
+00:00:30.050 --> 00:00:48.141
+Release details are recorded on Sui, the shared network. Walrus
+stores the software files for the retention period you select.
+Private releases are encrypted, and Seal checks who may obtain
+the keys. Publishing makes a release available for deployment;
+installation is a separate step.
 
 4
-00:00:45.150 --> 00:01:00.446
-You approve a deployment for a device or group. The shared
-records describe the approved version and targets. Each device
-client checks those records on its configured schedule when
-connected. This is not a remote session pushing files into your
-machines.
+00:00:49.350 --> 00:01:03.025
+Choose a device or group and approve its deployment. Each device
+client checks the shared records for updates on its configured
+schedule. Devices initiate these connections from your network,
+using outbound requests.
 
 5
-00:01:01.650 --> 00:01:20.061
-A targeted device downloads the files, verifies the approved
-release and runs its configured installer. Your platform handles
-system update details, including any reboot or rollback. An
-offline device can catch up later, while the deployment permits
-it and the files remain available.
+00:01:04.250 --> 00:01:23.663
+An eligible device downloads the software, verifies it against
+the approved release, and runs your configured installer. Your
+platform controls system installation, reboot and recovery.
+Devices that reconnect later can retrieve an update while the
+deployment remains eligible and the files are available.
 
 6
-00:01:21.300 --> 00:01:38.879
-The device authenticates its result so the console can show
-whether installation succeeded or failed. Health is reported
-separately. A deployment request does not mean installed, and
-installed does not mean healthy. Reporting frequency determines
-how fresh that picture is.
+00:01:24.900 --> 00:01:44.996
+Each device reports whether installation succeeded or failed.
+The console displays those results alongside separately reported
+device health. An approved deployment confirms your intent; the
+device's installation result confirms execution. Health reports
+describe its condition at the time of the sample.
 
 7
-00:01:40.100 --> 00:01:56.079
-The console, shared records, file storage and device clients
-work together without a SuiFleet application server. Network
-providers, connectivity and operating funds are still needed.
-Try one device first, then use groups and staged rollouts to
-expand.
+00:01:46.200 --> 00:02:03.971
+SuiFleet connects your console, shared release records, software
+storage and device clients. Begin with a small group, validate
+your deployment process, and expand through staged rollouts.
+Reliable connectivity, storage availability and a funded network
+budget keep the system operating.
