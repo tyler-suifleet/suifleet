@@ -36,6 +36,17 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   const created=(r,suffix)=>Object.keys(r.objectTypes).find(k=>r.objectTypes[k].endsWith(suffix));
   async function publish(name,directory){const tx=new Transaction(),[cap]=tx.publish(compile(directory));tx.transferObjects([cap],owner.toSuiAddress());const r=await execute('publish '+name,tx),pkg=r.effects.changedObjects.find(o=>o.outputState==='PackageWrite').objectId,upgradeCap=created(r,'::package::UpgradeCap');
    await fs.writeFile(path.join(directory,'Published.toml'),`[published.sf082]\nchain-id = "${chain}"\npublished-at = "${pkg}"\noriginal-id = "${pkg}"\nversion = 1\ntoolchain-version = "1.81.1"\nbuild-config = { flavor = "sui", edition = "2024" }\nupgrade-capability = "${upgradeCap}"\n`);return {pkg,upgradeCap,r};}
+  const reportingMode=process.env.SF247_REPORTING==='1';
+  const reportingBase=process.env.SF247_BASE_REF||'54ac232d2cf103b83bc4dde1c4b177a7440345b6';
+  let headCore;
+  if(reportingMode){
+   headCore=path.join(tmp,'head-core');await fs.cp(path.join(tree,'sources'),headCore,{recursive:true});
+   await fs.rm(path.join(tree,'sources'),{recursive:true});await fs.mkdir(path.join(tree,'sources'));
+   assert.match(reportingBase,/^[0-9a-f]{40}$/);
+   const archive=execFileSync('git',['archive',reportingBase,'contracts/sources'],{cwd:root});
+   const baseline=path.join(tmp,'baseline');await fs.mkdir(baseline);execFileSync('tar',['-x','-C',baseline],{input:archive});
+   await fs.cp(path.join(baseline,'contracts/sources'),path.join(tree,'sources'),{recursive:true});
+  }
   const core=await publish('core',tree),registry=created(core.r,'::device_registry::DeviceRegistry');
   await publish('WAL',path.join(deps,'wal'));await publish('Walrus',path.join(deps,'walrus'));
   const storagePackage=await publish('storage',path.join(tree,'fleet_storage'));
@@ -51,11 +62,27 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   tx=new Transaction();tx.moveCall({target:`${base.pkg}::fleet_data::create`,arguments:[tx.object(budget),tx.object(budgetCap),tx.object(storage),tx.pure.string(chain)]});r=await execute('create base fleet',tx);const fleet=created(r,'::fleet_data::FleetData');
   tx=new Transaction();tx.moveCall({target:`${base.pkg}::fleet_data::enroll`,arguments:[tx.object(fleet),tx.object(budget),tx.object(budgetCap),tx.object(account)]});r=await execute('create base writer',tx);const writer=created(r,'::fleet_data::DeviceData');
   const before=await Promise.all([fleet,writer].map(async objectId=>(await client.getObject({objectId,include:{content:true}})).object.content));
+  if(reportingMode){
+   await fs.rm(path.join(tree,'sources'),{recursive:true});await fs.cp(headCore,path.join(tree,'sources'),{recursive:true});
+   const original=core.pkg,built=compile(tree);tx=new Transaction();
+   const [ticket]=tx.moveCall({target:'0x2::package::authorize_upgrade',arguments:[tx.object(core.upgradeCap),tx.pure.u8(0),tx.pure.vector('u8',built.digest)]});
+   const receipt=tx.upgrade({modules:built.modules,dependencies:built.dependencies,package:original,ticket});
+   tx.moveCall({target:'0x2::package::commit_upgrade',arguments:[tx.object(core.upgradeCap),receipt]});
+   r=await execute('upgrade core with existing registry/budget/account',tx);
+   core.pkg=r.effects.changedObjects.find(o=>o.outputState==='PackageWrite').objectId;
+   await fs.writeFile(path.join(tree,'Published.toml'),`[published.sf082]\nchain-id = "${chain}"\npublished-at = "${core.pkg}"\noriginal-id = "${original}"\nversion = 2\ntoolchain-version = "1.81.1"\nbuild-config = { flavor = "sui", edition = "2024" }\nupgrade-capability = "${core.upgradeCap}"\n`);
+  }
   await fs.writeFile(path.join(dataTree,'sources/fleet_data.move'),headSource);await fs.rm(path.join(dataTree,'Published.toml'));const built=compile(dataTree);
   tx=new Transaction();const [ticket]=tx.moveCall({target:'0x2::package::authorize_upgrade',arguments:[tx.object(base.upgradeCap),tx.pure.u8(0),tx.pure.vector('u8',built.digest)]});const receipt=tx.upgrade({modules:built.modules,dependencies:built.dependencies,package:base.pkg,ticket});tx.moveCall({target:'0x2::package::commit_upgrade',arguments:[tx.object(base.upgradeCap),receipt]});r=await execute('upgrade data',tx);const head=r.effects.changedObjects.find(o=>o.outputState==='PackageWrite').objectId;
   const pkg=bcs.Object.parse((await client.getObject({objectId:head,include:{objectBcs:true}})).object.objectBcs).data.Package;
   const origins=Object.fromEntries(pkg.typeOriginTable.map(o=>[o.datatypeName,o.package]));assert.equal(origins.FleetData,base.pkg);assert.equal(origins.DeviceData,base.pkg);assert.equal(origins.AnchorKey,base.pkg);assert.equal(origins.DiagnosticKey,head);
   for(let i=0;i<2;i++)assert.deepEqual((await client.getObject({objectId:[fleet,writer][i],include:{content:true}})).object.content,before[i]);
+  if(reportingMode){
+   tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::publish_locator`,arguments:[tx.object(fleet),tx.object(budget),tx.object(budgetCap),tx.object(storage)]});
+   await execute('publish authoritative locator for existing objects after core/data upgrade',tx);
+   const field=await client.getDynamicField({parentId:budget,name:{type:`${origins.LocatorKey}::fleet_data::LocatorKey`,bcs:bcs.bool().serialize(false).toBytes()}});
+   assert.equal(bcs.Address.parse(field.dynamicField.value.bcs),fleet);
+  }
   tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::request_diagnostics`,arguments:[tx.object(fleet),tx.object(writer),tx.object(budget),tx.object(budgetCap),tx.object('0x6')]});await execute('diagnostics on existing writer',tx);
   const field=await client.getDynamicField({parentId:writer,name:{type:`${head}::fleet_data::DiagnosticKey`,bcs:bcs.bool().serialize(false).toBytes()}});assert.equal(bcs.struct('DiagnosticRequest',{seq:bcs.u64(),at_ms:bcs.u64()}).parse(field.dynamicField.value.bcs).seq,'1');
   // SF139: use existing objects and both callable package versions. A fleet-wide
@@ -147,7 +174,63 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   tx.moveCall({target:`${core.pkg}::customer::set_credential`,arguments:[tx.object(customer),tx.pure.address(device.toSuiAddress()),tx.pure.bool(true),tx.pure.bool(true)]});
   tx.moveCall({target:`${core.pkg}::customer::set_credential`,arguments:[tx.object(customer),tx.pure.address(owner.toSuiAddress()),tx.pure.bool(false),tx.pure.bool(false)]});
   await execute('rotate managed administrator',tx);await customerApprove(managed,false);
+  if(reportingMode){
+   // Existing pre-upgrade FleetData adopts the authoritative locator without
+   // replacing its writer or changing either old public create signature.
+   tx=new Transaction();tx.moveCall({target:`${core.pkg}::customer::borrow_budget_cap`,arguments:[tx.object(customer),tx.object(managed)]});
+   // The original owner was revoked above: both setup and migration must fail.
+   tx.setSender(owner.toSuiAddress());
+   let probe=await client.simulateTransaction({transaction:tx,checksEnabled:false,include:{effects:true}});
+   assert(!probe.Transaction?.status.success,'revoked administrator acquired reporting authority');
+   const isolated=[];
+   for(let n=0;n<2;n++){
+    const signer=Ed25519Keypair.generate();await requestSuiFromFaucetV2({host:process.env.PROTOCOL_TEST_FAUCET,recipient:signer.toSuiAddress()});
+    tx=new Transaction();tx.moveCall({target:`${core.pkg}::customer::create`,arguments:[tx.object(registry),tx.pure.string(`Reporting customer ${n}`)]});
+    const result=await execute(`create independent reporting customer ${n}`,tx,signer);
+    isolated.push({signer,customerId:created(result,'::customer::Customer'),id:created(result,'::customer::Fleet'),budgetId:created(result,'::fleet_budget::FleetBudget')});
+   }
+   async function provision(f,capFleet=f){
+    const tx=new Transaction();const [cap,loan]=tx.moveCall({target:`${core.pkg}::customer::borrow_budget_cap`,arguments:[tx.object(capFleet.customerId),tx.object(capFleet.id)]});
+    const [quota]=tx.moveCall({target:`${storagePackage.pkg}::fleet_storage::new_quota`,arguments:[86400000,100000,2,100000,100000].map(x=>tx.pure.u64(x))});
+    tx.moveCall({target:`${head}::fleet_data::provision`,arguments:[tx.object(f.budgetId),cap,quota,tx.pure.string(chain)]});
+    tx.moveCall({target:`${core.pkg}::customer::return_budget_cap`,arguments:[tx.object(capFleet.id),cap,loan]});return tx;
+   }
+   for(const [n,f] of isolated.entries()){
+    const result=await execute(`atomic reporting provisioning ${n}`,await provision(f),f.signer);
+    f.dataId=created(result,'::fleet_data::FleetData');f.storageId=created(result,'::fleet_storage::FleetStorage');
+   }
+   assert.notEqual(isolated[0].dataId,isolated[1].dataId);assert.notEqual(isolated[0].storageId,isolated[1].storageId);
+   for(const [label,tx,signer] of [['cross-customer budget locator',await provision(isolated[1],isolated[0]),isolated[0].signer],['duplicate partial setup',await provision(isolated[0]),isolated[0].signer]]){
+    const before=(await client.getObject({objectId:isolated[0].budgetId,include:{content:true}})).object.content;
+    tx.setSender(signer.toSuiAddress());tx.setGasBudget(30000000);
+    const coin=(await client.listCoins({owner:signer.toSuiAddress()})).objects[0];
+    tx.setGasPayment([{objectId:coin.objectId,version:coin.version,digest:coin.digest}]);
+    tx.setGasPrice((await client.getReferenceGasPrice()).referenceGasPrice);
+    // Fully resolve inputs so the failure reaches execution, rather than
+    // being rejected by the SDK's transaction-resolution simulation.
+    const wire=tx.getData();
+    for(let i=0;i<wire.inputs.length;i++){
+     const objectId=wire.inputs[i].UnresolvedObject?.objectId;if(!objectId)continue;
+     const {object}=await client.getObject({objectId});
+     wire.inputs[i]=object.owner.$kind==='Shared'
+      ?{Object:{SharedObject:{objectId,initialSharedVersion:object.owner.Shared.initialSharedVersion,mutable:true}}}
+      :{Object:{ImmOrOwnedObject:{objectId,version:object.version,digest:object.digest}}};
+    }
+    const bytes=await Transaction.from(JSON.stringify(wire)).build(),signed=await signer.signTransaction(bytes);
+    const result=await client.executeTransaction({transaction:bytes,signatures:[signed.signature],include:{effects:true}});
+    assert(result.FailedTransaction&&!result.FailedTransaction.status.success,label);
+    const failure=result.FailedTransaction;
+    assert.match(failure.status.error?.message??JSON.stringify(failure.status),label.startsWith('cross')?/abort code: 1.*fleet_budget::q/:/abort code: 0.*dynamic_field::add/);
+    digests[label]=failure.digest;
+    await client.waitForTransaction({digest:result.FailedTransaction.digest});
+    assert.deepEqual((await client.getObject({objectId:isolated[0].budgetId,include:{content:true}})).object.content,before,'failed setup changed binding');
+   }
+   // The authoritative binding survives adoption and credential rotation.
+   const migrated=await client.getDynamicField({parentId:budget,name:{type:`${origins.LocatorKey}::fleet_data::LocatorKey`,bcs:bcs.bool().serialize(false).toBytes()}});
+   assert.equal(bcs.Address.parse(migrated.dynamicField.value.bcs),fleet);
+   console.log('PASS SF247 existing core/data object upgrade and locator migration, two independent customers, revoked authority, cross-customer and duplicate atomic rollback');
+  }
   console.log('PASS managed scoped approval preserves pre-adoption identity, read-only PTB, cross-fleet rejection and credential rotation');
-  console.log(JSON.stringify({result:'PASS',chain,baseRef,base:base.pkg,head,origins,digests,attacks,scopedChecks,checks:['pinned real Walrus/storage dependencies','existing-object byte preservation','later DiagnosticKey origin','new API on existing writer','old and new entry points refuse revoked device']}));
+  console.log(JSON.stringify({result:'PASS',chain,reportingBase:reportingMode?reportingBase:undefined,baseRef,base:base.pkg,head,origins,digests,attacks,scopedChecks,checks:['pinned real Walrus/storage dependencies','existing-object byte preservation','later DiagnosticKey origin','new API on existing writer','old and new entry points refuse revoked device']}));
  }finally{await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1});

@@ -253,7 +253,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
+CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -886,3 +886,10 @@ test-hydration:
 .PHONY: test-subscription-localnet
 test-subscription-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --subscription-upgrade
+
+# SF-247 authenticated per-fleet reporting setup and browser interaction tests.
+.PHONY: test-fleet-reporting
+test-fleet-reporting:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_fleet_reporting.py
+	$(RUN) node scripts/test_fleet_reporting.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_reporting_browser.cjs

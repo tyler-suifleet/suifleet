@@ -7,9 +7,9 @@
   "rpc_urls": [
     "https://fullnode.testnet.sui.io:443"
   ],
-  "call_package_id": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+  "call_package_id": "0x5b26264a391fc0690081b557529c1c311c077ead75d9841746dc56bc9dc8efd8",
   "upgrade_cap_id": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
-  "package_version": "2",
+  "package_version": "4",
   "type_origins": {
     "device_registry::DeviceRegistry": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
     "device_registry::Device": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "Each step must match the current console build. scripts in site/guide/record_guide.cjs drive the same labels; update both together when the console changes.",
+  "note": "Written steps follow the current console. Videos are dated scripted testnet demonstrations; their source commit is retained in videos.json and layouts may differ. Update recording scripts when UI labels change.",
   "steps": [
     {
       "id": "sign-in",
@@ -14,7 +14,7 @@
       "actions": [
         "Open the console and click Connect Wallet at the top right.",
         "Pick Slush, your extension wallet or Google, and approve the connection.",
-        "The first time, click Create default fleet in the Fleet bar and approve the transaction. Pages stay hidden behind \"Select or create a fleet to continue\" until a fleet is selected.",
+        "On your first visit, choose Create default fleet in the fleet selector and approve the request. A fleet is your device workspace; choose it before continuing.",
         "Choose Get started in the sidebar: it shows your account, short address, the network (Testnet in the preview) and the next onboarding step."
       ],
       "result": "The console shows your connected address, your selected fleet and the next onboarding step.",
@@ -30,7 +30,7 @@
       "title": "Fund the network budget",
       "console_route": "budget/",
       "console_label": "Network budget",
-      "summary": "Network fees for device reports and storage are paid from a fleet budget you control, so devices never need a wallet of their own topped up by hand. Deposits and withdrawals are your transactions; spending limits cap what each device may use.",
+      "summary": "The fleet budget pays the network fees for device reports. Storage funding pays for uploaded files and logs where enabled. These balances are separate from your subscription and device capacity. Depositing funds requires your approval.",
       "before": [
         "SUI in the connected account. On testnet, request it from the Sui faucet; the console shows the address to fund."
       ],
@@ -53,8 +53,9 @@
       "title": "Register a device",
       "console_route": "devices/",
       "console_label": "Devices",
-      "summary": "Each device creates its own signing key on first boot; the key never leaves the device. You register the device's public address, which creates its on-chain record and a capability bound to that address.",
+      "summary": "Install the SuiFleet client on the device, then register the public address it supplies. The private device key stays on the device; never paste it into the console. Registration gives your account permission to manage that device.",
       "before": [
+        "Available device capacity for your organization. A funded network budget does not increase your device limit; check Device capacity or Plans and billing first.",
         "The device's address, printed by suifleet --derive-address /etc/suifleet/device.key on the device."
       ],
       "actions": [
@@ -80,7 +81,7 @@
       "title": "Enroll a batch",
       "console_route": "enrollment/",
       "console_label": "Enrollment",
-      "summary": "For manufacturing, reserve names and serial numbers instead of typing addresses. Each device gets a single-use claim credential and enrolls itself on first boot; no device address is needed in advance.",
+      "summary": "Optional for larger fleets: enroll devices in batches instead of copying each public device address. Each device receives its own enrollment credential. Start with single-device registration for your first pilot.",
       "before": [
         "A roster (CSV of names and serial numbers), or a single device to pair."
       ],
@@ -183,10 +184,10 @@
     },
     {
       "id": "access-policy",
-      "title": "Grant decryption",
+      "title": "Private-release access",
       "console_route": "access/",
       "console_label": "Access policies",
-      "summary": "Policies control who may request decryption keys for confidential releases.",
+      "summary": "Optional for private software: choose which devices may decrypt a release. Create the device group first, then configure access before publishing private software. This controls access to files; it does not itself deploy them.",
       "before": [
         "A group you administer."
       ],

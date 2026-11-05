@@ -21,8 +21,8 @@ export interface OnrampProvider {
  * serverless app does not have.
  */
 export function onrampProvider(appId = process.env.NEXT_PUBLIC_ONRAMP_APP_ID): { provider?: OnrampProvider; reason?: string } {
-  if (!appId) return { reason: "Card funding is not configured for this build (no public on-ramp app ID). Fund the wallet from an exchange or another wallet." };
-  if (!/^\d{1,12}$/.test(appId)) return { reason: "The configured on-ramp app ID is not a public numeric ID; card funding is disabled." };
+  if (!appId) return { reason: "Card funding is not enabled in this workspace. Use the selected network’s test funds for a testnet preview, or transfer the supported token from an account you control." };
+  if (!/^\d{1,12}$/.test(appId)) return { reason: "Card funding is unavailable because the payment-provider configuration is invalid. Ask your service administrator to check it." };
   return { provider: { id: "onramp-money", name: "OnRamp.money", appId } };
 }
 

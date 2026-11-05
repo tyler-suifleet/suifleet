@@ -13,9 +13,9 @@ export function useGroups() {
   const account = useCurrentAccount();
 
   return useQuery<DeviceGroup[]>({
-    queryKey: ["groups", NETWORK, account?.address, selection.identity],
+    queryKey: ["groups", NETWORK, account?.address, selection.identity, selection.fleet?.groups],
     queryFn: async () => {
-      const groups = await fetchGroups(client, selection.supported ? selection.fleet!.id : account!.address);
+      const groups = await fetchGroups(client, selection.supported ? selection.fleet!.id : account!.address, selection.supported ? selection.fleet!.groups : undefined);
       return selection.supported ? groups.filter(g => selection.fleet!.groups.includes(g.objectId)) : groups;
     },
     enabled: !!account?.address && (!selection.supported || !!selection.fleet),

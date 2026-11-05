@@ -2,11 +2,15 @@ import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { normalizeStructTag } from "@mysten/sui/utils";
 import { PACKAGE_ID, REGISTRY_ID } from "./constants";
-import { moveType, normalizeId, verifyDeployment } from "./deployment-manifest";
+import { MANIFEST, moveType, normalizeId, verifyDeployment } from "./deployment-manifest";
 import { customer_CustomerBcs, device_registry_DeviceRegistryBcs } from "./fleet-protocol";
 
 export function deviceCapacityMessage(activeDevices: bigint, deviceLimit: bigint) {
-  return `Device limit reached: ${activeDevices} active devices, limit ${deviceLimit} across this customer’s fleets. Ask the registry administrator to raise the limit in Administration → Device entitlements. Adding network funds does not raise this limit.`;
+  const subscriptionSupport = !!MANIFEST?.type_origins["subscription::Account"] && !!MANIFEST?.subscription_coins;
+  const guidance = subscriptionSupport
+    ? "Open Plans and billing to review capacity offers and your subscription. If no suitable offer is listed, contact your service administrator."
+    : "Plan checkout is not enabled in this workspace. Ask your service administrator—the person who manages this deployment—to enable or raise your device limit.";
+  return `Device limit reached: ${activeDevices} active devices, limit ${deviceLimit} across this customer’s fleets. Open Device capacity to review your organization’s limit. ${guidance} Adding network funds does not raise this limit.`;
 }
 export async function readCustomerEntitlement(client: SuiGrpcClient, customerId: string) {
   await verifyDeployment(client);
@@ -50,6 +54,6 @@ export async function checkDeviceCapacity(client: SuiGrpcClient, transaction: Tr
   }
 }
 export function registrationFailure(message: string) {
-  if (/MoveAbort/i.test(message)) return "Registration was refused by the network. Refresh the fleet to check its device limit and permissions. Ask the registry administrator to review Device entitlements if capacity is full.";
+  if (/MoveAbort/i.test(message)) return "Registration was refused by the network. Refresh the fleet to check its device limit and permissions. Open Device capacity if capacity is full.";
   return message;
 }
