@@ -73,9 +73,11 @@ class FixtureJournal:
     def run(self, label, submit, *, budget=20_000_000, funding=0, expect='success'):
         self.expected, self.funding = expect, funding
         completed = self.state.setdefault('completed', {})
-        if label in completed:
-            return completed[label]
         pending = self.state.get('pending')
+        if label in completed:
+            if pending:
+                raise RuntimeError('ambiguous native passkey pending/completed checkpoint')
+            return completed[label]
         if pending:
             if (pending.get('operation') != label or not pending.get('digest')
                     or pending.get('gas_budget_mist') != budget
@@ -288,44 +290,53 @@ def verify_cached_fixture(live, cached, source):
     return origins
 
 
-def select_fixture(live, cache, state, identity, keys_path, save):
-    """Reconcile the previous pair read-only, retaining its complete history."""
-    previous = state.get('active_fixture', identity)
-    if previous == identity:
-        return
-    old = state.get('fixtures', {}).get(previous)
-    if not old or not keys_path.is_file():
-        raise RuntimeError('missing retained native passkey fixture or signing identity')
-    expected = hashlib.sha256(json.dumps(
-        [live.chain, live.operator, old['base'], old['head']]).encode()).hexdigest()
-    if expected != previous:
-        raise RuntimeError('retained native passkey fixture identity mismatch')
-    cached = next((f for f in cache['fixtures'].values()
-                   if f.get('base_package') == old['base']
-                   and f.get('head_package') == old['head']), None)
-    if not cached:
-        raise RuntimeError('previous native passkey package provenance unavailable')
-    built = cached.get('provenance', {}).get('verified_transactions', {})
-    proof = built.get('upgrade' if old['base'] != old['head'] else 'base', {})
-    verify_cached_fixture(live, cached, 'bytecode-v1:' + str(proof.get('digest')))
-    journal = FixtureJournal(live, state, save)
-    journal.retire_legacy_base_probe()
-    journal.recover()  # Unknown or unexpected effects retain the pending identity.
-    state.setdefault('fixture_history', {}).setdefault(previous, []).append(dict(
-        completed=state.get('completed', {}), retired_probes=state.get('retired_probes', [])))
-    state['completed'] = {}
-    state['retired_probes'] = []
-    state['active_fixture'] = identity
-    save()
-    live.evidence['native_previous_fixture_reconciled'] = dict(identity=previous, acceptance=False)
-
-
 def fixture_identity(live, cached):
     return hashlib.sha256(json.dumps([live.chain, live.operator,
         cached['base_package'], cached['head_package']]).encode()).hexdigest()
 
 
-def retained_fixture(live, cache, source, state, *, allow_transition=False):
+def select_journal(live, cache, state, identity, save):
+    """Reconcile the original context before atomically parking its checkpoints.
+
+    Archives remain in the authenticated private state alongside the same keys.
+    Switching pairs never means completing or discarding an unfinished exercise.
+    """
+    active = state.get('active_fixture', identity)
+    if active == identity:
+        return
+    matches = [f for f in cache['fixtures'].values() if fixture_identity(live, f) == active]
+    if not matches:
+        raise RuntimeError('retained native passkey package provenance unavailable')
+    old = matches[0]
+    current = old['provenance']['verified_transactions'].get('upgrade') or old['provenance']['verified_transactions']['base']
+    verify_cached_fixture(live, old, 'bytecode-v1:' + current['digest'])
+    journal = FixtureJournal(live, state, save)
+    journal.retire_legacy_base_probe()
+    journal.recover()
+    # Completed checkpoints also need independently bound effects before moving
+    # context. They never authorize another submission or replenish the ledger.
+    archives = state.get('journals', {})
+    restored = archives.get(identity, {})
+    if set(restored) - {'completed'}:
+        raise RuntimeError('ambiguous archived native passkey journal')
+    for result in [*state.get('completed', {}).values(), *restored.get('completed', {}).values()]:
+        observed = live.read_back(result['digest'])
+        if not observed:
+            raise RuntimeError('retained native passkey completed effects unavailable')
+        observed = tc.bound(observed, result['digest'])
+        if observed['effects'] != result['effects']:
+            raise RuntimeError('retained native passkey completed effects changed')
+    archives = state.setdefault('journals', {})
+    if active in archives:
+        raise RuntimeError('ambiguous retained native passkey journal')
+    archives[active] = dict(completed=state.get('completed', {}))
+    restored = archives.pop(identity, {})
+    state['completed'] = restored.get('completed', {})
+    state['active_fixture'] = identity
+    save()
+
+
+def retained_fixture(live, cache, source, state):
     """Resume an unfinished exact-source pair before considering another cache hit.
 
     Multiple base/head pairs can share the same head bytecode. Cache ordering
@@ -340,9 +351,11 @@ def retained_fixture(live, cache, source, state, *, allow_transition=False):
                 if (fixture_identity(live, candidate) == active
                         and head_fixture({'fixtures': {key: candidate}}, source)):
                     return candidate
-            if not allow_transition:
+            if not any(fixture_identity(live, candidate) == active
+                       for candidate in cache['fixtures'].values()):
                 raise RuntimeError('unfinished native passkey fixture requires its exact source package pair')
-            # select_fixture verifies and reconciles the old pair before switching.
+            # A source change uses select_journal to verify and reconcile the old
+            # pair before parking it; selection itself never mutates the journal.
     return head_fixture(cache, source)
 
 
@@ -359,7 +372,7 @@ def cached_acceptance(live, package_state, private=None):
     if private.resolve().is_relative_to(Path.cwd().resolve()):
         raise RuntimeError('private signing state must stay outside the checkout')
     state = json.loads(private.read_text()) if private.exists() else {}
-    cached = retained_fixture(live, cache, source, state, allow_transition=True)
+    cached = retained_fixture(live, cache, source, state)
     if not cached:
         raise RuntimeError('native passkey acceptance requires the exact cached package gate fixture')
     head, base = cached['head_package'], cached['base_package']
@@ -367,14 +380,17 @@ def cached_acceptance(live, package_state, private=None):
     def save():
         save_state(private, state)
     identity = fixture_identity(live, cached)
-    select_fixture(live, cache, state, identity, private.with_suffix('.keys.json'), save)
+    keys_path = private.with_suffix('.keys.json')
+    retained = bool(state.get('require_keys') or state.get('fixtures') or state.get('pending')
+                    or state.get('completed') or state.get('journals'))
+    if retained and not keys_path.is_file():
+        raise RuntimeError('missing retained native passkey signing identity; preserve protected fixture')
+    native_fixture(live, private, operation='info', requireExistingKeys=retained)
+    select_journal(live, cache, state, identity, save)
     state['active_fixture'] = identity
     f = state.setdefault('fixtures', {}).get(identity)
-    keys_path = private.with_suffix('.keys.json')
-    if (f or state.get('pending') or state.get('completed')) and not keys_path.is_file():
-        raise RuntimeError('missing retained native passkey signing identity; preserve protected fixture')
-    native_fixture(live, private, operation='info', requireExistingKeys=bool(f or state.get('pending') or state.get('completed')))
     state['require_keys'] = True
+    save()
     journal = FixtureJournal(live, state, save)
     journal.retire_legacy_base_probe()
     journal.recover()
