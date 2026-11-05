@@ -167,6 +167,62 @@ class CachedPasskeyTests(unittest.TestCase):
         cap = dict(owner={'AddressOwner': live.operator}, content={'package': head, 'version': 2 if upgraded else 1})
         return live, cached, source, facts, cap
 
+    def test_unfinished_pair_wins_over_same_head_cache_order(self):
+        from live_package_upgrade import fixture_key
+        import copy
+        live, retained, source, facts, cap = self.fixture(upgraded=True)
+        other = copy.deepcopy(retained)
+        other['base_package'] = other['head_package'] = '0x' + '4' * 64
+        old_key = fixture_key('bytecode-v1:' + 'b' * 64, source)
+        new_key = fixture_key(source, source)
+        state = dict(active_fixture=target.fixture_identity(live, retained),
+                     pending={'digest': 'uncertain'}, completed={'proof': {'digest': 'known'}})
+        before = copy.deepcopy(state)
+        for entries in ([(new_key, other), (old_key, retained)],
+                        [(old_key, retained), (new_key, other)]):
+            cache = {'fixtures': dict(entries)}
+            self.assertIs(target.retained_fixture(live, cache, source, state), retained)
+            with patch.object(target.dm, 'chain_facts', return_value=facts):
+                target.verify_cached_fixture(live, retained, source)
+        self.assertEqual(state, before)
+        live.transaction.assert_not_called()
+        # Neither a missing pair nor stale source may discard the journal.
+        for cache, requested in (({'fixtures': {new_key: other}}, source),
+                                 ({'fixtures': {old_key: retained}}, 'bytecode-v1:' + 'c' * 64)):
+            with self.assertRaisesRegex(RuntimeError, 'requires its exact source package pair'):
+                target.retained_fixture(live, cache, requested, state)
+            self.assertEqual(state, before)
+        self.assertIs(target.retained_fixture(live, {'fixtures': {new_key: other}}, source,
+            dict(active_fixture=state['active_fixture'], completed={})), other)
+
+    def test_cached_acceptance_reaches_verified_pair_transition(self):
+        from live_package_upgrade import fixture_key
+        for journal in ({'completed': {'earlier': {'digest': 'known'}}},
+                        {'pending': {'digest': 'uncertain'}}):
+            with self.subTest(journal=journal), TemporaryDirectory() as directory:
+                root = Path(directory)
+                live, cached, source, facts, cap = self.fixture()
+                live.wallet = root / 'client.yaml'
+                private = root / 'live-passkey-state.json'
+                state = dict(active_fixture='previous', **journal)
+                private.write_text(json.dumps(state))
+                cache = {'fixtures': {fixture_key(source, source): cached}}
+                # Stop at reconciliation: neither old guard may intercept it,
+                # and no signing/new fixture work may precede reconciliation.
+                with patch('live_package_upgrade.load_state', return_value=cache), \
+                     patch.object(target, 'contracts_digest', return_value=source), \
+                     patch.object(target.dm, 'chain_facts', return_value=facts), \
+                     patch.object(target, 'select_fixture', side_effect=RuntimeError('reconciliation reached')) as select, \
+                     patch.object(target, 'native_fixture') as native:
+                    with self.assertRaisesRegex(RuntimeError, 'reconciliation reached'):
+                        target.cached_acceptance(live, root / 'package.json')
+                select.assert_called_once()
+                self.assertEqual(select.call_args.args[2], state)
+                self.assertEqual(select.call_args.args[3], target.fixture_identity(live, cached))
+                self.assertEqual(json.loads(private.read_text()), state)
+                native.assert_not_called()
+                live.transaction.assert_not_called()
+
     def test_verified_unchanged_and_upgraded_origins(self):
         for upgraded, retained in ((False, False), (True, False), (True, True)):
             with self.subTest(upgraded=upgraded, retained=retained):
