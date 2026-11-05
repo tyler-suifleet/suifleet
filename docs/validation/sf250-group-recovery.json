@@ -1,0 +1,19 @@
+{
+  "network": "testnet",
+  "chain": "4c78adac",
+  "console_commit": "88d23640",
+  "transaction": "EyTwSk2BYYaj5nzsLimoW8Q76XSbeVH2DZot96dcjayM",
+  "effects": {
+    "status": "success"
+  },
+  "events": [
+    {
+      "type": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139::device_group::DeviceAddedToGroup",
+      "parsedJson": {
+        "device_id": "0xca118cb406ab977afc84f60f31266cd84fffb7c01397accb100042f0146c5065",
+        "group_id": "0x6d01ad7be3892ab2718da96057119d52df667a51bc5da3974074954a8b04f5e6"
+      }
+    }
+  ],
+  "verification": "Actual production frontend recovered the existing managed group and enabled Manage; group membership transaction independently re-read with pinned Sui 1.83.0 CLI. Original SF-245 customer and allowance retained. No physical Pi or real Slush claim."
+}
