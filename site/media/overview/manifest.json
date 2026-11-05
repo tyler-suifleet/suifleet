@@ -103,9 +103,9 @@
   ],
   "source_sha256": {
     "site/overview/storyboard.json": "997803451e442987eaab39aa8db287e3b242436a85d96797d4ee2337f5d51cb6",
-    "site/overview/scene.html": "6c874826ee134dbd896325689e0e9a7207ab1f506a35eef801cc9cf1076d968d",
-    "site/overview/render_frames.cjs": "b16cc8dbed2c960d82ebee22057a2baacc73b2c4defd912ad125461c4f5dac04",
-    "site/overview/render_overview.py": "e83245e86e660c99cf17b73322fc482c6c0f2865ac780b099a9292d2eb5c100f"
+    "site/overview/scene.html": "5193b88f1a38b802b0da42739391ea37e286d0d2810e491dbc65586b00b62595",
+    "site/overview/render_frames.cjs": "071c7c86c9a4465bd787a4947f010edf8ab94d0d9c6f2cda5025e67d6d0ad905",
+    "site/overview/render_overview.py": "552fe7a73415dfdf39a070a3c00e9774b0de53b99bdcbe26c04a2bd45e554f16"
   },
   "variants": [
     {
@@ -113,24 +113,24 @@
       "width": 1280,
       "height": 720,
       "fallback": "overview-landscape.mp4",
-      "fallback_sha256": "9b44d3e664366b4fab50daac457e87f8c790ceb3037928bc4cba105097936b59",
+      "fallback_sha256": "9e992f119030041f5077cb648362d145fee7748adea9d9c50f7bb3b4a512487f",
       "file": "overview-landscape.webm",
-      "file_sha256": "0b7ce4344207dcb69cea9f1c0633534422f54b44828c77244e550f9734ad4adf",
+      "file_sha256": "a5acd26dd9d8c038542278dacca9f6da13238280737d7f5f4f89603bc23abb5d",
       "poster": "overview-landscape.jpg",
-      "poster_sha256": "fc73ea247ef9b998422e71b0dd62efd71b49cf98c1c53d8480140efd625ef860"
+      "poster_sha256": "779b42a02044e9517c13dcddd45620c76682855f12dbb42d0949723952b09ebc"
     },
     {
       "name": "portrait",
       "width": 720,
       "height": 1280,
       "fallback": "overview-portrait.mp4",
-      "fallback_sha256": "bccc79d50936d988124a84081ad3a04145ddc3a1f9c093ab931cc52ec50c07a2",
+      "fallback_sha256": "16ae9d9727d3feac2cf6d6b91cddbb93e1be6d4f11990677d2ad64c147a1cf09",
       "file": "overview-portrait.webm",
-      "file_sha256": "72b7a516e9ef14b4f9922628df51fe825d1d84e07f7bafe792c1410766cdb829",
+      "file_sha256": "38b2809d0ad76f4729289ad27152bbbee2ceb13a675be307b389571f3c126ba6",
       "poster": "overview-portrait.jpg",
-      "poster_sha256": "56b1d3af7791f8dffd29698c7183b6a50b1b31e67e264f6719ebde257a9958d2"
+      "poster_sha256": "0204607b2eabd1dbca00275c2938928774bd15f2c0c4fcda5dead02726ede6ad"
     }
   ],
   "captions": "overview.en.vtt",
-  "captions_sha256": "84026375ac7ede20c6582ea02f16aa299167f72cdacca8aa24e162f8c53e5da8"
+  "captions_sha256": "f6642de8198f08d7abfccc838059aeca72ef4f63f4c25b19b6361dd1cac0b91e"
 }

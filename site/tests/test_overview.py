@@ -28,5 +28,5 @@ class OverviewTest(unittest.TestCase):
   markup=build.overview_player();p=Parser();p.feed(markup)
   self.assertEqual(len(p.videos),2);self.assertEqual(len(p.tracks),2)
   for video in p.videos:self.assertIn('controls',video);self.assertIn('playsinline',video);self.assertNotIn('autoplay',video);self.assertEqual(video['preload'],'none')
-  for track in p.tracks:self.assertEqual(track['kind'],'captions');self.assertEqual(track['srclang'],'en')
+  for track in p.tracks:self.assertEqual(track['kind'],'captions');self.assertEqual(track['srclang'],'en');self.assertNotIn('default',track)
   self.assertIn('Read the complete narration',markup);self.assertIn('Illustrative animation',markup)

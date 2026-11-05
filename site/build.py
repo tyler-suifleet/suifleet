@@ -167,9 +167,9 @@ def overview_manifest():
 
 
 def overview_player():
-    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A two-minute animated introduction to approvals, shared records, software files and device clients. Female narration and English captions; no app controls to learn yet.</p>']
+    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A two-minute animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
     for video in manifest['variants']:
-        parts.append(f'<video class="overview-video overview-{video["name"]}" controls playsinline preload="none" width="{video["width"]}" height="{video["height"]}" poster="/media/overview/{video["poster"]}" aria-label="How SuiFleet works, {video["name"]} version" aria-describedby="overview-description"><source src="/media/overview/{video["file"]}" type="video/webm"><source src="/media/overview/{video["fallback"]}" type="video/mp4"><track kind="captions" src="/media/overview/{manifest["captions"]}" srclang="en" label="English" default>Your browser cannot play the video. Read the transcript below.</video>')
+        parts.append(f'<video class="overview-video overview-{video["name"]}" data-mp4-sha256="{video["fallback_sha256"]}" controls playsinline preload="none" width="{video["width"]}" height="{video["height"]}" poster="/media/overview/{video["poster"]}?v={video["poster_sha256"][:16]}" aria-label="How SuiFleet works, {video["name"]} version" aria-describedby="overview-description"><source src="/media/overview/{video["file"]}?v={video["file_sha256"][:16]}" type="video/webm"><source src="/media/overview/{video["fallback"]}?v={video["fallback_sha256"][:16]}" type="video/mp4"><track kind="captions" src="/media/overview/{manifest["captions"]}?v={manifest["captions_sha256"][:16]}" srclang="en" label="English">Your browser cannot play the video. Read the transcript below.</video>')
     parts.append('<p class="overview-caption">Illustrative animation. Installation results and current health are different; your platform controls its installer and any reboot.</p><details><summary>Read the complete narration</summary><ol class="overview-transcript">')
     for scene in manifest['scenes']:
         parts.append('<li><strong>'+html.escape(scene['title'])+'</strong><p>'+html.escape(scene['text'])+'</p></li>')
@@ -229,9 +229,10 @@ def build(out, config=None):
         rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|content)\}\}", lambda m: values[m.group(1)], layout)
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
         rendered = rendered.replace('href="/assets/style.css"', f'href="/assets/style.css?v={style_version}"')
-        if page["path"] == "/guide/":
+        if page["path"] in ("/guide/", "/how-it-works/"):
             integrity = guide_integrity()
-            rendered = rendered.replace("<body>", '<body class="guide-page">')
+            if page['path'] == '/guide/': rendered = rendered.replace("<body>", '<body class="guide-page">')
+            else: rendered = rendered.replace("media-src 'self';", "media-src 'self' blob:; connect-src 'self';")
             rendered = rendered.replace("base-uri 'none'; form-action 'none'", f"base-uri 'none'; form-action 'none'; script-src '{integrity}'")
             rendered = rendered.replace("</body>", f'<script src="{guide_script_url()}" integrity="{integrity}" defer></script>\n</body>')
         target = output_path(out, page["path"])
@@ -252,6 +253,7 @@ def build(out, config=None):
     for name in ("_headers", "robots.txt"):
         if name == "_headers":
             headers = (SRC / name).read_text(encoding="utf-8")
+            headers = headers.replace("media-src 'self';", "media-src 'self' blob:; connect-src 'self';")
             headers = headers.replace("default-src 'none';", f"default-src 'none'; script-src '{guide_integrity()}';")
             (out / name).write_text(headers, encoding="utf-8")
         else:

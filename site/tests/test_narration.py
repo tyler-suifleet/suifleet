@@ -66,6 +66,14 @@ class CaptionsTest(unittest.TestCase):
         self.assertIn('A device &amp; its &lt;public&gt; identity.', result)
         self.assertTrue(result.startswith('WEBVTT\n\n'))
 
+    def test_cue_separators_and_single_final_newline(self):
+        from captions import webvtt
+        cues = [dict(text='First.', speech_start=0, speech_end=1),
+                dict(text='Second.', speech_start=2, speech_end=3)]
+        self.assertEqual(webvtt(cues, 4),
+                         'WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\nFirst.\n\n'
+                         '2\n00:00:02.000 --> 00:00:03.000\nSecond.\n')
+
     def test_reject_overlap_truncation_nonfinite_and_invalid_text(self):
         from captions import webvtt
         good = dict(text='Hello.', speech_start=0, speech_end=1)

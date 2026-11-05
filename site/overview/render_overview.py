@@ -9,7 +9,7 @@ from narrate_guide import probe
 from captions import webvtt
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 def main():
- p=argparse.ArgumentParser();p.add_argument('--runtime',type=Path,required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--model',type=Path,required=True);p.add_argument('--voices',type=Path,required=True);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--runtime',type=Path,required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--model',type=Path,required=True);p.add_argument('--voices',type=Path,required=True);p.add_argument('--reuse-frames',action='store_true');a=p.parse_args()
  if a.out.exists():raise ValueError('Output must be a new immutable directory')
  a.runtime.mkdir(parents=True,exist_ok=True);config=json.loads((ROOT/'site/guide/narration.json').read_text());story=json.loads((ROOT/'site/overview/storyboard.json').read_text());assert sha(a.model)==config['model_sha256'] and sha(a.voices)==config['voices_sha256'];assert importlib.metadata.version('kokoro-onnx')==config['engine_version']
  import numpy as np
@@ -22,13 +22,18 @@ def main():
  joined=np.concatenate(audio)
  with wave.open(str(a.runtime/'narration.wav'),'wb') as wav:wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(24000);wav.writeframes((np.clip(joined,-1,1)*32767).astype('<i2').tobytes())
  (a.runtime/'timeline.json').write_text(json.dumps({'fps':fps,'duration':position,'scenes':timeline},indent=2)+'\n');print('Narration ready',round(position,2),'seconds',flush=True)
- subprocess.run(['node',str(ROOT/'site/overview/render_frames.cjs'),str(a.runtime)],check=True,cwd=ROOT)
+ if a.reuse_frames:
+  receipt=json.loads((a.runtime/'frames-receipt.json').read_text())
+  assert receipt=={'timeline_sha256':sha(a.runtime/'timeline.json'),'scene_sha256':sha(ROOT/'site/overview/scene.html'),'renderer_sha256':sha(ROOT/'site/overview/render_frames.cjs')},'Stale rendered frames'
+  for name in ['landscape','portrait']:
+   assert len(list((a.runtime/name).glob('*.png')))==round(position*fps),'Incomplete rendered frames'
+ else:subprocess.run(['node',str(ROOT/'site/overview/render_frames.cjs'),str(a.runtime)],check=True,cwd=ROOT)
  a.out.mkdir(parents=True);tag=image();manifest={'schema':1,'kind':'illustrative-animation','title':story['title'],'duration_seconds':round(position,2),'voice':story['voice'],'language':story['language'],'synthetic_voice':True,'scenes':timeline,'cues':cues,'source_sha256':{str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'site/overview/storyboard.json',ROOT/'site/overview/scene.html',ROOT/'site/overview/render_frames.cjs',Path(__file__)]},'variants':[]}
  for name,width,height in [('landscape',1280,720),('portrait',720,1280)]:
   work=a.runtime/name;shutil.copyfile(a.runtime/'narration.wav',work/'narration.wav');frames=round(position*fps)
   ffmpeg(tag,work,'-framerate',str(fps),'-i','%05d.png','-i','narration.wav','-map','0:v:0','-map','1:a:0','-c:v','libx264','-crf','24','-preset','medium','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-t',str(position),'-map_metadata','-1','overview.mp4')
   ffmpeg(tag,work,'-i','overview.mp4','-c:v','libvpx-vp9','-crf','34','-b:v','0','-row-mt','1','-cpu-used','4','-c:a','libopus','-b:a','96k','-map_metadata','-1','overview.webm')
-  ffmpeg(tag,work,'-ss',str(timeline[-1]['start']+1),'-i','overview.mp4','-frames:v','1','-q:v','3','poster.jpg')
+  ffmpeg(tag,work,'-ss',str(timeline[-1]['start']+5),'-i','overview.mp4','-frames:v','1','-q:v','3','poster.jpg')
   v={'name':name,'width':width,'height':height}
   for source,key,suffix in [('overview.mp4','fallback','mp4'),('overview.webm','file','webm'),('poster.jpg','poster','jpg')]:
    dest=a.out/f'overview-{name}.{suffix}';shutil.copyfile(work/source,dest);assert dest.stat().st_size<15_000_000;v[key]=dest.name;v[key+'_sha256']=sha(dest)
