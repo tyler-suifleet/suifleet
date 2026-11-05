@@ -1474,3 +1474,40 @@ The adapter adds no publication, faucet request or allowance; pending outcomes a
 the existing non-replenishing ledger remain authoritative. Offline regressions do
 not establish protected-testnet success: the coordinator must rebuild the SF-236
 candidate after integration and record actual testnet and exact-head/base review.
+
+
+**SF-255 CI lane 0 funding repair (2026-11-05, run 42051196956).**
+The [failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/42051196956)
+stopped before submitting test transactions: zero allowance used, with the
+400,000,000-MIST historical reservation preserved. Its single successful faucet
+credited 1,000,000,000 MIST, raising 2,771,874,620 to 3,771,874,620 MIST,
+below the unchanged 4,050,000,000-MIST whole-suite requirement. The downloaded
+package-upgrade evidence identifies lane 0, chain `4c78adac`, protocol 140 and
+the pinned transaction CLI. This is a funding shortfall, not a source failure.
+
+A separate one-request faucet-only maintenance operation was coordinated in
+[SF-010/#11](https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6662012850).
+The worker independently verified chain `4c78adac`, the recipient against
+`scripts/testnet_pool.py`, and network CLI SHA-256
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`
+in the pinned local test container. A temporary public-only client configuration
+and empty keystore were used; no CI signing secret was accessed.
+
+With `network:suifleet-testnet` acquired and asserted, the sole request succeeded:
+`G7ed6CHKFdz4e58gyxRntKgivLy8BEVabM8Wuwkry99r`. Independent transaction
+readback confirmed successful effects at checkpoint `403180066`, a
+1,000,000,000-MIST credit to the pinned CI recipient, and 1,000,000 MIST net gas
+paid by the faucet. Total balance increased from 3,771,874,620 to 4,771,874,620
+MIST (4,743,633,212 address balance plus 28,241,408 coin balance), above preflight.
+The global lease was released promptly. No package/object transaction, fixture
+replay, reservation removal, allowance change or additional in-run retry occurred.
+
+Verification: `PYTHONPATH=scripts/tests python3 -m unittest test_testnet_reconcile
+test_testnet_budget test_testnet` ran 108 tests successfully (two skipped), including
+bounded faucet, insufficient-credit and non-replenishing allowance regressions.
+`python3 -m unittest discover -s scripts/tests -p 'test_live*.py'` passed 118 tests.
+`git diff --check` passed. This records funding recovery only: no repaired hosted
+testnet success, installed-runtime recovery or independent approval is claimed.
+The coordinator must obtain exact-head/base checks and fresh independent review.
+Deferred physical, manual-wallet, production-provider and mainnet acceptance
+remains unrun in SF-031/#32 and SF-087/#159 (production hosting in SF-042/#62).

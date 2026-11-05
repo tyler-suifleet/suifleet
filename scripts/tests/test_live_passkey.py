@@ -184,16 +184,21 @@ class CachedPasskeyTests(unittest.TestCase):
             self.assertIs(target.retained_fixture(live, cache, source, state), retained)
             with patch.object(target.dm, 'chain_facts', return_value=facts):
                 target.verify_cached_fixture(live, retained, source)
-        self.assertIs(target.retained_fixture(live, {'fixtures': {new_key: other}}, source,
-            state, allow_transition=True), other)
         self.assertEqual(state, before)
         live.transaction.assert_not_called()
-        # Neither a missing pair nor stale source may discard the journal.
-        for cache, requested in (({'fixtures': {new_key: other}}, source),
-                                 ({'fixtures': {old_key: retained}}, 'bytecode-v1:' + 'c' * 64)):
+        # Missing original provenance must never discard the journal.
+        for cache, requested in (({'fixtures': {new_key: other}}, source),):
             with self.assertRaisesRegex(RuntimeError, 'requires its exact source package pair'):
                 target.retained_fixture(live, cache, requested, state)
             self.assertEqual(state, before)
+        changed_source = 'bytecode-v1:' + 'c' * 64
+        changed_key = fixture_key(source, changed_source)
+        cache = {'fixtures': {old_key: retained, changed_key: other}}
+        self.assertIs(target.retained_fixture(live, cache, changed_source, state), other)
+        self.assertEqual(state, before)
+        self.assertIsNone(target.retained_fixture(live, {'fixtures': {old_key: retained}},
+                                                changed_source, state))
+        self.assertEqual(state, before)
         self.assertIs(target.retained_fixture(live, {'fixtures': {new_key: other}}, source,
             dict(active_fixture=state['active_fixture'], completed={})), other)
 
@@ -456,40 +461,143 @@ class ProtectedResumeTests(unittest.TestCase):
         self.assertEqual((enrollment['proof'],enrollment['sponsor']),('new-proof',1))
         self.assertEqual([r['key'] for r in requests if r['operation']=='proof'],[0])
 
-class PairTransitionTests(unittest.TestCase):
-    def test_previous_pair_reconciles_without_replay_and_preserves_history(self):
-        import hashlib
-        for outcome in ('success', 'unknown', 'failure', 'missing_keys', 'bad_provenance'):
-            with self.subTest(outcome=outcome), TemporaryDirectory() as directory:
-                live, result = JournalRecoveryTests().live('failure' if outcome == 'failure' else 'success')
-                live.chain, live.operator = 'chain', 'operator'
-                old = dict(base='base', head='head', customer='customer', fleet='fleet')
-                identity = hashlib.sha256(json.dumps(['chain','operator','base','head']).encode()).hexdigest()
-                pending = dict(operation='setup', digest='digest', gas_budget_mist=20_000_000, expect='success')
-                state = dict(active_fixture=identity, fixtures={identity:old}, pending=pending.copy(),
-                             completed={'earlier': {'digest':'earlier'}})
-                cache = dict(fixtures={'old': dict(base_package='base', head_package='head',
-                    provenance=dict(verified_transactions={'upgrade':dict(digest='a'*64)}))})
-                keys = Path(directory)/'state.keys.json'
-                if outcome != 'missing_keys': keys.write_text('retained identity')
-                if outcome == 'unknown': live.read_back.return_value = {}
-                with patch.object(target, 'verify_cached_fixture',
-                        side_effect=RuntimeError('bad provenance') if outcome == 'bad_provenance' else None), \
-                     patch.object(target.tc, 'bound', side_effect=lambda r,d:r):
-                    if outcome == 'success':
-                        target.select_fixture(live, cache, state, 'new-pair', keys, Mock())
-                        self.assertEqual(state['active_fixture'], 'new-pair')
-                        self.assertEqual(state['completed'], {})
-                        history = state['fixture_history'][identity][0]['completed']
-                        self.assertEqual(history['setup'], result)
-                        self.assertIn('earlier', history)
-                        self.assertEqual(live.ledger.used, 20_000_000)
-                        self.assertFalse(live.evidence['native_previous_fixture_reconciled']['acceptance'])
-                    else:
-                        with self.assertRaises(RuntimeError):
-                            target.select_fixture(live, cache, state, 'new-pair', keys, Mock())
-                        self.assertEqual(state['active_fixture'], identity)
-                        self.assertEqual(state['pending'], pending)
+
+class PairTransitionTests(JournalRecoveryTests):
+    def fixture(self):
+        live, result = self.live()
+        live.chain, live.operator = 'test-chain', 'operator'
+        old = dict(base_package='old-base', head_package='old-head', provenance=dict(
+            verified_transactions=dict(upgrade=dict(digest='a'*64))))
+        new = dict(base_package='new-base', head_package='new-head', provenance=old['provenance'])
+        old_id, new_id = (target.fixture_identity(live, f) for f in (old, new))
+        state = dict(active_fixture=old_id, require_keys=True, fixtures={old_id: dict(customer='retained')},
+                     pending=dict(operation='proof', digest='digest', gas_budget_mist=20_000_000, expect='success'))
+        return live, result, {'fixtures': {'old': old, 'new': new}}, state, old_id, new_id
+
+    def test_changed_source_selection_reconciles_before_switching(self):
+        from live_package_upgrade import fixture_key
+        live, result, cache, state, old, new = self.fixture()
+        old_source, new_source = 'bytecode-v1:' + 'a' * 64, 'bytecode-v1:' + 'c' * 64
+        cache['fixtures'] = {
+            fixture_key(old_source, old_source): cache['fixtures']['old'],
+            fixture_key(old_source, new_source): cache['fixtures']['new'],
+        }
+        original = json.loads(json.dumps(state))
+        selected = target.retained_fixture(live, cache, new_source, state)
+        self.assertEqual(target.fixture_identity(live, selected), new)
+        self.assertEqual(state, original)
+        snapshots = []
+        with patch.object(target, 'verify_cached_fixture') as verify, \
+             patch.object(target.tc, 'bound', side_effect=lambda r, d: r):
+            target.select_journal(live, cache, state, new,
+                                  lambda: snapshots.append(json.loads(json.dumps(state))))
+        verify.assert_called_once_with(live, cache['fixtures'][fixture_key(old_source, old_source)], old_source)
+        self.assertEqual(snapshots[-1]['active_fixture'], new)
+        self.assertEqual(state['journals'][old]['completed']['proof'], result)
+        self.assertEqual(state['fixtures'], original['fixtures'])
+        self.assertEqual(live.ledger.used, 20_000_000)
+        live.executor.assert_not_called()
+
+    def test_legacy_probe_retires_before_pair_transition_without_replay(self):
+        for status in ('success', 'failure', 'unreadable'):
+            live,result,cache,state,old,new = self.fixture()
+            label = 'old package cannot bypass protection'
+            state['pending'].update(operation=label, expect='failure')
+            original = dict(state['pending'])
+            if status == 'unreadable':
+                live.read_back.return_value = {}
+            else:
+                result['effects']['status']['status'] = status
+            with self.subTest(status=status), patch.object(target,'verify_cached_fixture') as verify, \
+                 patch.object(target.tc,'bound',side_effect=lambda r,d:r):
+                if status == 'unreadable':
+                    with self.assertRaisesRegex(RuntimeError, 'exact digest not readable'):
+                        target.select_journal(live,cache,state,new,lambda: None)
+                    self.assertEqual(state['pending'],original)
+                    self.assertEqual(state['active_fixture'],old)
+                    self.assertNotIn('journals',state)
+                else:
+                    target.select_journal(live,cache,state,new,lambda: None)
+                    self.assertEqual(state['active_fixture'],new)
+                    self.assertNotIn('pending',state)
+                    self.assertNotIn(label,state['journals'][old]['completed'])
+                    self.assertEqual(state['retired_probes'][0]['pending'],original)
+                    self.assertEqual(state['retired_probes'][0]['result'],result)
+                    self.assertFalse(live.evidence['retired_native_base_probe']['acceptance'])
+                    self.assertEqual(live.ledger.used,20_000_000)
+                verify.assert_called_once()
                 live.executor.assert_not_called()
-                self.assertEqual(state['fixtures'][identity], old)
-                if keys.exists(): self.assertEqual(keys.read_text(), 'retained identity')
+            self.assertTrue(state['require_keys'])
+            self.assertEqual(state['fixtures'][old]['customer'],'retained')
+
+    def test_old_pending_parked_and_restored_without_duplicate_submission(self):
+        live,result,cache,state,old,new = self.fixture()
+        snapshots=[]
+        save=lambda: snapshots.append(json.loads(json.dumps(state)))
+        with patch.object(target,'verify_cached_fixture') as verify, \
+             patch.object(target.tc,'bound',side_effect=lambda r,d:r):
+            target.select_journal(live,cache,state,new,save)
+            self.assertEqual(state['active_fixture'],new)
+            self.assertEqual(state['journals'][old]['completed']['proof'],result)
+            self.assertEqual(state['completed'],{})
+            self.assertNotIn('pending',state)
+            # Simulate a restart by round-tripping the last durable checkpoint.
+            state=json.loads(json.dumps(snapshots[-1]))
+            target.select_journal(live,cache,state,old,lambda: None)
+            self.assertEqual(state['completed']['proof'],result)
+            verify.assert_called()
+        self.assertTrue(state['require_keys'])
+        self.assertEqual(state['fixtures'][old]['customer'],'retained')
+        live.executor.assert_not_called()
+        self.assertEqual(live.ledger.used,20_000_000)
+
+    def test_unknown_failure_missing_provenance_and_changed_effects_never_switch(self):
+        for case in ('unknown','failure','missing','changed','ambiguous'):
+            live,result,cache,state,old,new=self.fixture()
+            if case=='unknown':live.read_back.return_value={}
+            if case=='failure':result['effects']['status']['status']='failure'
+            if case=='missing':cache['fixtures']={}
+            if case=='changed':
+                state['completed']={'proof':json.loads(json.dumps(result))}
+                state.pop('pending')
+                result['effects']['status']['status']='failure'
+            if case=='ambiguous':state['completed']={'proof':result}
+            with self.subTest(case=case), patch.object(target,'verify_cached_fixture'), \
+                 patch.object(target.tc,'bound',side_effect=lambda r,d:r):
+                with self.assertRaises(RuntimeError):
+                    target.select_journal(live,cache,state,new,lambda: None)
+            self.assertEqual(state['active_fixture'],old)
+            self.assertNotIn('journals',state)
+            live.executor.assert_not_called()
+
+    def test_crash_after_pending_recovery_retains_original_pair_and_completed(self):
+        live,result,cache,state,old,new=self.fixture()
+        snapshots=[]
+        def save():
+            snapshots.append(json.loads(json.dumps(state)))
+            raise OSError('simulated crash after atomic write')
+        with patch.object(target,'verify_cached_fixture'), patch.object(target.tc,'bound',side_effect=lambda r,d:r):
+            with self.assertRaises(OSError):target.select_journal(live,cache,state,new,save)
+            state=snapshots[-1]
+            target.select_journal(live,cache,state,new,lambda: None)
+        self.assertEqual(state['journals'][old]['completed']['proof'],result)
+        live.executor.assert_not_called()
+        self.assertEqual(live.ledger.used,20_000_000)
+
+
+class RetainedPairKeysTests(unittest.TestCase):
+    def test_archived_journal_never_generates_replacement_keys(self):
+        with TemporaryDirectory() as directory:
+            root=Path(directory)
+            private=root/'live-passkey-state.json'
+            private.write_text(json.dumps(dict(journals={'old':{'completed':{}}})))
+            live=SimpleNamespace(chain='chain',operator='operator',wallet=root/'client.yaml')
+            cached=dict(base_package='base',head_package='head')
+            with patch('live_package_upgrade.load_state',return_value={'fixtures':{}}), \
+                 patch('live_wallet_gate.head_fixture',return_value=cached), \
+                 patch.object(target,'contracts_digest',return_value='source'), \
+                 patch.object(target,'verify_cached_fixture'), patch.object(target,'native_fixture') as native:
+                with self.assertRaisesRegex(RuntimeError,'missing retained'):
+                    target.cached_acceptance(live,root/'package.json',private)
+                native.assert_not_called()
+            self.assertIn('old',json.loads(private.read_text())['journals'])

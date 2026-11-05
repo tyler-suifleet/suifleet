@@ -51,6 +51,64 @@ class StaleBaseTests(unittest.TestCase):
                 f.controller.annotate_stale_base(f.project, pr)
                 self.assertNotIn('_stale_base_contracts', pr)
 
+    def held_case(self):
+        f, pr, run, evidence, trees = self.setup_case()
+        evidence['operator'] = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
+        evidence['funding']['held_mist'] = 400_000_000
+        evidence['quarantine'] = {'sf146-run40095854988': dict(
+            status='unresolved', reserved_mist=400_000_000, quarantined=1792867383.1161861,
+            resolved=None, digest=None, gas_mist=None, isolated_objects=None,
+            source=dict(run=40095854988, head='c50d39902848278b550717a29cd044e73485afd2',
+                base='b9e8053f4f034ca725686d19870cde6f3f756d63', epoch=1262, checkpoint=398674879))}
+        # Exact gas accounting shape from failed run 42083700951. The retained
+        # 400M hold is additional funding, never refunded into this run's ledger.
+        used = 0
+        for tx, gas in zip(evidence['transactions'], (789579200, 8425378, 1243578)):
+            used += gas
+            tx.update(gas_mist=gas, allowance_used_mist=used)
+        evidence['transactions'][-1]['allowance_used_mist'] = used
+        evidence.update(allowance_used_mist=used, spent_mist=used, max_spend_mist=2_000_000_000)
+        return f, pr, run, evidence, trees
+
+    def test_historical_hold_preserved_while_collecting_stale_source(self):
+        f, pr, run, evidence, trees = self.held_case()
+        before = copy.deepcopy(evidence)
+        failures = copy.deepcopy(c.failed_checks(pr))
+        f.controller.annotate_stale_base(f.project, pr)
+        self.assertTrue(c.verified_stale_base(pr))
+        self.assertEqual(pr['_stale_base_contracts']['held_mist'], 400_000_000)
+        self.assertEqual(pr['_stale_base_contracts']['allowance_used_mist'], 799248156)
+        self.assertEqual(evidence, before)
+        self.assertEqual(c.failed_checks(pr), failures)
+        self.assertIsNotNone(c.checks_blocker(pr))
+        f.gh = Fixture.gh.__get__(f)
+        f.tick()
+        self.assertEqual(f.row()['status'], 'awaiting_ci')
+        self.assertEqual(f.reconciled, [])
+        self.assertIsNotNone(c.checks_blocker(f.controller.candidate(f.project, f.row())))
+
+    def test_hold_routing_rejects_unknown_changed_or_settled_reservations(self):
+        for mode in ('operator', 'name', 'held', 'budget', 'source', 'status', 'resolved',
+                     'digest', 'gas_mist', 'isolated_objects', 'timestamp', 'accounting', 'submitted'):
+            with self.subTest(mode=mode):
+                f, pr, run, evidence, trees = self.held_case()
+                record = evidence['quarantine']['sf146-run40095854988']
+                if mode == 'operator': evidence['operator'] = 'other'
+                if mode == 'name': evidence['quarantine']['other'] = record
+                if mode == 'held': evidence['funding']['held_mist'] -= 1
+                if mode == 'budget': record['reserved_mist'] -= 1
+                if mode == 'source': record['source']['run'] += 1
+                if mode == 'status': record['status'] = 'never_executed'
+                if mode == 'resolved': record['resolved'] = 1792867384
+                if mode == 'digest': record['digest'] = 'unknown'
+                if mode == 'gas_mist': record['gas_mist'] = 0
+                if mode == 'isolated_objects': record['isolated_objects'] = []
+                if mode == 'timestamp': record['quarantined'] = None
+                if mode == 'accounting': evidence['allowance_used_mist'] -= 1
+                if mode == 'submitted': evidence['transactions'][-1]['digest'] = 'unknown'
+                f.controller.annotate_stale_base(f.project, pr)
+                self.assertNotIn('_stale_base_contracts', pr)
+
     def setup_case(self):
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
         f = Fixture(Path(temporary.name))
