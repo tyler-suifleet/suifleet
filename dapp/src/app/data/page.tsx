@@ -1,4 +1,5 @@
 "use client";
+import { ReportingReadiness } from "@/components/ReportingReadiness";
 import { liveArchiveEntries } from "@/lib/stream-retention";
 import { StreamRetentionPanel } from "@/components/StreamRetention";
 
@@ -163,7 +164,7 @@ export default function FleetDataPage() {
   }
   return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device files and logs, verify their contents and choose who can access them." /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
     <StreamRetentionPanel />
-    {!DATA_CONFIG ? <p>Device data reporting is not set up for this fleet. Ask your administrator to finish the setup.</p> : <>
+    {!DATA_CONFIG ? <ReportingReadiness /> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}
       <button className="border rounded p-2 ml-3" disabled={!device || isPending || (role!=='owner' && role!=='support')} onClick={()=>void diagnostics()}>Request diagnostics</button>

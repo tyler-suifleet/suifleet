@@ -288,6 +288,38 @@ def verify_cached_fixture(live, cached, source):
     return origins
 
 
+def select_fixture(live, cache, state, identity, keys_path, save):
+    """Reconcile the previous pair read-only, retaining its complete history."""
+    previous = state.get('active_fixture', identity)
+    if previous == identity:
+        return
+    old = state.get('fixtures', {}).get(previous)
+    if not old or not keys_path.is_file():
+        raise RuntimeError('missing retained native passkey fixture or signing identity')
+    expected = hashlib.sha256(json.dumps(
+        [live.chain, live.operator, old['base'], old['head']]).encode()).hexdigest()
+    if expected != previous:
+        raise RuntimeError('retained native passkey fixture identity mismatch')
+    cached = next((f for f in cache['fixtures'].values()
+                   if f.get('base_package') == old['base']
+                   and f.get('head_package') == old['head']), None)
+    if not cached:
+        raise RuntimeError('previous native passkey package provenance unavailable')
+    built = cached.get('provenance', {}).get('verified_transactions', {})
+    proof = built.get('upgrade' if old['base'] != old['head'] else 'base', {})
+    verify_cached_fixture(live, cached, 'bytecode-v1:' + str(proof.get('digest')))
+    journal = FixtureJournal(live, state, save)
+    journal.retire_legacy_base_probe()
+    journal.recover()  # Unknown or unexpected effects retain the pending identity.
+    state.setdefault('fixture_history', {}).setdefault(previous, []).append(dict(
+        completed=state.get('completed', {}), retired_probes=state.get('retired_probes', [])))
+    state['completed'] = {}
+    state['retired_probes'] = []
+    state['active_fixture'] = identity
+    save()
+    live.evidence['native_previous_fixture_reconciled'] = dict(identity=previous, acceptance=False)
+
+
 def fixture_identity(live, cached):
     return hashlib.sha256(json.dumps([live.chain, live.operator,
         cached['base_package'], cached['head_package']]).encode()).hexdigest()
@@ -335,6 +367,7 @@ def cached_acceptance(live, package_state, private=None):
     identity = fixture_identity(live, cached)
     if state.get('active_fixture', identity) != identity and (state.get('pending') or state.get('completed')):
         raise RuntimeError('unfinished native passkey fixture belongs to another package pair')
+    select_fixture(live, cache, state, identity, private.with_suffix('.keys.json'), save)
     state['active_fixture'] = identity
     f = state.setdefault('fixtures', {}).get(identity)
     keys_path = private.with_suffix('.keys.json')

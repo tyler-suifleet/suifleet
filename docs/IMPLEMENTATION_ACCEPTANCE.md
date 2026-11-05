@@ -14,6 +14,7 @@ merging implementation does not establish them or authorize deployment.
 | Implementation | Deferred integration |
 | SF-141 per-stream retention | Physical device, actual Mainnet, production Seal/provider and manual real-wallet checks remain unrun in SF-031/#32 and SF-087/#159. Move/local upgrade and expiry/reclaim lifecycle, native failure/restart, browser/software authority, normal CI/security/automatic Testnet and independent review remain required. SF-129 must merge before final integration; local evidence is not public epoch-563 prune/rebate acceptance. |
 |---|---|
+| SF-251 evaluation reporting | Physical Pi, actual Mainnet, production-provider and manual real-wallet acceptance remain unrun in SF-031/#32 and SF-087/#159. Retain local compatibility/browser/SDK/build checks, bounded actual public-testnet reporting effects, hosted CI/testnet and independent review. See [verified evaluation evidence](validation/SF251.md). |
 | SF-247 per-fleet reporting setup | Physical Pi, actual Mainnet, production-provider and manual-wallet checks remain unrun in SF-031/#32 and SF-087/#159. Capability/security review, local Move/existing-object upgrades, browser setup/error/retry/download, Rust/OTA, actual bounded dedicated-Testnet native health using generated settings, ordinary CI/testnet and independent review remain implementation gates. See [reporting setup](FLEET_REPORTING_SETUP.md). |
 | SF-082 serverless dApp and fleet data | Final production Seal/provider/domain and manual wallet acceptance, physical target and Mainnet checks remain SF-031/#32 and SF-087/#159. Actual merged SF-083 compatibility, native simulator, isolated-chain upgrade/adversarial tests, reproducible production export, authorized Testnet data/Site effects and verified browser decryption, normal CI/testnet/security and independent review remain implementation gates. |
 | SF-091 fleet recovery and outage rehearsal | Production Seal providers, real IdP/extension-wallet sessions, physical Pi recovery and Mainnet remain unrun in SF-031/#32 and SF-087/#159. Isolated restore/outage/payment-failure drills with the real daemon, read-only Testnet restore/discovery/owner-policy decryption, the actual merged SF-082 integration and rerun, normal CI/testnet and independent review remain implementation gates. |
@@ -206,3 +207,23 @@ provider and actual mainnet acceptance remain in
 [SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62). The explicit
 SF-201 policy entry records this user-authorized ordering without claiming final
 wallet/hardware compatibility or granting production/hardware/mainnet authority.
+
+## Customer-hosting follow-through (SF-253)
+
+Independent public HTTPS website/app/docs publication is now verified; see
+[SF-253 evidence](validation/SF253.md) and [deployment receipts](../hosting/final-deployments.json).
+Owned-domain DNS/ownership/TLS cutover was subsequently verified in
+[SF-256](validation/SF256.md) on the owner’s Cloudflare account. Manual real-wallet screening/signing
+remains in SF-031/#32. No owned-domain success, DNS writes or real-wallet signing
+are inferred from provider-host delivery or a public-account read-only harness.
+Normal software/CI/testnet and independent review gates remain required.
+
+## Owner-controlled Cloudflare migration (SF-256)
+
+Account/zone ownership, three Pages publications, all four custom-domain statuses,
+actual HTTPS/mobile/desktop/media/data access and sealed served-byte/header checks
+are verified in [SF-256](validation/SF256.md). The owner applied DNS manually.
+This completes the prior domain-activation deferral; it does not establish manual
+Slush signing/screening, Pi/Mainnet or production-payment acceptance in #32/#159.
+Protected CI credential/reviewer setup and a full CI release/rollback rehearsal
+remain separate from this explicitly user-authorized machine publication.

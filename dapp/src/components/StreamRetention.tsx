@@ -1,4 +1,5 @@
 "use client";
+import { ReportingReadiness } from './ReportingReadiness';
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
@@ -52,7 +53,7 @@ export function StreamRetentionPanel() {
     } catch { if (current === generation.current) setMessage('Archive extension refused or unavailable. Expired data and archives awaiting renewal cannot be extended here.'); }
   }
   return <section className="border rounded p-4 space-y-3"><h2 className="font-semibold">Per-stream retention</h2>
-    {!DATA_CONFIG?.streamRetentionOrigin ? <p>Retention settings are unavailable until this fleet’s software is upgraded and verified.</p> : <>
+    {!DATA_CONFIG?.streamRetentionOrigin ? !DATA_CONFIG ? <ReportingReadiness /> : <p>This fleet’s reporting version does not support custom retention settings.</p> : <>
       <ul>{ARCHIVE_STREAMS.map((name, i) => <li key={name}>{name}: {loaded ? values[i] === undefined ? 'using the shared storage setting' : 'custom storage period configured (see technical settings)' : 'unavailable'}</li>)}</ul>
       <p>Choose how long to keep each stream’s new data. Changing a setting does not extend existing archives. Exact durations depend on the storage network’s schedule; calendar expiry dates are unavailable here.</p>
       <details><summary>Technical storage settings</summary>

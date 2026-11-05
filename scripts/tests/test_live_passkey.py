@@ -453,3 +453,41 @@ class ProtectedResumeTests(unittest.TestCase):
         enrollment=next(r for r in requests if r['operation']=='enroll')
         self.assertEqual((enrollment['proof'],enrollment['sponsor']),('new-proof',1))
         self.assertEqual([r['key'] for r in requests if r['operation']=='proof'],[0])
+
+class PairTransitionTests(unittest.TestCase):
+    def test_previous_pair_reconciles_without_replay_and_preserves_history(self):
+        import hashlib
+        for outcome in ('success', 'unknown', 'failure', 'missing_keys', 'bad_provenance'):
+            with self.subTest(outcome=outcome), TemporaryDirectory() as directory:
+                live, result = JournalRecoveryTests().live('failure' if outcome == 'failure' else 'success')
+                live.chain, live.operator = 'chain', 'operator'
+                old = dict(base='base', head='head', customer='customer', fleet='fleet')
+                identity = hashlib.sha256(json.dumps(['chain','operator','base','head']).encode()).hexdigest()
+                pending = dict(operation='setup', digest='digest', gas_budget_mist=20_000_000, expect='success')
+                state = dict(active_fixture=identity, fixtures={identity:old}, pending=pending.copy(),
+                             completed={'earlier': {'digest':'earlier'}})
+                cache = dict(fixtures={'old': dict(base_package='base', head_package='head',
+                    provenance=dict(verified_transactions={'upgrade':dict(digest='a'*64)}))})
+                keys = Path(directory)/'state.keys.json'
+                if outcome != 'missing_keys': keys.write_text('retained identity')
+                if outcome == 'unknown': live.read_back.return_value = {}
+                with patch.object(target, 'verify_cached_fixture',
+                        side_effect=RuntimeError('bad provenance') if outcome == 'bad_provenance' else None), \
+                     patch.object(target.tc, 'bound', side_effect=lambda r,d:r):
+                    if outcome == 'success':
+                        target.select_fixture(live, cache, state, 'new-pair', keys, Mock())
+                        self.assertEqual(state['active_fixture'], 'new-pair')
+                        self.assertEqual(state['completed'], {})
+                        history = state['fixture_history'][identity][0]['completed']
+                        self.assertEqual(history['setup'], result)
+                        self.assertIn('earlier', history)
+                        self.assertEqual(live.ledger.used, 20_000_000)
+                        self.assertFalse(live.evidence['native_previous_fixture_reconciled']['acceptance'])
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            target.select_fixture(live, cache, state, 'new-pair', keys, Mock())
+                        self.assertEqual(state['active_fixture'], identity)
+                        self.assertEqual(state['pending'], pending)
+                live.executor.assert_not_called()
+                self.assertEqual(state['fixtures'][identity], old)
+                if keys.exists(): self.assertEqual(keys.read_text(), 'retained identity')

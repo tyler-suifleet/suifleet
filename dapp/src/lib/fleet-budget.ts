@@ -453,6 +453,8 @@ export interface StorageConfig {
   packageId: string;
   /** Original FleetStorage/RecordKey introduction package after upgrades. */
   storageOrigin?: string;
+  /** Verified retention-key origin for an app-wide reporting release. */
+  retentionOrigin?: string;
   walrus: (typeof PINNED_WALRUS)["testnet"];
 }
 
