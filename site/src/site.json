@@ -26,13 +26,13 @@
   ],
   "pages": [
     {"source": "index.html", "path": "/", "title": "SuiFleet: verifiable OTA updates and fleet management", "description": "Deploy software to Linux device fleets with signed release authority, encrypted delivery and tamper-evident update records. No application servers."},
-    {"source": "how-it-works.html", "path": "/how-it-works/", "title": "How it works", "description": "How SuiFleet registers devices, delivers authenticated releases and records device reports without an application server."},
+    {"source": "how-it-works.html", "path": "/how-it-works/", "title": "How it works", "description": "What you need for a first device update, how releases reach devices and what stays under your platform’s control."},
     {"source": "guide.html", "path": "/guide/", "title": "Guide", "description": "Step-by-step walkthrough of the SuiFleet console with written instructions: sign in, fund, register, enroll, publish, deploy and roll out."},
     {"source": "pricing.html", "path": "/pricing/", "title": "Pricing", "description": "Proposed per-device pricing for the SuiFleet platform and managed plans, with network fees included."},
     {"source": "docs.html", "path": "/docs/", "title": "Documentation", "description": "Where to find SuiFleet documentation: operator guides, device client, security model and reference."},
     {"source": "security.html", "path": "/security/", "title": "Security and custody", "description": "Who holds which keys in SuiFleet, what the chain records prove and what remains your platform's responsibility."},
     {"source": "contact.html", "path": "/contact/", "title": "Contact", "description": "Contact SuiFleet about pilots, design partnerships, security reports and support."},
-    {"source": "privacy.html", "path": "/privacy/", "title": "Privacy", "description": "This site sets no cookies and runs no scripts or analytics. What the console and public networks can see."},
+    {"source": "privacy.html", "path": "/privacy/", "title": "Privacy", "description": "How the website, console and public networks handle requests, public management records and private release files."},
     {"source": "404.html", "path": "/404.html", "title": "Page not found", "description": "The page you asked for does not exist."}
   ]
 }
