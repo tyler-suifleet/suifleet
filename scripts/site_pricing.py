@@ -27,8 +27,8 @@ def render(prices, policy, plan_digest):
            '<p class="lead">A subscription for deployment and fleet management, with configurable reporting and storage.</p>',
            '<p class="note"><strong>Proposed prices, not a binding tariff.</strong> The testnet preview is free. '
            'Final terms are set in your order; no complete mainnet bill has been measured. '
-           '<a href="{{repo:docs/BUSINESS_PLAN.md}}">Read the business plan</a>.</p>',
-           '<h2>Platform plan</h2><p>USD per device per month, graduated: each band applies only to the devices in it.</p>',
+           'Contact us to confirm availability and a written quote.</p>',
+           '<h2>Platform plan</h2><p>You can start below the first band’s maximum. Prices are in US dollars per device per month; each band applies only to the devices in that band.</p>',
            '<table><thead><tr><th>Devices</th><th>Per device per month</th></tr></thead><tbody>']
     previous = 0
     for tier in base['tiers']:
@@ -57,9 +57,9 @@ def render(prices, policy, plan_digest):
             '<h2>Included and configurable settings</h2><p>Enrollment, staged rollouts and the dashboard are included. '
             'Live telemetry is outside the base product. Log uploads are off for new fleets; the included archive settings apply when enabled. '
             'Faster checks, health reports, longer retention and encrypted delivery can add cost. '
-            'Settings are chosen per fleet and recorded on chain.</p>',
+            'Settings are chosen per fleet and saved when you approve the change.</p><details><summary>Reporting, storage and optional delivery prices</summary>',
             '<table><thead><tr><th>Setting</th><th>Option</th><th>Added USD per device per month</th></tr></thead><tbody>']
-    labels = dict(checkIntervalMs='Update check', rolloutCheckIntervalMs='Rollout check', healthIntervalMs='On-chain health',
+    labels = dict(checkIntervalMs='Update check', rolloutCheckIntervalMs='Rollout check', healthIntervalMs='Health reports',
                   archiveIntervalMs='Log archives', archiveRetentionDays='Log retention')
     for key, options in prices['settings'].items():
         for option in options:
@@ -67,7 +67,7 @@ def render(prices, policy, plan_digest):
             out.append(f'<tr><td>{labels[key]}</td><td>{label}</td><td>{usd(option["usdPerDeviceMonth"])}</td></tr>')
     for option in prices['addOns'].values():
         out.append(f'<tr><td>Optional add-on</td><td>{html.escape(option["label"])}</td><td>{usd(option["usdPerDeviceMonth"])}</td></tr>')
-    out += ['</tbody></table>', '<h2>Fleet data</h2>',
+    out += ['</tbody></table></details>', '<h2>Fleet data</h2>',
             f'<p>Includes {data["includedBytesPerDeviceMonth"] / 1_000_000:g} MB written per device per month, kept for '
             f'{data["includedRetentionDays"]} days. Additional writes: {usd(data["writeUsdPerGB"])} per GB; '
             f'storage: {usd(data["storageUsdPerGBMonth"])} per GB-month. Logs count as device data. Reading data back has no Walrus egress fee.</p>',
@@ -76,7 +76,7 @@ def render(prices, policy, plan_digest):
             'WAL pays Walrus artifact and device-data writes and retention. Release uploads can also require SUI relay fees. '
             'Volume rates below about $0.07 per device assume customer-funded SUI network costs. '
             'The console shows subscription prices separately from estimated network costs; they are not a second subscription charge. '
-            'Provider services and actual workloads can change the total.</p>',
+            'Provider services and actual workloads can change the total.</p><p><strong>In the current preview:</strong> buying device capacity and adding network funds are separate steps. Saving fleet settings does not deposit money. Do not buy real tokens to use testnet.</p>',
             '<p><a href="{{app:settings/}}">Estimate your fleet settings and network costs in the console</a>. '
             'Deployment-specific price overrides may differ from this public proposal.</p>',
             '<h2>SUI price and renewals</h2>',

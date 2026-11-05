@@ -253,7 +253,7 @@ export default function FirmwarePage() {
 
   return (
     <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
-      <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Upload an artifact, define its lifecycle recipe, and deploy to device groups"} />
+      <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Choose a software file, describe how to install or run it, and select the devices that should receive it."} />
 
       {catalogError && <p role="alert">{catalogError}</p>}
       {catalogVersion && <section aria-label="Published version review" className="rounded border bg-white p-4 space-y-2"><p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p><ol className="text-sm">{catalogVersion.manifests.map((m, i) => <li key={i}>{i + 1}. {m.os}/{m.arch}<ReleaseRecipeStorage recipeBlobId={m.recipeBlobId} recipeSha256={m.recipeSha256} /></li>)}</ol><p className="text-sm text-gray-500">Review targets below before submitting. Deployment requests delivery; installed and running state require device reports.</p><Link href="/components" className="text-sm text-blue-600">Back to software library</Link></section>}

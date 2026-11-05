@@ -1,33 +1,40 @@
 <div class="page">
 <h1>How it works</h1>
-<p class="lead">SuiFleet is three parts: a static web console, a client daemon on each device, and smart contracts on the Sui network. Release artifacts live on Walrus decentralized storage. None of them requires a SuiFleet-operated server.</p>
+<p class="lead">Choose the software your devices should run, send an update to the right devices, and check each result. Your team uses a web console; a small SuiFleet client on each device checks for updates and reports what happened.</p>
 
-<h2>The pieces</h2>
-<table>
-<thead><tr><th>Part</th><th>What it does</th><th>Where it runs</th></tr></thead>
-<tbody>
-<tr><td>Console</td><td>Sign in, register devices, publish versions, deploy, watch results and health.</td><td>Your browser, served as static files from <a href="{{app_url}}">app.suifleet.io</a>.</td></tr>
-<tr><td>Contracts</td><td>Hold devices, groups, deployments, permissions and the record of every report. Enforce who may do what.</td><td>Sui (Move packages).</td></tr>
-<tr><td>Storage</td><td>Holds release artifacts, recipes and encrypted device log archives.</td><td>Walrus, with Seal threshold encryption.</td></tr>
-<tr><td>Device client</td><td>Holds the device's own signing key, watches for deployments, verifies and applies them, reports signed results and health.</td><td>Each Linux device (systemd service).</td></tr>
-</tbody>
-</table>
+<h2>What you need for a first update</h2>
+<ul>
+<li><strong>A device and an installer.</strong> Install the SuiFleet client on a supported platform. Your platform supplies the commands that install and run your application or system update.</li>
+<li><strong>An account approval app.</strong> A wallet such as Slush is the app you use to sign in and approve changes. You do not need to manage the underlying contracts to use the console.</li>
+<li><strong>Device capacity and network funds.</strong> Your account needs room for the device, and network activity needs funds. These are separate: adding funds does not increase your device limit. The public preview uses test tokens, not real-money payments.</li>
+<li><strong>A software release to try.</strong> Start with a non-sensitive test application and one device before using groups or a wider rollout.</li>
+</ul>
 
-<h2>A release, end to end</h2>
+<h2>From registration to a running release</h2>
 <ol class="steps-flow">
-<li><strong>Register.</strong> The device generates its own key on first boot and prints its address. You register that address in the console, which creates a Device record and a capability bound to it. For volume, a batch enrollment lets devices claim their own records with a one-time code.</li>
-<li><strong>Publish.</strong> In the console you upload the artifact and a recipe describing how to apply it. The browser encrypts both, stores them on Walrus and records their digests on chain.</li>
-<li><strong>Deploy.</strong> A deployment names the version and its targets: single devices or groups. The transaction is signed by your wallet, so the target list and the release authority are on the public record.</li>
-<li><strong>Apply.</strong> Each targeted device sees the deployment, checks its own membership, downloads and decrypts the artifact, verifies its digest and runs your configured install command.</li>
-<li><strong>Report.</strong> The device signs and submits its result. The console reads results and health directly from the chain and verifies the signatures in your browser.</li>
+<li><strong>Connect the device.</strong> The client creates the device's own identity. Register its public address and give it a recognizable name. For manufacturing batches, reserve names and serial numbers and give each device its own single-use enrollment credential.</li>
+<li><strong>Prepare a version.</strong> Choose a component name, version, target platform, software file and installation instructions. Publishing adds the version to your library; it does not install it anywhere.</li>
+<li><strong>Choose who can read it.</strong> Use confidential delivery for proprietary software and create an access policy before publishing. Public examples are readable by anyone. A policy controls access to private files; deployment permissions control who may send an update.</li>
+<li><strong>Send the update.</strong> Select a device or group and approve the deployment. Start with a pilot group and use a staged rollout when you want to observe results before admitting more devices.</li>
+<li><strong>Check the result.</strong> A deployment-created message confirms the request, not installation on every device. Follow each device's result, running version and available diagnostics. Health is the latest reported state, not a live connection test.</li>
 </ol>
 
-<h2>What SuiFleet does not do</h2>
-<ul>
-<li>It does not install operating systems, choose partitions or reboot devices. Your platform tools own that, and SuiFleet runs the commands you configure.</li>
-<li>A signed report proves which device identity sent it, not that the hardware booted correctly or is uncompromised.</li>
-<li>Live telemetry pipelines are not part of the product. Devices publish bounded signed health on chain and encrypted logs to Walrus; you can keep any existing telemetry pipeline.</li>
-</ul>
-<p>Details: <a href="{{repo:docs/SERVERLESS_PRODUCT.md}}">operating without application servers</a>, <a href="{{repo:docs/MOVE_NATIVE_MODEL.md}}">the on-chain model</a> and <a href="{{repo:docs/STAGED_ROLLOUTS.md}}">staged rollouts</a>.</p>
-<p><a class="button primary" href="/guide/">Walk through the console</a></p>
+<h2>Your platform stays in control</h2>
+<p>SuiFleet can deliver application or system-update files and invoke your configured installer, including tools such as SWUpdate or RAUC. Your platform decides how partitions, reboot, boot confirmation and rollback work. SuiFleet does not infer those choices for you.</p>
+<p>A verified report identifies the device that sent it. It does not prove that the hardware is uncompromised or that every part of an operating-system update succeeded. Continuous telemetry can continue through your existing tools.</p>
+
+<details><summary>What runs behind the console?</summary>
+<table>
+<thead><tr><th>Part</th><th>Purpose</th><th>Where it runs</th></tr></thead>
+<tbody>
+<tr><td>Web console</td><td>Register devices, prepare releases, control access and review results.</td><td>Your browser. The site serves static files.</td></tr>
+<tr><td>Device client</td><td>Verify releases, invoke your installer and send device-authenticated reports.</td><td>Each supported device. Installation and service setup depend on the platform.</td></tr>
+<tr><td>Sui network</td><td>Record permissions, deployments and device reports. Network transactions require approval and fees.</td><td>Public network providers; SuiFleet does not operate a fleet application server.</td></tr>
+<tr><td>Walrus storage and Seal</td><td>Store release files and device archives; control decryption of confidential content.</td><td>Storage and key-service providers. Storage has a retention period and may need renewal.</td></tr>
+</tbody>
+</table>
+<p>These services still need internet access, funding and suitable providers. “No SuiFleet application server” does not mean there are no external services or operating costs.</p>
+<p>Technical references: <a href="{{repo:docs/SERVERLESS_PRODUCT.md}}">service dependencies</a>, <a href="{{repo:docs/MOVE_NATIVE_MODEL.md}}">permission model</a> and <a href="{{repo:docs/STAGED_ROLLOUTS.md}}">staged rollout behavior</a>.</p>
+</details>
+<p><a class="button primary" href="/guide/">Follow the first-device guide</a> <a href="{{repo:docs/INSTALL_DEVICE_CLIENT.md}}">Check client installation requirements</a></p>
 </div>

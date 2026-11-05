@@ -122,11 +122,11 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
           await main.getByRole('heading',{name:'Sign in to continue',exact:true}).waitFor();
           assert.equal((await page.locator('h1').textContent()).trim(),(await current.textContent()).trim(),`${route}: prompt titled for the page`);
           assert.ok((await main.locator('header p').textContent()).trim().length>20,`${route}: one-line page description`);
-          assert.doesNotMatch(await main.textContent(),/this account|this wallet|fleet configuration|unavailable|not loaded|Connect a wallet|Select or create a fleet/i,`${route}: no account or configuration wording while signed out`);
+          assert.doesNotMatch(await main.textContent(),/this account|this wallet|fleet configuration|unavailable|not loaded|Connect a wallet|Choose a fleet to continue/i,`${route}: no account or configuration wording while signed out`);
         } else {
           // Get started is the sign-in flow itself, even when fleets need a selection.
           await page.locator('main').getByRole('heading',{name:'Sign in or connect'}).waitFor();
-          assert.doesNotMatch(await page.locator('main').textContent(),/Select or create a fleet/,`${route}: sign-in step is not hidden behind fleet selection`);
+          assert.doesNotMatch(await page.locator('main').textContent(),/Choose a fleet to continue/,`${route}: sign-in step is not hidden behind fleet selection`);
         }
       }
       await page.goto(base+'/fixture/',{waitUntil:'networkidle'});

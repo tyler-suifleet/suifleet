@@ -84,7 +84,7 @@ for (const variant of ['address', 'enroll']) {
   for (const section of ['yocto', 'macos', 'linux', 'debian', 'manifest']) assert.ok(hrefs.includes(guideUrl(section)), `${variant}: no ${section} link`);
   for (const href of hrefs) docPath(href);
   assert.ok(html.includes('Install the device client'));
-  assert.ok(html.includes('Download deployment.json'));
+  assert.ok(html.includes('Download connection settings'));
   assert.match(html, /rel="noopener noreferrer"/);
   assert.ok(hrefs.includes(guideUrl('signer')) && html.includes('/etc/suifleet/signer.toml'), `${variant}: no signer.toml step`);
   if (variant === 'address') {
@@ -95,7 +95,7 @@ for (const variant of ['address', 'enroll']) {
     assert.ok(hrefs.includes(guideUrl('enroll')));
   }
 }
-assert.ok(!render(undefined, 'address').includes('Download deployment.json'), 'an unconfigured build offers no manifest');
+assert.ok(!render(undefined, 'address').includes('Download connection settings'), 'an unconfigured build offers no manifest');
 console.log('PASS: Get started, Devices and Enrollment render guide links, address/enroll commands and the manifest download');
 
 async function online() {

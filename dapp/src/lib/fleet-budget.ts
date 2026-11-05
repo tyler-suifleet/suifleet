@@ -458,8 +458,8 @@ export interface StorageConfig {
 
 /** Storage support for this build: only where a pinned, verified Walrus build exists. */
 export function storageConfig(network = MANIFEST?.network, packageId = process.env.NEXT_PUBLIC_FLEET_STORAGE_PACKAGE): { config?: StorageConfig; reason?: string } {
-  if (!packageId) return { reason: "Prepaid Walrus storage is not configured for this build (no fleet_storage package)." };
-  if (!/^0x[0-9a-fA-F]{1,64}$/.test(packageId)) return { reason: "The configured fleet_storage package ID is invalid." };
+  if (!packageId) return { reason: "Storage funding is not enabled in this workspace. Ask your service administrator to finish the storage setup." };
+  if (!/^0x[0-9a-fA-F]{1,64}$/.test(packageId)) return { reason: "Storage funding is unavailable because this workspace’s storage configuration is invalid." };
   if (network !== "testnet") return { reason: `Prepaid Walrus storage is built only against the pinned Walrus Testnet contracts; none is verified for ${network ?? "this network"}.` };
   return { config: { packageId: normalizeSuiAddress(packageId), storageOrigin: process.env.NEXT_PUBLIC_FLEET_STORAGE_ORIGIN || normalizeSuiAddress(packageId), walrus: PINNED_WALRUS.testnet } };
 }
