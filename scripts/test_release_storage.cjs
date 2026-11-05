@@ -8,11 +8,33 @@ assert.equal(periodEpochs(1.1, schedule), 2);
 assert.equal(periodEpochs(15, { ...schedule, epochDurationMs: 14 * DAY }), 2);
 for (const days of [0, -1, NaN, Infinity, 54]) assert.throws(() => periodEpochs(days, schedule));
 for (const maxEpochs of [NaN, 0, Infinity]) assert.throws(() => periodEpochs(1, { ...schedule, maxEpochs }));
-assert.equal(expiryTime(15, schedule), 15 * DAY);
-assert.match(expiryWarning(10 * DAY, 10 * DAY), /expired/);
-assert.match(expiryWarning(17 * DAY, 10 * DAY), /within 7 days/);
-assert.equal(expiryWarning(18 * DAY, 10 * DAY), undefined);
+// Historic genesis plus today's duration is not a trustworthy calendar anchor.
+assert.equal(expiryTime(15, schedule), undefined);
+assert.equal(expiryTime(15, {...schedule, currentEpochStartMs:100*DAY}), 105*DAY);
+assert.equal(expiryTime(15, {...schedule, currentEpochStartMs:NaN}), undefined);
+assert.match(expiryWarning(10, schedule), /expired/);
+assert.match(expiryWarning(17, schedule), /within 7 days/);
+assert.equal(expiryWarning(19, schedule), undefined);
 assert.match(expiryWarning(undefined), /unknown/);
+const {storageRemaining} = load('lib/release-storage.ts');
+assert.match(storageRemaining(577,{...schedule,epoch:572}), /4–5 days remaining/);
+assert.equal(expiryTime(577,{...schedule,epoch:572,firstEpochStartMs:1743692414626}), undefined);
+assert.equal(storageRemaining(572,{...schedule,epoch:572}), 'Expired');
+// The retention table must use authoritative runway even when historic timing
+// would place a still-live blob's expiry before the observation date.
+const observed = Date.parse('2026-11-04T00:00:00Z');
+assert.ok(1743692414626 + 577 * DAY < observed);
+assert.match(storageRemaining(577, {epoch:572, epochDurationMs:DAY}), /4–5 days remaining/);
+assert.equal(storageRemaining(577, undefined), undefined);
+const retentionUi = require('node:fs').readFileSync(require('node:path').join(__dirname, '../dapp/src/components/FleetBudget.tsx'), 'utf8');
+assert.match(retentionUi, /storageRemaining\(item.end,/);
+assert.doesNotMatch(retentionUi.slice(retentionUi.indexOf('function RetentionPanel(')), /new Date\(|Projected exclusive expiry/);
+
+assert.match(storageRemaining(15,{...schedule,epochDurationMs:2*DAY}), /8–10 days/);
+assert.match(storageRemaining(11,{...schedule,epochDurationMs:3600000}), /0–1 hours/);
+for (const invalid of [NaN,Infinity,-1,1.5]) assert.equal(storageRemaining(invalid,schedule),undefined);
+assert.equal(storageRemaining(Number.MAX_SAFE_INTEGER,schedule),undefined);
+assert.equal(storageRemaining(15,{...schedule,epochDurationMs:0}),undefined);
 const target = { config: { packageId: '0xa', walrus: { system: '0xb' } }, storageId: '0xc', budgetId: '0xd', capId: '0xe' };
 (async () => {
   const api = { movePackageService: { getDatatype: async () => ({ response: { datatype: { definingId: '0x99' } } }) } };

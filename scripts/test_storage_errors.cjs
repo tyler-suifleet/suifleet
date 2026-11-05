@@ -135,7 +135,7 @@ assert.doesNotMatch(settingsSource, /\$\{(?:walrusError|gasError)\}/, 'price rea
 // Exercise each read-error branch of the publish-period hook with raw internals.
 for (const failed of ['fleet', 'release-schedule', 'release-defaults', 'release-price']) {
   const periodLoad = loader({
-    react: { useState: () => [undefined, () => {}] },
+    react: { useState: () => [undefined, () => {}], useRef: value => ({current:value}) },
     '@/hooks/useCurrentAccount': { useCurrentAccount: () => undefined },
     '@mysten/dapp-kit-react': { useCurrentClient: () => ({}) },
     './useFleetStorage': {
@@ -143,7 +143,7 @@ for (const failed of ['fleet', 'release-schedule', 'release-defaults', 'release-
       useFleetBlobStore: () => ({}),
     },
     './useFleetTransaction': { useFleetTransaction: () => ({}) },
-    '@tanstack/react-query': { useQuery: ({ queryKey }) => ({
+    '@tanstack/react-query': { useQueryClient: () => ({refetchQueries:async()=>{}}), useQuery: ({ queryKey }) => ({
       data: queryKey[0] === 'release-schedule' ? { epoch: 10, epochDurationMs: 86400000, firstEpochStartMs: 1, maxEpochs: 365 } : undefined,
       error: queryKey[0] === failed ? raw : undefined,
     }) },
