@@ -4725,6 +4725,53 @@
         "Storage/presentation/browser/typecheck/build tests cover unavailable/recovered reads, misleading historic timing, expired epochs and prepaid longer coverage."
       ],
       "validation": "Delayed/recovered phone browser checks, quote/expiry invariants and typed read-only live facts; no mainnet/hardware/provider credentials."
+    },
+    {
+      "key": "SF-244",
+      "title": "Audit and improve the complete customer-facing site, console and guide",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "dapp/src",
+        "docs"
+      ],
+      "resources": [],
+      "description": "User requests a prospective-customer deep dive across the full landing website, application and narrated guides, assuming no blockchain knowledge and limited Greengrass knowledge. Evaluate the actual journey, plain-language explanations, feature/cost/security claims, prerequisites, task sequence and consistency between current main, previews and recordings; fix clear copy gaps and track larger proven issues.",
+      "evidence": "User request 2026-11-04. Current app preview still identifies source0880dbb7 and landing mixes d45a4e96 layout with9b0f5ee1 media, while main has later billing and other features. Audit must distinguish stale previews and historic demo footage from current implementation rather than implying latest UI was exercised.",
+      "acceptance": [
+        "Visit every landing page and current application route in desktop and mobile customer journeys, including logged-out/onboarding and safe populated/read-only states. Record exact scope, sources, observations and limitations; never claim real wallet/hardware actions that did not run.",
+        "Review all nine guide videos, their spoken scripts and visual sequencing for purpose, prerequisites, correct terminology, action/result distinctions and consistency with current UI. Identify obsolete footage, missing explanations and misleading claims.",
+        "Produce an itemized customer-readiness audit with page/flow-specific evidence, severity, fixes and remaining gaps. Improve clear customer-facing copy and navigation without changing authority/payment/security behavior or inventing production readiness.",
+        "Run meaningful presentation/content regressions, typecheck and production builds for changed UI. Refresh local previews from verified current source and preserve narrated videos; keep genuine wallet/hardware/production acceptance and product decisions explicit."
+      ],
+      "validation": "Browser walkthrough and screenshots/text extraction across all routes at desktop/mobile, guide playback/transcript review, factual checks against current code/configuration and pricing documents, frontend typecheck/build and relevant site/presentation tests. No customer-wallet, mainnet, physical or provider-account writes."
+    },
+    {
+      "key": "SF-245",
+      "title": "Refresh narrated customer walkthroughs and add synchronized captions",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site/guide",
+        "site/media/guide",
+        "site/build.py",
+        "site/tests"
+      ],
+      "resources": [],
+      "description": "Customer audit SF-244 found that all nine narrated clips use older console source 79675b48. Their narration is coherent, but the current UI has newer capacity/billing prerequisites and changed labels. The guide now discloses the older demo layout; that does not replace fresh recordings.\n\nAcceptance:\n- Record the current console through the basic one-device journey: connect/select fleet, obtain device capacity, fund network costs, register, publish, deploy and inspect a verified result.\n- Keep bulk enrollment, private access and staged rollouts explicitly optional; show their actual prerequisites.\n- Keep female narration explaining why and how, visible cursor/click emphasis, accurate action/result sequencing, and a source revision per recording.\n- Add native English WebVTT captions for the complete narration, matching the final encoded timing, with keyboard/mobile playback checks.\n- Use a scripted disposable test wallet where necessary and label it; do not present it as real Slush, Pi or production-payment acceptance.\n- Verify the viewport-fitted written guide, full audio/video decoding, captions and media digests. No production credentials, mainnet or hardware programming are authorized by this ticket.\n\nEvidence: docs/CUSTOMER_EXPERIENCE_AUDIT.md in SF-244; full local ASR of all nine clips matched scripts 98\u2013100%, but representative frames show older UI and no capacity/checkout walkthrough.\n",
+      "evidence": "SF-244 customer audit, current UI54ac232d versus recording79675b48.",
+      "acceptance": [
+        "Fresh current-UI narrated one-device journey includes capacity and funding prerequisites, with optional advanced paths clearly identified.",
+        "Native English captions match full narration and encoded timing; cursor emphasis, source provenance, viewport/navigation/media checks pass."
+      ],
+      "validation": "Offline script/timing/media checks and desktop/mobile guide playback; public testnet recording with dedicated authorized account only when needed."
     }
   ]
 }

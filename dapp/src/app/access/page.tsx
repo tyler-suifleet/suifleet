@@ -41,12 +41,11 @@ export default function AccessPage() {
     <div className="max-w-3xl space-y-6">
       <PageHeader title="Access policies" subtitle="Choose which devices and accounts can open private software releases. This does not give them permission to publish updates or manage your fleet." />
       <InfoCard title="Control who can open private software"><p>
-        Grants and revocations are signed transactions; recipients use their own keys. Revocation stops future key
-        release once key servers observe it, but cannot recall keys or plaintext already obtained, clear cached keys, or uninstall delivered software. Replacing the encryption key blocks new access to earlier releases. Encrypt and deploy replacement copies of any software devices still need.
+        Approve a policy change to give or remove access to private files. Once the access services receive the change, they stop issuing new keys to open the protected files. It cannot erase a file or key someone already received, or uninstall software. If access must change for existing software, publish and deploy a newly encrypted copy.
       </p></InfoCard>
       <ol className="list-decimal pl-5 text-sm space-y-1">
         <li>Name a policy for the releases you want to protect.</li>
-        <li>Grant decryption to activated devices, groups you administer, or an account.</li>
+        <li>Give access to activated devices, groups you administer, or an account.</li>
         <li>Choose this policy when uploading a confidential release in <Link className="text-blue-700 underline" href="/firmware">Deploy component</Link>.</li>
       </ol>
       {!POLICIES_ENABLED && <section role="status" className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 shadow-sm">
