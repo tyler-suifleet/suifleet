@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -38,6 +39,8 @@ import deployment_manifest as dm  # noqa: E402
 from live_common import DAEMON, Live, Spent, Walrus, pending_key, plain  # noqa: E402
 from live_package_upgrade import contracts_digest, load_state  # noqa: E402
 from live_wallet_gate import head_fixture  # noqa: E402
+
+DAEMON = Path(os.environ.get("SUIFLEET_GUIDE_DAEMON", str(DAEMON)))
 
 FUNDING = 220_000_000  # Target browser balance; existing gas is charged too.
 ENTITLEMENT = ("20", "50000000", "1")  # devices, upload bytes, period
@@ -59,7 +62,7 @@ def assert_lease():
 def node(runtime, phase, manifest_file, seed_file, env_extra):
     env = {**os.environ, "GUIDE_MANIFEST_FILE": str(manifest_file), "GUIDE_SEED_FILE": str(seed_file),
            "GUIDE_EXPORT": str(ROOT / "dapp" / "out"), "GUIDE_OUT": str(runtime), "GUIDE_PHASE": phase,
-           "GUIDE_STATE": str(runtime / "browser-state.json"), "GUIDE_VERSION": "1.0.0-guide.r" + hashlib.sha256(str(runtime).encode()).hexdigest()[:12], **env_extra}
+           "GUIDE_STATE": str(runtime / "browser-state.json"), "GUIDE_DEVICE_NAME": "guide-linux-" + hashlib.sha256(str(runtime).encode()).hexdigest()[:6], "GUIDE_VERSION": "1.0.0-guide.r" + hashlib.sha256(str(runtime).encode()).hexdigest()[:12], **env_extra}
     result = subprocess.run(["node", str(ROOT / "site/guide/record_guide.cjs")], env=env, text=True, timeout=3600)
     evidence = json.loads((runtime / f"evidence-{phase}.json").read_text())
     return result.returncode, evidence
@@ -71,11 +74,62 @@ def created(live, digest, suffix):
     return [c["objectId"] for c in found.get("objectChanges", []) if c["type"] == "created" and c["objectType"].endswith(suffix)]
 
 
-def build_console(manifest):
+def run_recorded_device(live, runtime, manifest_file, device_key, device_id, cap_id, deployment_id, persist):
+    """A disposable Linux client, not physical-Pi acceptance. Funding is bounded."""
+    binary = Path(os.environ.get("SUIFLEET_GUIDE_DAEMON", str(DAEMON)))
+    if not binary.is_file():
+        raise RuntimeError("build the current daemon before recording its result")
+    address = subprocess.check_output([str(binary), "--derive-address", str(device_key)], text=True).strip()
+    previous = live.evidence.get("recorded_device")
+    if previous:
+        if previous.get("deployment") != deployment_id or not previous.get("funding_digest"):
+            raise RuntimeError("reconcile prior device funding before another attempt")
+        if live.executed(previous["funding_digest"])["effects"]["status"]["status"] != "success":
+            raise RuntimeError("device funding outcome is not verified")
+    else:
+        live.evidence["recorded_device"] = {"device": device_id, "address": address, "deployment": deployment_id, "funding_mist": 50_000_000}
+        persist()
+        result = live.transaction("fund the disposable recorded Linux device", "--split-coins", "gas", "[50000000]", "--assign", "funds", "--transfer-objects", "[funds.0]", "@" + address, budget=10_000_000, funding=50_000_000)
+        live.evidence["recorded_device"]["funding_digest"] = result["digest"]
+        persist()
+    config = runtime / "device-config.toml"
+    config.write_text('[sui]\nmanifest_path = ' + json.dumps(str(manifest_file)) + '\n[device]\nkeypair_path = ' + json.dumps(str(device_key))
+        + '\ndevice_object_id = ' + json.dumps(device_id) + '\ndevice_cap_id = ' + json.dumps(cap_id)
+        + '\n[apply]\ncommand = "/bin/sh"\ntimeout_seconds = 30\nallow_recipe_commands = true\n'
+        + '[runtime]\nstate_dir = ' + json.dumps(str(runtime / "device-state")) + '\npoll_seconds = 86400\nevent_discovery_seconds = 1\nreplay_history = true\n')
+    config.chmod(0o600)
+    with (runtime / "device.log").open("w") as output:
+        process = subprocess.Popen([str(binary)], env={"PATH": os.environ["PATH"], "HOME": str(runtime / "device-home"), "EDGE_CONFIG": str(config)}, stdout=output, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                live.assert_lock()
+                if live.receipts(deployment_id).get(dm.object_id(device_id)) == 1:
+                    live.evidence["recorded_device"].update(applied=True, remaining_balance_mist=live.balance(address))
+                    persist(); return
+                if process.poll() is not None:
+                    raise RuntimeError("recorded device exited before a verified apply; inspect its private log")
+                time.sleep(3)
+            raise RuntimeError("recorded device has no verified Applied receipt; do not narrate success")
+        finally:
+            process.terminate()
+            try: process.wait(timeout=15)
+            except subprocess.TimeoutExpired: process.kill(); process.wait()
+
+
+def build_console(manifest, profile=None):
     """The console export the screencasts show, built for this manifest."""
     env = {**os.environ, "NEXT_TELEMETRY_DISABLED": "1", "NEXT_PUBLIC_DEPLOYMENT_MANIFEST": json.dumps(manifest)}
     for name in [k for k in env if k.startswith("NEXT_PUBLIC_") and k != "NEXT_PUBLIC_DEPLOYMENT_MANIFEST"]:
         del env[name]  # Only the manifest: no Google, Seal or fleet-data overrides from the host.
+    if profile:
+        for line in (Path(profile) / "frontend.env").read_text().splitlines():
+            if line and not line.startswith("#"):
+                name, value = line.split("=", 1)
+                if not name.startswith("NEXT_PUBLIC_"):
+                    raise RuntimeError("recording profile contains a non-public environment setting")
+                env[name] = shlex.split(value)[0]
+        env["NEXT_PUBLIC_DEPLOYMENT_MANIFEST"] = json.dumps(manifest)
     subprocess.run([str(ROOT / "dapp/node_modules/.bin/next"), "build"], cwd=ROOT / "dapp", env=env, check=True,
                    stdout=subprocess.DEVNULL)
 
@@ -139,14 +193,23 @@ def run(args):
         live.ledger.evidence = prior["transactions"]
         live.ledger.used = used
         live.start_balance = prior["start_balance_mist"]
-    state = load_state(Path(args.state) if args.state else live.wallet.parent / "live-state.json", live.chain, live.operator)
-    fixture = head_fixture(state, contracts_digest(ROOT / "contracts"))
-    if not fixture or not fixture.get("owner_cap"):
-        sys.exit("no activated package-upgrade fixture for these contracts; run make live-gate-package-upgrade first")
     walrus = Walrus("testnet")
-    manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url, package=fixture["head_package"],
-                                          upgrade_cap=fixture["upgrade_cap"], registry=fixture["registry"], network="testnet",
-                                          publisher=walrus.publisher if args.check else walrus.working_publisher(), aggregator=walrus.aggregator))
+    if getattr(args, "profile", None):
+        manifest = json.loads((Path(args.profile) / "deployment.json").read_text())
+        dm.verify(manifest)
+        if manifest["network"] != "testnet" or manifest["chain_identifier"] != live.chain:
+            raise RuntimeError("recording profile is not this testnet")
+        fixture = {"head_package": manifest["call_package_id"], "upgrade_cap": manifest["upgrade_cap_id"], "registry": manifest["shared_objects"]["registry"]["id"]}
+        if not args.check:
+            manifest["walrus"]["publisher_url"] = walrus.working_publisher()
+    else:
+        state = load_state(Path(args.state) if args.state else live.wallet.parent / "live-state.json", live.chain, live.operator)
+        fixture = head_fixture(state, contracts_digest(ROOT / "contracts"))
+        if not fixture or not fixture.get("owner_cap"):
+            sys.exit("no activated package-upgrade fixture for these contracts; run make live-gate-package-upgrade first or select a verified owned --profile")
+        manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url, package=fixture["head_package"],
+                                              upgrade_cap=fixture["upgrade_cap"], registry=fixture["registry"], network="testnet",
+                                              publisher=walrus.publisher if args.check else walrus.working_publisher(), aggregator=walrus.aggregator))
     dm.verify(manifest)
     facts = dm.chain_facts(live.rpc_url, fixture["upgrade_cap"])
     if dm.upgrade_cap(facts["objects"][fixture["upgrade_cap"]])[2] != live.operator:
@@ -175,11 +238,11 @@ def run(args):
         raise RuntimeError("console has uncommitted changes; commit the chosen build before recording")
     if any(p.is_file() and not p.name.endswith((".example", ".sample")) for p in (ROOT / "dapp").glob(".env*")):
         raise RuntimeError("local Next.js env files can override reproducible configuration")
-    build_console(manifest)
+    build_console(manifest, getattr(args, "profile", None))
     package, registry = fixture["head_package"], fixture["registry"]
 
-    pending = live.wallet.parent / "guide-recorder-key.hex"
-    demo_path = live.wallet.parent / "guide-recorder-demo.json"
+    pending = runtime / "guide-recorder-key.hex" if getattr(args, "fresh_customer", False) else live.wallet.parent / "guide-recorder-key.hex"
+    demo_path = runtime / "guide-recorder-demo.json" if getattr(args, "fresh_customer", False) else live.wallet.parent / "guide-recorder-demo.json"
     demo = json.loads(demo_path.read_text()) if demo_path.exists() else {}
     if pending.exists():
         if not demo or demo.get("chain") != live.chain or demo.get("package") != package:
@@ -254,17 +317,14 @@ def run(args):
         assert len(customers) == 1, f"expected one new Customer, found {customers}"
         demo["customer"] = customers[0]
         demo_path.write_text(json.dumps(demo))
-        if not resume:
-            live.transaction("grant the guide customer its entitlement", "--move-call", f"{package}::customer::set_entitlement",
-                             f"@{customers[0]}", f"@{registry}", *ENTITLEMENT, budget=20_000_000)
         live.check(f"verified customer {customers[0]}; {'reused' if not sign_in['transactions'] else 'created in this recording'}")
 
-        rest_steps = ["fund", "register-device", "enroll-batch", "publish-version", "deploy-group", "access-policy", "fleet-settings"]
+        rest_steps = ["capacity-plan", "fund", "register-device", "enroll-batch", "publish-version", "deploy-group", "access-policy", "fleet-settings"]
         remaining = [s for s in rest_steps if not (runtime / "frames" / s / "frames.json").exists()] if resume else rest_steps
         resume_phase = "resume-rest-" + str(len(list(runtime.glob("evidence-resume-rest*.json"))) + 1)
         if remaining:
             code, rest = node(runtime, resume_phase if resume else "rest", manifest_file, seed_file,
-                              {"GUIDE_DEVICES": json.dumps([device_address]), "GUIDE_FRESH_DEVICE": "1" if fresh_device else "0", "GUIDE_DEVICE_NAME": "guide-pi-" + hashlib.sha256(str(runtime).encode()).hexdigest()[:6] if fresh_device else "guide-pi-001", "GUIDE_DEMO_POLICY": demo.get("policy", ""), "GUIDE_DEMO_GROUP": demo.get("group", ""), "GUIDE_ACCESS_POLICY": demo.get("access_policy", ""), "GUIDE_STEPS": ",".join(remaining)})
+                              {"GUIDE_DEVICES": json.dumps([device_address]), "GUIDE_FRESH_DEVICE": "1" if fresh_device else "0", "GUIDE_DEVICE_NAME": "guide-linux-" + hashlib.sha256(str(runtime).encode()).hexdigest()[:6] if fresh_device else "guide-linux-001", "GUIDE_DEMO_POLICY": demo.get("policy", ""), "GUIDE_DEMO_GROUP": demo.get("group", ""), "GUIDE_ACCESS_POLICY": demo.get("access_policy", ""), "GUIDE_STEPS": ",".join(remaining)})
         else:
             code, rest = 0, {"transactions": []}
         browser["phases"].append(rest)
@@ -280,6 +340,15 @@ def run(args):
         assert len(devices) == 1 and len(versions) == 1, (devices, versions)
         demo["device"] = devices[0]
         demo_path.write_text(json.dumps(demo))
+        device_caps = created(live, by_step["register-device"][-1], "::device_cap::DeviceCap")
+        deployments = created(live, by_step["deploy-group"][-1], "::deployment_manager::DeploymentRecord")
+        if len(device_caps) != 1 or len(deployments) != 1:
+            raise RuntimeError("expected one device capability and one demonstrated deployment")
+        run_recorded_device(live, runtime, manifest_file, device_key, devices[0], device_caps[0], deployments[0], persist)
+        code, result_view = node(runtime, "device-result", manifest_file, seed_file,
+            {"GUIDE_STEPS": "deploy-group", "GUIDE_APPEND_STEP": "deploy-group", "GUIDE_RESULT_ONLY": "1"})
+        browser["phases"].append(result_view)
+        assert code == 0, "verified device result was not captured in the console"
         fields = plain(live.object(versions[0])["content"])
         extra = {"recipe": fields["recipe_blob_ids"][0], "recipeSha256": fields["recipe_sha256s"][0],
                  "artifactSha256": fields["artifact_sha256s"][0], "cohorts": [devices[0]]}
@@ -337,6 +406,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--wallet", required=True, help="client.yaml of the dedicated testnet wallet")
     parser.add_argument("--runtime-dir", required=True, help="private directory for the manifest, frames and evidence")
+    parser.add_argument("--profile", type=Path, help="Explicit verified existing testnet deployment; does not fabricate an upgrade fixture")
+    parser.add_argument("--fresh-customer", action="store_true", help="Use a new private recording identity and customer; existing recordings remain unchanged")
     parser.add_argument("--state", help="package-upgrade fixture cache (default: live-state.json beside the wallet)")
     parser.add_argument("--max-spend-mist", type=int, default=250_000_000)
     parser.add_argument("--faucet", action="store_true", help="request testnet SUI once if the balance is below the allowance")

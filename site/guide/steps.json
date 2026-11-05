@@ -26,6 +26,31 @@
       ]
     },
     {
+      "id": "capacity-plan",
+      "title": "Enable device capacity",
+      "console_route": "billing/",
+      "console_label": "Plans and billing",
+      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the fleet budget for device activity. Check capacity before depositing operating funds. This preview uses a disposable test tariff and free test tokens, not real purchases.",
+      "before": [
+        "Connect and choose your fleet.",
+        "Obtain free test SUI for approvals. An organization administrator must choose the plan."
+      ],
+      "actions": [
+        "Open Device capacity to check how many device places are available.",
+        "Open Plans and billing, select a reviewed offer and read its device limit, term, token amount and verified payment recipient.",
+        "Approve prepayment from your connected wallet. Wait for verified confirmation before retrying.",
+        "Apply the due prepaid payment to activate capacity. This uses the existing subscription balance, with a separate network fee.",
+        "Return to Device capacity and verify the new limit."
+      ],
+      "result": "The organization\u2019s device limit increases. No device has been registered, connected or updated by buying capacity.",
+      "docs": [
+        {
+          "label": "Subscription pricing",
+          "path": "docs/SUBSCRIPTIONS.md"
+        }
+      ]
+    },
+    {
       "id": "fund",
       "title": "Fund the network budget",
       "console_route": "budget/",

@@ -148,6 +148,8 @@ def expand(text, config, source):
             return config["app_url"] + arg.lstrip("/")
         if name == "repo" and arg is not None:
             return repo_url(config, arg)
+        if name == "guide_count" and arg is None:
+            return str(len(load_json(GUIDE / "steps.json")["steps"]))
         if name == "guide_options" and arg is None:
             steps = load_json(GUIDE / "steps.json")["steps"]
             return "".join(f'<option value="{step["id"]}">{index}. {html.escape(step["title"])}</option>' for index, step in enumerate(steps, 1)) + '<option value="complete">Walkthrough complete</option>'

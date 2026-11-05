@@ -47,7 +47,7 @@ const evidence = { phase, wallet_address: address, transactions: [], steps: [] }
 const VIEWPORT = { width: 1280, height: 800 };
 let currentStep = null;
 const VERSION = process.env.GUIDE_VERSION || "1.0.0";
-const DEVICE_NAME = process.env.GUIDE_DEVICE_NAME || "guide-pi-001";
+const DEVICE_NAME = process.env.GUIDE_DEVICE_NAME || "guide-linux-001";
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".txt": "text/plain",
   ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".wasm": "application/wasm", ".woff2": "font/woff2" };
@@ -145,7 +145,7 @@ class Recorder {
       fs.writeFileSync(path.join(this.dir, name), Buffer.from(data, "base64"));
       // CDP may deliver an older compositor timestamp after a newer one.
       // Preserve delivered frame order and use monotonic capture arrival time.
-      this.frames.push({ file: name, t: (performance.timeOrigin + performance.now()) / 1000, cdp_timestamp: metadata.timestamp });
+      this.frames.push({ file: name, t: (performance.timeOrigin + performance.now()) / 1000 + (this.offset || 0), cdp_timestamp: metadata.timestamp });
     });
   }
   async start(step) {
@@ -161,6 +161,8 @@ class Recorder {
       fs.rmSync(this.dir, { recursive: true, force: true });
     }
     fs.mkdirSync(this.dir, { recursive: true });
+    this.offset = previous.length ? previous.at(-1).t + 0.1 - (performance.timeOrigin + performance.now()) / 1000 : 0;
+    this.cues = append && fs.existsSync(path.join(this.dir,"cues.json")) ? JSON.parse(fs.readFileSync(path.join(this.dir,"cues.json"))) : [];
     this.frames = previous; this.count = previous.length;
     await this.cdp.send("Page.startScreencast", { format: "jpeg", quality: 92, maxWidth: VIEWPORT.width, maxHeight: VIEWPORT.height });
   }
@@ -169,6 +171,7 @@ class Recorder {
     await this.cdp.send("Page.stopScreencast");
     const frames = this.frames; this.frames = null;
     fs.writeFileSync(path.join(this.dir, "frames.json"), JSON.stringify(frames));
+    fs.writeFileSync(path.join(this.dir, "cues.json"), JSON.stringify(this.cues));
     await this.page.screenshot({ path: path.join(this.dir, "poster.png") });
     return frames.length;
   }
@@ -213,8 +216,27 @@ const STEPS = {
     await page.locator("#fleet-switcher").waitFor();
     await page.waitForFunction(() => document.querySelector("#fleet-switcher")?.value, null, { timeout: 60000 });
     await page.getByRole("heading", { name: "Get started with SuiFleet" }).waitFor();
-    await h.caption("Your fleet is selected in the Fleet switcher. Next: fund its network budget.");
+    await h.caption("Your fleet is selected. Next check device capacity: network funds do not increase your device limit.");
     await h.pause(2500);
+  },
+
+  async "capacity-plan"(page, h) {
+    await h.caption("Check Device capacity before funding devices. A subscription provides places for devices; network deposits pay operating fees.");
+    await h.click(h.sidebar("Device capacity"));
+    await page.getByRole("heading", { name: "Device capacity", exact:true }).waitFor();
+    await h.pause(1500);
+    await h.caption("Choose Plans and billing. This demonstration uses test tokens and a disposable test tariff, not commercial pricing.");
+    await h.click(h.sidebar("Plans and billing"));
+    const select=page.getByLabel("Plan and payment coin");await select.waitFor();
+    await page.waitForFunction(()=>[...document.querySelectorAll('option')].some(o=>!o.disabled&&o.textContent.includes('SUI')&&!o.textContent.includes('verifying')),null,{timeout:60000});
+    const option=select.locator('option').filter({hasText:/SUI/}).first();await select.selectOption(await option.getAttribute('value'));
+    await h.caption("Review the device limit, token amount and verified payment recipient, then approve prepayment. It is separate from device operating funds.");
+    let before=evidence.transactions.length;await h.click(page.getByRole('button',{name:'Prepay from connected wallet in one transaction'}));await transactions(page,before,1);
+    const apply=page.getByRole('button',{name:'Apply due prepaid payment'});await apply.waitFor({timeout:60000});
+    await h.caption("Apply the due prepaid payment to activate capacity. This uses the subscription balance, not another wallet payment; approval still costs a network fee.");
+    before=evidence.transactions.length;await h.click(apply);await transactions(page,before,1);
+    await h.click(h.sidebar('Device capacity'));await page.getByText(/0 active devices \/ 100 allowed/).waitFor({timeout:60000});
+    await h.caption("The organization now has capacity for 100 devices. Next, fund device activity; no software has been installed yet.");await h.pause(2500);
   },
 
   async fund(page, h) {
@@ -249,7 +271,7 @@ const STEPS = {
     await h.type(page.locator('input[name="name"]'), DEVICE_NAME);
     await h.type(page.locator('input[name="deviceAddress"]'), devices[0], 8);
     await h.click(page.locator('select[name="arch"]'));
-    await page.locator('select[name="arch"]').selectOption("aarch64");
+    await page.locator('select[name="arch"]').selectOption("x86_64");
     const before = evidence.transactions.length;
     await h.caption("Click Register and approve the transaction.");
     await h.click(page.getByRole("button", { name: "Register", exact: true }));
@@ -327,9 +349,11 @@ const STEPS = {
     await h.click(page.getByRole("button", { name: "Continue to platform artifacts" }));
     await h.caption("Choose the platform and attach the artifact for it.");
     await page.getByLabel("Operating system").first().selectOption("linux");
-    await page.getByLabel("Architecture").first().selectOption("aarch64");
+    await page.getByLabel("Architecture").first().selectOption("x86_64");
     await page.getByLabel("Artifact").first().setInputFiles({ name: "guide-app-1.0.0.sh", mimeType: "text/x-shellscript",
       buffer: Buffer.from("#!/bin/sh\n# SuiFleet guide example component 1.0.0\necho 'hello from guide-app 1.0.0'\n") });
+    await h.click(page.getByText("Optional installer command", {exact:true}));
+    await h.type(page.getByLabel("Install command", {exact:true}), "/bin/sh {artifact}");
     await h.pause(1200);
     await h.caption("Delivery: choose Confidential for proprietary software. This public demo artifact is published unencrypted.");
     await h.click(page.getByText("Public (unencrypted)", { exact: true }));
@@ -345,6 +369,14 @@ const STEPS = {
   },
 
   async "deploy-group"(page, h) {
+    if (process.env.GUIDE_RESULT_ONLY === '1') {
+      await h.caption("After the Linux device client processes the update, open Deployments to verify its result. This is a disposable software test, not a physical Raspberry Pi.");
+      await h.click(h.sidebar('Deployments'));
+      await page.getByText(DEVICE_NAME,{exact:true}).first().waitFor({timeout:60000});
+      await page.getByText('Applied',{exact:true}).first().waitFor({timeout:90000});
+      await h.caption("Applied is a verified device receipt: the client downloaded the software, ran its configured installer and reported success. Deployment created alone did not prove this.");
+      await h.pause(4500);return;
+    }
     await h.caption("On Devices, open the Device groups tab and create a group.");
     await h.click(h.sidebar("Devices"));
     await page.getByRole("heading", { name: "Devices", exact: true }).waitFor();
@@ -526,9 +558,13 @@ const devices = JSON.parse(process.env.GUIDE_DEVICES || "[]");
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const recorder = new Recorder(page, await context.newCDPSession(page));
-  const h = helpers(page);
+  const h = helpers(page), originalCaption = h.caption;
+  h.caption = async text => {
+    if (text && recorder.frames) recorder.cues.push({ text, t:(performance.timeOrigin + performance.now())/1000 + (recorder.offset||0) });
+    await originalCaption(text);
+  };
   const extra = process.env.GUIDE_EXTRA ? JSON.parse(process.env.GUIDE_EXTRA) : {};
-  const PHASES = { "sign-in": "sign-in", rest: "fund,register-device,enroll-batch,publish-version,deploy-group,access-policy,fleet-settings", rollout: "staged-rollout", inspect: "" };
+  const PHASES = { "sign-in": "sign-in", rest: "capacity-plan,fund,register-device,enroll-batch,publish-version,deploy-group,access-policy,fleet-settings", rollout: "staged-rollout", inspect: "" };
   const names = (process.env.GUIDE_STEPS || PHASES[phase]).split(",").filter(Boolean);
   let failure;
   try {
