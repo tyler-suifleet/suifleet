@@ -41,7 +41,7 @@ async function releaseOrigins(client: SuiGrpcClient, release: ReportingRelease) 
   }
   const [data, storage] = await Promise.all([
     check(release.packageId, release.upgradeCapId, "fleet_data", ["FleetData", "DeviceData", "DeviceKey", "CompactHeadKey", "StreamRetentionKey", "LocatorKey"]),
-    check(release.storagePackageId, release.storageUpgradeCapId, "fleet_storage", ["FleetStorage"]),
+    check(release.storagePackageId, release.storageUpgradeCapId, "fleet_storage", ["FleetStorage", "RetentionKey"]),
   ]);
   if (data.DeviceData !== data.FleetData || data.DeviceKey !== data.FleetData) throw Error("Incompatible reporting origins");
   return { data, storage };
@@ -107,7 +107,7 @@ export async function resolveFleetStorageRelease(client: SuiGrpcClient, fleet: N
   const origins = await releaseOrigins(client, release);
   const resolved = storageConfig(MANIFEST?.network, release.storagePackageId);
   if (!resolved.config) return { ...resolved, storageId: undefined as string | undefined };
-  return { config: { ...resolved.config, storageOrigin: origins.storage.FleetStorage },
+  return { config: { ...resolved.config, storageOrigin: origins.storage.FleetStorage, retentionOrigin: origins.storage.RetentionKey },
     storageId: reporting.storageId, reason: undefined };
 }
 

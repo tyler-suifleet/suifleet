@@ -419,7 +419,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
 }) {
   const client = useCurrentClient(), account = useCurrentAccount();
   const { submit, message, error, pending } = useSubmit();
-  const origin = retentionOrigin();
+  const origin = retentionOrigin(config);
   const [executor, setExecutor] = useState(''), [margin, setMargin] = useState(2);
   const [walLimit, setWalLimit] = useState('1'), [gasLimit, setGasLimit] = useState('0.1'), [reward, setReward] = useState('0.01');
   const [walFunds, setWalFunds] = useState('1'), [gasFunds, setGasFunds] = useState('0.1');

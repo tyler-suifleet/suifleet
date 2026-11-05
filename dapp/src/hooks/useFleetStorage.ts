@@ -64,7 +64,7 @@ export function useFleetBlobStore() {
   const mutation = useFleetTransaction();
   const { target, storage, reason } = useFleetStorage();
   const [renewalTarget, setRenewalTarget] = useState(0), [maxFee, setMaxFee] = useState('');
-  const origin = retentionOrigin();
+  const origin = retentionOrigin(target?.config);
   const policy = useQuery({ queryKey: ['retention-upload', target?.storageId, origin], enabled: !!target && !!origin,
     refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, target!.storageId, origin!, target!.config.storageOrigin ?? target!.config.packageId) });

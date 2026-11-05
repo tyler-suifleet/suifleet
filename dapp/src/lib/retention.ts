@@ -19,8 +19,8 @@ export type RetentionView = ReturnType<typeof RetentionBcs.parse>;
 export interface RetainedBlob { id: string; end: number; encodedSize: bigint; policy?: ReturnType<typeof RenewalBcs.parse> }
 
 /** Origins are explicit after upgrades: existing records retain v1 origins. */
-export function retentionOrigin(): string | undefined {
-  const value = process.env.NEXT_PUBLIC_FLEET_RETENTION_ORIGIN;
+export function retentionOrigin(config?: StorageConfig): string | undefined {
+  const value = config?.retentionOrigin ?? process.env.NEXT_PUBLIC_FLEET_RETENTION_ORIGIN;
   if (!value) return undefined;
   return normalizeSuiAddress(value);
 }
