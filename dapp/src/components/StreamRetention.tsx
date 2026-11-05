@@ -7,8 +7,9 @@ import { useFleetDataConfig } from '@/hooks/useFleetDataConfig';
 import { useFleetSelection } from '@/hooks/useFleetSelection';
 import { fetchCustomerFleets } from '@/lib/customer-fleets';
 import { selectedDataAuthority } from '@/lib/data-authority';
-import { fetchBudgets, fetchManagedBudget, storageConfig } from '@/lib/fleet-budget';
+import { fetchBudgets, fetchManagedBudget } from '@/lib/fleet-budget';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { useFleetStorage } from '@/hooks/useFleetStorage';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { ARCHIVE_STREAMS, readStreamPolicies, setStreamRetentionTx, extendStreamArchiveTx } from '@/lib/stream-retention';
 
@@ -19,7 +20,8 @@ export function StreamRetentionPanel() {
   const [values, setValues] = useState<(number | undefined)[]>([]), [kind, setKind] = useState(0), [epochs, setEpochs] = useState(3);
   const [cap, setCap] = useState<string>(), [message, setMessage] = useState(''), [loaded, setLoaded] = useState(false);
   const [blob, setBlob] = useState(''), [extension, setExtension] = useState(1);
-  const storage = storageConfig().config;
+  const fleetStorage = useFleetStorage();
+  const storage = fleetStorage.storage?.id === DATA_CONFIG?.storageId ? fleetStorage.config : undefined;
   const generation = useRef(0);
   useEffect(() => {
     const current = ++generation.current; setCap(undefined); setValues([]); setLoaded(false); setMessage('');

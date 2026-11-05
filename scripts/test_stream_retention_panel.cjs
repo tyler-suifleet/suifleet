@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const {loader,appRequire} = require('./frontend_test_utils.cjs');
 const {normalizeSuiAddress:id} = appRequire('@mysten/sui/utils');
-const config={packageId:id('0x82'),streamRetentionOrigin:id('0x83'),fleetId:id('0xf1'),budgetId:id('0xb1')};
+const config={packageId:id('0x82'),streamRetentionOrigin:id('0x83'),fleetId:id('0xf1'),budgetId:id('0xb1'),storageId:id('0x84')};
 const actual=loader()('lib/stream-retention.ts');
 let slots=[],cursor=0,effects=[],account={address:id('0xa1')},policies=[3,13,26],signed=[],pendingResolve;
 let selection={supported:false,identity:'legacy'},admin=true;
@@ -19,8 +19,10 @@ const dependencies={react,
  '@/lib/customer-fleets':{fetchCustomerFleets:async()=>[{...selection.fleet,administrator:admin}]},
  '@/lib/data-authority':{selectedDataAuthority:loader()('lib/data-authority.ts').selectedDataAuthority},
  '@/hooks/useFleetDataConfig':{useFleetDataConfig:()=>config},
+ // The panel resolves archive storage separately from the reporting config.
+ '@/hooks/useFleetStorage':{useFleetStorage:()=>({storage:{id:config.storageId},config:{packageId:id('0x85')}})},
  '@/hooks/useFleetSelection':{useFleetSelection:()=>selection},
- '@/lib/fleet-budget':{storageConfig:()=>({}),fetchManagedBudget:async()=>({id:config.budgetId,capId:id('0xc2')}),fetchBudgets:async()=>account.address===id('0xa1')?[{id:config.budgetId,capId:id('0xc1')}]:[]},
+ '@/lib/fleet-budget':{fetchManagedBudget:async()=>({id:config.budgetId,capId:id('0xc2')}),fetchBudgets:async()=>account.address===id('0xa1')?[{id:config.budgetId,capId:id('0xc1')}]:[]},
  '@/lib/stream-retention':{...actual,readStreamPolicies:async()=>policies},
  '@/hooks/useFleetTransaction':{useFleetTransaction:()=>({isPending:false,mutateAsync:({transaction})=>{signed.push(transaction);return new Promise(resolve=>{pendingResolve=resolve;});}})},
 };
