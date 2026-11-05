@@ -4886,6 +4886,28 @@
         "Durable separate 2 SUI ceiling includes all failures/funding; exact receipts and mobile HTTPS artifact/handoff supplied; normal review/CI and deferred acceptance retained."
       ],
       "validation": "Exact-head compatibility, browser/SDK/typecheck/build and actual testnet daemon outcomes; no Mainnet, other-wallet credentials or physical Pi."
+    },
+    {
+      "key": "SF-252",
+      "title": "Create an animated customer introduction before the app walkthroughs",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "docs",
+        "scripts",
+        ".github/workflows"
+      ],
+      "resources": [],
+      "description": "The user explicitly requests a visual how-it-works introduction, not screen recordings of app controls. Implement a polished original animated diagram with the established three-boat branding and female narration, plus native captions and an accessible transcript. Explain operator/wallet approval, publishing release metadata versus stored files, target selection, device-initiated checks of shared Sui records, verified download from Walrus (Seal for confidential software), platform-owned installation/reboot, and separately signed install/health reports. Never imply pushes, perpetual file storage, automatic healthy status or a wallet/private key sent to a device. Provide landscape and phone-friendly portrait video, WebM/MP4 fallbacks, a poster and purposeful integration on How it works and before guided app usage. Version reproducible source/storyboard/assets; meaningful media/text/hash/phone/browser tests. Source overlays are illustrative animation, explicitly not live hardware footage or testnet acceptance. Build on current guide #615, preserving its ten current narrated recordings. Record actual implementation/model/tests and normal review; no mainnet, physical programming or production credentials.",
+      "evidence": "Explicit user request to finish customer-audit implementations, permanent customer domains and a visual conceptual introduction.",
+      "acceptance": [
+        "The user explicitly requests a visual how-it-works introduction, not screen recordings of app controls. Implement a polished original animated diagram with the established three-boat branding and female narration, plus native captions and an accessible transcript. Explain operator/wallet approval, publishing release metadata versus stored files, target selection, device-initiated checks of shared Sui records, verified download from Walrus (Seal for confidential software), platform-owned installation/reboot, and separately signed install/health reports. Never imply pushes, perpetual file storage, automatic healthy status or a wallet/private key sent to a device. Provide landscape and phone-friendly portrait video, WebM/MP4 fallbacks, a poster and purposeful integration on How it works and before guided app usage. Version reproducible source/storyboard/assets; meaningful media/text/hash/phone/browser tests. Source overlays are illustrative animation, explicitly not live hardware footage or testnet acceptance. Build on current guide #615, preserving its ten current narrated recordings. Record actual implementation/model/tests and normal review; no mainnet, physical programming or production credentials."
+      ],
+      "validation": "Meaningful browser/mobile/media/deployment verification, exact provenance and explicit remaining access/acceptance boundaries."
     }
   ],
   "project_title": "SuiFleet \u2014 OTA and Fleet Management",

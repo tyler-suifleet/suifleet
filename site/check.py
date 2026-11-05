@@ -8,7 +8,7 @@ Offline and deterministic, so it runs in CI without network access:
     #fragment to an element id on the target page;
   - external links use https and an allowlisted host (site.json); GitHub links
     into this repository must name a file or directory that exists here;
-  - only the exact integrity-pinned guide script on /guide/; no other <script>, <iframe>, <object>, <embed>, <form>, inline event handler,
+  - only the exact integrity-pinned local player script on /guide/ and /how-it-works/; no other <script>, <iframe>, <object>, <embed>, <form>, inline event handler,
     javascript: URL or externally hosted resource: guide navigation is local and
     loads nothing from third parties, so it cannot track visitors;
   - every page has lang, a title, a description, exactly one <h1> and the
@@ -137,7 +137,7 @@ def check(out, require_videos=False, config=None):
     if not built_script.is_file() or built_script.read_bytes() != script.read_bytes():
         errors.append("guide script does not match reviewed source")
     for path in sorted(out.rglob("*.html")):
-        parser = Page(integrity, guide_url) if path.relative_to(out).as_posix() == "guide/index.html" else Page()
+        parser = Page(integrity, guide_url) if path.relative_to(out).as_posix() in ("guide/index.html", "how-it-works/index.html") else Page()
         parser.feed(path.read_text(encoding="utf-8"))
         pages[path] = parser
     if not pages:
@@ -159,7 +159,8 @@ def check(out, require_videos=False, config=None):
         if page.canonical is not None and (not page.canonical.startswith(config["origin"] + "/")
                                            or resolve(out, page.canonical[len(config["origin"]):]) != path):
             errors.append(f"{where}: canonical URL {page.canonical} does not name this page")
-        expected_csp = CSP + f"; script-src '{integrity}'" if where == "guide/index.html" else CSP
+        expected_csp = CSP + f"; script-src '{integrity}'" if where in ("guide/index.html", "how-it-works/index.html") else CSP
+        if where == "how-it-works/index.html": expected_csp = expected_csp.replace("media-src 'self';", "media-src 'self' blob:; connect-src 'self';")
         if page.csp != expected_csp:
             errors.append(f"{where}: missing or changed Content-Security-Policy meta tag")
         for tag, attr, url in page.urls:
@@ -209,6 +210,8 @@ def check_videos(out, require):
         errors.append("guide videos must be recorded on Sui testnet (chain 4c78adac)")
     if not re.fullmatch(r"[0-9a-f]{40}", manifest.get("console_commit", "")):
         errors.append("guide video console_commit must identify a full Git commit")
+    sys.path.insert(0, str(SITE / "guide"))
+    from captions import webvtt
     seen = set()
     for video in manifest.get("videos", []):
         if not re.fullmatch(r"[0-9a-f]{40}", video.get("console_commit", manifest.get("console_commit", ""))):
@@ -218,11 +221,19 @@ def check_videos(out, require):
         if video["step"] in seen:
             errors.append(f"duplicate video for {video['step']}")
         seen.add(video["step"])
+        if video.get("captions"):
+            try:
+                expected = webvtt(video["narration"]["cues"], video["duration_seconds"])
+                name = video["captions"]
+                if Path(name).name != name or (out / "media" / "guide" / name).read_text(encoding="utf-8") != expected:
+                    errors.append(f"guide {video['step']} captions differ from encoded narration")
+            except (KeyError, ValueError, OSError, TypeError):
+                errors.append(f"guide {video['step']} invalid narration/caption timing")
         if require:
-            for required in ("poster", "fallback"):
+            for required in ("poster", "fallback", "captions"):
                 if not video.get(required):
                     errors.append(f"guide {video['step']} missing {required}")
-        for key in ("file", "poster", "fallback"):
+        for key in ("file", "poster", "fallback", "captions"):
             name = video.get(key)
             if not name:
                 continue
