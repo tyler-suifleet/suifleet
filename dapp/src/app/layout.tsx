@@ -13,7 +13,7 @@ import "@/components/OrganizationSecurity.css";
 import Link from "next/link";
 import { SubscriptionWarnings } from "@/components/SubscriptionWarnings";
 import { HistoryStatus } from "@/components/HistoryStatus";
-import { ConnectionRequired } from "@/components/ui";
+import { PageHeader, ConnectionRequired } from "@/components/ui";
 import { useHydrated } from "@/hooks/useCurrentAccount";
 
 // dApp Kit UI registers custom elements and must only load in the browser.
@@ -32,7 +32,7 @@ const NAV = [
   { href: "/firmware",    label: "Deploy component", description: "Choose software, select your devices and review an update before deploying." },
   { href: "/access",      label: "Access policies", description: "Choose which devices and accounts can open private software releases." },
   { href: "/handover",    label: "Administration", description: "Transfer control of selected devices and resources to another administrator." },
-  { href: "/entitlements", label: "Device entitlements", description: "Review your customer device limit and, as registry administrator, grant device limits to customers." },
+  { href: "/entitlements", label: "Device capacity", description: "Review how many devices your organization can manage and how to increase that limit." },
   { href: "/settings",    label: "Fleet settings", description: "Choose when devices check for updates, send health reports and upload data." },
   { href: "/billing", label: "Plans and billing", description: "Choose capacity, prepay subscriptions and download receipts." },
   { href: "/budget",      label: "Network budget", description: "Keep devices funded for activity and storage, with spending limits you control." },
@@ -51,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <title>SuiFleet</title>
         <link rel="icon" href="/favicon.svg?v=400d0317ed09" type="image/svg+xml" sizes="any" />
         <link rel="alternate icon" href="/favicon.ico?v=400d0317ed09" sizes="16x16 32x32 48x48 64x64" />
-        <meta name="description" content="Decentralized edge fleet management on Sui" />
+        <meta name="description" content="Deploy software, manage device fleets and review verified update results." />
         <meta property="og:title" content="SuiFleet console" />
         <meta property="og:description" content="Manage edge fleets on Sui. Public testnet preview." />
         <meta property="og:type" content="website" />
@@ -108,7 +108,7 @@ function SignedOutGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(), connection = useWalletConnection(), hydrated = useHydrated();
   const route = NAV.find(item => item.href !== "/get-started" && isActive(item.href, pathname));
   if (pathname === "/billing" || pathname === "/billing/") return <>{children}</>;
-  if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>;
+  if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"} pendingHeader={<PageHeader title={NAV.find(item => isActive(item.href, pathname))?.label ?? "Your fleet"} />}>{children}</FleetScope>;
   if (!route) return <>{children}</>;
   if (!hydrated || connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;
   return <ConnectionRequired title={route.label} description={route.description} />;
