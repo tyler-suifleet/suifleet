@@ -4727,6 +4727,28 @@
       "validation": "Delayed/recovered phone browser checks, quote/expiry invariants and typed read-only live facts; no mainnet/hardware/provider credentials."
     },
     {
+      "key": "SF-250",
+      "title": "Read managed fleet groups from current inventory, not historical events",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/hooks/useGroups.ts",
+        "dapp/src/lib/sui.ts",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "The actual SF-245 customer walkthrough successfully published its first version and created a managed-fleet group. The app showed the group indefinitely as \u201cCreated \u00b7 adding to the list\u2026\u201d without a Manage action. Its current group query discovers records through historical GroupCreated events even though the selected authenticated Fleet already contains authoritative group IDs. A pruned or delayed event endpoint must not prevent using a confirmed current inventory.\n\nAcceptance:\n- Managed fleet group reads use the selected authenticated fleet's current group IDs and freshly decoded objects, preserving type/schema/current-admin checks, indexed members and selection isolation. Retain legacy event discovery only for unmanaged users.\n- Current membership/group inventory refreshes after successful mutations without relying on event-history completeness. Never accept a guessed/local-storage object as authority or fabricate a successful result.\n- Regressions cover pruned/unavailable event history, new group creation visibility, wrong-admin/type/deleted groups, selection changes and genuine read failures. Typecheck/build and actual testnet group reuse/management in SF-245.\n- Reuse the already confirmed guide-pilot group and original durable spending allowance; do not replay creation. No hardware/mainnet/production credentials.\n",
+      "evidence": "Actual new-fleet group remains pending despite confirmed successful creation; query depends on historical events.",
+      "acceptance": [
+        "Use authenticated fleet group inventory and current typed object reads, retaining admin and member verification.",
+        "Regression tests and actual current-customer group management pass without historical event availability."
+      ],
+      "validation": "Frontend tests/typecheck/build and retained SF-245 group testnet result under unchanged allowance."
+    },
+    {
       "key": "SF-244",
       "title": "Audit and improve the complete customer-facing site, console and guide",
       "priority": "P1",
