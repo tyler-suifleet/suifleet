@@ -45,6 +45,19 @@ const targetFields = new Map();
   c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => targetFields.get(objectId) ?? ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
+  const history = c.listEvents;
+  c.listEvents = async () => { throw Error('History pruned'); };
+  assert.deepEqual((await sui.fetchGroups(c, owner, [group]))[0].deviceIds, [device]);
+  assert.deepEqual(await sui.fetchGroups(c, owner, []), []);
+  assert.deepEqual(await sui.fetchGroups(c, id('0xb'), [group]), []);
+  const getObjects = c.getObjects;
+  c.getObjects = async () => ({objects:[{objectId:group,type:'0x2::coin::Coin',content:groupBytes}]});
+  await assert.rejects(sui.fetchGroups(c,owner,[group]), /Unexpected DeviceGroup type/);
+  c.getObjects = async () => ({objects:[new ObjectError('deleted','deleted',{reason:'deleted'})]});
+  assert.deepEqual(await sui.fetchGroups(c,owner,[group]),[]);
+  c.getObjects = async () => ({objects:[new ObjectError('unknown','transport failure',{reason:'unknown'})]});
+  await assert.rejects(sui.fetchGroups(c,owner,[group]),/transport failure/);
+  c.getObjects=getObjects;c.listEvents=history;
   c.getDynamicField = async ({name}) => {
     if (name.type.endsWith("::TargetGroupsKey") || name.type.endsWith("::TargetDevicesKey")) return {dynamicField:{value:{type:"vector<0x2::object::ID>", bcs:appRequire("@mysten/sui/bcs").bcs.vector(appRequire("@mysten/sui/bcs").bcs.Address).serialize(name.type.endsWith("::TargetGroupsKey") ? [group] : [device]).toBytes()}}};
     if (name.type.endsWith("::ControlKey")) throw new ObjectError("missing", "missing", {reason:"notFound"});
@@ -87,5 +100,18 @@ const targetFields = new Map();
   await assert.rejects(sui.fetchGroups(c, owner), /no progress/);
   c.listOwnedObjects = async () => ({ objects: [], hasNextPage: true, cursor: null });
   await assert.rejects(sui.fetchDevices(c, owner), /no cursor/);
+  // The query identity changes with inventory and with the selected fleet.
+  let selected={supported:true,identity:'fleet-a',fleet:{id:owner,groups:[group]}},requested;
+  const hook=loader({'./useFleetSelection':{useFleetSelection:()=>selected},
+    '@/hooks/useCurrentAccount':{useCurrentAccount:()=>({address:owner})},
+    '@mysten/dapp-kit-react':{useCurrentClient:()=>c},
+    '@tanstack/react-query':{useQuery:options=>options},
+    '@/lib/sui':{fetchGroups:async(...args)=>{requested=args;return [];}}})('hooks/useGroups.ts');
+  const first=hook.useGroups();await first.queryFn();assert.deepEqual(requested,[c,owner,[group]]);
+  selected={...selected,fleet:{...selected.fleet,groups:[group,id('0xbf')]}};
+  assert.notDeepEqual(hook.useGroups().queryKey,first.queryKey);
+  selected={...selected,identity:'fleet-b',fleet:{id:id('0xb'),groups:[]}};
+  const second=hook.useGroups();await second.queryFn();assert.deepEqual(requested,[c,id('0xb'),[]]);assert.notDeepEqual(second.queryKey,first.queryKey);
+  selected={supported:false,identity:'legacy'};await hook.useGroups().queryFn();assert.deepEqual(requested,[c,owner,undefined]);
   console.log("PASS: BCS inventory (activated and unactivated)/group/deployment queries, empty scan pages, cursors, authoritative receipts, deleted records and errors");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
