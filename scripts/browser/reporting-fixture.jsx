@@ -3,7 +3,8 @@ import React,{useState,useContext,createContext} from 'react';
 import {createRoot} from 'react-dom/client';
 import {FleetReportingSetup} from '../../dapp/src/components/FleetReportingSetup';
 const Context=createContext(null);
-let server,fail=true,enrolled=false;
+let server,fail=true,enrolled=false,invalidRelease=false;
+export function useDevices(){return {data:[{objectId:'device-1',name:'First device'}]};}
 export function useCurrentClient(){return {};}
 export function useFleetSelection(){return useContext(Context).selection;}
 export function useFleetReporting(){return useContext(Context).query;}
@@ -13,7 +14,7 @@ export function useFleetTransaction(){return {isPending:false,mutateAsync:async(
  if(transaction==='enroll')enrolled=true;
  return {digest:'fixture-confirmed-digest'};
 }};}
-export function reportingRelease(){return {packageId:'fixture'};}
+export function reportingRelease(){if(invalidRelease)throw Error('Invalid release');return {packageId:'fixture'};}
 export async function buildProvisionReporting(){return 'setup';}
 export async function buildEnrollReporting(){return 'enroll';}
 export async function reportingClientSettings(){if(!enrolled)throw Error('Enroll device reporting before downloading');return '[fleet_data]\nfleet_id = "verified-data"\n';}
@@ -24,6 +25,7 @@ function Harness(){
  const query={data,error,isPending:checking,isError:!!error,isFetching:false,refetch:refresh};
  return <Context.Provider value={{selection:{fleet},query}}>
   <button onClick={()=>setError(Error('Transport unavailable'))}>Simulate unavailable readiness</button>
+  <button onClick={()=>{invalidRelease=true;setError(Error("Invalid release"));}}>Break reporting release</button>
   <button onClick={()=>setAdmin(false)}>Revoke administrator</button>
   <button onClick={()=>{server=undefined;enrolled=false;setData(undefined);setIdentity(v=>v+1);}}>Select second fleet</button>
   <FleetReportingSetup key={identity}/>
