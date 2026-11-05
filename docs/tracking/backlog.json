@@ -4748,6 +4748,54 @@
         "Native English captions match full narration and encoded timing; cursor emphasis, source provenance, viewport/navigation/media checks pass."
       ],
       "validation": "Offline script/timing/media checks and desktop/mobile guide playback; public testnet recording with dedicated authorized account only when needed."
+    },
+    {
+      "key": "SF-246",
+      "title": "Make the mobile customer preview and first-use configuration complete",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "profiles",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "The user explicitly requests fixing every major SF-244 finding, including mobile access and unavailable services, rather than leaving them as audit recommendations.\n\nScope: build a customer-usable public HTTPS evaluation preview with working website/app/installation-documentation links; prevent local addresses from leaking into mobile flows. Make first-use capacity, subscription and network funding prerequisites actionable and clearly ordered. Verify and wire existing supported reporting/storage/data configuration without changing the existing registry or orphaning previously registered devices. Investigate missing subscription configuration and enable it only through a verified compatible testnet deployment; do not substitute a different test fixture registry silently. Add explicit readiness guidance where external configuration is actually missing.\n\nPreserve SF-173's distinct Walrus-Site publisher ownership/allowance; no use of its separate publisher wallet is authorized here. Public HTTPS preview and dedicated-agent testnet acceptance are authorized; no mainnet, production credentials or physical programming. SF-245/#612 already owns rerecording/captions; coordinate the current audit copy and new prerequisites with that worker.\n\nAcceptance:\n- Public HTTPS website, guide, app and installation docs work at a phone viewport, including all cross-origin help/launch links, media and refresh/deep links; no localhost/WSL addresses are shipped in that public preview.\n- First-use UI explains and links capacity, subscriptions, network deposits, device setup, deployment and verified outcomes in correct order without blockchain knowledge; preserve all authority, privacy and spending gates.\n- Read-only live checks verify evaluation manifest/origins/registry and optional service configuration. Where enabling missing contracts is necessary, use dedicated-agent testnet with compatibility validation, a durable non-replenishing allowance and network lease; preserve existing device inventory.\n- Validate desktop/mobile presentation, wallet error/rejection/transaction handling, typecheck/build and relevant cross-layer tests. Record exact enabled/unavailable features and unrun acceptance honestly.\n- Publish contained Tyler-authored commits/PR and keep public preview provenance and runtime lease recovery documented.\n",
+      "evidence": "User requests all customer-audit findings fixed and mobile access on 2026-11-04.",
+      "acceptance": [
+        "Mobile public HTTPS website/app/docs/media and cross-links work without localhost/private addresses.",
+        "Actionable ordered capacity/subscription/funding/device onboarding with verified supported service configuration; preserve registry/inventory and authority/spending gates.",
+        "Relevant browser/build/compatibility checks pass; exact enabled features and limits documented."
+      ],
+      "validation": "Read-only live profile validation, phone-viewport public-host browser checks, frontend typecheck/build and onboarding regressions; dedicated-agent testnet mutations only if needed with compatibility/allowance/lease."
+    },
+    {
+      "key": "SF-247",
+      "title": "Provision reporting and storage per fleet without rebuilding the app",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts",
+        "dapp/src",
+        "suifleet-edge/src",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "SF-244/SF-246 customer audit found a deeper provisioning gap: useFleetDataConfig resolves only build-time NEXT_PUBLIC_FLEET_DATA_CONFIGS entries matched by budget ID. The retained evaluation FleetData binding is verified and can be enabled, but a newly created customer fleet cannot set up its own reporting/data path without an operator provisioning objects and rebuilding configuration. This must be fixed, not hidden as an empty dashboard.\n\nImplement an authenticated per-fleet setup path for device reporting/storage: authorized customer administrator can create/configure the required storage/data objects, publish an authoritative locator bound to the correct registry/budget, download the matching client settings and see pending/verified/failed readiness. Resolve it dynamically without rebuilding the app for each customer. Preserve explicit legacy locators as a verified migration fallback. Never trust a URL query, localStorage or arbitrary shared-object address as authority; verify registry/budget/storage/type origins and configured organization protections. Use additive APIs/migrations, preserve old public signatures/layouts and existing device keys/journals. Devices with no report must remain unreported.\n\nAcceptance: two independent new fleets complete setup without app rebuild, cross-customer locator spoofing/revoked authority/partial transaction failures are rejected, and the actual daemon publishes a verified signed health sample through the generated settings on automated testnet. Include browser setup/error/retry/download tests, Move old/new-object compatibility where needed, Rust/OTA verification and exact bounded testnet evidence. Physical Pi/mainnet/provider acceptance remain deferred. Coordinate profile/first-use interfaces with SF-246/#614 and guide flow with SF-245/#612. This is separate from SF-173's restricted Walrus Site publisher wallet.\n",
+      "evidence": "SF-246 verified static FleetData locator only applies to retained evaluation budget; new customer fleets need rebuild/operator setup.",
+      "acceptance": [
+        "Authorized administrators provision per-fleet reporting/storage and authoritative registry/budget-bound locators, discoverable without frontend rebuild.",
+        "Two isolated new fleets, spoofed locators, revoked authority and partial-failure recovery tested; generated client settings yield verified daemon health on automated testnet."
+      ],
+      "validation": "Move additive API/existing-object/upgrade tests where needed, browser provisioning/error/retry/download tests, Rust/OTA and bounded live testnet daemon evidence; no physical/mainnet/provider acceptance."
     }
   ]
 }
