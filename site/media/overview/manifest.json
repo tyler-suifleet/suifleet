@@ -103,7 +103,7 @@
   ],
   "source_sha256": {
     "site/overview/storyboard.json": "f528808f10a77032ff9d6f3739276864e01908aaa5f9806ab2af41a1ae9943c0",
-    "site/overview/scene.html": "900f1fe156cb887db9883280fabddbb2ef1632f565b4c9ef3d87629e589d66d6",
+    "site/overview/scene.html": "2f8bb46f8973e8f691f7fd4bf99488ee0c57cc19b619ae5a878ef3cd9f8ca812",
     "site/overview/render_frames.cjs": "071c7c86c9a4465bd787a4947f010edf8ab94d0d9c6f2cda5025e67d6d0ad905",
     "site/overview/render_overview.py": "552fe7a73415dfdf39a070a3c00e9774b0de53b99bdcbe26c04a2bd45e554f16"
   },
@@ -113,22 +113,22 @@
       "width": 1280,
       "height": 720,
       "fallback": "overview-landscape.mp4",
-      "fallback_sha256": "26fc76c93f7a21612fa24952ef854551fc57f67d7045d184bee46dc553261789",
+      "fallback_sha256": "a3d885b5c39e39ada62039d587b7d2e021d3841d4d7df16b1398d5a8315dea4f",
       "file": "overview-landscape.webm",
-      "file_sha256": "a3cad1807729988f5e1a38c80da4632c9be041073fd9d7b2bfd24db97425bc59",
+      "file_sha256": "7746d6de406b428fc60bc03bc6fd084d5d68c1108d4910915454fb8885583aac",
       "poster": "overview-landscape.jpg",
-      "poster_sha256": "d0280dc937218bb7717a8f8c8503cb873c98b7f2e7ffb6c25fc09061dc15ed91"
+      "poster_sha256": "00629e8e57c2ed2d108910bf0d415c64e2d5442d4d65e08c475414ff2aa71dfc"
     },
     {
       "name": "portrait",
       "width": 720,
       "height": 1280,
       "fallback": "overview-portrait.mp4",
-      "fallback_sha256": "ff51a759d94cf1feed3652bcd35fcb5f23593c7f781dc48352b5cd0043c0910c",
+      "fallback_sha256": "42c48a7ac3693d870bebd2fb771b8d4ef7c1c9252f74463e1ff8906dc3571aa4",
       "file": "overview-portrait.webm",
-      "file_sha256": "957bbbba9252d4c41e2ed25383874a2d5e3fe0ba84fab92b89e6be532bdb1d91",
+      "file_sha256": "b987d2750223a6e7b23339aa9012608705195426795790bb525b80bd8b3d32b9",
       "poster": "overview-portrait.jpg",
-      "poster_sha256": "53dfeda00d66439fe4dfff1d5045c567da42631ecdc79ca5cab615e11e2602d7"
+      "poster_sha256": "34f00c8df7fb6fb931201dd6bfea4c4634b669e53ebbfcebf3a6f6d4f2fe6090"
     }
   ],
   "captions": "overview.en.vtt",
