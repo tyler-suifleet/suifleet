@@ -187,7 +187,7 @@
       "title": "Run a staged rollout",
       "console_route": "rollouts/",
       "console_label": "Rollouts",
-      "summary": "A staged rollout releases to cohorts in order. Devices are admitted a few at a time; each cohort must report signed, healthy results for its bake period before the next one starts, and the rollout stops itself if failures pass your threshold.",
+      "summary": "Optional for larger fleets: a staged rollout releases to cohorts in order. Devices are admitted a few at a time; each cohort must report signed, healthy results for its bake period before the next one starts, and the rollout stops itself if failures pass your threshold.",
       "before": [
         "A published library version for the target device platform.",
         "Named devices or groups to divide into batches. Configure device reporting and verify current health before admitting devices."
@@ -212,7 +212,7 @@
       "title": "Private-release access",
       "console_route": "access/",
       "console_label": "Access policies",
-      "summary": "Optional for private software: choose which devices may decrypt a release. Create the device group first, then configure access before publishing private software. This controls access to files; it does not itself deploy them.",
+      "summary": "Optional for private software: choose which devices may decrypt a release. You can complete this step earlier: create the device group first, then configure access before publishing private software. This controls access to files; it does not itself deploy them.",
       "before": [
         "A group you administer."
       ],
