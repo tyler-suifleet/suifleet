@@ -16,7 +16,9 @@ fixed-layout overview video release is in
 The illustrated overview release develops actions around smaller fixed landmarks;
 its evidence is in `cloudflare-illustrated-overview-deployment.json`. The latest
 website-only professional narration revision is recorded in
-`cloudflare-overview-narration-deployment.json`. The user applied DNS manually; the model
+`cloudflare-overview-narration-deployment.json`. The current connected-component
+animation, which removes the detached corner legend, is recorded in
+`cloudflare-connected-overview-deployment.json`. The user applied DNS manually; the model
 performed no DNS-record writes.
 
 | Address | Pages project |
