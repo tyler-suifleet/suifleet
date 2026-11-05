@@ -1,8 +1,4 @@
 {
-  "schema_version": 1,
-  "repository": "tyler-suifleet/suifleet",
-  "project_title": "SuiFleet \u2014 OTA and Fleet Management",
-  "issue_creation_policy": "Only Codex may create new tickets/issues unless the user explicitly authorizes another model.",
   "issues": [
     {
       "key": "SF-001",
@@ -4796,6 +4792,34 @@
         "Two isolated new fleets, spoofed locators, revoked authority and partial-failure recovery tested; generated client settings yield verified daemon health on automated testnet."
       ],
       "validation": "Move additive API/existing-object/upgrade tests where needed, browser provisioning/error/retry/download tests, Rust/OTA and bounded live testnet daemon evidence; no physical/mainnet/provider acceptance."
+    },
+    {
+      "key": "SF-248",
+      "title": "Fix native coin-intent handling for fleet and enrollment funding",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/customer-fleets.ts",
+        "scripts/test_customer_fleets.cjs",
+        "dapp/src/lib/enrollment.ts",
+        "scripts/test_enrollment_frontend.cjs"
+      ],
+      "resources": [],
+      "description": "SF-245's actual novice testnet walkthrough hit a functional funding blocker: after successfully activating capacity100, the Network budget Deposit action fails before wallet submission with \u201cDo not know how to serialize a BigInt\u201d. No deposit transaction was submitted. The managed-budget wrapper withManagedBudgetCap rebuilds a transaction via bare JSON.stringify; coinWithBalance intent metadata contains bigint amounts. This affects real deposit/withdraw-style managed actions even though existing pure-BCS unit fixtures pass.\n\nFix lossless serialization of supported SDK transaction data, preserving exact u64 values, coin intent resolution, sender/gas/expiry, command index remapping and atomic budget-cap borrow/return. Do not convert amounts to Number or weaken authority checks. Add a regression using actual buildDepositTx/coinWithBalance, including an amount above Number.MAX_SAFE_INTEGER; prove the resulting transaction can still resolve/build with the SDK and contains the exact amount and correct cap loan sequence. Relevant frontend/typecheck/build and managed authority tests, followed by actual testnet deposit evidence through the existing SF-245 run. Preserve its original fixed allowance and existing effects; no new wallet/hardware/mainnet scope.\n\nCoordinate with SF-246/#614 and SF-247/#616. This is a source defect, not a reason to retry an approval or fund another account.\n\nAdditional confirmed defect in the same native coin-funding path: the live batch enrollment guide creates its policy successfully, then the claim registration/funding transaction fails VM resolution before submission with UnusedValueWithoutDrop. buildClaimsTx obtains an exact-total CoinWithBalance coin, splits the full total out to recipients, and leaves the empty original coin unconsumed. Fix by paying the last recipient from the remainder (or another verified complete-consumption construction), retaining exact per-recipient amounts and transaction bounds. Test one/multiple recipients, uneven/high-precision amounts, full SDK resolution/encoding and terminal consumption of the original funding coin. Resume only unsubmitted registration after current claims/balances are freshly reconciled; preserve existing policy, customer and allowance.\n",
+      "evidence": "Actual SF-245 current-console Network budget deposit failed before submission with BigInt JSON serialization after capacity activation.",
+      "acceptance": [
+        "Real managed coinWithBalance transactions serialize losslessly, preserve SDK intent resolution and exact u64 amounts plus atomic cap borrow/return.",
+        "Regression above Number.MAX_SAFE_INTEGER, frontend/authority tests, typecheck/build and existing-run bounded actual testnet deposit pass.",
+        "Batch enrollment consumes the original funding coin, preserves exact per-recipient amounts and passes actual testnet VM execution without unused-value errors."
+      ],
+      "validation": "Actual SDK deposit construction/resolution plus managed authority and frontend regressions; resume effects-reconciled SF-245 run without resetting allowance."
     }
-  ]
+  ],
+  "project_title": "SuiFleet \u2014 OTA and Fleet Management",
+  "schema_version": 1,
+  "issue_creation_policy": "Only Codex may create new tickets/issues unless the user explicitly authorizes another model.",
+  "repository": "tyler-suifleet/suifleet"
 }
