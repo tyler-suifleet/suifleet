@@ -14,7 +14,7 @@ class DNSTest(unittest.TestCase):
   spec=importlib.util.spec_from_file_location('host_build',ROOT/'build.py');build=importlib.util.module_from_spec(spec);spec.loader.exec_module(build)
   with tempfile.TemporaryDirectory() as directory:
    output=Path(directory);(output/'_headers').write_text('/*\n  X-Content-Type-Options: nosniff\n')
-   build.add_dns_download(output)
+   build.add_dns_download(output,ROOT/'dns-records.zone')
    self.assertEqual((output/'setup/suifleet-dns.zone').read_bytes(),(ROOT/'dns-records.zone').read_bytes())
    headers=(output/'_headers').read_text();self.assertIn('X-Content-Type-Options: nosniff',headers);self.assertIn('Content-Disposition: attachment;',headers);self.assertIn('X-Robots-Tag: noindex',headers)
  def test_refuse_mail_or_unrelated_domain_scope(self):
