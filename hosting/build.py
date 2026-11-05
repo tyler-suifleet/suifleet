@@ -14,6 +14,7 @@ def add_dns_download(website_out, zone_source=None):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--origins',type=Path,required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--node',type=Path,required=True);p.add_argument('--dns-zone',type=Path);a=p.parse_args()
  if a.out.exists():raise ValueError('Output must be a new immutable directory')
+ if subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip():raise ValueError('Commit source changes before building a receipted release')
  website=module('hosting_website',ROOT/'site/build.py');config=website.load_config(a.origins);origins={k:config[k] for k in ['origin','app_url','docs_url']};revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
  env=dict(os.environ)
  for line in (ROOT/'profiles/seal-testnet/frontend.env').read_text().splitlines():

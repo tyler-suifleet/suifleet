@@ -1,93 +1,86 @@
-# Independent customer hosting
+# Owner-controlled Cloudflare Pages hosting
 
-The customer website, Testnet app and curated docs are deployed as public static
-Sites. They run independently of this WSL machine. Their project IDs are retained
-under `sites/`; initial receipts are in `initial-deployments.json` and current evaluated publication receipts are in `final-deployments.json`.
-Keep those IDs when updating. Never commit Site source credentials or wallet keys.
+The current provider is **Cloudflare Pages in the user's own account**. The
+website, Testnet console and curated docs are independent static deployments.
+`cloudflare-pages.json` pins the verified owner account/active zone and desired
+project scope; `cloudflare-projects.json` records the actual provider-returned
+project IDs and domains. Reuse these projects; do not create replacements on retry.
 
-The requested final domains are `suifleet.io` / `www.suifleet.io`,
-`app.suifleet.io`, and `docs.suifleet.io`. Their host-side bindings exist; domain
-ownership and certificates remain pending until the owner updates Cloudflare DNS.
-No Cloudflare DNS account is connected in this session, so no authoritative DNS
-writes have been made. Google Workspace mail records must remain intact.
+| Address | Pages project |
+|---|---|
+| `suifleet.io`, `www.suifleet.io` | `suifleet-marketing` |
+| `app.suifleet.io` | `suifleet-console` |
+| `docs.suifleet.io` | `suifleet-docs` |
 
-## One-time DNS connection
+The domain's authoritative DNS was already on Cloudflare in this account. No
+registrar/nameserver migration, Google hosting or paid plan is needed for this
+static deployment. Google Workspace mail and unrelated DNS must remain intact.
 
-1. Open Cloudflare, choose **suifleet.io → DNS → Records → Import and Export**.
-2. Review `dns-records.zone`, generated directly from the host's returned records.
-   Import its web A/CNAME and ownership TXT records. It contains no MX, email
-   authentication, nameserver or unrelated records. If `app` already exists,
-   edit that web record to the supplied CNAME rather than leaving an A/CNAME
-   conflict. Preserve all existing Google Workspace and unrelated records.
-3. The supplied routing records explicitly select **DNS only**, so Cloudflare's
-   optional import proxy checkbox cannot silently proxy them. Keep the provider
-   verification TXT values exactly as returned.
-4. Refresh each domain through the native custom-domain status tool. Require
-   active ownership/routing and a valid HTTPS certificate, then verify actual
-   website/app/docs navigation and media on the final domains.
-5. Rebuild with `production-origins.json` and publish the verified source through
-   the same Site projects. Until that cutover, `provisioning-origins.json` keeps
-   all hosted crosslinks usable without advertising unresolved domains.
+## Authentication and DNS
 
-Cloudflare documents [zone-file import](https://developers.cloudflare.com/dns/manage-dns-records/how-to/import-and-export/)
-and its per-record `cf-proxied:false` override. Do not migrate nameservers or
-remove email records to attach this hosting.
-
-## Build and update
+Use the existing locked CLI, not an unpinned global install:
 
 ```sh
+npm ci --prefix tools/static-hosting
+WRANGLER_SEND_METRICS=false tools/static-hosting/node_modules/.bin/wrangler login \
+  --device --browser=false --scopes account:read user:read pages:write zone:read
+```
+
+This browser/device login works from a phone and avoids WSL localhost callbacks.
+Credentials remain in private Wrangler configuration; never print, copy into Git,
+put into CLI arguments or reuse the personal OAuth token as a CI secret. Pages
+access does not grant DNS-record editing. The actual DNS API refused this login
+with403; no DNS mutation is claimed or attempted through that scope.
+
+The Pages custom-domain associations are registered before DNS is pointed at
+the projects. Their activation/TLS must be checked separately. Use the four
+**actual provider-derived** CNAMEs in `cloudflare-dns.zone`; import/edit them in
+Cloudflare DNS with Proxied enabled. Replace conflicting web records rather than
+adding duplicates. Preserve MX/TXT/DKIM/CAA and all unrelated records.
+
+**Do not import `dns-records.zone`: it is the obsolete OpenAI Sites plan.** The
+old `sites/`, `domain-bindings.json` and Sites deployment receipts are historical
+migration/rollback evidence, not the current deployment configuration. Old local
+instructions were retired; the current file is `/home/tyler/suifleet-cloudflare-dns.zone`.
+No OpenAI ownership TXT records are required by this hosting.
+
+## Prepare, verify and publish
+
+Run from a clean source checkout with pinned Node22.22.2 and the hash-pinned docs
+requirements installed. `cloudflare-staging-origins.json` is for independent
+Pages-host checks; `production-origins.json` is for the actual owned domains.
+
+```sh
+python3 hosting/cloudflare_pages.py provision --receipt /private/projects.json
+python3 hosting/cloudflare_pages.py dns --receipt /private/projects.json --output /private/web-dns.zone
 PYTHONPATH=/path/to/hash-pinned/docs/packages python3 hosting/build.py \
-  --origins hosting/provisioning-origins.json --out /private/new-hosted-release \
-  --node /path/to/node-v22.22.2/bin/node
-CHROME_EXECUTABLE=/path/to/chrome node hosting/test_hosted_browser.cjs \
-  hosting/provisioning-origins.json
+  --origins hosting/production-origins.json --dns-zone hosting/cloudflare-dns.zone \
+  --out /private/new-immutable-bundles --node /path/to/node-v22.22.2/bin/node
 ```
 
-The builder validates the paired Testnet manifest before and after the pinned
-frontend build, configures real public documentation links, prepares security
-headers and emits source/configuration/file hashes. It never signs a transaction
-or writes DNS. Review the output before publication. A stale UpgradeCap/profile
-is a real error; resolve the paired manifest rather than weakening verification.
+Provisioning verifies zone/account ownership and existing project identity before
+creating anything. Builds reverify the public Testnet profile before and after
+export. DNS download inclusion requires an explicitly chosen provider file;
+legacy Sites records are never silently added to a new bundle.
 
-Use the Sites skill and its `site-workflow.mjs` helper for the existing projects.
-Pass short-lived credentials only through hidden stdin. Keep the user's verified
-Tyler Bush author/committer identity; make descriptive itemized snapshot commits
-before invoking the helper so it does not create a generic commit. Package the
-exact pushed source and use the audience-appropriate native save/deploy call.
-The current customer sites are public. Do not change their audience on updates.
+Use the existing `site/release.py seal` for marketing/docs/console and
+`site/collection.py` to bind all three public-file inventories to one digest.
+These gates enforce the static-only policy and Pages file/count/header limits.
+Reverify that collection digest before upload; deploy exactly its public folders
+with the pinned Wrangler to the recorded project/production branch, passing the
+recorded source commit. Retain native deployment IDs, source and collection hashes.
+Check served bytes/headers, mobile/desktop navigation and actual media playback.
+Do not equate a successful upload with DNS/TLS or manual-wallet acceptance.
 
-Physical Pi, manual wallet, production-provider/payment and Mainnet acceptance
-are separate from successful static-host publication. The app remains Testnet.
+`cloudflare_pages.py bind --receipt /private/projects.json --output /private/domains.json`
+creates missing domain associations idempotently. It does not edit DNS.
 
-Live checks (run from the repository root with Chrome available):
+The existing `.github/workflows/static-site.yml` remains the protected future
+release path: separate preview/production credentials, exact approved artifact,
+main-only production environment and the user's reviewer gate. Machine OAuth
+login does not configure or bypass those CI credential/approval protections.
+This user-requested migration is a separately authorized, receipted local upload.
 
-```sh
-CHROME_EXECUTABLE=/path/to/chrome node hosting/test_overview_browser.cjs
-CHROME_EXECUTABLE=/path/to/chrome node hosting/test_customer_readonly.cjs
-```
-
-The overview check plays both layouts with native captions and verifies the
-actual downloadable DNS bytes. The customer check only reads the recorded
-public Testnet customer's configuration and signed native startup report; it
-contains no signing key and rejects every signing/execution request. Its sample
-can age out. It is not manual Slush or production-wallet acceptance.
-
-## Response security gate (required after publication)
-
-Run `python3 hosting/check_headers.py hosting/provisioning-origins.json`
-alongside the browser checks. It asserts actual HTTP response headers for all
-three hosts and the DNS download. Generated `_headers` files describe intended
-configuration; the current Sites host does not apply them. Existing deployment
-receipts therefore do not prove security-header acceptance.
-
-Console preparation also inserts a hash-based meta CSP before scripts and a
-referrer meta policy. These provide browser restrictions even on a host ignoring
-`_headers`, but cannot provide frame-ancestors, HSTS or nosniff. Choose/configure
-a provider-supported response-header mechanism and pass the live gate before
-claiming this finding resolved. No production publication is authorized by this
-documentation.
-
-For a prepared local console, run:
-`CHROME_EXECUTABLE=/path/to/chrome node hosting/test_console_csp.cjs /path/to/prepared/app`.
-This checks hydration and blocks an unreviewed inline script without serving
-response CSP. It does not establish remote deployment or framing protection.
+Official references: [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/),
+[custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/),
+[DNS import](https://developers.cloudflare.com/dns/manage-dns-records/how-to/import-and-export/).
