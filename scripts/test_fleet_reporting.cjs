@@ -58,6 +58,41 @@ function fixture(options={}) {
  assert.equal(load('lib/retention.ts').retentionOrigin(selectedStorage.config),release.storagePackageId);
  await assert.rejects(()=>reporting.resolveFleetStorageRelease(fixture({rpcError:true}),fleet(1)));
  const legacyStorage=await reporting.resolveFleetStorageRelease(fixture({absent:true}),fleet(1));assert.equal(legacyStorage.config.packageId,id('0x999'));
+ // Render the actual panel with controlled hooks, then execute its extension action.
+ // This catches regressions where the writer bypasses verified storage discovery.
+ async function panelExtension(config, resolved, storageId) {
+  const executed=[];let state=0;
+  const panelLoad=loader({
+   react:{useEffect:()=>{},useRef:()=>({current:0}),useState:initial=>{
+    const index=state++;return [index===3?id('0xe1'):index===6?id('0xabc'):initial,()=>{}];
+   }},
+   '@/hooks/useCurrentAccount':{useCurrentAccount:()=>({address:id('0x123')})},
+   '@mysten/dapp-kit-react':{useCurrentClient:()=>fixture()},
+   '@/hooks/useFleetDataConfig':{useFleetDataConfig:()=>config},
+   '@/hooks/useFleetSelection':{useFleetSelection:()=>({supported:true,fleet:fleet(1),identity:'test'})},
+   '@/hooks/useFleetStorage':{useFleetStorage:()=>({config:resolved.config,storage:storageId?{id:storageId}:undefined})},
+   '@/hooks/useFleetTransaction':{useFleetTransaction:()=>({mutateAsync:async request=>executed.push(request.transaction),isPending:false})},
+  });
+  const tree=panelLoad('components/StreamRetention.tsx').StreamRetentionPanel();
+  function find(node) {
+   if(!node||typeof node!=='object')return;
+   if(node.type==='button'&&node.props.children==='Extend archive before expiry')return node;
+   for(const child of [node.props?.children].flat(Infinity)){const match=find(child);if(match)return match;}
+  }
+  const button=find(tree);assert(button);await button.props.onClick();
+  // The handler awaits execution before updating status; the transaction is captured synchronously.
+  return {button,executed};
+ }
+ for(const [resolved,expected] of [[selectedStorage,release.storagePackageId],[legacyStorage,id('0x999')]]) {
+  const result=await panelExtension(configs[0],resolved,configs[0].storageId);
+  assert.equal(result.button.props.disabled,false);assert.equal(result.executed.length,1);
+  const call=result.executed[0].getData().commands[0].MoveCall;
+  assert.equal(call.package,expected);assert.equal(call.function,'extend_stream_blob');
+ }
+ for(const storageId of [undefined,configs[1].storageId]) {
+  const result=await panelExtension(configs[0],selectedStorage,storageId);
+  assert.equal(result.button.props.disabled,true);assert.equal(result.executed.length,0);
+ }
  for(let n=1;n<=2;n++)assert.deepEqual(await reporting.resolveFleetReporting(fixture(),fleet(n)),configs[n-1]);
  for(const options of [{crossData:true},{crossStorage:true},{wrongOrigin:true},{staleRelease:true},{spoof:true},{rpcError:true}])await assert.rejects(()=>reporting.resolveFleetReporting(fixture(options),fleet(1)));
  assert.equal(await reporting.resolveFleetReporting(fixture({absent:true}),fleet(1)),undefined);
@@ -74,5 +109,5 @@ function fixture(options={}) {
  assert(settings.includes(`[fleet_data.managed]\ncustomer_id = "${fleet(1).customerId}"\nfleet_id = "${fleet(1).id}"`));
  assert(!settings.includes('keypair_path'));assert(!settings.includes('[runtime]'));
  await assert.rejects(()=>reporting.reportingClientSettings(fixture({missingWriter:true}),fleet(1),fleet(1).devices[0]),/Enroll device/);
- console.log('PASS: two dynamic fleets; spoofed locator, cross-budget data/storage, wrong origin, stale release, RPC failure and read-only authority rejected; atomic capability-loan builder and retry recovery');
+ console.log('PASS: archive extension panel uses verified release/legacy packages and refuses missing/mismatched storage; two dynamic fleets; spoofed locator, cross-budget data/storage, wrong origin, stale release, RPC failure and read-only authority rejected; atomic capability-loan builder and retry recovery');
 })().catch(e=>{console.error(e);process.exit(1)});
