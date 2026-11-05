@@ -57,3 +57,7 @@ windows-evidence.json
 
 # suifleet.io landing site build output (site/build.py)
 site/dist/
+
+# Cloudflare local deployment cache and pinned CLI dependencies
+.wrangler/
+tools/static-hosting/node_modules

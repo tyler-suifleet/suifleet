@@ -25,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: python3 -m unittest discover -s site/tests -v
+      - name: Test hosting account, DNS scope and static integrity guards
+        run: python3 -m unittest discover -s hosting -p 'test_*.py' -v
       - run: |
           python3 site/build.py --out "$RUNNER_TEMP/site-a"
           python3 site/build.py --out "$RUNNER_TEMP/site-b"

@@ -1,0 +1,53 @@
+{
+  "website": {
+    "id": "appgdep_6aec430a22808191a935637153a852fb",
+    "project_id": "appgprj_6aec305355dc819181c4011690b539fd",
+    "title": "SuiFleet",
+    "version_id": "appgprj_6aec305355dc819181c4011690b539fd~appgver_ae0c2958cf788191847274cc4d52803a",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://suifleet-website.classiccrow.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6aec305355dc819181c4011690b539fd",
+    "failure_message": null,
+    "env_set_revision": 0,
+    "updated_at": "2026-11-05T08:49:20.199146+00:00",
+    "source_commit": "4a83ee0f63357e9138a2dd303e0df58ed0faeff4",
+    "upstream_revision": "c139a19ee518b05bccaa61a60975421acdb8dc51"
+  },
+  "app": {
+    "id": "appgdep_6aec41f5e08481918915165d7f7c8a99",
+    "project_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34",
+    "title": "SuiFleet Console",
+    "version_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34~appgver_8f9a57d3e0808191a270518e4c49cc8e",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://suifleet-console.classiccrow.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6aec307b6ec081919a43e49d6b8f0a34",
+    "failure_message": null,
+    "env_set_revision": 0,
+    "updated_at": "2026-11-05T08:44:44.102163+00:00",
+    "source_commit": "787e94186e2867d335e74525d9c879ee08f78254",
+    "upstream_revision": "d7b68ab471aed8f4756e23c15adddb182273f660"
+  },
+  "docs": {
+    "id": "appgdep_6aec41fde5a88191bbc1f82824be66a3",
+    "project_id": "appgprj_6aec307f34d88191bd7a9f661dd3a257",
+    "title": "SuiFleet Documentation",
+    "version_id": "appgprj_6aec307f34d88191bd7a9f661dd3a257~appgver_995dfc2e13c48191a4671b825d83439c",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://suifleet-docs.classiccrow.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6aec307f34d88191bd7a9f661dd3a257",
+    "failure_message": null,
+    "env_set_revision": 0,
+    "updated_at": "2026-11-05T08:44:50.569785+00:00",
+    "source_commit": "c8b3b1ef4a796f181b17a65f4f13562c2d1bfa6b",
+    "upstream_revision": "d7b68ab471aed8f4756e23c15adddb182273f660"
+  }
+}

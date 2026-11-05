@@ -21,9 +21,9 @@ export function useFleetAlerts(): AlertsResult {
     return () => clearInterval(timer);
   }, []);
   const query = useQuery<AlertsResult>({
-    queryKey: ["alerts", NETWORK, account?.address, selection.identity],
+    queryKey: ["alerts", NETWORK, account?.address, selection.identity, config?.fleetId, config?.packageId],
     queryFn: () => fetchChainAlerts(client, account!.address, undefined, selection.supported && selection.fleet ? { fleet: selection.fleet, config } : undefined),
-    enabled: !!account?.address && (!selection.supported || !!selection.fleet),
+    enabled: !!account?.address && (!selection.supported || (!!selection.fleet && !!config)),
     refetchInterval: ALERTS_REFRESH_MS,
   });
   return currentAlerts(query.data, query.dataUpdatedAt, query.isError, Math.max(now, query.dataUpdatedAt));
