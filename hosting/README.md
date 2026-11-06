@@ -113,3 +113,6 @@ The current sample uses the user-selected woman-at-the-computer editorial scene,
 with animated approval, direct software delivery and device verification. See
 `cloudflare-editorial-film-deployment.json` for the current website-only release.
 The full overview remains unchanged.
+
+The sample now uses a conversational SuiFleet introduction. Current release
+evidence: `cloudflare-human-narration-deployment.json`; visuals are unchanged.
