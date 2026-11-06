@@ -4978,6 +4978,27 @@
         "User direction: the public landing website should present SuiFleet as a production product independently of the app's current Testnet environment. Remove customer-facing Testnet/test-token/prelaunch environment banners and boilerplate from the marketing pages, shared footer, pricing/security/how-it-works and written product guide. Use neutral product language without inventing a mainnet launch, certified hardware safety, published third-party audit or live commercial billing. Keep app network labels and actual Testnet deployment/configuration entirely unchanged. Review public docs branding/header/footer for the same site-wide development status; preserve accurate technical network references and validation provenance rather than falsifying them. Update guide narration/captions where they unnecessarily brand the product by the demo network, preserving genuine recording provenance and truthful app indicators visible within the app footage. Retain female narration, cursor, optional captions and existing animated introduction. Add regression checks for production-facing marketing copy versus explicit app environment. Build/test and publish only the website/documentation changes to the existing owner Cloudflare projects with sealed source/file receipts and real served-byte/navigation/media checks. No contract, wallet, DNS or app-environment mutation; no mainnet claim. Preserve the user's commit identity, small commits and normal source/CI review."
       ],
       "validation": "Meaningful local static release tests, sealed three-origin builds, actual Pages deployment/domain/served-byte/media evidence and no credential disclosure."
+    },
+    {
+      "key": "SF-258",
+      "title": "Permit stopped recovery past archived dependency wait receipts",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Recovery SF245 is rejected by a stale dependency_resumes waiting row whose original dispatcher run is finished and archived following a published Review handoff. Prerequisite SF244 is Done. Fix the supported operator recovery fence to distinguish an archived stopped waiting receipt from active dependency resumption. Preserve all process, helper, claim, lease and competing-recovery protections. Do not mutate the runtime databases manually or install unmerged source.",
+      "evidence": "Bounded recovery run c3563b5dd4df432aa458b31b5bea9c02: supported recovery_control refused dependency resumption owns recovery; read-only receipts show waiting dependency source dispatch-0d0939e4443149df8729df0823bfb091 is finished and archived.",
+      "acceptance": [
+        "Archived, verified stopped waiting receipts no longer indefinitely block explicit same-claim operator recovery.",
+        "Active, uncertain, unarchived or resuming dependency owners still block; no claim or original evidence is discarded.",
+        "Meaningful offline regression tests cover refusal and allowed recovery; review and merged-only runtime installation remain required."
+      ],
+      "validation": "Offline recovery-control regression suite and dispatcher retirement/dependency tests. No wallet, deployment or hardware operations."
     }
   ]
 }

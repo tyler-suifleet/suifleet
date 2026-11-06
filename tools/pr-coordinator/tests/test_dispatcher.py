@@ -1022,3 +1022,87 @@ class HelperProcessTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ArchivedDependencyWaitTests(unittest.TestCase):
+    setUp = DispatchTests.setUp
+    receipt = DispatchTests.receipt
+
+    def setup_wait(self, status='finished', state='waiting', archived=True):
+        self.folder = self.receipt(status=status, owner_status='blocked')
+        self.digest = d.hashlib.sha256(self.claim['token'].encode()).hexdigest()
+        self.worker.db.execute('INSERT INTO dependency_resumes VALUES(?,?,?,?,?,?,?,?,?,?)',
+            ('session', 'suifleet', 'Codex', self.digest, state, None, 0, 0, 'waiting prerequisite', 1))
+        if archived:
+            self.worker.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)',
+                ('session', 'parked', 'original evidence', 'authoritative published Review handoff', 1))
+        self.worker.stopped_identity = Mock(return_value={'pid': 99999999, 'started': 'start'})
+        self.worker.capacity_helpers = Mock(return_value=[])
+
+    def record(self):
+        return dict(self.worker.db.execute('SELECT * FROM dependency_resumes').fetchone())
+
+    def retire(self):
+        self.worker.retire_archived_dependency_waits(self.project)
+
+    def test_archived_stopped_wait_releases_only_dependency_fence_and_survives_restart(self):
+        self.setup_wait()
+        original = dict(self.worker.db.execute('SELECT * FROM runs').fetchone())
+        claim = dict(self.claim)
+        result = (self.folder/'result.json').read_bytes()
+        self.retire()
+        self.assertEqual(self.record()['state'], 'retired')
+        self.assertEqual(self.record()['claim'], self.digest)
+        self.assertEqual(dict(self.worker.db.execute('SELECT * FROM runs').fetchone()), original)
+        self.assertEqual(self.claim, claim)
+        self.assertEqual((self.folder/'result.json').read_bytes(), result)
+        self.worker.ticket.assert_not_called()
+        # The unchanged installed recovery fence no longer sees an active wait.
+        self.assertIsNone(self.worker.db.execute(
+            "SELECT 1 FROM dependency_resumes WHERE claim=? AND state IN ('waiting','resuming')",
+            (self.digest,)).fetchone())
+        self.retire()
+        self.assertEqual(self.record()['state'], 'retired')
+        restarted = d.Dispatcher(self.config, self.state)
+        self.addCleanup(restarted.db.close)
+        restarted.retire_archived_dependency_waits(self.project)
+        self.assertEqual(self.record()['state'], 'retired')
+
+    def test_active_uncertain_or_unarchived_reservations_remain(self):
+        self.setup_wait()
+        for status, state, archived, identity, helpers in [
+                ('parked', 'waiting', True, {'started':'start'}, []),
+                ('finished', 'resuming', True, {'started':'start'}, []),
+                ('finished', 'waiting', False, {'started':'start'}, []),
+                ('finished', 'waiting', True, None, []),
+                ('finished', 'waiting', True, {'started':'start'}, [{'pid':1}])]:
+            with self.subTest(status=status, state=state, archived=archived, helpers=helpers):
+                self.worker.db.execute('UPDATE runs SET status=?', (status,))
+                self.worker.db.execute('UPDATE dependency_resumes SET state=?', (state,))
+                self.worker.db.execute('DELETE FROM retired_runs')
+                if archived:
+                    self.worker.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)',
+                        ('session','parked','evidence','published handoff',1))
+                self.worker.stopped_identity.return_value = identity
+                self.worker.capacity_helpers.return_value = helpers
+                self.retire()
+                self.assertEqual(self.record()['state'], state)
+
+    def test_reconcile_retires_wait_after_published_review_archive(self):
+        self.setup_wait(status='parked', archived=False)
+        ObsoleteReceiptTests.authority(self, {'status':'review'})
+        self.worker.reconcile(self.project)
+        self.assertEqual(self.record()['state'], 'retired')
+        self.assertEqual(self.worker.db.execute('SELECT status FROM runs').fetchone()[0], 'finished')
+        self.assertEqual(self.worker.db.execute('SELECT reason FROM retired_runs').fetchone()[0],
+                         'authoritative published Review handoff')
+
+    def test_claim_mismatch_and_process_change_fail_closed(self):
+        self.setup_wait()
+        self.worker.db.execute("UPDATE dependency_resumes SET claim='different'")
+        self.retire()
+        self.assertEqual(self.record()['state'], 'waiting')
+        self.worker.db.execute('UPDATE dependency_resumes SET claim=?', (self.digest,))
+        self.worker.stopped_identity.side_effect = [{'started':'start'}, None]
+        self.retire()
+        self.assertEqual(self.record()['state'], 'waiting')
