@@ -99,3 +99,8 @@ This user-requested migration is a separately authorized, receipted local upload
 Official references: [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/),
 [custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/),
 [DNS import](https://developers.cloudflare.com/dns/manage-dns-records/how-to/import-and-export/).
+
+The separate 20-second Remotion/SVG sample is at
+`https://suifleet.io/film-preview/`. Its release evidence is
+`cloudflare-remotion-sample-deployment.json`. It is unlisted/noindex and does not
+replace the full overview. Only marketing was deployed; app/docs are unchanged.
