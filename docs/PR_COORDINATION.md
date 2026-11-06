@@ -1692,3 +1692,26 @@ repairs. SF-243's existing implementation claim carries the repair; a newly
 pinned candidate after merged integration still needs real CI, automatic
 testnet and ordinary application review. Install only reviewed merged runtime.
 Offline routing tests establish no deployment or public-testnet success.
+
+### Cached native-passkey package-pair incident (SF-255)
+
+Candidate #643 (`58b0b0828925404219e65853b56431cb19cd1ce1`, base
+`d5702bc6be238f1887df00611ebf382b2bece755`) failed Automatic testnet run
+42031568923 before native-passkey acceptance because its retained journal used
+another package pair. The scoped incident reader authenticates that completed
+main-controller run, both exact head-named effects artifact hashes and the
+specific package-pair diagnostic. It records existing SF-255/#648 ownership in
+`shared_harness_incidents` and suppresses unchanged victim candidate repairs.
+Changed source/base, mixed failed checks and different artifacts retain normal
+routing. This grants no acceptance, wallet retry or worker ownership transfer.
+
+The harness now independently reconciles pending digests and completed effects
+against the original verified cached package fixture before atomically parking
+its journal in the same private encrypted state. It restores checkpoints when
+returning to that pair and retains the signing-key file across all pairs.
+Unreadable/changed effects, unexpected failed effects, missing provenance or
+missing retained keys stop recovery without another submission. Original
+pending reservations remain charged to the non-replenishing run allowance;
+parking a journal does not claim the unfinished exercise passed. Install the
+coordinator only from reviewed merged source; actual automatic testnet recovery
+and installed routing remain post-handoff evidence, not offline test results.

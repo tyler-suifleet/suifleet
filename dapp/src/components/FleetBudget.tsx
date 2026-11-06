@@ -1,4 +1,5 @@
 "use client";
+import { storageRemaining } from "@/lib/release-storage";
 import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -418,7 +419,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
 }) {
   const client = useCurrentClient(), account = useCurrentAccount();
   const { submit, message, error, pending } = useSubmit();
-  const origin = retentionOrigin();
+  const origin = retentionOrigin(config);
   const [executor, setExecutor] = useState(''), [margin, setMargin] = useState(2);
   const [walLimit, setWalLimit] = useState('1'), [gasLimit, setGasLimit] = useState('0.1'), [reward, setReward] = useState('0.01');
   const [walFunds, setWalFunds] = useState('1'), [gasFunds, setGasFunds] = useState('0.1');
@@ -447,8 +448,8 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
         <button type="button" onClick={() => void submit(() => buildConfigureRetentionTx(config, storage, budget, cap, executor, margin, parseToken(walLimit), parseToken(gasLimit), parseToken(reward)))}>Set bounded executor policy</button>
       </div>
       <p>Protect every fleet blob, including recipes, configuration, dependencies, rollback/recovery, site/manifest and history. External blobs are not protected by this storage; retain verified backups and import/re-upload them with owner-authorized references. Newly registered blobs pause further discretionary writes until authorized.</p>
-      <table><thead><tr><th>Blob</th><th>Exclusive expiry epoch</th><th>Projected exclusive expiry / runway</th><th>Authorized target</th><th>Last successful renewal epoch</th></tr></thead><tbody>
-        {blobs.map((item) => <tr key={item.id}><td><button type="button" onClick={() => { setBlob(item.id); setTarget(item.end + 1); }}>{item.id}</button></td><td>{item.end}</td><td>{schedule ? new Date(schedule.firstEpochStartMs + item.end * schedule.epochDurationMs).toISOString() : 'schedule unavailable'}; {epoch === undefined ? '?' : Math.max(0, item.end - epoch)} epoch(s). Projection assumes unchanged epoch duration.</td><td>{item.policy?.target ?? 'no renewal policy; check coverage'}{item.policy && item.policy.last_success_epoch === null && item.policy.max_fee === '0' ? ' (capacity prepaid)' : ''}</td><td>{item.policy?.last_success_epoch ?? 'none'}</td></tr>)}
+      <table><thead><tr><th>Blob</th><th>Exclusive expiry epoch</th><th>Approximate remaining storage / epoch runway</th><th>Authorized target</th><th>Last successful renewal epoch</th></tr></thead><tbody>
+        {blobs.map((item) => <tr key={item.id}><td><button type="button" onClick={() => { setBlob(item.id); setTarget(item.end + 1); }}>{item.id}</button></td><td>{item.end}</td><td>{storageRemaining(item.end, schedule && epoch !== undefined ? { epoch, epochDurationMs: schedule.epochDurationMs } : undefined) ?? 'Remaining duration unavailable'}; {epoch === undefined ? '?' : Math.max(0, item.end - epoch)} epoch(s) until exclusive expiry.</td><td>{item.policy?.target ?? 'no renewal policy; check coverage'}{item.policy && item.policy.last_success_epoch === null && item.policy.max_fee === '0' ? ' (capacity prepaid)' : ''}</td><td>{item.policy?.last_success_epoch ?? 'none'}</td></tr>)}
       </tbody></table>
       <label>Blob object ID <input className="border" value={blob} onChange={(e) => setBlob(e.target.value)} /></label>
       <label>Finite target epoch <input className="border w-16" type="number" value={target} onChange={(e) => setTarget(Number(e.target.value))} /></label>

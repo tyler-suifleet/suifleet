@@ -6,7 +6,7 @@ import { normalizeStructTag, normalizeSuiAddress as id } from "@mysten/sui/utils
 import { MANIFEST, verifyDeployment } from "./deployment-manifest";
 import { UpgradeCapBcs } from "./move-bcs";
 import { configuredDataFleets, FleetDataBcs, readFleetData, readDeviceData, type FleetDataConfig } from "./fleet-data";
-import { DEFAULT_QUOTA, FleetStorageBcs, fetchAccount, fetchManagedBudget } from "./fleet-budget";
+import { DEFAULT_QUOTA, FleetStorageBcs, fetchAccount, fetchManagedBudget, storageConfig } from "./fleet-budget";
 import type { NamedFleet } from "./customer-fleets";
 
 /** One reviewed package release for all customers, never a per-fleet build list. */
@@ -41,7 +41,7 @@ async function releaseOrigins(client: SuiGrpcClient, release: ReportingRelease) 
   }
   const [data, storage] = await Promise.all([
     check(release.packageId, release.upgradeCapId, "fleet_data", ["FleetData", "DeviceData", "DeviceKey", "CompactHeadKey", "StreamRetentionKey", "LocatorKey"]),
-    check(release.storagePackageId, release.storageUpgradeCapId, "fleet_storage", ["FleetStorage"]),
+    check(release.storagePackageId, release.storageUpgradeCapId, "fleet_storage", ["FleetStorage", "RetentionKey"]),
   ]);
   if (data.DeviceData !== data.FleetData || data.DeviceKey !== data.FleetData) throw Error("Incompatible reporting origins");
   return { data, storage };
@@ -94,6 +94,21 @@ export async function resolveFleetReporting(client: SuiGrpcClient, fleet: NamedF
     await verifyStorage(client, legacy[0], id(origin));
   }
   return legacy[0];
+}
+
+/** Select the verified reporting storage release for new fleets while retaining
+ * the explicit legacy package for older fleets. Errors never select fallback. */
+export async function resolveFleetStorageRelease(client: SuiGrpcClient, fleet: NamedFleet) {
+  const legacy = { ...storageConfig(), storageId: undefined as string | undefined };
+  const release = reportingRelease();
+  if (!release) return legacy;
+  const reporting = await resolveFleetReporting(client, fleet, release);
+  if (!reporting || reporting.packageId !== release.packageId) return legacy;
+  const origins = await releaseOrigins(client, release);
+  const resolved = storageConfig(MANIFEST?.network, release.storagePackageId);
+  if (!resolved.config) return { ...resolved, storageId: undefined as string | undefined };
+  return { config: { ...resolved.config, storageOrigin: origins.storage.FleetStorage, retentionOrigin: origins.storage.RetentionKey },
+    storageId: reporting.storageId, reason: undefined };
 }
 
 export async function buildProvisionReporting(client: SuiGrpcClient, fleet: NamedFleet, release = reportingRelease()) {

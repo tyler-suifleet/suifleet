@@ -1,8 +1,8 @@
 {
-  "checked_at": "2026-11-05T05:04:54.781Z",
+  "checked_at": "2026-11-05T07:11:40.137Z",
   "network": "testnet",
   "chain": "4c78adac",
-  "package": "0xe57b1ccc5010d33a3dd80305109fa0aafc77a07ba70973b7c3987429f5cce749",
+  "package": "0x5b26264a391fc0690081b557529c1c311c077ead75d9841746dc56bc9dc8efd8",
   "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
   "upgrade_cap": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
   "namespace": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",

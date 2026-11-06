@@ -22,7 +22,7 @@ export function expiryTime(endEpoch: number, schedule: StorageSchedule): number 
   const value = anchor + (endEpoch-schedule.epoch)*schedule.epochDurationMs;
   return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
-export function storageRemaining(endEpoch: number | undefined, schedule?: StorageSchedule): string | undefined {
+export function storageRemaining(endEpoch: number | undefined, schedule?: Pick<StorageSchedule, 'epoch' | 'epochDurationMs'>): string | undefined {
   if (endEpoch === undefined || !schedule || !Number.isSafeInteger(endEpoch) || endEpoch < 0
       || !Number.isSafeInteger(schedule.epoch) || schedule.epoch < 0 || !Number.isSafeInteger(schedule.epochDurationMs) || schedule.epochDurationMs <= 0) return undefined;
   const periods = endEpoch-schedule.epoch;
