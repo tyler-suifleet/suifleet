@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "account_id": "891137fc20b3722a2be4716e655769ea",
+  "zone_id": "05f2e929552eb648e1488b86f860fc94",
+  "projects": {
+    "website": {
+      "id": "9672e9fa-ead0-46c7-ac1a-b0925139bdd7",
+      "name": "suifleet-marketing",
+      "subdomain": "suifleet-marketing.pages.dev",
+      "production_branch": "production"
+    },
+    "app": {
+      "id": "1cd9a3fb-f684-441f-9bb9-7d156d41b892",
+      "name": "suifleet-console",
+      "subdomain": "suifleet-console.pages.dev",
+      "production_branch": "production"
+    },
+    "docs": {
+      "id": "3eedd1ae-dee4-425e-aa6b-f0b51d4bf301",
+      "name": "suifleet-docs",
+      "subdomain": "suifleet-docs.pages.dev",
+      "production_branch": "production"
+    }
+  }
+}

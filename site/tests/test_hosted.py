@@ -54,9 +54,26 @@ class HostedTests(unittest.TestCase):
             src, out = Path(tmp) / 'source', Path(tmp) / 'hosted'
             src.mkdir()
             (src / 'deployment-manifest.json').write_text(json.dumps(manifest))
-            (src / 'index.html').write_text('<script>self.test=1</script>')
+            (src / 'index.html').write_text('<html><head><script>self.test=1</script></head><body></body></html>')
             hosted.prepare(src, out, 'console', 'a' * 40)
             policy = (out / '_headers').read_text().split('Content-Security-Policy: ')[1].split('\n')[0]
+            from html.parser import HTMLParser
+            class Metas(HTMLParser):
+                def handle_starttag(self, tag, attrs):
+                    if tag == 'meta':
+                        self.tags.append(dict(attrs))
+            parsed = Metas()
+            parsed.tags = []
+            document = (out / 'index.html').read_text()
+            parsed.feed(document)
+            meta = next(t['content'] for t in parsed.tags if t.get('http-equiv') == 'Content-Security-Policy')
+            self.assertEqual(meta, policy.replace("; frame-ancestors 'none'", ""))
+            self.assertLess(document.index('<meta'), document.index('<script'))
+            self.assertLess(document.index('<meta charset="utf-8">'), 1024)
+            self.assertIn({'name': 'referrer', 'content': 'strict-origin-when-cross-origin'}, parsed.tags)
+            parser = hosted.Scripts()
+            parser.feed(document)
+            self.assertTrue(all(h in meta for h in parser.hashes))
             directives = {parts[0]: set(parts[1:]) for clause in policy.split(';') if (parts := clause.split())}
             required = {
                 'https://fullnode.testnet.sui.io:443',
