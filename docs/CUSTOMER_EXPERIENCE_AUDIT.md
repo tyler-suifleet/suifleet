@@ -1,5 +1,7 @@
 # Customer experience audit — 4 November 2026
 
+Implementation follow-through: [current remediation and deployment evidence](CUSTOMER_AUDIT_REMEDIATION.md). The conclusions below describe the original audit date.
+
 ## Verdict
 
 The core story is understandable: install a device client, register devices, publish software, deploy it and inspect the result. The public preview is **not yet a self-service customer onboarding experience**. A prospective customer can encounter configuration and capacity barriers that look like product failures. Clearer copy helps, but does not provision those services.

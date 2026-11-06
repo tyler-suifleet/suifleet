@@ -58,7 +58,14 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
  assert.throws(()=>data.validateHealthSnapshot({...daily,interval_seconds:86401},86400));
  // Exercise the actual detail/header components with real reader results.
  const React = appRequire('react'), { renderToStaticMarkup } = appRequire('react-dom/server');
- const { HealthDetails, TelemetrySettings } = load('components/DeviceHealth.tsx');
+ // Render the real readiness component with explicit selection/query states.
+ // The header now reads fleet reporting hooks, so a context-free render is invalid.
+ let reportingQuery = { isSuccess: true, data: undefined };
+ const renderHealth = loader({
+  '@/hooks/useFleetDataConfig': { useFleetReporting: () => reportingQuery },
+  '@/hooks/useFleetSelection': { useFleetSelection: () => ({ supported: true, fleet: { budgetId: config.budgetId } }) },
+ });
+ const { HealthDetails, TelemetrySettings } = renderHealth('components/DeviceHealth.tsx');
  const telemetry = load('lib/telemetry.ts');
  const absentConfig = (await telemetry.fetchFleetHealth(client(), [deviceId], id('0xa'), '', '', fetch, {}))[deviceId];
  const notMember = await result(client({ missingIndex: true }));
@@ -74,6 +81,18 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
   assert.equal(header.includes('Health comes from verified device reports.'), configured);
   assert.equal(header.includes('not set up'), !configured);
   assert.doesNotMatch(detail + header, /NEXT_PUBLIC_/);
+ }
+ // Pending and failed reads must never be presented as confirmed missing setup.
+ for (const [query, expected] of [
+  [{ isPending: true }, 'Checking this fleet’s reporting settings'],
+  [{ isError: true }, 'We could not verify reporting settings'],
+  [{ isSuccess: true, isRefetchError: true }, 'We could not verify reporting settings'],
+ ]) {
+  reportingQuery = query;
+  const header = renderToStaticMarkup(React.createElement(TelemetrySettings, { configured: false }));
+  assert.ok(header.includes(expected), header);
+  assert.ok(!header.includes('Reporting is not set up'), header);
+  assert.equal(header.includes('Retry reporting check'), !!(query.isError || query.isRefetchError));
  }
  // A global locator must not make an unrelated selected fleet look configured.
  let selection = { supported: true, identity: 'unrelated', fleet: { budgetId: id('0x999') } };

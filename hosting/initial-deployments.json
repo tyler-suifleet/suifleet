@@ -1,0 +1,47 @@
+{
+  "website": {
+    "id": "appgdep_6aec355f674481919c44fcb316d6b3fe",
+    "project_id": "appgprj_6aec305355dc819181c4011690b539fd",
+    "title": "SuiFleet",
+    "version_id": "appgprj_6aec305355dc819181c4011690b539fd~appgver_b0e9c4129e648191b91f74c8d72699ab",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://suifleet-website.classiccrow.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": "sediment://file_000000001a9c81f5b89b5c2bf2dac6bd",
+    "provider_deployment_id": "site---6aec305355dc819181c4011690b539fd",
+    "failure_message": null,
+    "env_set_revision": 0,
+    "updated_at": "2026-11-05T07:51:12.884650+00:00"
+  },
+  "app": {
+    "id": "appgdep_6aec356642f08191b3369339cde39d26",
+    "project_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34",
+    "title": "SuiFleet Console",
+    "version_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34~appgver_0eae186a3efc8191be9651fad1157be3",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://suifleet-console.classiccrow.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6aec307b6ec081919a43e49d6b8f0a34",
+    "failure_message": null,
+    "env_set_revision": 0,
+    "updated_at": "2026-11-05T07:51:13.301308+00:00"
+  },
+  "docs": {
+    "id": "appgdep_6aec357730f88191946f7864bf8bb1ed",
+    "project_id": "appgprj_6aec307f34d88191bd7a9f661dd3a257",
+    "title": "SuiFleet Documentation",
+    "version_id": "appgprj_6aec307f34d88191bd7a9f661dd3a257~appgver_2189cf1b8aac81919c9a2d182c9d0b54",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://suifleet-docs.classiccrow.chatgpt.site",
+    "has_mcp": false,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6aec307f34d88191bd7a9f661dd3a257",
+    "failure_message": null,
+    "env_set_revision": 0,
+    "updated_at": "2026-11-05T07:51:28.103493+00:00"
+  }
+}

@@ -1,6 +1,7 @@
 // UI boundary fixtures only; production resolver/PTBs are tested separately.
 import React,{useState,useContext,createContext} from 'react';
 import {createRoot} from 'react-dom/client';
+import {ReportingReadiness} from '../../dapp/src/components/ReportingReadiness';
 import {FleetReportingSetup} from '../../dapp/src/components/FleetReportingSetup';
 const Context=createContext(null);
 let server,fail=true,enrolled=false,invalidRelease=false;
@@ -23,12 +24,12 @@ function Harness(){
  const refresh=async()=>{setChecking(false);setData(server);setError(null);return {data:server};};
  const fleet={id:`fleet-${identity}`,customerId:'customer',devices:['device-1'],administrator:admin};
  const query={data,error,isPending:checking,isError:!!error,isFetching:false,refetch:refresh};
- return <Context.Provider value={{selection:{fleet},query}}>
+ return <Context.Provider value={{selection:{fleet,supported:true},query}}>
   <button onClick={()=>setError(Error('Transport unavailable'))}>Simulate unavailable readiness</button>
   <button onClick={()=>{invalidRelease=true;setError(Error("Invalid release"));}}>Break reporting release</button>
   <button onClick={()=>setAdmin(false)}>Revoke administrator</button>
   <button onClick={()=>{server=undefined;enrolled=false;setData(undefined);setIdentity(v=>v+1);}}>Select second fleet</button>
-  <FleetReportingSetup key={identity}/>
+  {!data && <ReportingReadiness/>}<FleetReportingSetup key={identity}/>
  </Context.Provider>;
 }
 createRoot(document.getElementById('root')).render(<Harness/>);

@@ -26,11 +26,7 @@ const dependencies={react,
  '@/lib/stream-retention':{...actual,readStreamPolicies:async()=>policies},
  '@/hooks/useFleetTransaction':{useFleetTransaction:()=>({isPending:false,mutateAsync:({transaction})=>{signed.push(transaction);return new Promise(resolve=>{pendingResolve=resolve;});}})},
 };
-const fs=require('node:fs'),path=require('node:path'),Module=require('node:module'),ts=appRequire('typescript');
-const filename=path.resolve(__dirname,'../dapp/src/components/StreamRetention.tsx'),compiled=new Module(filename,module);
-compiled.filename=filename;compiled.require=name=>Object.hasOwn(dependencies,name)?dependencies[name]:appRequire(name);
-compiled._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{fileName:filename,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,filename);
-const {StreamRetentionPanel}=compiled.exports;
+const {StreamRetentionPanel}=loader(dependencies)('components/StreamRetention.tsx');
 function render(){cursor=0;effects=[];const tree=StreamRetentionPanel();effects.forEach(f=>f());return tree;}
 function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return [];return [tree,...nodes(tree.props?.children)];}
 const text=t=>typeof t==='string'||typeof t==='number'?String(t):Array.isArray(t)?t.map(text).join(''):t?.props?text(t.props.children):'';
