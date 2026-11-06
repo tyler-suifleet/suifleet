@@ -1,6 +1,6 @@
 # Install the SuiFleet device client
 
-SuiFleet is a public-testnet preview. Choose a platform below, then enroll the
+Choose a platform below, then enroll the
 device and send a small test component before a wider rollout. You need an
 operator account, funds for network fees, a deployment manifest for that same
 network and administrative access to the device. Registration alone does not

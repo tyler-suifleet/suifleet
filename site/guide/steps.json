@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "Written steps follow the current console. Videos are dated scripted testnet demonstrations; their source commit is retained in videos.json and layouts may differ. Update recording scripts when UI labels change.",
+  "note": "Written steps follow the current console. Videos are dated scripted demonstrations; their source commit is retained in videos.json and layouts may differ. Update recording scripts when UI labels change.",
   "steps": [
     {
       "id": "sign-in",
@@ -15,7 +15,7 @@
         "Open the console and click Connect Wallet at the top right.",
         "Pick Slush, your extension wallet or Google, and approve the connection.",
         "On your first visit, choose Create default fleet in the fleet selector and approve the request. A fleet is your device workspace; choose it before continuing.",
-        "Choose Get started in the sidebar: it shows your account, short address, the network (Testnet in the preview) and the next onboarding step."
+        "Choose Get started in the sidebar: it shows your account, short address, the selected network and the next onboarding step."
       ],
       "result": "The console shows your connected address, your selected fleet and the next onboarding step.",
       "docs": [
@@ -30,10 +30,10 @@
       "title": "Enable device capacity",
       "console_route": "billing/",
       "console_label": "Plans and billing",
-      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the fleet budget for device activity. Check capacity before depositing operating funds. This preview uses a disposable test tariff and free test tokens, not real purchases.",
+      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the fleet budget for device activity. Check capacity before depositing operating funds. Review the capacity and price shown in the console before approving a purchase.",
       "before": [
         "Connect and choose your fleet.",
-        "Obtain free test SUI for approvals. An organization administrator must choose the plan."
+        "Have funds for account fees on the network shown in the console. An organization administrator must choose the plan."
       ],
       "actions": [
         "Open Device capacity to check how many device places are available.",
@@ -42,7 +42,7 @@
         "Apply the due prepaid payment to activate capacity. This uses the existing subscription balance, with a separate network fee.",
         "Return to Device capacity and verify the new limit."
       ],
-      "result": "The organization\u2019s device limit increases. No device has been registered, connected or updated by buying capacity.",
+      "result": "The organization’s device limit increases. No device has been registered, connected or updated by buying capacity.",
       "docs": [
         {
           "label": "Subscription pricing",
@@ -57,7 +57,7 @@
       "console_label": "Network budget",
       "summary": "The fleet budget pays the network fees for device reports. Storage funding pays for uploaded files and logs where enabled. These balances are separate from your subscription and device capacity. Depositing funds requires your approval.",
       "before": [
-        "SUI in the connected account. On testnet, request it from the Sui faucet; the console shows the address to fund."
+        "Funds for account fees on the network shown in the console. Confirm the account and selected network before funding."
       ],
       "actions": [
         "Choose Network budget in the sidebar.",
@@ -138,7 +138,7 @@
         "Choose Components in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
         "Click Publish version, enter the Component name and Semantic version, and continue.",
         "For each platform choose the Operating system and Architecture, attach the Artifact and, if needed, an Install command.",
-        "Under Delivery keep Confidential and choose the Access policy for proprietary software. The scripted testnet demo chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
+        "Under Delivery keep Confidential and choose the Access policy for proprietary software. The recorded example chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
         "Click Review version, then Upload and publish version, and approve the transaction."
       ],
       "result": "Version published, with the confirmed transaction digest. The version appears in the component library.",

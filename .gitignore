@@ -57,3 +57,21 @@ windows-evidence.json
 
 # suifleet.io landing site build output (site/build.py)
 site/dist/
+
+# Cloudflare local deployment cache and pinned CLI dependencies
+.wrangler/
+tools/static-hosting/node_modules
+
+# Isolated video composition toolchain
+site/motion-sample/node_modules/
+site/motion-sample/public/narration.wav
+site/motion-sample/public/inter-variable.woff2
+site/motion-sample/public/logo.svg
+site/motion-sample/public/timing.json
+
+site/motion-sample/public/workstation.png
+site/motion-sample/public/gateway.png
+site/motion-sample/public/storage.png
+
+site/motion-sample/public/editorial-scene.png
+site/motion-sample/public/overview-narration.wav

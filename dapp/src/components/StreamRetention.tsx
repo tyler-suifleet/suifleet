@@ -1,4 +1,5 @@
 "use client";
+import { ReportingReadiness } from './ReportingReadiness';
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
@@ -6,8 +7,9 @@ import { useFleetDataConfig } from '@/hooks/useFleetDataConfig';
 import { useFleetSelection } from '@/hooks/useFleetSelection';
 import { fetchCustomerFleets } from '@/lib/customer-fleets';
 import { selectedDataAuthority } from '@/lib/data-authority';
-import { fetchBudgets, fetchManagedBudget, storageConfig } from '@/lib/fleet-budget';
+import { fetchBudgets, fetchManagedBudget } from '@/lib/fleet-budget';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { useFleetStorage } from '@/hooks/useFleetStorage';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { ARCHIVE_STREAMS, readStreamPolicies, setStreamRetentionTx, extendStreamArchiveTx } from '@/lib/stream-retention';
 
@@ -18,7 +20,8 @@ export function StreamRetentionPanel() {
   const [values, setValues] = useState<(number | undefined)[]>([]), [kind, setKind] = useState(0), [epochs, setEpochs] = useState(3);
   const [cap, setCap] = useState<string>(), [message, setMessage] = useState(''), [loaded, setLoaded] = useState(false);
   const [blob, setBlob] = useState(''), [extension, setExtension] = useState(1);
-  const storage = storageConfig().config;
+  const fleetStorage = useFleetStorage();
+  const storage = fleetStorage.storage?.id === DATA_CONFIG?.storageId ? fleetStorage.config : undefined;
   const generation = useRef(0);
   useEffect(() => {
     const current = ++generation.current; setCap(undefined); setValues([]); setLoaded(false); setMessage('');
@@ -52,7 +55,7 @@ export function StreamRetentionPanel() {
     } catch { if (current === generation.current) setMessage('Archive extension refused or unavailable. Expired data and archives awaiting renewal cannot be extended here.'); }
   }
   return <section className="border rounded p-4 space-y-3"><h2 className="font-semibold">Per-stream retention</h2>
-    {!DATA_CONFIG?.streamRetentionOrigin ? <p>Retention settings are unavailable until this fleet’s software is upgraded and verified.</p> : <>
+    {!DATA_CONFIG?.streamRetentionOrigin ? !DATA_CONFIG ? <ReportingReadiness /> : <p>This fleet’s reporting version does not support custom retention settings.</p> : <>
       <ul>{ARCHIVE_STREAMS.map((name, i) => <li key={name}>{name}: {loaded ? values[i] === undefined ? 'using the shared storage setting' : 'custom storage period configured (see technical settings)' : 'unavailable'}</li>)}</ul>
       <p>Choose how long to keep each stream’s new data. Changing a setting does not extend existing archives. Exact durations depend on the storage network’s schedule; calendar expiry dates are unavailable here.</p>
       <details><summary>Technical storage settings</summary>

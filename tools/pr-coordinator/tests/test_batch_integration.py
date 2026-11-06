@@ -490,6 +490,69 @@ class BatchTests(unittest.TestCase):
         f.tick();self.assertEqual(len(posts),1);self.assertEqual(f.row()['status'],'pr_creating')
         self.assertIn('ambiguous',f.row()['error'])
 
+    def stack_second_member(self, f):
+        f.git('checkout','-q','work/2')
+        f.git('merge','--no-ff','-qm','Include prerequisite',f.heads[0])
+        head=f.git('rev-parse','HEAD')
+        f.git('push','-q','origin','work/2')
+        f.git('checkout','-q','main')
+        f.heads[1]=head
+        f.source_prs[2]['headRefOid']=head
+        f.receipts[2].update(head=head,base=f.heads[0],
+            source_feedback=coordinator_module.source_feedback(f.source_prs[2]))
+
+    def test_stacked_review_base_in_preceding_member_builds_and_keeps_gates(self):
+        f=self.fixture()
+        # Member 2 was independently reviewed against member 1's unmerged head.
+        self.stack_second_member(f)
+        f.tick()
+        row=f.row()
+        self.assertEqual(row['status'],'awaiting_ci')
+        self.assertEqual([m['pr'] for m in json.loads(row['members'])],[1,2])
+        f.git('merge-base','--is-ancestor',f.heads[0],row['head'])
+        f.tick();self.assertEqual(f.row()['status'],'awaiting_ci')
+        self.assertEqual(f.reconciled,[])
+        f.green();f.tick();self.assertEqual(f.row()['status'],'awaiting_review')
+        self.assertEqual(f.reconciled,[])
+        f.approve();f.tick();self.assertEqual(f.row()['status'],'done')
+        self.assertEqual(f.reconciled,[1,2])
+
+    def test_future_review_base_is_rejected_without_stranding_other_member(self):
+        f=self.fixture()
+        f.receipts[1]['base']=f.heads[1]
+        f.tick()
+        row=f.row()
+        self.assertEqual(row['status'],'awaiting_ci')
+        self.assertEqual([m['pr'] for m in json.loads(row['members'])],[2])
+        context=f.db.execute('SELECT context FROM integration_batch_conflicts WHERE pr=1').fetchone()
+        self.assertIn('reviewed base is absent',json.loads(context[0])['reason'])
+        self.assertEqual(f.reconciled,[])
+
+    def test_rejected_predecessor_cannot_supply_stacked_review_base(self):
+        f=self.fixture();self.stack_second_member(f)
+        f.receipts[1]['base']=f.heads[1]
+        f.tick()
+        self.assertEqual(f.row()['status'],'failed')
+        self.assertEqual(f.candidate_prs,{})
+        self.assertEqual(f.db.execute('SELECT count(*) FROM integration_batch_conflicts').fetchone()[0],2)
+        self.assertEqual(f.reconciled,[])
+
+    def test_stacked_base_recovery_reuses_epoch_and_git_errors_stay_uncertain(self):
+        f=self.fixture();self.stack_second_member(f)
+        original=f.controller.git
+        def fail(project,*args,**kwargs):
+            if args[:3]==('merge-base','--is-ancestor',f.heads[0]) and args[3]!=f.base:
+                raise subprocess.CalledProcessError(128,['git',*args])
+            return original(project,*args,**kwargs)
+        with patch.object(f.controller,'git',side_effect=fail):f.tick()
+        self.assertEqual(f.row()['status'],'build_uncertain')
+        self.assertEqual(f.db.execute('SELECT count(*) FROM integration_batch_conflicts').fetchone()[0],0)
+        epoch=f.row()['id']
+        f.tick()
+        self.assertEqual(f.row()['id'],epoch)
+        self.assertEqual(f.row()['status'],'awaiting_ci')
+        self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])],[1,2])
+
     def test_unpublished_build_failure_retries_safely(self):
         f=self.fixture();original=f.controller.git
         def fail(project,*args,**kwargs):

@@ -18,16 +18,16 @@ This recording uses a scripted test wallet in place of Slush;
 approve the connection.
 
 4
-00:00:26.280 --> 00:00:29.565
-Connected: the card shows your address and the network
-(Testnet).
+00:00:26.280 --> 00:00:29.843
+Connected: the account card shows your address and current
+connection.
 
 5
-00:00:30.280 --> 00:00:34.611
+00:00:30.560 --> 00:00:34.891
 First time only: create your default fleet, then approve the
 transaction.
 
 6
-00:00:36.120 --> 00:00:42.328
+00:00:36.400 --> 00:00:42.608
 Your fleet is selected. Next check device capacity: network
 funds do not increase your device limit.

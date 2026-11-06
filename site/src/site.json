@@ -33,6 +33,7 @@
     {"source": "security.html", "path": "/security/", "title": "Security and custody", "description": "Who holds which keys in SuiFleet, what the chain records prove and what remains your platform's responsibility."},
     {"source": "contact.html", "path": "/contact/", "title": "Contact", "description": "Contact SuiFleet about pilots, design partnerships, security reports and support."},
     {"source": "privacy.html", "path": "/privacy/", "title": "Privacy", "description": "How the website, console and public networks handle requests, public management records and private release files."},
+    {"source": "film-preview.html", "path": "/film-preview/", "title": "Animation sample", "description": "A twenty-second illustrated look at preparing, approving and delivering a software release.", "noindex": true},
     {"source": "404.html", "path": "/404.html", "title": "Page not found", "description": "The page you asked for does not exist."}
   ]
 }

@@ -127,7 +127,21 @@ def check(out):
                 raise ValueError(rel + ": broken anchor " + link)
 
 
-def build(out):
+def build(out, origins=None):
+    origins = origins or {}
+    if not isinstance(origins,dict): raise ValueError('Documentation origins must be an object')
+    if set(origins) - {'origin','website_url','app_url'}:
+        raise ValueError('Unknown documentation origin setting')
+    import ipaddress
+    for value in origins.values():
+        if not isinstance(value,str): raise ValueError('Documentation origin must be a string')
+        u = urlsplit(value)
+        if u.scheme != 'https' or not u.hostname or u.username or u.password or u.query or u.fragment or u.path not in ('','/') or u.hostname == 'localhost' or u.hostname.endswith('.local'):
+            raise ValueError('Documentation hosts must be public credential-free HTTPS origins')
+        try: address=ipaddress.ip_address(u.hostname)
+        except ValueError: address=None
+        if address is not None and not address.is_global:
+            raise ValueError('Documentation hosts must be public')
     out = out.resolve()
     # Never erase a caller's directory or source tree.
     if out == ROOT or out in SITE.parents or out == SITE or SITE.is_relative_to(out):
@@ -141,6 +155,8 @@ def build(out):
     (out / MARKER).write_text("SF-177\n")
     shutil.copytree(SITE / "assets", out / "assets")
     layout = (SITE / "layout.html").read_text()
+    for source,key in [('https://docs.suifleet.io','origin'),('https://suifleet.io','website_url'),('https://app.suifleet.io','app_url')]:
+        layout = layout.replace(source, origins.get(key,source).rstrip('/'))
     search = []
     def emit(path, title, content):
         nav = ""
@@ -157,7 +173,7 @@ def build(out):
         target = out / (path.lstrip("/") + "index.html" if path.endswith("/") else path.lstrip("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(result, encoding="utf-8")
-    emit("/", "Documentation", '<h1>SuiFleet documentation</h1><p>Install a client, enroll a device, publish components and administer your fleet. Start with <a href="/install/">the installation guide</a>.</p><p>Public testnet preview. Platform scripts own OS installation, reboot and firmware recovery. Physical, production provider, real-wallet and mainnet acceptance remain separate.</p>')
+    emit("/", "Documentation", '<h1>SuiFleet documentation</h1><p>Install a client, enroll a device, publish components and administer your fleet. Start with <a href="/install/">the installation guide</a>.</p><p>Choose the platform and configuration that match your fleet. Your platform scripts control OS installation, reboot and firmware recovery.</p>')
     for page in pages:
         text = (ROOT / page["source"]).read_text(encoding="utf-8")
         content = render(text, page["source"], pages)
@@ -167,8 +183,9 @@ def build(out):
         search.append(dict(path=path, title=page["title"], text=text))
     emit("/404.html", "Page not found", '<h1>Page not found</h1><p><a href="/">Browse the documentation</a> or search for a page.</p>')
     (out / "search.json").write_text(json.dumps(search, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    (out / "robots.txt").write_text("User-agent: *\nAllow: /\nSitemap: " + ORIGIN + "/sitemap.xml\n")
-    (out / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join("<url><loc>" + ORIGIN + path + "</loc></url>" for path in ["/"] + [p["path"] for p in search]) + "</urlset>\n")
+    effective_origin=origins.get("origin",ORIGIN).rstrip("/")
+    (out / "robots.txt").write_text("User-agent: *\nAllow: /\nSitemap: " + effective_origin + "/sitemap.xml\n")
+    (out / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join("<url><loc>" + effective_origin + path + "</loc></url>" for path in ["/"] + [p["path"] for p in search]) + "</urlset>\n")
     (out / "_headers").write_text("/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\n")
     check(out)
     sums = "".join(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.relative_to(out).as_posix() + "\n" for p in sorted(out.rglob("*")) if p.is_file())

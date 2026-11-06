@@ -4,20 +4,25 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright');
 (async()=>{
  const fixture=path.resolve(__dirname,'browser/reporting-fixture.jsx');
  const aliases=Object.fromEntries(['@/hooks/useDevices','@/hooks/useFleetSelection','@/hooks/useFleetDataConfig','@/hooks/useFleetTransaction','@/lib/fleet-reporting','@mysten/dapp-kit-react'].map(name=>[name,fixture]));
- const {outputFiles}=await build({entryPoints:[fixture],bundle:true,platform:'browser',write:false,jsx:'automatic',nodePaths:[path.resolve(__dirname,'../dapp/node_modules')],alias:aliases,define:{'process.env.NODE_ENV':'"development"'}});
+ const {outputFiles}=await build({entryPoints:[fixture],bundle:true,platform:'browser',write:false,jsx:'automatic',banner:{js:'var process = { env: {} };'},nodePaths:[path.resolve(__dirname,'../dapp/node_modules')],alias:aliases,define:{'process.env.NODE_ENV':'"development"'}});
  const browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||'/opt/google/chrome/chrome',headless:true,args:['--no-sandbox']});
  try{
-  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error('BROWSER ERROR',e.message)});
   await page.route('https://reporting.invalid/**',r=>r.fulfill({contentType:'text/html',body:'<div id="root"></div><script src="https://bundle.invalid/app.js"></script>'}));
   await page.route('https://bundle.invalid/app.js',r=>r.fulfill({contentType:'text/javascript',body:outputFiles[0].text}));
   await page.goto('https://reporting.invalid/');
   await page.getByText('Pending: checking reporting readiness…',{exact:true}).waitFor();
+  await page.getByText('Checking this fleet’s reporting settings… This can take a moment.',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Reporting is not set up for this fleet.',{exact:false}).count(),0);
   assert(await page.getByRole('button',{name:'Set up fleet reporting',exact:true}).isDisabled());
   await page.getByRole('button',{name:'Refresh readiness',exact:true}).click();
   await page.getByRole('button',{name:'Simulate unavailable readiness'}).click();
   await page.getByText('Failed: readiness could not be verified.',{exact:true}).waitFor();
+  await page.getByText('We could not verify reporting settings. This does not mean reporting is missing.',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Reporting is not set up for this fleet.',{exact:false}).count(),0);
   assert(await page.getByRole('button',{name:'Set up fleet reporting',exact:true}).isDisabled());
-  await page.getByRole('button',{name:'Refresh readiness',exact:true}).click();
+  await page.getByRole('button',{name:'Retry reporting check',exact:true}).click();
+  await page.getByText('Reporting is not set up for this fleet.',{exact:false}).waitFor();
   await page.getByRole('button',{name:'Set up fleet reporting',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'You declined account approval'}).waitFor();
   await page.getByRole('button',{name:'Set up fleet reporting',exact:true}).click();

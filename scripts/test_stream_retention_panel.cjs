@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const {loader,appRequire} = require('./frontend_test_utils.cjs');
 const {normalizeSuiAddress:id} = appRequire('@mysten/sui/utils');
-const config={packageId:id('0x82'),streamRetentionOrigin:id('0x83'),fleetId:id('0xf1'),budgetId:id('0xb1')};
+const config={packageId:id('0x82'),streamRetentionOrigin:id('0x83'),fleetId:id('0xf1'),budgetId:id('0xb1'),storageId:id('0x84')};
 const actual=loader()('lib/stream-retention.ts');
 let slots=[],cursor=0,effects=[],account={address:id('0xa1')},policies=[3,13,26],signed=[],pendingResolve;
 let selection={supported:false,identity:'legacy'},admin=true;
@@ -19,16 +19,14 @@ const dependencies={react,
  '@/lib/customer-fleets':{fetchCustomerFleets:async()=>[{...selection.fleet,administrator:admin}]},
  '@/lib/data-authority':{selectedDataAuthority:loader()('lib/data-authority.ts').selectedDataAuthority},
  '@/hooks/useFleetDataConfig':{useFleetDataConfig:()=>config},
+ // The panel resolves archive storage separately from the reporting config.
+ '@/hooks/useFleetStorage':{useFleetStorage:()=>({storage:{id:config.storageId},config:{packageId:id('0x85')}})},
  '@/hooks/useFleetSelection':{useFleetSelection:()=>selection},
- '@/lib/fleet-budget':{storageConfig:()=>({}),fetchManagedBudget:async()=>({id:config.budgetId,capId:id('0xc2')}),fetchBudgets:async()=>account.address===id('0xa1')?[{id:config.budgetId,capId:id('0xc1')}]:[]},
+ '@/lib/fleet-budget':{fetchManagedBudget:async()=>({id:config.budgetId,capId:id('0xc2')}),fetchBudgets:async()=>account.address===id('0xa1')?[{id:config.budgetId,capId:id('0xc1')}]:[]},
  '@/lib/stream-retention':{...actual,readStreamPolicies:async()=>policies},
  '@/hooks/useFleetTransaction':{useFleetTransaction:()=>({isPending:false,mutateAsync:({transaction})=>{signed.push(transaction);return new Promise(resolve=>{pendingResolve=resolve;});}})},
 };
-const fs=require('node:fs'),path=require('node:path'),Module=require('node:module'),ts=appRequire('typescript');
-const filename=path.resolve(__dirname,'../dapp/src/components/StreamRetention.tsx'),compiled=new Module(filename,module);
-compiled.filename=filename;compiled.require=name=>Object.hasOwn(dependencies,name)?dependencies[name]:appRequire(name);
-compiled._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{fileName:filename,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,filename);
-const {StreamRetentionPanel}=compiled.exports;
+const {StreamRetentionPanel}=loader(dependencies)('components/StreamRetention.tsx');
 function render(){cursor=0;effects=[];const tree=StreamRetentionPanel();effects.forEach(f=>f());return tree;}
 function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return [];return [tree,...nodes(tree.props?.children)];}
 const text=t=>typeof t==='string'||typeof t==='number'?String(t):Array.isArray(t)?t.map(text).join(''):t?.props?text(t.props.children):'';
