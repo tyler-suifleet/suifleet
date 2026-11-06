@@ -377,6 +377,45 @@ class Dispatcher:
                 if authority is not None:
                     authority.close()
 
+    def retire_archived_dependency_waits(self, project):
+        """Retire stale waits only after their stopped source was durably archived.
+
+        A finished source is never scanned by resume_dependency_waits. Keeping
+        its old waiting reservation would permanently fence explicit recovery.
+        Resuming intents remain reserved even when their source is archived.
+        """
+        rows = self.db.execute("""SELECT r.* FROM runs r
+            JOIN retired_runs a ON a.session=r.session
+            JOIN dependency_resumes w ON w.source=r.session
+            WHERE r.project=? AND r.status='finished' AND w.project=r.project
+              AND w.state='waiting'""", (project['id'],)).fetchall()
+        for row in rows:
+            try:
+                claim = json.loads(row['claim'])
+                digest = hashlib.sha256(claim['token'].encode()).hexdigest()
+                identity = self.stopped_identity(row)
+                if identity is None or self.capacity_helpers(claim, identity['started']):
+                    continue
+                self.db.execute('BEGIN IMMEDIATE')
+                try:
+                    fresh = self.db.execute('SELECT * FROM runs WHERE session=?', (row['session'],)).fetchone()
+                    if (not fresh or dict(fresh) != dict(row)
+                            or self.stopped_identity(row) != identity
+                            or self.capacity_helpers(claim, identity['started'])):
+                        continue
+                    self.db.execute("""UPDATE dependency_resumes SET state='retired',reason=?,updated=?
+                        WHERE source=? AND project=? AND family=? AND claim=? AND state='waiting'
+                        AND EXISTS (SELECT 1 FROM retired_runs WHERE session=?)""",
+                        ('source receipt archived; explicit recovery retains all ownership fences',
+                         time.time(), row['session'], project['id'], row['family'], digest, row['session']))
+                    self.db.execute('COMMIT')
+                finally:
+                    if self.db.in_transaction:
+                        self.db.execute('ROLLBACK')
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+                # Missing/corrupt provenance or uncertain processes retain ownership.
+                continue
+
     def claim_helpers(self, claim):
         """Record detached claim-bearing processes; never signal an uncertain PID."""
         helpers = []
@@ -1806,6 +1845,7 @@ First inspect git status/log and the current-head CI, then continue the unfinish
 
     def reconcile(self, project):
         self.retire_obsolete(project)
+        self.retire_archived_dependency_waits(project)
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
         for row in rows:
             try:

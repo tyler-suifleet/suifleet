@@ -4957,6 +4957,27 @@
         "User explicitly selected migration away from OpenAI Sites to conventional hosting in their own Cloudflare account. Implement the concrete migration for suifleet.io/www, app.suifleet.io and docs.suifleet.io using the existing pinned Wrangler/Cloudflare Pages release tooling. Preserve the latest animated overview, optional native captions, all ten narrated walkthroughs, verified Testnet app/config, curated docs, narrow security headers and public crosslinks. Verify the authenticated account actually owns the active suifleet.io zone. Discover existing projects before creation; retain actual returned project domains/IDs and never assume a desired pages.dev name was allocated. Build and seal all three static artifacts, verify source/config/file hashes, validate Pages file/count/header limits, deploy under the user's account and check real served HTTPS content/media. Prefer the owned domains once DNS/TLS is active; otherwise keep explicitly identified staging links. Connect domain bindings before pointing DNS, preserve Google Workspace mail/unrelated records and never import the obsolete OpenAI verification zone. Remove superseded Sites domain bindings only as needed during actual cutover; retain working provider previews until migration verification. OAuth stays only in private Wrangler config; no token in logs/source/issues/arguments. User authorized this migration and publication; normal application/source/CI gates remain for code, protected existing CI credential/release environments are not weakened. Record any DNS permission requirement accurately rather than inventing successful mutation. This is Testnet frontend hosting, not Mainnet, hardware programming or production-payment acceptance."
       ],
       "validation": "Meaningful local static release tests, sealed three-origin builds, actual Pages deployment/domain/served-byte/media evidence and no credential disclosure."
+    },
+    {
+      "key": "SF-258",
+      "title": "Permit stopped recovery past archived dependency wait receipts",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Recovery SF245 is rejected by a stale dependency_resumes waiting row whose original dispatcher run is finished and archived following a published Review handoff. Prerequisite SF244 is Done. Fix the supported operator recovery fence to distinguish an archived stopped waiting receipt from active dependency resumption. Preserve all process, helper, claim, lease and competing-recovery protections. Do not mutate the runtime databases manually or install unmerged source.",
+      "evidence": "Bounded recovery run c3563b5dd4df432aa458b31b5bea9c02: supported recovery_control refused dependency resumption owns recovery; read-only receipts show waiting dependency source dispatch-0d0939e4443149df8729df0823bfb091 is finished and archived.",
+      "acceptance": [
+        "Archived, verified stopped waiting receipts no longer indefinitely block explicit same-claim operator recovery.",
+        "Active, uncertain, unarchived or resuming dependency owners still block; no claim or original evidence is discarded.",
+        "Meaningful offline regression tests cover refusal and allowed recovery; review and merged-only runtime installation remain required."
+      ],
+      "validation": "Offline recovery-control regression suite and dispatcher retirement/dependency tests. No wallet, deployment or hardware operations."
     }
   ]
 }
