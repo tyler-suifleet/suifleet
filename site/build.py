@@ -144,12 +144,27 @@ def overview_manifest():
     manifest=load_json(OVERVIEW_MEDIA/'manifest.json')
     if manifest.get('kind') != 'illustrative-animation' or {v.get('name') for v in manifest.get('variants',[])} != {'landscape','portrait'}:
         raise BuildError('Overview must contain both verified animation variants')
-    expected_sources={'site/overview/storyboard.json','site/overview/scene.html','site/overview/render_frames.cjs','site/overview/render_overview.py'}
+    expected_sources={'site/overview/storyboard.json','site/overview/render_overview.py','site/motion-sample/src/overview.tsx','site/motion-sample/overview-render.mjs','site/motion-sample/package.json','site/motion-sample/package-lock.json'}
     if set(manifest.get('source_sha256',{})) != expected_sources or any(sha256(ROOT/name) != digest for name,digest in manifest['source_sha256'].items()):
         raise BuildError('Overview render source changed; regenerate the animation')
+    assets={'site/motion-sample/art/editorial-scene.png','site/src/assets/inter-variable.woff2','site/src/assets/logo.svg'}
+    if set(manifest.get('assets_sha256',{}))!=assets or any(sha256(ROOT/name)!=value for name,value in manifest['assets_sha256'].items()):
+        raise BuildError('Overview artwork or font changed')
+    if manifest.get('renderer')!='Remotion' or manifest.get('renderer_version')!='4.0.541' or manifest.get('fps')!=30:
+        raise BuildError('Unexpected overview renderer')
     story=load_json(ROOT/'site/overview/storyboard.json')
     if [s['text'] for s in manifest['scenes']] != [s['text'] for s in story['scenes']]:
         raise BuildError('Overview narration differs from reviewed storyboard')
+    if [c['text'] for c in manifest['cues']] != [s['text'] for s in story['scenes']]:
+        raise BuildError('Overview captions differ from storyboard')
+    duration=sum(s['duration'] for s in story['scenes'])
+    if manifest['duration_seconds']!=duration:
+        raise BuildError('Overview duration differs from storyboard')
+    previous=0
+    for cue,scene in zip(manifest['cues'],manifest['scenes']):
+        if not previous<=scene['start']<=cue['speech_start']<cue['speech_end']<scene['start']+scene['duration']<=duration:
+            raise BuildError('Overview speech overlaps or exceeds its chapter')
+        previous=scene['start']+scene['duration']
     for variant in manifest['variants']:
         if (variant.get('width'),variant.get('height')) != ((1280,720) if variant['name']=='landscape' else (720,1280)):
             raise BuildError('Unexpected overview dimensions')
@@ -211,7 +226,7 @@ def motion_sample_player():
 
 
 def overview_player():
-    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A two-minute animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
+    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A short animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
     for video in manifest['variants']:
         parts.append(f'<video class="overview-video overview-{video["name"]}" data-mp4-sha256="{video["fallback_sha256"]}" controls playsinline preload="none" width="{video["width"]}" height="{video["height"]}" poster="/media/overview/{video["poster"]}?v={video["poster_sha256"][:16]}" aria-label="How SuiFleet works, {video["name"]} version" aria-describedby="overview-description"><source src="/media/overview/{video["file"]}?v={video["file_sha256"][:16]}" type="video/webm"><source src="/media/overview/{video["fallback"]}?v={video["fallback_sha256"][:16]}" type="video/mp4"><track kind="captions" src="/media/overview/{manifest["captions"]}?v={manifest["captions_sha256"][:16]}" srclang="en" label="English">Your browser cannot play the video. Read the transcript below.</video>')
     parts.append('<p class="overview-caption">Illustrative animation. Installation results and current health are different; your platform controls its installer and any reboot.</p><details><summary>Read the complete narration</summary><ol class="overview-transcript">')

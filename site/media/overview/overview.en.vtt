@@ -1,54 +1,49 @@
 WEBVTT
 
 1
-00:00:00.350 --> 00:00:14.366
-SuiFleet manages software updates across connected devices.
-Publish a release, deploy it to selected devices, and track
-installation results. Organize devices into groups to manage
-rollouts across your fleet.
+00:00:00.350 --> 00:00:09.630
+With SuiFleet, managing your devices is simple. Bring your
+devices together, organize them into groups, and keep their
+software up to date from one console.
 
 2
-00:00:15.600 --> 00:00:28.848
-Your wallet is your secure approval app. Use it to authorize
-fleet management changes. The network verifies your approval,
-and each device uses its own identity. Your wallet's private key
-stays in your wallet.
+00:00:12.350 --> 00:00:21.758
+You choose what changes, and which devices receive it. Your
+wallet acts as a secure approval app. It confirms your
+permission, without sharing your private key.
 
 3
-00:00:30.050 --> 00:00:48.141
-Release details are recorded on Sui, the shared network. Walrus
-stores the software files for the retention period you select.
-Private releases are encrypted, and Seal checks who may obtain
-the keys. Publishing makes a release available for deployment;
-installation is a separate step.
+00:00:24.350 --> 00:00:35.465
+Sui saves your approval on a shared network. Walrus stores your
+software files for the period you choose. Private releases are
+encrypted, with access limited to authorized devices.
 
 4
-00:00:49.350 --> 00:01:03.025
-Choose a device or group and approve its deployment. Each device
-client checks the shared records for updates on its configured
-schedule. Devices initiate these connections from your network,
-using outbound requests.
+00:00:36.350 --> 00:00:46.974
+The SuiFleet client on each device checks for approved updates
+on its configured schedule. Connections start from the device,
+so you do not need to open an incoming connection.
 
 5
-00:01:04.250 --> 00:01:23.663
-An eligible device downloads the software, verifies it against
-the approved release, and runs your configured installer. Your
-platform controls system installation, reboot and recovery.
-Devices that reconnect later can retrieve an update while the
-deployment remains eligible and the files are available.
+00:00:48.350 --> 00:00:59.358
+When an update is available, the device downloads it from Walrus
+and verifies that it matches the approved release. A device that
+reconnects can catch up while the update remains available.
 
 6
-00:01:24.900 --> 00:01:44.996
-Each device reports whether installation succeeded or failed.
-The console displays those results alongside separately reported
-device health. An approved deployment confirms your intent; the
-device's installation result confirms execution. Health reports
-describe its condition at the time of the sample.
+00:01:00.350 --> 00:01:10.995
+SuiFleet then runs your configured installer. Your platform
+handles installation, any reboot, and recovery. This lets you
+use the update process that suits your devices.
 
 7
-00:01:46.200 --> 00:02:03.971
-SuiFleet connects your console, shared release records, software
-storage and device clients. Begin with a small group, validate
-your deployment process, and expand through staged rollouts.
-Reliable connectivity, storage availability and a funded network
-budget keep the system operating.
+00:01:12.350 --> 00:01:22.313
+See which installations succeeded and which failed. Device
+health is reported separately. If an update fails, review the
+available diagnostics before trying again.
+
+8
+00:01:24.350 --> 00:01:34.014
+Start with a small group, check the results, and expand your
+rollout in stages. You stay in control of the release, while
+SuiFleet coordinates delivery across your fleet.

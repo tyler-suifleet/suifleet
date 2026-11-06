@@ -6,45 +6,59 @@
   "scenes": [
     {
       "id": "fleet",
-      "title": "One fleet. Many devices.",
-      "subtitle": "Your software, across the devices you manage.",
-      "text": "SuiFleet manages software updates across connected devices. Publish a release, deploy it to selected devices, and track installation results. Organize devices into groups to manage rollouts across your fleet."
+      "title": "Device management, made simple.",
+      "subtitle": "One place to manage your connected devices.",
+      "text": "With SuiFleet, managing your devices is simple. Bring your devices together, organize them into groups, and keep their software up to date from one console.",
+      "duration": 12
     },
     {
       "id": "approve",
-      "title": "You approve the changes.",
-      "subtitle": "A wallet is your approval app.",
-      "text": "Your wallet is your secure approval app. Use it to authorize fleet management changes. The network verifies your approval, and each device uses its own identity. Your wallet's private key stays in your wallet."
+      "title": "You stay in control.",
+      "subtitle": "A wallet is your secure approval app.",
+      "text": "You choose what changes, and which devices receive it. Your wallet acts as a secure approval app. It confirms your permission, without sharing your private key.",
+      "duration": 12
     },
     {
       "id": "publish",
-      "title": "Publish once. Choose who can read it.",
-      "subtitle": "Release records and software files have different jobs.",
-      "text": "Release details are recorded on Sui, the shared network. Walrus stores the software files for the retention period you select. Private releases are encrypted, and Seal checks who may obtain the keys. Publishing makes a release available for deployment; installation is a separate step."
+      "title": "Prepare once. Deliver across your fleet.",
+      "subtitle": "Approvals and software files have different jobs.",
+      "text": "Sui saves your approval on a shared network. Walrus stores your software files for the period you choose. Private releases are encrypted, with access limited to authorized devices.",
+      "duration": 12
     },
     {
       "id": "poll",
       "title": "Devices check for their updates.",
-      "subtitle": "The device initiates the connection.",
-      "text": "Choose a device or group and approve its deployment. Each device client checks the shared records for updates on its configured schedule. Devices initiate these connections from your network, using outbound requests."
+      "subtitle": "Connections start from your devices.",
+      "text": "The SuiFleet client on each device checks for approved updates on its configured schedule. Connections start from the device, so you do not need to open an incoming connection.",
+      "duration": 12
+    },
+    {
+      "id": "download",
+      "title": "The right release, checked before use.",
+      "subtitle": "Download and verify the approved software.",
+      "text": "When an update is available, the device downloads it from Walrus and verifies that it matches the approved release. A device that reconnects can catch up while the update remains available.",
+      "duration": 12
     },
     {
       "id": "install",
-      "title": "Download. Verify. Install.",
-      "subtitle": "Your platform controls the installer and reboot.",
-      "text": "An eligible device downloads the software, verifies it against the approved release, and runs your configured installer. Your platform controls system installation, reboot and recovery. Devices that reconnect later can retrieve an update while the deployment remains eligible and the files are available."
+      "title": "Works with your installation process.",
+      "subtitle": "Your platform controls installation and reboot.",
+      "text": "SuiFleet then runs your configured installer. Your platform handles installation, any reboot, and recovery. This lets you use the update process that suits your devices.",
+      "duration": 12
     },
     {
       "id": "report",
-      "title": "A request is not a result.",
-      "subtitle": "Requested \u2192 Applied. Health is a separate report.",
-      "text": "Each device reports whether installation succeeded or failed. The console displays those results alongside separately reported device health. An approved deployment confirms your intent; the device's installation result confirms execution. Health reports describe its condition at the time of the sample."
+      "title": "Know how the rollout is progressing.",
+      "subtitle": "Installation results and health are separate.",
+      "text": "See which installations succeeded and which failed. Device health is reported separately. If an update fails, review the available diagnostics before trying again.",
+      "duration": 12
     },
     {
       "id": "overview",
-      "title": "Approve. Check. Verify. Report.",
-      "subtitle": "Start small. Expand with confidence.",
-      "text": "SuiFleet connects your console, shared release records, software storage and device clients. Begin with a small group, validate your deployment process, and expand through staged rollouts. Reliable connectivity, storage availability and a funded network budget keep the system operating."
+      "title": "Start small. Expand with confidence.",
+      "subtitle": "Choose a group. Validate. Roll out in stages.",
+      "text": "Start with a small group, check the results, and expand your rollout in stages. You stay in control of the release, while SuiFleet coordinates delivery across your fleet.",
+      "duration": 12
     }
   ]
 }
