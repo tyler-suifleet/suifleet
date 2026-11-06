@@ -104,3 +104,7 @@ The separate 20-second Remotion/SVG sample is at
 `https://suifleet.io/film-preview/`. Its release evidence is
 `cloudflare-remotion-sample-deployment.json`. It is unlisted/noindex and does not
 replace the full overview. Only marketing was deployed; app/docs are unchanged.
+
+The latest sample at `/film-preview/` uses detailed generated artwork, clearer
+handoffs and “Sui saves the approval” narration. Its current release evidence is
+`cloudflare-detailed-film-deployment.json`; the full overview is still unchanged.
