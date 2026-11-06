@@ -4876,9 +4876,9 @@
       "kind": "type:bug",
       "depends_on": [],
       "paths": [
-        "profiles/seal-testnet",
         "dapp",
         "docs/validation",
+        "profiles/seal-testnet",
         "scripts"
       ],
       "resources": [],
@@ -4934,6 +4934,27 @@
         "The user wants the full customer audit implemented and to use owned suifleet.io instead of localhost-dependent hosting. Current DNS observations: authoritative Cloudflare NS bristol/bayan; Google Workspace MX; apex/www/docs have no A answers; app has Cloudflare addresses but this host observes403/1010. Implement reviewed reproducible independent hosted static website/app/docs and configured suifleet.io, app.suifleet.io, docs.suifleet.io with HTTPS and working crosslinks. Preserve Google Workspace MX/TXT/DKIM and existing unrelated DNS. Discover existing hosting/access first; never claim DNS changed without authorized authenticated write access and verification. When DNS access is absent, finish deployed artifacts and exact provider-returned DNS instructions before asking the user to add records. No new paid plan or nameserver migration required by assumption. Existing Sites native hosting tools may provide managed hosting without the WSL machine; preserve repo source/verified Tyler authorship and exact deployment provenance. Do not substitute tunnel or localhost as permanent hosting. Keep app clearly labeled Testnet and reuse the verified SF-251 evaluation release/config; no Mainnet/other-wallet changes or confidential config. Full audit closure matrix must distinguish implemented source, publicly deployed evaluation and deferred physical/provider/manual-wallet production acceptance. Verify HTTPS/mobile/navigation/media/captions and customer workflow, security headers and CSP for actual remote provider endpoints. Coordinate with SF-251/#628 and overview SF-252; do not edit other owned worktrees."
       ],
       "validation": "Meaningful browser/mobile/media/deployment verification, exact provenance and explicit remaining access/acceptance boundaries."
+    },
+    {
+      "key": "SF-258",
+      "title": "Permit stopped recovery past archived dependency wait receipts",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Recovery SF245 is rejected by a stale dependency_resumes waiting row whose original dispatcher run is finished and archived following a published Review handoff. Prerequisite SF244 is Done. Fix the supported operator recovery fence to distinguish an archived stopped waiting receipt from active dependency resumption. Preserve all process, helper, claim, lease and competing-recovery protections. Do not mutate the runtime databases manually or install unmerged source.",
+      "evidence": "Bounded recovery run c3563b5dd4df432aa458b31b5bea9c02: supported recovery_control refused dependency resumption owns recovery; read-only receipts show waiting dependency source dispatch-0d0939e4443149df8729df0823bfb091 is finished and archived.",
+      "acceptance": [
+        "Archived, verified stopped waiting receipts no longer indefinitely block explicit same-claim operator recovery.",
+        "Active, uncertain, unarchived or resuming dependency owners still block; no claim or original evidence is discarded.",
+        "Meaningful offline regression tests cover refusal and allowed recovery; review and merged-only runtime installation remain required."
+      ],
+      "validation": "Offline recovery-control regression suite and dispatcher retirement/dependency tests. No wallet, deployment or hardware operations."
     }
   ]
 }
