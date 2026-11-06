@@ -495,9 +495,17 @@ class BatchController:
                      *dict.fromkeys([m['head'] for m in members]+[m['reviewed_base'] for m in members]))
             self.git(project, 'worktree', 'add', '--detach', batch['directory'], batch['base'])
             for member in members:
-                # Old source reviews remain useful only when their base is in
-                # the pinned integration history, never an unrelated/future base.
-                self.git(project, 'merge-base', '--is-ancestor', member['reviewed_base'], batch['base'])
+                # A stacked source can be reviewed against a preceding member.
+                # Require that base in the already accepted candidate history;
+                # a later, rejected or unrelated source cannot supply it.
+                try:
+                    self.git(project, 'merge-base', '--is-ancestor', member['reviewed_base'], previous)
+                except subprocess.CalledProcessError as error:
+                    if error.returncode != 1:
+                        raise
+                    self.reject_member(project, batch, member,
+                        'reviewed base is absent from preceding candidate history')
+                    continue
                 try:
                     self.git(project, 'merge-base', '--is-ancestor', member['head'], previous)
                 except subprocess.CalledProcessError as error:
