@@ -189,6 +189,12 @@ def checks_blocker(pr):
 # new policy review; until then their skips fail closed.
 OPTIONAL_DEPLOYMENT_WORKFLOW = '.github/workflows/static-site.yml'
 OPTIONAL_DEPLOYMENT_BLOB = 'a5a5c9aea5d6a6addb7e13187d27ad705c5e395b'
+# SF-256 adds only offline hosting tests; deployment conditions are identical.
+# Retain the old workflow so already-published candidates remain verifiable.
+OPTIONAL_DEPLOYMENT_BLOBS = frozenset((
+    OPTIONAL_DEPLOYMENT_BLOB,
+    '9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0',
+))
 OPTIONAL_DEPLOYMENT_JOBS = frozenset(('preview', 'production-preflight', 'production'))
 
 
@@ -198,7 +204,7 @@ def verified_optional_skip(pr, check):
             and proof.get('head') == pr.get('headRefOid') and bool(pr.get('headRefOid'))
             and proof.get('base') == pr.get('baseRefOid') and bool(pr.get('baseRefOid'))
             and proof.get('url') == check.get('detailsUrl')
-            and proof.get('workflow_blob') == OPTIONAL_DEPLOYMENT_BLOB
+            and proof.get('workflow_blob') in OPTIONAL_DEPLOYMENT_BLOBS
             and all(type(proof.get(key)) is int and proof[key] > 0 for key in ('run', 'job', 'attempt')))
 
 
@@ -224,7 +230,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
             tree = immutable_read(f"{prefix}/git/trees/{pr['headRefOid']}?recursive=1")
             blobs = [r for r in tree['tree'] if r['path'] == OPTIONAL_DEPLOYMENT_WORKFLOW]
             if (tree.get('truncated') or len(blobs) != 1 or blobs[0].get('type') != 'blob'
-                    or blobs[0].get('sha') != OPTIONAL_DEPLOYMENT_BLOB):
+                    or blobs[0].get('sha') not in OPTIONAL_DEPLOYMENT_BLOBS):
                 continue
             path = f'{prefix}/actions/runs/{run_id}'
             run = read(path)
@@ -257,7 +263,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
             if fresh != run:
                 continue
             check['_optional_skip'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'], url=check['detailsUrl'],
-                                           workflow_blob=OPTIONAL_DEPLOYMENT_BLOB, run=run_id, job=job_id, attempt=attempt)
+                                           workflow_blob=blobs[0]['sha'], run=run_id, job=job_id, attempt=attempt)
         except Exception:
             # Unknown/unavailable evidence stays blocking; do not leak API errors.
             continue
