@@ -1,0 +1,17 @@
+; Web hosting records only. Preserve Google Workspace MX/TXT/DKIM and all unrelated records.
+; For an existing app record, edit its target/type rather than creating conflicting records.
+$ORIGIN suifleet.io.
+$TTL 300
+@ IN A 162.159.143.30 ; cf_tags=cf-proxied:false
+@ IN A 172.66.3.26 ; cf_tags=cf-proxied:false
+_openai-site-verification.suifleet.io. IN TXT "openai-site-verification=f6WtGnvWSzRB8OTKhzm_R6FqJvxQxy4YrGzLIBgn3xs"
+_cf-custom-hostname.suifleet.io. IN TXT "4cf374c8-4b4e-432f-b991-7805f2d1aabd"
+app IN CNAME custom-domains.chatgpt.site. ; cf_tags=cf-proxied:false
+_openai-site-verification.app.suifleet.io. IN TXT "openai-site-verification=DxCWb31kJEJvqMzEUOEyrPmCWIU-J5F_vK1_5OwAjmo"
+_cf-custom-hostname.app.suifleet.io. IN TXT "ee1826d4-c142-46f8-bdee-f37d5279e876"
+docs IN CNAME custom-domains.chatgpt.site. ; cf_tags=cf-proxied:false
+_openai-site-verification.docs.suifleet.io. IN TXT "openai-site-verification=cds3hVxPijxFHlwGbTYwCx9Tyqx3cQrOpbtKYdysEhQ"
+_cf-custom-hostname.docs.suifleet.io. IN TXT "cfc36443-4165-432d-86c5-8edf9e437e2e"
+www IN CNAME custom-domains.chatgpt.site. ; cf_tags=cf-proxied:false
+_openai-site-verification.www.suifleet.io. IN TXT "openai-site-verification=EB6h8y4qD72zMtFmY849v_lZFjK-ARY4XSERkzEGu7E"
+_cf-custom-hostname.www.suifleet.io. IN TXT "e8f1a8f3-e4cc-41e2-8757-804333458f69"

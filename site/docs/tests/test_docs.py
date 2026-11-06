@@ -17,6 +17,18 @@ class DocsTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.out = Path(self.temp.name) / "output"
 
+    def test_public_host_origins_are_consistent_and_private_origins_refused(self):
+        build.build(self.out,{'origin':'https://help.example.org','website_url':'https://www.example.org','app_url':'https://app.example.org/'})
+        index=(self.out/'index.html').read_text()
+        self.assertIn('href="https://help.example.org/',index)
+        self.assertIn('href="https://app.example.org/',index)
+        self.assertIn('href="https://www.example.org/',index)
+        self.assertIn('https://help.example.org/sitemap.xml',(self.out/'robots.txt').read_text())
+        self.assertNotIn('https://docs.suifleet.io',(self.out/'sitemap.xml').read_text())
+        for bad in ['http://example.org','https://localhost','https://172.27.90.223','https://example.org/path','https://name:secret@example.org','https://example.org/?key=secret']:
+            with self.subTest(bad=bad),self.assertRaises(ValueError):build.build(self.out,{'origin':bad})
+        with self.assertRaises(ValueError):build.build(self.out,{'unknown':'https://example.org'})
+
     def test_reproducible_curated_site_and_console_links(self):
         build.build(self.out)
         first = (self.out / "SHA256SUMS").read_bytes()
