@@ -108,3 +108,8 @@ replace the full overview. Only marketing was deployed; app/docs are unchanged.
 The latest sample at `/film-preview/` uses detailed generated artwork, clearer
 handoffs and “Sui saves the approval” narration. Its current release evidence is
 `cloudflare-detailed-film-deployment.json`; the full overview is still unchanged.
+
+The current sample uses the user-selected woman-at-the-computer editorial scene,
+with animated approval, direct software delivery and device verification. See
+`cloudflare-editorial-film-deployment.json` for the current website-only release.
+The full overview remains unchanged.
