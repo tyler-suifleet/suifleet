@@ -121,3 +121,7 @@ The full overview now uses the selected editorial style at
 `https://suifleet.io/how-it-works/#overview` (96 seconds, eight chapters).
 Current release evidence: `cloudflare-full-editorial-overview-deployment.json`.
 The twenty-second sample and app/docs are unchanged.
+
+The current full overview is 104 seconds and closes with the spoken invitation
+“Start your SuiFleet journey today,” dissolving into the full-screen brand.
+Current release evidence: `cloudflare-logo-closing-deployment.json`.
