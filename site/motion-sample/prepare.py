@@ -12,7 +12,7 @@ def prepare():
  assert importlib.metadata.version('kokoro-onnx')==config['engine_version']
  engine=Kokoro(model,voices);rate=24000;track=np.zeros(round(script['duration']*rate),dtype=np.float32);cues=[]
  for i,cue in enumerate(script['cues']):
-  text=re.sub(r'\bSui\b','swee',cue['text']);samples,sr=engine.create(text,voice=script['voice'],speed=1.04,lang='en-us');assert sr==rate and np.isfinite(samples).all()
+  text=re.sub(r'\bSui\b','swee',re.sub(r'\bSuiFleet\b','Swee Fleet',cue['text']));samples,sr=engine.create(text,voice=script['voice'],speed=1.04,lang='en-us');assert sr==rate and np.isfinite(samples).all()
   end=cue['start']+len(samples)/rate;limit=script['cues'][i+1]['start']-.15 if i+1<len(script['cues']) else script['duration']-.15
   if end>limit:raise ValueError(f'Cue needs more room: {cue["text"]}: {end} > {limit}')
   start=round(cue['start']*rate);track[start:start+len(samples)]=samples;cues.append({'text':cue['text'],'speech_start':cue['start'],'speech_end':end})

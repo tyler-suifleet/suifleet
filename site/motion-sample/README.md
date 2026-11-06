@@ -16,8 +16,10 @@ Approval metadata goes to Sui; software uploads directly to Walrus and downloads
 to devices. Software is never depicted passing through Sui to reach storage.
 Devices initiate their checks. Every verified state is added after receipt;
 none is baked into the clean plate. The scene ends at “Ready to install,” without
-claiming that the platform installer ran. The spoken verb is “saves,” preserving
-the pronunciation correction. The full overview remains independent.
+claiming that the platform installer ran. The narration introduces SuiFleet’s value before explaining the workflow,
+using conversational customer language. Pronunciation hints affect synthesized
+audio only; captions retain the correct product spelling. The full overview
+remains independent.
 
 The 20-second film has 600 frames at 30 fps in landscape 1600×900 and portrait
 900×1600. `script.json` owns the narration. `prepare.py` verifies the existing

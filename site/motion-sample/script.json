@@ -5,19 +5,19 @@
   "cues": [
     {
       "start": 0.5,
-      "text": "Prepare your next software release."
+      "text": "With SuiFleet, managing your devices is simple."
     },
     {
       "start": 5.0,
-      "text": "Approve its deployment with your wallet."
+      "text": "You choose the update and approve it securely."
     },
     {
       "start": 9.3,
-      "text": "Sui saves the approval. Walrus stores the software."
+      "text": "Sui saves your approval. Walrus stores your software."
     },
     {
       "start": 14.5,
-      "text": "Your devices check, download, and verify the release."
+      "text": "Your devices download and verify it, ready to install."
     }
   ]
 }
