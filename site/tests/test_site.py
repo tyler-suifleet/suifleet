@@ -42,7 +42,7 @@ class SiteTest(unittest.TestCase):
         tree = ET.fromstring((self.out / "sitemap.xml").read_text())
         actual = {v.text for v in tree.findall("{*}url/{*}loc")}
         config = json.loads((SITE / "src/site.json").read_text())
-        expected = {config["origin"] + v["path"] for v in config["pages"] if v["path"] != "/404.html"}
+        expected = {config["origin"] + v["path"] for v in config["pages"] if v["path"] != "/404.html" and not v.get("noindex")}
         self.assertEqual(actual, expected)
         self.assertIn("Sitemap: https://suifleet.io/sitemap.xml", (self.out / "robots.txt").read_text())
 

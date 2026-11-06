@@ -1,0 +1,11 @@
+{
+  "duration": 20,
+  "fps": 30,
+  "voice": "af_heart",
+  "cues": [
+    {"start": 0.5, "text": "Prepare your next software release."},
+    {"start": 5.0, "text": "Approve its deployment with your wallet."},
+    {"start": 9.3, "text": "Sui records the approval. Walrus stores the software."},
+    {"start": 14.5, "text": "The device checks, downloads, and verifies the release."}
+  ]
+}

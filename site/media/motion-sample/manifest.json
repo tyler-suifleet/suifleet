@@ -1,0 +1,69 @@
+{
+  "renderer": "Remotion",
+  "version": "4.0.541",
+  "fps": 30,
+  "duration_seconds": 20,
+  "source_sha256": {
+    "site/motion-sample/src/index.tsx": "d3e3972098f5f90ac6834c36c89857ab5b6ff377faa1825fd3dacb3349c49b58",
+    "site/motion-sample/render.mjs": "6c2e3284400795c53a965c4e57f2c1145b01af650ee1f63f78155978bb778635",
+    "site/motion-sample/prepare.py": "e2644e59d40120a82eee50ec69415c9346f6755bcbb5ffd807d105c3f2844c6c",
+    "site/motion-sample/script.json": "391df3cbf2a4525db9a89820c209225ec4cfef5b41b80fc56d2866bf79f2bbff",
+    "site/motion-sample/package.json": "180f9b32736fef5e613def2c90f5bc97e970dddf6376b33c33f352770de24776",
+    "site/motion-sample/package-lock.json": "cfea27dffa0c1a16bc75f986b7f62db6d8c8136d8803d5ed94c41f7253856207"
+  },
+  "assets_sha256": {
+    "site/src/assets/inter-variable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+    "site/src/assets/logo.svg": "400d0317ed09a06ab9a6be1e5f985accc6058eb7926dd37f79bc32e5aa25e225"
+  },
+  "narration_sha256": "922f6fd671ac56347c5096c1c415bc9e84b5ec4b14ad7fdbc5e59aa627e25925",
+  "timing": {
+    "duration": 20,
+    "cues": [
+      {
+        "text": "Prepare your next software release.",
+        "speech_start": 0.5,
+        "speech_end": 2.2493333333333334
+      },
+      {
+        "text": "Approve its deployment with your wallet.",
+        "speech_start": 5,
+        "speech_end": 6.962666666666666
+      },
+      {
+        "text": "Sui records the approval. Walrus stores the software.",
+        "speech_start": 9.3,
+        "speech_end": 12.414666666666667
+      },
+      {
+        "text": "The device checks, downloads, and verifies the release.",
+        "speech_start": 14.5,
+        "speech_end": 17.614666666666665
+      }
+    ]
+  },
+  "videos": [
+    {
+      "name": "landscape",
+      "file": "landscape.mp4",
+      "sha256": "5100ad43055acfb7899ec6c2427adccae231410f09b45ca4ec7218ed5f87b98a",
+      "poster": "landscape.png",
+      "width": 1600,
+      "height": 900,
+      "poster_sha256": "9e4649418a5b6c09bee968852bb0e733c63fa39caec514d3c46db8cdd79df79f"
+    },
+    {
+      "name": "portrait",
+      "file": "portrait.mp4",
+      "sha256": "8707b7cacab085353412600e9aaf74ee2af9f817c5d8a2e69115c4141c0f0c81",
+      "poster": "portrait.png",
+      "width": 900,
+      "height": 1600,
+      "poster_sha256": "ac7f2dd55c2500591b4ef9647eea4a19918b47a0fa467975a4b5c475e578af79"
+    }
+  ],
+  "kind": "visual-direction-sample",
+  "voice": "af_heart",
+  "synthetic_voice": true,
+  "captions": "sample.en.vtt",
+  "captions_sha256": "83bfe2504b8f011e529bf05ea01028df8cb5bd5ee7ee0b4414168b4ff9cbf561"
+}

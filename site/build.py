@@ -166,6 +166,50 @@ def overview_manifest():
     return manifest
 
 
+SAMPLE_MEDIA=SITE/'media/motion-sample'
+def motion_sample_manifest():
+    manifest=load_json(SAMPLE_MEDIA/'manifest.json')
+    expected={'site/motion-sample/'+name for name in ['src/index.tsx','render.mjs','prepare.py','script.json','package.json','package-lock.json']}
+    if manifest.get('renderer')!='Remotion' or manifest.get('version')!='4.0.541' or manifest.get('duration_seconds')!=20 or manifest.get('fps')!=30:
+        raise BuildError('Unexpected motion sample renderer or timing')
+    if set(manifest.get('source_sha256',{}))!=expected or any(sha256(ROOT/name)!=value for name,value in manifest['source_sha256'].items()):
+        raise BuildError('Motion sample source changed; regenerate the sample')
+    assets={'site/src/assets/inter-variable.woff2','site/src/assets/logo.svg'}
+    if set(manifest.get('assets_sha256',{}))!=assets or any(sha256(ROOT/name)!=value for name,value in manifest['assets_sha256'].items()):
+        raise BuildError('Motion sample artwork or font changed')
+    if {v['name'] for v in manifest.get('videos',[])}!={'landscape','portrait'}:
+        raise BuildError('Motion sample needs landscape and portrait')
+    for video in manifest['videos']:
+        for key,hash_key in [('file','sha256'),('poster','poster_sha256')]:
+            if Path(video[key]).name!=video[key] or sha256(SAMPLE_MEDIA/video[key])!=video[hash_key]:
+                raise BuildError('Motion sample media failed digest verification')
+    script=load_json(ROOT/'site/motion-sample/script.json')
+    if manifest.get('voice')!=script['voice'] or [cue['text'] for cue in manifest['timing']['cues']]!=[cue['text'] for cue in script['cues']]:
+        raise BuildError('Motion sample narration differs from script')
+    previous=0
+    for cue in manifest['timing']['cues']:
+        if not previous<=cue['speech_start']<cue['speech_end']<=20:
+            raise BuildError('Motion sample narration overlaps or exceeds video')
+        previous=cue['speech_end']
+    if manifest.get('captions')!='sample.en.vtt' or sha256(SAMPLE_MEDIA/manifest['captions'])!=manifest['captions_sha256']:
+        raise BuildError('Motion sample captions failed digest verification')
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('sample_captions',GUIDE/'captions.py');captions=importlib.util.module_from_spec(spec);spec.loader.exec_module(captions)
+    if (SAMPLE_MEDIA/manifest['captions']).read_text()!=captions.webvtt(manifest['timing']['cues'],20):
+        raise BuildError('Motion sample captions differ from narration timing')
+    return manifest
+
+def motion_sample_player():
+    manifest=motion_sample_manifest();parts=['<section class="motion-sample" aria-label="Twenty-second animation sample">']
+    for video in manifest['videos']:
+        name=video['name'];w,h=(1600,900) if name=='landscape' else (900,1600)
+        parts.append(f'<video class="sample-{name}" controls playsinline preload="metadata" width="{w}" height="{h}" poster="/media/motion-sample/{video["poster"]}?v={video["poster_sha256"][:16]}" aria-label="Animation sample, {name} version"><source src="/media/motion-sample/{video["file"]}?v={video["sha256"][:16]}" type="video/mp4"><track kind="captions" src="/media/motion-sample/{manifest["captions"]}?v={manifest["captions_sha256"][:16]}" srclang="en" label="English">Your browser cannot play this video. Read the transcript below.</video>')
+    parts.append('<p class="sample-note">Female narration with optional English captions. Use the player’s captions menu to turn them on.</p><details><summary>Read the narration</summary><p>')
+    parts.append(' '.join(html.escape(cue['text']) for cue in manifest['timing']['cues']))
+    parts.append('</p></details><p><a href="/media/motion-sample/portrait.mp4" download>Download the phone version</a> · <a href="/media/motion-sample/landscape.mp4" download>Download the widescreen version</a></p></section>')
+    return ''.join(parts)
+
+
 def overview_player():
     manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A two-minute animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
     for video in manifest['variants']:
@@ -191,6 +235,8 @@ def expand(text, config, source):
         if name == "guide_options" and arg is None:
             steps = load_json(GUIDE / "steps.json")["steps"]
             return "".join(f'<option value="{step["id"]}">{index}. {html.escape(step["title"])}</option>' for index, step in enumerate(steps, 1)) + '<option value="complete">Walkthrough complete</option>'
+        if name == "motion_sample_player" and arg is None:
+            return motion_sample_player()
         if name == "overview_player" and arg is None:
             return overview_player()
         if name == "guide_steps" and arg is None:
@@ -227,6 +273,8 @@ def build(out, config=None):
                   "canonical": canonical, "nav": nav, "app_url": config["app_url"],
                   "repo_url": config["repo_url"], "content": content.strip()}
         rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|content)\}\}", lambda m: values[m.group(1)], layout)
+        if page.get("noindex"):
+            rendered=rendered.replace("</head>", '<meta name="robots" content="noindex, nofollow">\n</head>')
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
         rendered = rendered.replace('href="/assets/style.css"', f'href="/assets/style.css?v={style_version}"')
         if page["path"] in ("/guide/", "/how-it-works/"):
@@ -250,6 +298,10 @@ def build(out, config=None):
     (out/'media/overview').mkdir(parents=True)
     names=[overview['captions'],'manifest.json']+[v[key] for v in overview['variants'] for key in ['file','fallback','poster']]
     for name in names:shutil.copyfile(OVERVIEW_MEDIA/name,out/'media/overview'/name)
+    sample=motion_sample_manifest()
+    (out/'media/motion-sample').mkdir(parents=True)
+    names=['manifest.json',sample['captions']]+[video[key] for video in sample['videos'] for key in ['file','poster']]
+    for name in names:shutil.copyfile(SAMPLE_MEDIA/name,out/'media/motion-sample'/name)
     for name in ("_headers", "robots.txt"):
         if name == "_headers":
             headers = (SRC / name).read_text(encoding="utf-8")
@@ -259,7 +311,7 @@ def build(out, config=None):
         else:
             shutil.copyfile(SRC / name, out / name)
     urls = "".join(f"<url><loc>{escape(config['origin'] + page['path'])}</loc></url>"
-                   for page in config["pages"] if page["path"] != "/404.html")
+                   for page in config["pages"] if page["path"] != "/404.html" and not page.get("noindex"))
     (out / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + urls + '</urlset>\n',
