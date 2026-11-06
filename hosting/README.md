@@ -116,3 +116,8 @@ The full overview remains unchanged.
 
 The sample now uses a conversational SuiFleet introduction. Current release
 evidence: `cloudflare-human-narration-deployment.json`; visuals are unchanged.
+
+The full overview now uses the selected editorial style at
+`https://suifleet.io/how-it-works/#overview` (96 seconds, eight chapters).
+Current release evidence: `cloudflare-full-editorial-overview-deployment.json`.
+The twenty-second sample and app/docs are unchanged.
