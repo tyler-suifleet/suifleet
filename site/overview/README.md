@@ -1,8 +1,9 @@
 # Customer system overview
 
-A 96-second editorial animation based on the user-selected woman-at-the-computer
-scene. Eight chapters explain the fleet, secure approval, publishing, device
-checks, verification, platform installation, results and staged rollout. The
+A 104-second editorial animation based on the user-selected woman-at-the-computer
+scene. Eight workflow chapters explain the fleet, secure approval, publishing, device
+checks, verification, platform installation, results and staged rollout. A closing invitation dissolves the scene into a large, centred
+three-boat logo and SuiFleet wordmark. The
 woman, console and factory devices share one continuous visual setting; editable
 routes, parcels, approval, installation progress and result cards animate over
 that illustration. The source plate and exact built-in image edit prompt are in

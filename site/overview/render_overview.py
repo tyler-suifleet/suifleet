@@ -20,7 +20,7 @@ def main():
  for scene in story['scenes']:
   spoken=re.sub(r'\bSui\b','swee',re.sub(r'\bSuiFleet\b','Swee Fleet',scene['text']))
   samples,rate=model.create(spoken,voice=story['voice'],speed=1.04,lang=story['language']);assert rate==24000 and len(samples)>0 and np.isfinite(samples).all()
-  speech=len(samples)/rate;duration=scene['duration'];assert duration==12
+  speech=len(samples)/rate;duration=scene['duration'];assert duration==(8 if scene['id']=='closing' else 12)
   if speech>duration-.8:raise ValueError('Speech needs more room: '+scene['id'])
   timeline.append({**scene,'start':position});cues.append({'text':scene['text'],'speech_start':position+.35,'speech_end':position+.35+speech});audio.extend([np.zeros(round(.35*rate),dtype=np.float32),samples,np.zeros(round((duration-.35-speech)*rate),dtype=np.float32)]);position+=duration
  public=ROOT/'site/motion-sample/public';public.mkdir(exist_ok=True);joined=np.concatenate(audio)

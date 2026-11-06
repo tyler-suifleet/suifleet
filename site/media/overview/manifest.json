@@ -4,7 +4,7 @@
   "renderer": "Remotion",
   "renderer_version": "4.0.541",
   "title": "How SuiFleet works",
-  "duration_seconds": 96,
+  "duration_seconds": 104,
   "fps": 30,
   "voice": "af_heart",
   "language": "en-us",
@@ -73,6 +73,14 @@
       "text": "Start with a small group, check the results, and expand your rollout in stages. You stay in control of the release, while SuiFleet coordinates delivery across your fleet.",
       "duration": 12,
       "start": 84
+    },
+    {
+      "id": "closing",
+      "title": "Start your SuiFleet journey today.",
+      "subtitle": "SuiFleet",
+      "text": "Start your SuiFleet journey today.",
+      "duration": 8,
+      "start": 96
     }
   ],
   "cues": [
@@ -115,13 +123,18 @@
       "text": "Start with a small group, check the results, and expand your rollout in stages. You stay in control of the release, while SuiFleet coordinates delivery across your fleet.",
       "speech_start": 84.35,
       "speech_end": 94.014
+    },
+    {
+      "text": "Start your SuiFleet journey today.",
+      "speech_start": 96.35,
+      "speech_end": 98.12066666666666
     }
   ],
   "source_sha256": {
-    "site/overview/storyboard.json": "faf1d326f1db692314912c7536807f7bf25fdb1f07a7d120d4e4f3b90e2b816c",
-    "site/overview/render_overview.py": "a693a678557200264097786f33ee09dd4a1c02eff434bdc308bdfed2d57fb33a",
-    "site/motion-sample/src/overview.tsx": "19eeb51f343db0dc1a1523916f910c15dd33c2b5c19eb5f6ad0dd4b5ff0cd5b7",
-    "site/motion-sample/overview-render.mjs": "1a1dbed2952c3f3c5d4d0103ddf62794ae888d0771a149175abebbac15c191ad",
+    "site/overview/storyboard.json": "07f606b9a71e9d688d47705c61b82a9f0f9514a0b4d2b17b8b7920d82b7f5c42",
+    "site/overview/render_overview.py": "55b3f3545adbaa4ce746808aef26388109ce6cd351faa65a8effee40040bae4e",
+    "site/motion-sample/src/overview.tsx": "27bcb154a61a0a04dbbc076ad8888da7cbd09eee4f6b137192dfc795940b40dd",
+    "site/motion-sample/overview-render.mjs": "01d8d2356de00e974cfe8f594813b9bb95ae4f49b666536c8eab8f08af22a141",
     "site/motion-sample/package.json": "180f9b32736fef5e613def2c90f5bc97e970dddf6376b33c33f352770de24776",
     "site/motion-sample/package-lock.json": "cfea27dffa0c1a16bc75f986b7f62db6d8c8136d8803d5ed94c41f7253856207"
   },
@@ -130,16 +143,16 @@
     "site/src/assets/inter-variable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
     "site/src/assets/logo.svg": "400d0317ed09a06ab9a6be1e5f985accc6058eb7926dd37f79bc32e5aa25e225"
   },
-  "narration_sha256": "9262f996d7db27eed1f15a673b12456e2dcdb210b8040a3d52391a714d5022af",
+  "narration_sha256": "1c377e16f4f5804ba0f7251fb35c633361fc24907df3a20f0834c58be0b2df49",
   "variants": [
     {
       "name": "landscape",
       "width": 1280,
       "height": 720,
       "fallback": "overview-landscape.mp4",
-      "fallback_sha256": "29791480004de48d0286918c4e81ec0298647b75b6217d52a9330097fdc19228",
+      "fallback_sha256": "1732f966aa9a96d6691eec124570121e0b40351d75b1a112eb883e7b949fe89d",
       "file": "overview-landscape.webm",
-      "file_sha256": "8f637bcbd67d0ca32b55a78e2a6368a848061603e056881e587de524adfd13de",
+      "file_sha256": "5ac5996aa197ea553a90c4503f407d6489d10304f63e0bbae6763ca65f3142b5",
       "poster": "overview-landscape.jpg",
       "poster_sha256": "d72d2ad738031977ab848b94079a4e7cc98a48a2bfc41227999ba6ac1d2f4145"
     },
@@ -148,13 +161,13 @@
       "width": 720,
       "height": 1280,
       "fallback": "overview-portrait.mp4",
-      "fallback_sha256": "e6d57622cf3bbf8d22ab80d8928bcf79ca8d4808a8dd9aba7e769fb3455d6337",
+      "fallback_sha256": "27b5ef7f15fb2d68f0a86cacceb1f40a0db1272149c77105644c80f92f6ab88a",
       "file": "overview-portrait.webm",
-      "file_sha256": "45e703cf8671b81c927226db974b148b1a64bbfcb6a4733e3862d4a56e109ad1",
+      "file_sha256": "b001af83961b459b3079e823fb86a5609d388f0752712288b11d12133d9b582b",
       "poster": "overview-portrait.jpg",
       "poster_sha256": "e8d90a18c94cad69ab67936601e60ba9811eadae3e7b4984fd3e7e7052c39fd9"
     }
   ],
   "captions": "overview.en.vtt",
-  "captions_sha256": "c076d5ed9afda659cd71bd37b2ade3efd1fed0461604d72d0ab5dd1c8e8c5e8d"
+  "captions_sha256": "559ccd7871a35ddf1142abe1f67fa000499e7ea64f11350d6db9861397d741c0"
 }

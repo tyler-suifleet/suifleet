@@ -90,7 +90,7 @@ function Rollout({f}:{f:number}){
  </g>;
 }
 function Film(){
- const actual=useCurrentFrame(),config=useVideoConfig(),portrait=config.height>config.width;
+ const current=useCurrentFrame(),actual=Math.min(current,2879),ending=current-2880,config=useVideoConfig(),portrait=config.height>config.width;
  const width=portrait?900:1600,height=portrait?1600:900;
  const chapter=Math.min(7,Math.floor(actual/360)),local=actual-chapter*360;
  const ranges=[[0,130],[145,269],[270,389],[390,447],[450,548],[548,599],[585,599],[490,599]];
@@ -111,6 +111,7 @@ function Film(){
   <Html5Audio src={staticFile('overview-narration.wav')}/>
   <svg width={config.width} height={config.height} viewBox={`0 0 ${width} ${height}`}>
    <defs><clipPath id="scene"><rect x={frame.x} y={frame.y} width={frame.w} height={frame.h} rx="22"/></clipPath><filter id="soft" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="6" stdDeviation="8" floodColor="#163B6D" floodOpacity=".1"/></filter></defs>
+   <g opacity={1-tween(ending,18,105)} filter={ending>18?`blur(${8*tween(ending,18,105)}px)`:undefined}>
    <Logo x={portrait?55:74} y={portrait?52:40} size={.35}/>{label('SuiFleet',portrait?130:149,portrait?87:75,30,ink,650)}
    {portrait?<g>{scene.title.includes('. ')?<g>{label(scene.title.split('. ')[0]+'.',55,177,40,ink,650)}{label(scene.title.split('. ')[1],55,224,40,ink,650)}</g>:label(scene.title.replace(/\.$/,''),55,192,chapter===4?36:40,ink,650)}{scene.subtitle.length>48?<g>{label(scene.subtitle.slice(0,scene.subtitle.lastIndexOf(' ',45)),55,scene.title.includes('. ')?280:246,24,'#607493',500)}{label(scene.subtitle.slice(scene.subtitle.lastIndexOf(' ',45)+1),55,scene.title.includes('. ')?313:279,24,'#607493',500)}</g>:label(scene.subtitle,55,scene.title.includes('. ')?282:254,24,'#607493',500)}</g>:<g>{label(scene.title,74,155,43,ink,650)}{label(scene.subtitle,74,195,23,'#607493',500)}</g>}
 
@@ -144,8 +145,14 @@ function Film(){
    {label(`${chapter+1} / 8`,portrait?55:74,height-38,17,'#6B7890',550)}
    {label('How SuiFleet works',width-(portrait?55:74),height-38,17,'#6B7890',550,'end')}
 
+   </g>
+   {ending>=0&&<g opacity={tween(ending,12,95)}>
+    <Logo x={(width-180*(portrait?3.15:4.4)*(.84+.16*tween(ending,12,145)))/2} y={height*(portrait?.28-.03*tween(ending,80,165):.06-.02*tween(ending,80,165))} size={(portrait?3.15:4.4)*(.84+.16*tween(ending,12,145))}/>
+    {label('SuiFleet',width/2,height*(portrait?.63:.74),portrait?94:104,ink,650,'middle')}
+    <g opacity={tween(ending,5,30)*(1-tween(ending,140,190))}>{portrait?<g>{label('Start your SuiFleet',width/2,height*.72,34,ink,500,'middle')}{label('journey today.',width/2,height*.756,34,ink,500,'middle')}</g>:label('Start your SuiFleet journey today.',width/2,height*.88,32,ink,500,'middle')}</g>
+   </g>}
   </svg>
  </AbsoluteFill>;
 }
-const Root=()=> <><Composition id="Landscape" component={Film} width={1280} height={720} fps={30} durationInFrames={2880}/><Composition id="Portrait" component={Film} width={720} height={1280} fps={30} durationInFrames={2880}/></>;
+const Root=()=> <><Composition id="Landscape" component={Film} width={1280} height={720} fps={30} durationInFrames={3120}/><Composition id="Portrait" component={Film} width={720} height={1280} fps={30} durationInFrames={3120}/></>;
 registerRoot(Root);

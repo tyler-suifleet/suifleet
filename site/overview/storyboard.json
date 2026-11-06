@@ -59,6 +59,13 @@
       "subtitle": "Choose a group. Validate. Roll out in stages.",
       "text": "Start with a small group, check the results, and expand your rollout in stages. You stay in control of the release, while SuiFleet coordinates delivery across your fleet.",
       "duration": 12
+    },
+    {
+      "id": "closing",
+      "title": "Start your SuiFleet journey today.",
+      "subtitle": "SuiFleet",
+      "text": "Start your SuiFleet journey today.",
+      "duration": 8
     }
   ]
 }
