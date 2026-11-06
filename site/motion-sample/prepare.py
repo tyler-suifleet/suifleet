@@ -19,6 +19,6 @@ def prepare():
  public=base/'public';public.mkdir(exist_ok=True)
  with wave.open(str(public/'narration.wav'),'wb') as out:out.setnchannels(1);out.setsampwidth(2);out.setframerate(rate);out.writeframes((np.clip(track,-1,1)*32767).astype('<i2').tobytes())
  for name in ['inter-variable.woff2','logo.svg']:shutil.copyfile(ROOT/'site/src/assets'/name,public/name)
- for name in ['workstation','gateway','storage']:shutil.copyfile(base/'art'/(name+'.png'),public/(name+'.png'))
+ shutil.copyfile(base/'art/editorial-scene.png',public/'editorial-scene.png')
  (public/'timing.json').write_text(json.dumps({'duration':script['duration'],'cues':cues},indent=2)+'\n');print('Prepared 20-second female narration, with no overlapping or truncated cues')
 if __name__=='__main__':prepare()

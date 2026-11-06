@@ -174,7 +174,7 @@ def motion_sample_manifest():
         raise BuildError('Unexpected motion sample renderer or timing')
     if set(manifest.get('source_sha256',{}))!=expected or any(sha256(ROOT/name)!=value for name,value in manifest['source_sha256'].items()):
         raise BuildError('Motion sample source changed; regenerate the sample')
-    assets={'site/src/assets/inter-variable.woff2','site/src/assets/logo.svg'}|{'site/motion-sample/art/'+name+'.png' for name in ['workstation','gateway','storage']}
+    assets={'site/src/assets/inter-variable.woff2','site/src/assets/logo.svg'}|{'site/motion-sample/art/editorial-scene.png'}
     if set(manifest.get('assets_sha256',{}))!=assets or any(sha256(ROOT/name)!=value for name,value in manifest['assets_sha256'].items()):
         raise BuildError('Motion sample artwork or font changed')
     if {v['name'] for v in manifest.get('videos',[])}!={'landscape','portrait'}:

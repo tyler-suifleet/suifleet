@@ -1,18 +1,25 @@
 # Twenty-second motion direction sample
 
-An independent Remotion 4.0.541 / React composition combining detailed transparent
-3D illustrations with editable SVG overlays, spring-driven entrances, a continuous
-camera move and self-hosted Inter. The artwork and exact built-in image-generation
-prompts are recorded under `art/`; the original RGBA bytes/alpha are preserved.
-It explores a visual direction; it does not replace the full system overview.
-The workstation, approval record, software storage and device belong to one
-spatial scene. Approval now stays in focus until completion; the camera waits for
-the device-check response before following the download. A click, curved
-document handoffs, arrival pulses and an on-device scan explain the actions. Completed steps fade as the camera follows the active step. Verification
-ends at “Ready to install,” without claiming the platform installer ran.
+An independent Remotion 4.0.541 / React composition in the user-selected
+woman-at-the-computer editorial illustration direction. One consistent factory
+scene replaces the separate product renders. `art/editorial-reference.png`
+records the chosen direction; `art/editorial-scene.png` is a clean plate generated
+with built-in `image_gen`. The exact edit brief is in `art/editorial-prompts.json`.
+The originals are preserved; branding, text, parcels, signatures, routes and
+verification marks are drawn separately in SVG. No image-generation API key or
+paid rendering service is required.
 
-The spoken verb “records” is replaced with “saves” to avoid the synthesis
-ambiguity. The 20-second film has 600 frames at 30 fps in landscape 1600×900 and portrait
+The scene itself is illustrated artwork, not app footage or a hardware claim.
+The animation uses progressive paths, moving software parcels, approval seals,
+signing, device queries/responses, on-device verification and camera movement.
+Approval metadata goes to Sui; software uploads directly to Walrus and downloads
+to devices. Software is never depicted passing through Sui to reach storage.
+Devices initiate their checks. Every verified state is added after receipt;
+none is baked into the clean plate. The scene ends at “Ready to install,” without
+claiming that the platform installer ran. The spoken verb is “saves,” preserving
+the pronunciation correction. The full overview remains independent.
+
+The 20-second film has 600 frames at 30 fps in landscape 1600×900 and portrait
 900×1600. `script.json` owns the narration. `prepare.py` verifies the existing
 local Kokoro model/voice hashes, uses the female `af_heart` voice, rejects
 truncated/overlapping speech and prepares the ignored local assets. It requires

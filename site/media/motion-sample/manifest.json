@@ -4,21 +4,19 @@
   "fps": 30,
   "duration_seconds": 20,
   "source_sha256": {
-    "site/motion-sample/src/index.tsx": "27bafb564e3aa42ab5a06c9fa1736302eb640d9d89b6de41fc1b09e6ee100082",
-    "site/motion-sample/render.mjs": "5e6fbfef522ef532aa7a84ed55d9d5bc887c5f8cef4ff1bea3636a4b61b84b40",
-    "site/motion-sample/prepare.py": "9f93afa986195f4d4384165e08a976982d44247c869b74e4d02ed88f1175406d",
-    "site/motion-sample/script.json": "a1ba541c0f29a1b0f69d01771d04997b35f9fc2da280e227019ce86034d601bc",
+    "site/motion-sample/src/index.tsx": "3241617bdd802505d7e60c05055af3feb32863e7ccdbe9b3d486b22e91092f40",
+    "site/motion-sample/render.mjs": "773179239631e63c8be9956d5155d2d32f73cb67c510edbac779ebdf3ebb94b4",
+    "site/motion-sample/prepare.py": "ed2bd1afe9142cbd51d52d0143c95a3f8e4e13cb55e197a548ceb6cad4ac45a0",
+    "site/motion-sample/script.json": "2064c2c28666125cc0901df5266378d5bcd7209fb1e0044b9db7335c99ba28d2",
     "site/motion-sample/package.json": "180f9b32736fef5e613def2c90f5bc97e970dddf6376b33c33f352770de24776",
     "site/motion-sample/package-lock.json": "cfea27dffa0c1a16bc75f986b7f62db6d8c8136d8803d5ed94c41f7253856207"
   },
   "assets_sha256": {
     "site/src/assets/inter-variable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
     "site/src/assets/logo.svg": "400d0317ed09a06ab9a6be1e5f985accc6058eb7926dd37f79bc32e5aa25e225",
-    "site/motion-sample/art/workstation.png": "32c68f277ddaba2a59f789dc0234423e4adbc2ca5fd7a25c39db788b72336b27",
-    "site/motion-sample/art/gateway.png": "c14e6bd5616619e9f8b4d50a588675872ba82a9e65d3391fdda35542f3fd41fb",
-    "site/motion-sample/art/storage.png": "9b123b1ec6493f07781d5b0ef5146b83dee866427a67f0bfcb29e6649dff151c"
+    "site/motion-sample/art/editorial-scene.png": "681e178c457ddfeaade782bdd8ab62fd12533ac8f53cb18e2c4b8b559d09555f"
   },
-  "narration_sha256": "f1d34abda18a2f28f97468401f6c697d82f40764a8cf87691cbfcaa1bdb0a155",
+  "narration_sha256": "87cfa555fdaf160c9eeaef9861f14a8334f8b027a5bab10c8f8c61653400168b",
   "timing": {
     "duration": 20,
     "cues": [
@@ -38,9 +36,9 @@
         "speech_end": 12.329333333333334
       },
       {
-        "text": "The device checks, downloads, and verifies the release.",
+        "text": "Your devices check, download, and verify the release.",
         "speech_start": 14.5,
-        "speech_end": 17.614666666666665
+        "speech_end": 17.572
       }
     ]
   },
@@ -48,25 +46,25 @@
     {
       "name": "landscape",
       "file": "landscape.mp4",
-      "sha256": "6d02677566fcce78434e7582aeb652c1fc0d403288db70e3088fc14ff3c947cd",
+      "sha256": "0431d0ffb82b54be6db6a0ff8068aaad63cd75c89366211ac098bce7c6e0a491",
       "poster": "landscape.png",
       "width": 1600,
       "height": 900,
-      "poster_sha256": "618c7c5949b20f1b75c329c7493a9ae2a0d03c9ba55432b5dbd205caca74c6b8"
+      "poster_sha256": "5fa0fd4cbece09ccd9e0faa2f7ad4a9b8838cffd2abbf501fcf38a0e9f4b000b"
     },
     {
       "name": "portrait",
       "file": "portrait.mp4",
-      "sha256": "4ac428d917ddc4d5bdf86bea3ab1d27fc6600db3f2423ede84cd127b38bf6fb9",
+      "sha256": "97b4b925de00da1db04c33f5273a731d3cc87b35d4e583ea7cfa9f9e3210ffde",
       "poster": "portrait.png",
       "width": 900,
       "height": 1600,
-      "poster_sha256": "e977dba558985ba82426615b6c0554ef594cd6e1e8154d76338f1558f6100c8d"
+      "poster_sha256": "9e370d7ddc0f935085323c80ec054bff30fc2fbe799950c507639664218f2baf"
     }
   ],
   "kind": "visual-direction-sample",
   "voice": "af_heart",
   "synthetic_voice": true,
   "captions": "sample.en.vtt",
-  "captions_sha256": "a0da2756f6d495b84ae0b214cded13b15a2576627890476387f2b04b933f1925"
+  "captions_sha256": "c05045fce58dd1da0453f845203e5e91de266417572b9f923e736b818ffac59d"
 }

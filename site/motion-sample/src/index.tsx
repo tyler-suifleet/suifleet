@@ -1,143 +1,107 @@
-import React, {useEffect, useState} from 'react';
-import {AbsoluteFill, Composition, Easing, Html5Audio, cancelRender, continueRender, delayRender, interpolate, registerRoot, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
-
-const ink='#13233F',muted='#6C7890',blue='#2563EB',mint='#12A884';
-const clamp=(n:number)=>Math.max(0,Math.min(1,n));
+import React,{useEffect,useState} from 'react';
+import {AbsoluteFill,Composition,Easing,Html5Audio,cancelRender,continueRender,delayRender,interpolate,registerRoot,spring,staticFile,useCurrentFrame,useVideoConfig} from 'remotion';
+const ink='#142744',blue='#2465E8',mint='#159C78',cream='#FBF4EA';
+const clamp=(v:number)=>Math.max(0,Math.min(1,v));
 const tween=(f:number,a:number,b:number)=>interpolate(f,[a,b],[0,1],{extrapolateLeft:'clamp',extrapolateRight:'clamp',easing:Easing.inOut(Easing.cubic)});
-const pop=(f:number,start:number)=>spring({frame:f-start,fps:30,config:{damping:22,stiffness:100,mass:.8}});
-const text=(content:string,x:number,y:number,size=24,fill=ink,weight=500,anchor:any='start')=><text x={x} y={y} fontSize={size} fontWeight={weight} fill={fill} textAnchor={anchor}>{content}</text>;
-const Tick=({x=0,y=0,p=1,size=1}:{x?:number;y?:number;p?:number;size?:number})=><g transform={`translate(${x} ${y}) scale(${size})`}><path d="M-12 0 -3 9 15-11" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" pathLength="1" strokeDasharray="1" strokeDashoffset={1-clamp(p)}/></g>;
-const Logo=({x,y,size=1}:{x:number;y:number;size?:number})=><g transform={`translate(${x} ${y}) scale(${size})`} fill={blue}><path d="M22 83Q43 65 40 42Q56 54 61 72Z M66 87Q96 57 88 21Q118 43 125 68Z M126 91Q159 47 148 0Q175 25 180 62Z M39 82 59 79Q53 87 45 87Z M83 86 122 77Q107 94 91 92Z M142 88 180 73Q163 101 131 104Z M0 104Q40 78 87 94Q135 111 180 77Q151 118 91 106Q43 91 0 104Z"/></g>;
-const FileIcon=({x=0,y=0,scale=1}:{x?:number;y?:number;scale?:number})=><g transform={`translate(${x} ${y}) scale(${scale})`}><rect x="-27" y="-34" width="54" height="68" rx="10" fill="url(#file)"/><path d="M10-34V-18H27" fill="#A9CBFF"/><path d="M-13-7H11 M-13 4H15 M-13 15H6" stroke="white" strokeWidth="3" strokeLinecap="round"/></g>;
-function Console({f}:{f:number}){
- const approved=f>240,p=pop(f,25);
- return <g transform="translate(-390 -120)">
-  <image href={staticFile('workstation.png')} x="-300" y="-230" width="600" height="460" preserveAspectRatio="xMidYMid meet"/>
-  <g opacity={clamp(p)} transform={`translate(0 ${14*(1-p)})`} filter="url(#smallShadow)">
-   <rect x="-155" y="-175" width="310" height="100" rx="18" fill="white" fillOpacity=".98" stroke="#E0E9F6"/>
-   <FileIcon x={-118} y={-130} scale={.62}/>
-   {text('Gateway software',-88,-142,19,ink,620)}{text('Release 1.2',-88,-116,15,muted)}
-   <circle cx="108" cy="-125" r="15" fill={approved?'#E1F6ED':'#EBF1FE'}/>
-   {approved?<g color={mint}><Tick x={108} y={-125} size={.48}/></g>:text('↑',108,-119,19,blue,600,'middle')}
-  </g>
- </g>;
-}
-function Cursor({f}:{f:number}){
- if(f<112||f>172)return null;const p=tween(f,112,140),x=interpolate(p,[0,1],[-265,-231]),y=interpolate(p,[0,1],[125,-203]),fade=tween(f,112,122)*(1-tween(f,158,172)),click=tween(f,140,160);
+const pop=(f:number,start:number)=>spring({frame:f-start,fps:30,config:{damping:23,stiffness:95,mass:.8}});
+const label=(s:string,x:number,y:number,size=22,color=ink,weight=550,anchor:'start'|'middle'|'end'='start')=><text x={x} y={y} fill={color} fontSize={size} fontWeight={weight} textAnchor={anchor}>{s}</text>;
+function Logo({x,y,size=.3}:{x:number;y:number;size?:number}){return <g transform={`translate(${x} ${y}) scale(${size})`} fill={blue}><path d="M22 83Q43 65 40 42Q56 54 61 72Z M66 87Q96 57 88 21Q118 43 125 68Z M126 91Q159 47 148 0Q175 25 180 62Z M39 82 59 79Q53 87 45 87Z M83 86 122 77Q107 94 91 92Z M142 88 180 73Q163 101 131 104Z M0 104Q40 78 87 94Q135 111 180 77Q151 118 91 106Q43 91 0 104Z"/></g>}
+function Tick({p=1,size=1}:{p?:number;size?:number}){return <g transform={`scale(${size})`}><path d="M-12 0-3 9 15-11" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" pathLength="1" strokeDasharray="1" strokeDashoffset={1-clamp(p)}/></g>}
+function Parcel({x=0,y=0,size=1}:{x?:number;y?:number;size?:number}){return <g transform={`translate(${x} ${y}) scale(${size})`} stroke="#ECF4FF" strokeWidth="1.6" strokeLinejoin="round"><ellipse cx="0" cy="28" rx="25" ry="8" fill="#163777" opacity=".1" stroke="none"/><path d="M-24-13 0-27 26-14 1 0Z" fill="#6D9CFF"/><path d="M-24-13 1 0V29L-24 15Z" fill="#2B69DD"/><path d="M1 0 26-14V14L1 29Z" fill="#1648AC"/><path d="M-11-20 13-7V7" stroke="white" strokeWidth="4" fill="none"/></g>}
+function Seal({x=0,y=0,p=1}:{x?:number;y?:number;p?:number}){return <g transform={`translate(${x} ${y})`}><circle r="23" fill="#E5F5EC" stroke={mint} strokeWidth="2"/><g color={mint}><Tick p={p}/></g></g>}
+const paths={
+ approval:[[625,510],[675,465],[715,405],[800,405]],
+ upload:[[450,565],[650,530],[760,625],[960,625]],
+ check:[[1370,480],[1220,380],[1000,350],[800,405]],
+ permit:[[800,405],[1000,440],[1220,520],[1370,480]],
+ download:[[960,625],[1120,615],[1260,535],[1370,480]],
+ gateway:[[960,625],[1160,590],[1230,310],[1424,304]],
+ sensor:[[960,625],[1120,630],[1210,694],[1375,694]],
+};
+function cubic(points:number[][],t:number){const [a,b,c,d]=points,q=1-t;return [q**3*a[0]+3*q*q*t*b[0]+3*q*t*t*c[0]+t**3*d[0],q**3*a[1]+3*q*q*t*b[1]+3*q*t*t*c[1]+t**3*d[1]]}
+function Transfer({f,type,start,end}:{f:number;type:keyof typeof paths;start:number;end:number}){
+ if(f<start||f>end+38)return null;const points=paths[type],p=tween(f,start,end),[x,y]=cubic(points,p),software=['upload','download','gateway','sensor'].includes(type),query=type==='check',color=software?blue:query?'#8298B9':mint,fade=1-tween(f,end+8,end+38);
  return <g opacity={fade}>
-  {f>=140&&<circle cx={x} cy={y} r={12+27*click} fill="none" stroke={blue} strokeWidth="2" opacity={1-click}/>}
-  <g transform={`translate(${x} ${y}) scale(${1-.1*Math.sin(Math.PI*click)})`} filter="url(#smallShadow)"><path d="M0 0 0 30 8 23 15 37 21 34 14 20 25 19Z" fill={ink} stroke="white" strokeWidth="2.5" strokeLinejoin="round"/></g>
+  <path d={`M${points[0]}C${points[1]} ${points[2]} ${points[3]}`} fill="none" stroke={software?'#A5C5FF':'#D0E0DB'} strokeWidth={software?17:7} opacity=".35" pathLength="1" strokeDasharray="1" strokeDashoffset={1-p} strokeLinecap="round"/>
+  <path d={`M${points[0]}C${points[1]} ${points[2]} ${points[3]}`} fill="none" stroke={color} strokeWidth={software?9:2.8} pathLength="1" strokeDasharray={query?'.012 .018':'1'} strokeDashoffset={1-p} strokeLinecap="round"/>
+  {p<1&&(software?<Parcel x={x} y={y} size={.9}/>:query?<g transform={`translate(${x} ${y})`}><circle r="19" fill={cream} stroke={color} strokeWidth="2"/>{label('?',0,7,23,color,600,'middle')}</g>:<Seal x={x} y={y}/>)}
+  {f>=end&&<circle cx={points[3][0]} cy={points[3][1]} r={15+33*tween(f,end,end+28)} fill="none" stroke={color} strokeWidth="2" opacity={1-tween(f,end,end+28)}/>}
  </g>;
 }
-function Approval({f}:{f:number}){
- const enter=pop(f,145),exit=tween(f,250,275),opacity=clamp(enter)*(1-exit);if(opacity<=0)return null;
- return <g transform={`translate(${-150+15*(1-enter)+180*exit} ${-100-12*enter}) scale(${(.94+.06*enter)*(1-.7*exit)})`} opacity={opacity} filter="url(#cardShadow)">
-  <rect x="-125" y="-133" width="310" height="290" rx="23" fill="white" stroke="#E0E8F5"/>
-  <circle cx="-83" cy="-89" r="20" fill="#EDF3FF"/><path d="M-95-92H-72V-75H-95Z M-91-92V-99H-76V-92" fill="none" stroke={blue} strokeWidth="2.5" strokeLinejoin="round"/>
-  {text('Your approval',-50,-91,15,muted)}{text('Approve deployment',-94,-42,23,ink,620)}
-  {text('Gateway software · 1.2',-94,-9,16,muted)}
-  <path d="M-94 18H152" stroke="#E9EEF6"/>
-  <path d="M-75 65Q-60 18-50 55T-20 55Q-5 22 5 55T30 48L75 46" fill="none" stroke={blue} strokeWidth="3.2" strokeLinecap="round" pathLength="1" strokeDasharray="1" strokeDashoffset={1-tween(f,185,227)}/>
-  <rect x="-94" y="100" width="246" height="35" rx="9" fill="#E4F6EF" opacity={tween(f,225,245)}/>
-  <g color={mint} opacity={tween(f,225,245)}><Tick x={-71} y={117} p={tween(f,225,245)} size={.55}/>{text('Deployment approved',-49,122,14,'#0A7A60',600)}</g>
+function Waypoint({f,type}:{f:number;type:'sui'|'walrus'}){
+ const sui=type==='sui',p=pop(f,sui?240:290);if(p<=0)return null;const x=sui?800:960,y=sui?405:625,confirmed=f>(sui?305:365);
+ return <g transform={`translate(${x} ${y+12*(1-p)}) scale(${.95+.05*p})`} opacity={clamp(p)} filter="url(#soft)">
+  <path d="M-100 5C-124-24-102-59-65-58C-55-88-12-89 7-66C42-82 75-65 78-39C117-29 118 15 90 30C77 57 36 60 18 48C-10 70-43 57-56 43C-83 51-112 31-100 5Z" fill="#FFF9F1" fillOpacity=".96" stroke={sui?'#8EACD9':'#8FAEE7'} strokeWidth="2"/>
+  {label(sui?'Sui':'Walrus',0,-14,29,ink,650,'middle')}
+  {label(sui?'Deployment approval':'Software files',0,16,17,'#5F7595',550,'middle')}
+  {confirmed&&(sui?<g transform="translate(0 42)" color={mint}><Tick p={tween(f,305,322)} size={.65}/></g>:<Parcel y={48} size={.42}/>)}
  </g>;
 }
-function SuiRecord({f}:{f:number}){
- const p=pop(f,255);if(p<=0)return null;
- return <g transform={`translate(420 ${-250+24*(1-p)})`} opacity={clamp(p)} filter="url(#shadow)">
-  <rect x="-174" y="-92" width="348" height="184" rx="24" fill="white"/>
-  <rect x="-147" y="-65" width="44" height="44" rx="13" fill="#EAF1FF"/>
-  <path d="M-135-53H-119V-31H-135Z M-131-45H-123 M-131-39H-123" fill="none" stroke={blue} strokeWidth="2"/>
-  {text('Sui',-87,-47,24,ink,650)}{text('Approved release record',-87,-22,14,muted)}
-  <path d="M-145 0H145" stroke="#E9EEF6"/>{text('Gateway software',-144,33,17,ink,550)}{text('1.2',145,33,18,blue,650,'end')}
-  <g color={mint} opacity={tween(f,320,337)}><Tick x={-135} y={65} size={.5} p={tween(f,320,337)}/>{text('Approval verified',-115,70,14,'#12866A',550)}</g>
+function Release({f}:{f:number}){
+ const p=pop(f,20);return <g opacity={clamp(p)*(1-tween(f,130,145))} transform={`translate(447 ${555+15*(1-p)}) rotate(-4)`}>
+  <Parcel size={1.05}/>{label('Release 1.2',0,53,17,ink,650,'middle')}
  </g>;
 }
-function Storage({f}:{f:number}){
- const p=pop(f,300);if(p<=0)return null;
- return <g transform={`translate(420 ${160+25*(1-p)})`} opacity={clamp(p)}>
-  <image href={staticFile('storage.png')} x="-200" y="-170" width="400" height="330" preserveAspectRatio="xMidYMid meet"/>
-  <g opacity={tween(f,382,400)} transform="translate(0 -84)"><FileIcon scale={.7}/></g>
-  {text('Walrus',0,182,25,ink,650,'middle')}{text('Software files',0,207,16,muted,450,'middle')}
+function Wallet({f}:{f:number}){
+ const p=pop(f,145),exit=tween(f,247,270);if(p<=0||exit===1)return null;
+ return <g transform={`translate(${620+155*exit} ${515-100*exit}) scale(${(.94+.06*p)*(1-.68*exit)})`} opacity={clamp(p)*(1-exit)} filter="url(#soft)">
+  <rect x="-125" y="-111" width="250" height="224" rx="18" fill="#FFFBF5" stroke="#C6D4E8"/>
+  {label('Wallet approval',-99,-72,21,ink,650)}{label('Factory group · 3 devices',-99,-42,14,'#607493')}
+  <path d="M-99-17H99" stroke="#D9E1EB"/>
+  <path d="M-75 45Q-60 4-50 38T-20 38Q-6 8 5 40T31 34L76 32" stroke={blue} strokeWidth="3" fill="none" strokeLinecap="round" pathLength="1" strokeDasharray="1" strokeDashoffset={1-tween(f,177,221)}/>
+  <g opacity={tween(f,222,240)}><rect x="-99" y="72" width="198" height="27" rx="7" fill="#DFF2E6"/>{label('Deployment approved',0,90,14,'#117A5D',600,'middle')}</g>
  </g>;
 }
-function Gateway({f}:{f:number}){
- const p=pop(f,350);if(p<=0)return null;const ready=tween(f,505,548),load=tween(f,450,495);
- return <g transform={`translate(-390 ${240+35*(1-p)})`} opacity={clamp(p)}>
-  <image href={staticFile('gateway.png')} x="-210" y="-215" width="420" height="420" preserveAspectRatio="xMidYMid meet"/>
-  <g color="#60F2B9" opacity={ready}><Tick x={-115} y={48} p={ready} size={.7}/></g>
-  {f>=500&&f<548&&<rect x="-137" y={29+29*tween(f,500,542)} width="52" height="4" rx="2" fill="url(#scan)" opacity=".7"/>}
-  <g opacity={tween(f,450,465)} transform={`translate(115 ${-55+12*(1-ready)})`} filter="url(#smallShadow)">
-   <rect x="-10" y="-35" width="210" height="116" rx="17" fill="white"/>
-   {text('Release 1.2',10,-5,18,ink,650)}
-   {text(f<500?'Receiving files':ready<.98?'Verifying integrity':'Ready to install',10,24,14,ready>.98?'#118468':muted,500)}
-   <rect x="10" y="47" width="168" height="5" rx="2.5" fill="#E4ECF7"/>
-   <rect x="10" y="47" width={168*(f<500?load:ready)} height="5" rx="2.5" fill={ready>.98?mint:blue}/>
-  </g>
- </g>;
-}
-const flowPaths={approval:[[30,-100],[140,-180],[240,-300],[420,-250]],files:[[-280,-210],[-60,-70],[180,160],[420,160]],check:[[-380,285],[-160,100],[120,-240],[420,-250]],response:[[420,-250],[160,-340],[-350,-90],[-380,285]],download:[[420,160],[220,285],[-150,380],[-380,285]]};
-function bezier(points:number[][],t:number){const [a,b,c,d]=points,q=1-t;return [q*q*q*a[0]+3*q*q*t*b[0]+3*q*t*t*c[0]+t*t*t*d[0],q*q*q*a[1]+3*q*q*t*b[1]+3*q*t*t*c[1]+t*t*t*d[1]]}
-function Flow({f,type,start,end}:{f:number;type:keyof typeof flowPaths;start:number;end:number}){
- if(f<start||f>end+20)return null;const p=tween(f,start,end),pts=flowPaths[type],pos=bezier(pts,p),fade=1-tween(f,end,end+20),arrival=clamp((f-end)/20);const tangent=[3*(1-p)**2*(pts[1][0]-pts[0][0])+6*(1-p)*p*(pts[2][0]-pts[1][0])+3*p*p*(pts[3][0]-pts[2][0]),3*(1-p)**2*(pts[1][1]-pts[0][1])+6*(1-p)*p*(pts[2][1]-pts[1][1])+3*p*p*(pts[3][1]-pts[2][1])];const bank=Math.max(-16,Math.min(16,Math.atan2(tangent[1],tangent[0])*180/Math.PI*.25));
- return <g opacity={fade}>
-  {f>=end&&<circle cx={pts[3][0]} cy={pts[3][1]} r={15+40*arrival} fill="none" stroke={mint} strokeWidth="2" opacity={.45*(1-arrival)}/>}
-  <path d={`M${pts[0]}C${pts[1]} ${pts[2]} ${pts[3]}`} fill="none" stroke={type==='check'?'#AFBDD3':'#B9CEF1'} strokeWidth="2" strokeDasharray="5 8" pathLength="1" opacity=".6"/>
-  {p<1&&<g transform={`translate(${pos[0]} ${pos[1]}) rotate(${bank})`} filter="url(#smallShadow)">
-   <rect x="-47" y="-34" width="94" height="68" rx="14" fill="white" stroke="#DCE6F5"/>
-   {type==='check'?<g>{text('Check',0,6,17,blue,650,'middle')}</g>:<g><FileIcon x={-21} scale={.55}/>{text(type==='approval'?'OK':'1.2',13,7,17,type==='approval'?mint:blue,650,'middle')}</g>}
-  </g>}
+function Verification({f}:{f:number}){
+ const receive=tween(f,450,500),verify=tween(f,500,548);
+ if(f<450)return null;
+ return <g>
+  {verify<.98?<g><rect x="1340" y="492" width="58" height="5" rx="2.5" fill="#355674"/><rect x="1340" y="492" width={58*(f<500?receive:verify)} height="5" rx="2.5" fill={f<500?'#6CB0FF':'#6DE0AF'}/></g>:<g transform="translate(1370 480)" color="#7AE7B8"><Tick p={verify} size={1}/></g>}
+  {f>=500&&f<548&&<path d={`M1334 ${448+59*tween(f,500,545)}H1405`} stroke="#7BC9FF" strokeWidth="3" opacity=".6"/>}
+  {f>548&&<g opacity={tween(f,548,560)}><path d="M1324 519H1210" stroke={mint} strokeWidth="2"/>{label('Verified',1196,526,24,'#147B5E',650,'end')}</g>}
+  {f>560&&<Seal x={1395} y={298} p={tween(f,560,574)}/>}
+  {f>570&&<Seal x={1352} y={678} p={tween(f,570,584)}/>}
  </g>;
 }
 function Film(){
  const f=useCurrentFrame(),{width,height}=useVideoConfig(),portrait=height>width;
- const [handle]=useState(()=>delayRender('Load self-hosted typography and artwork'));
- useEffect(()=>{Promise.all([document.fonts.load('600 40px Inter'),...['workstation','gateway','storage'].map(name=>{const image=new Image();image.src=staticFile(name+'.png');return image.decode()})]).then(()=>continueRender(handle)).catch(cancelRender)},[handle]);
- const approvalFocus=tween(f,135,190),reveal=tween(f,215,340),focus=tween(f,448,523);
- const approvalX=interpolate(approvalFocus,[0,1],[-390,portrait?-295:-310]);
- const focusX=interpolate(reveal,[0,1],[approvalX,0])+(portrait?-330:-390)*focus;
- const focusY=interpolate(reveal,[0,1],[-120,0])+240*focus;
- const approvalZoom=interpolate(approvalFocus,[0,1],[portrait?1.25:1.22,portrait?1.06:1.16]);
- const z=interpolate(reveal,[0,1],[approvalZoom,portrait?.53:.76])+(portrait?.92:.79)*focus;
- const phase=f<150?0:f<270?1:f<390?2:f<550?3:4;
- const titles=[['Your next release.'],['Approved by you.'],['Ready for delivery.'],['Your device takes over.'],['Verified.','Ready to install.']];
- const titleIn=pop(f,[0,150,270,390,550][phase]);
- return <AbsoluteFill style={{background:'#F6F8FC',fontFamily:'Inter, sans-serif'}}>
+ const [handle]=useState(()=>delayRender('Load selected editorial scene and type'));
+ useEffect(()=>{const image=new Image();image.src=staticFile('editorial-scene.png');Promise.all([image.decode(),document.fonts.load('600 40px Inter')]).then(()=>continueRender(handle)).catch(cancelRender)},[handle]);
+ const frame=portrait?{x:32,y:335,w:836,h:1060}:{x:40,y:215,w:1520,h:560};
+ const times=[0,130,240,345,445,550,599];
+ const zoom=interpolate(f,times,portrait?[1.36,1.36,1.17,1.07,1.12,1.5,1.5]:[1.15,1.15,1.02,.97,.98,.98,.98],{easing:Easing.inOut(Easing.cubic)});
+ const rawX=interpolate(f,times,portrait?[425,425,670,900,1100,1370,1370]:[670,670,790,800,880,1100,1100],{easing:Easing.inOut(Easing.cubic)});
+ const cx=Math.max(frame.w/(2*zoom),Math.min(1600-frame.w/(2*zoom),rawX)),cy=Math.max(frame.h/(2*zoom),Math.min(900-frame.h/(2*zoom),portrait?510:490));
+ const phase=f<145?0:f<270?1:f<390?2:3;
+ return <AbsoluteFill style={{background:cream,fontFamily:'Inter,sans-serif'}}>
   <style>{`@font-face{font-family:Inter;src:url('${staticFile('inter-variable.woff2')}') format('woff2');font-weight:100 900}`}</style>
   <Html5Audio src={staticFile('narration.wav')}/>
   <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-   <defs>
-    <radialGradient id="ambient"><stop stopColor="#DCEAFF" stopOpacity=".9"/><stop offset="1" stopColor="#F6F8FC" stopOpacity="0"/></radialGradient>
-    <linearGradient id="scan"><stop stopColor="#75BAFF" stopOpacity="0"/><stop offset=".5" stopColor="#75BAFF"/><stop offset="1" stopColor="#75BAFF" stopOpacity="0"/></linearGradient>
-    <linearGradient id="file" x2="1" y2="1"><stop stopColor="#66AAFF"/><stop offset="1" stopColor="#245DE0"/></linearGradient>
-    <linearGradient id="storage" x2="0" y2="1"><stop stopColor="#C7DDFC"/><stop offset="1" stopColor="#94BAEE"/></linearGradient>
-    <linearGradient id="device" x2="1" y2="1"><stop stopColor="#425975"/><stop offset=".55" stopColor="#2B425F"/><stop offset="1" stopColor="#1A2E4B"/></linearGradient>
-    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="18" stdDeviation="25" floodColor="#253D70" floodOpacity=".12"/></filter>
-    <filter id="cardShadow" x="-50%" y="-50%" width="200%" height="220%"><feDropShadow dx="0" dy="14" stdDeviation="22" floodColor="#19385E" floodOpacity=".2"/></filter>
-    <filter id="smallShadow" x="-60%" y="-70%" width="220%" height="250%"><feDropShadow dx="0" dy="8" stdDeviation="10" floodColor="#28456E" floodOpacity=".15"/></filter>
-    <filter id="deviceShadow" x="-40%" y="-30%" width="190%" height="180%"><feDropShadow dx="10" dy="20" stdDeviation="20" floodColor="#1A3454" floodOpacity=".18"/></filter>
-    <filter id="glow"><feGaussianBlur stdDeviation="3"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-   </defs>
-   <ellipse cx={width*.57} cy={height*.58} rx={width*.7} ry={height*.5} fill="url(#ambient)"/>
-   <Logo x={portrait?58:76} y={portrait?67:54} size={portrait?.36:.3}/>
-   {text('SuiFleet',portrait?139:145,portrait?101:82,30,ink,650)}
-   {text('SOFTWARE, IN SYNC.',width-(portrait?60:78),portrait?98:80,portrait?14:13,muted,600,'end')}
-   <g transform={`translate(${portrait?60:78} ${(portrait?205:176)+16*(1-titleIn)})`} opacity={clamp(titleIn)}>
-    {titles[phase].map((line,i)=>text(line,0,i*(portrait?72:68),portrait?58:56,ink,600))}
+   <defs><clipPath id="scene"><rect x={frame.x} y={frame.y} width={frame.w} height={frame.h} rx="22"/></clipPath><filter id="soft" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="6" stdDeviation="8" floodColor="#163B6D" floodOpacity=".1"/></filter></defs>
+   <Logo x={portrait?55:74} y={portrait?52:40} size={.35}/>{label('SuiFleet',portrait?130:149,portrait?87:75,30,ink,650)}
+   {portrait?<g>{label('Your software.',55,198,57,ink,650)}{label('Every device.',55,267,57,ink,650)}</g>:label('Your software. Every device.',74,165,55,ink,650)}
+   <g clipPath="url(#scene)">
+    <g transform={`translate(${frame.x+frame.w/2} ${frame.y+frame.h/2}) scale(${zoom}) translate(${-cx} ${-cy})`}>
+     <image href={staticFile('editorial-scene.png')} x="0" y="0" width="1600" height="900" preserveAspectRatio="none"/>
+     <Release f={f}/>
+     {f>=135&&f<173&&<circle cx="420" cy="665" r={10+28*tween(f,135,173)} stroke={blue} strokeWidth="3" fill="none" opacity={1-tween(f,145,173)}/>}
+     <Wallet f={f}/>
+     <Waypoint f={f} type="sui"/><Waypoint f={f} type="walrus"/>
+     <Transfer f={f} type="approval" start={260} end={305}/>
+     <Transfer f={f} type="upload" start={308} end={365}/>
+     <Transfer f={f} type="check" start={390} end={418}/>
+     <Transfer f={f} type="permit" start={420} end={447}/>
+     <Transfer f={f} type="download" start={450} end={500}/>
+     <Transfer f={f} type="gateway" start={520} end={560}/>
+     <Transfer f={f} type="sensor" start={532} end={570}/>
+     <Verification f={f}/>
+    </g>
    </g>
-   <g transform={`translate(${width/2} ${height*(portrait?.54:.55)}) scale(${z}) translate(${-focusX} ${-focusY})`}>
-    <g opacity={1-tween(f,400,445)}><Console f={f}/></g><g opacity={1-tween(f,450,490)}><SuiRecord f={f}/></g><g opacity={1-tween(f,500,530)}><Storage f={f}/></g><Gateway f={f}/>
-    <Cursor f={f}/><Approval f={f}/>
-    <Flow f={f} type="approval" start={274} end={319}/><Flow f={f} type="files" start={330} end={382}/>
-    <Flow f={f} type="check" start={390} end={420}/><Flow f={f} type="response" start={422} end={447}/>
-    <Flow f={f} type="download" start={450} end={495}/>
-   </g>
-   <path d={`M${portrait?60:78} ${height-72}H${width-(portrait?60:78)}`} stroke="#DEE5F0"/>
-   <path d={`M${portrait?60:78} ${height-72}H${(portrait?60:78)+(width-2*(portrait?60:78))*f/599}`} stroke={blue} strokeWidth="2"/>
-   {text('Prepare',portrait?60:78,height-36,14,phase===0?blue:muted,500)}
-   {text('Approve',width*.36,height-36,14,phase===1?blue:muted,500,'middle')}
-   {text('Deliver',width*.63,height-36,14,phase===2?blue:muted,500,'middle')}
-   {text('Verify',width-(portrait?60:78),height-36,14,phase>=3?blue:muted,500,'end')}
+   <rect x={frame.x} y={frame.y} width={frame.w} height={frame.h} rx="22" fill="none" stroke="#E7DED1"/>
+   <path d={`M${portrait?55:74} ${height-73}H${width-(portrait?55:74)}`} stroke="#DBD6CE"/>
+   <path d={`M${portrait?55:74} ${height-73}H${(portrait?55:74)+(width-2*(portrait?55:74))*f/599}`} stroke={blue} strokeWidth="2"/>
+   {['Prepare','Approve','Deliver','Verify'].map((word,i)=>label(word,(portrait?55:74)+(width-2*(portrait?55:74))*i/3,height-38,15,phase===i?blue:'#6B7890',phase===i?650:500,i===0?'start':i===3?'end':'middle'))}
+   {f>=548&&label('Verified. Ready to install.',width/2,portrait?1463:height-96,portrait?24:20,'#157C60',600,'middle')}
   </svg>
  </AbsoluteFill>;
 }
