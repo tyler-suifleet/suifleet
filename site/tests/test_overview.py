@@ -30,3 +30,14 @@ class OverviewTest(unittest.TestCase):
   for video in p.videos:self.assertIn('controls',video);self.assertIn('playsinline',video);self.assertNotIn('autoplay',video);self.assertEqual(video['preload'],'none')
   for track in p.tracks:self.assertEqual(track['kind'],'captions');self.assertEqual(track['srclang'],'en');self.assertNotIn('default',track)
   self.assertIn('Read the complete narration',markup);self.assertIn('Illustrative animation',markup)
+
+ def test_altered_editorial_plate_is_rejected(self):
+  manifest=build.overview_manifest();manifest['assets_sha256']['site/motion-sample/art/editorial-scene.png']='0'*64
+  original=build.load_json
+  with patch.object(build,'load_json',side_effect=lambda p: manifest if p==build.OVERVIEW_MEDIA/'manifest.json' else original(p)):
+   with self.assertRaisesRegex(build.BuildError,'artwork'):build.overview_manifest()
+ def test_speech_cannot_outlast_its_chapter(self):
+  manifest=build.overview_manifest();manifest['cues'][0]['speech_end']=manifest['scenes'][0]['duration']+1
+  original=build.load_json
+  with patch.object(build,'load_json',side_effect=lambda p: manifest if p==build.OVERVIEW_MEDIA/'manifest.json' else original(p)):
+   with self.assertRaisesRegex(build.BuildError,'speech'):build.overview_manifest()

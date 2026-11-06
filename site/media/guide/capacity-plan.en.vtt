@@ -7,23 +7,23 @@ provides places for devices; network deposits pay operating
 fees.
 
 2
-00:00:09.800 --> 00:00:17.437
-Choose Plans and billing. This demonstration uses test tokens
-and a disposable test tariff, not commercial pricing.
+00:00:09.800 --> 00:00:15.709
+Choose Plans and billing. Review device capacity and the price
+shown before approving your selection.
 
 3
-00:00:18.160 --> 00:00:26.651
+00:00:16.440 --> 00:00:24.931
 Review the device limit, token amount and verified payment
 recipient, then approve prepayment. It is separate from device
 operating funds.
 
 4
-00:00:27.360 --> 00:00:36.789
+00:00:25.640 --> 00:00:35.069
 Apply the due prepaid payment to activate capacity. This uses
 the subscription balance, not another wallet payment; approval
 still costs a network fee.
 
 5
-00:00:38.280 --> 00:00:46.771
+00:00:36.560 --> 00:00:45.051
 The organization now has capacity for 100 devices. Next, fund
 device activity; no software has been installed yet.

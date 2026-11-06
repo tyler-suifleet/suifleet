@@ -479,7 +479,10 @@ class PublicPricingTests(unittest.TestCase):
 
     def test_policy_and_estimator_are_explicit(self):
         page = self.site.generated()
-        for text in ('{{app:settings/}}', 'SUI pays', 'WAL pays', 'never change mid-term', 'at least 3×', '30 days', 'gas-price', 'not a binding tariff'):
+        for text in ('{{app:settings/}}', 'SUI pays', 'WAL pays', 'never change mid-term', 'at least 3×', '30 days', 'gas-price',
+                     'Prices shown help you compare options.',
+                     'Final terms are set in your written quote.',
+                     'Contact us to confirm availability and a written quote.'):
             self.assertIn(text, page)
 
 

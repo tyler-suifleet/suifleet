@@ -21,7 +21,7 @@
         },
         {
           "source_start": 6.003,
-          "text": "Connected: the card shows your address and the network (Testnet)."
+          "text": "Connected: the account card shows your address and current connection."
         },
         {
           "source_start": 8.33,
@@ -44,7 +44,7 @@
         },
         {
           "source_start": 3.814,
-          "text": "Choose Plans and billing. This demonstration uses test tokens and a disposable test tariff, not commercial pricing."
+          "text": "Choose Plans and billing. Review device capacity and the price shown before approving your selection."
         },
         {
           "source_start": 10.412,

@@ -6,9 +6,19 @@ website, Testnet console and curated docs are independent static deployments.
 project scope; `cloudflare-projects.json` records the actual provider-returned
 project IDs and domains. Reuse these projects; do not create replacements on retry.
 
-All four owned hostnames are active. Actual final deployment IDs/source and domain
-status are recorded in `cloudflare-deployments.json`; validation is in
-[SF-256](../docs/validation/SF256.md). The user applied DNS manually; the model
+All four owned hostnames are active. The initial three-origin release is recorded
+in `cloudflare-deployments.json` ([SF-256](../docs/validation/SF256.md)). The later
+website/docs-only product-copy update is recorded in
+`cloudflare-product-copy-deployments.json` ([SF-257](../docs/validation/SF257.md));
+the console retains its original Testnet deployment. The subsequent website-only
+fixed-layout overview video release is in
+`cloudflare-overview-layout-deployment.json` (same SF-257 validation record).
+The illustrated overview release develops actions around smaller fixed landmarks;
+its evidence is in `cloudflare-illustrated-overview-deployment.json`. The latest
+website-only professional narration revision is recorded in
+`cloudflare-overview-narration-deployment.json`. The current connected-component
+animation, which removes the detached corner legend, is recorded in
+`cloudflare-connected-overview-deployment.json`. The user applied DNS manually; the model
 performed no DNS-record writes.
 
 | Address | Pages project |
@@ -89,3 +99,29 @@ This user-requested migration is a separately authorized, receipted local upload
 Official references: [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/),
 [custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/),
 [DNS import](https://developers.cloudflare.com/dns/manage-dns-records/how-to/import-and-export/).
+
+The separate 20-second Remotion/SVG sample is at
+`https://suifleet.io/film-preview/`. Its release evidence is
+`cloudflare-remotion-sample-deployment.json`. It is unlisted/noindex and does not
+replace the full overview. Only marketing was deployed; app/docs are unchanged.
+
+The latest sample at `/film-preview/` uses detailed generated artwork, clearer
+handoffs and “Sui saves the approval” narration. Its current release evidence is
+`cloudflare-detailed-film-deployment.json`; the full overview is still unchanged.
+
+The current sample uses the user-selected woman-at-the-computer editorial scene,
+with animated approval, direct software delivery and device verification. See
+`cloudflare-editorial-film-deployment.json` for the current website-only release.
+The full overview remains unchanged.
+
+The sample now uses a conversational SuiFleet introduction. Current release
+evidence: `cloudflare-human-narration-deployment.json`; visuals are unchanged.
+
+The full overview now uses the selected editorial style at
+`https://suifleet.io/how-it-works/#overview` (96 seconds, eight chapters).
+Current release evidence: `cloudflare-full-editorial-overview-deployment.json`.
+The twenty-second sample and app/docs are unchanged.
+
+The current full overview is 104 seconds and closes with the spoken invitation
+“Start your SuiFleet journey today,” dissolving into the full-screen brand.
+Current release evidence: `cloudflare-logo-closing-deployment.json`.

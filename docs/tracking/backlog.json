@@ -4959,6 +4959,27 @@
       "validation": "Meaningful local static release tests, sealed three-origin builds, actual Pages deployment/domain/served-byte/media evidence and no credential disclosure."
     },
     {
+      "key": "SF-257",
+      "title": "Separate production website messaging from the app network environment",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "docs",
+        "hosting"
+      ],
+      "resources": [],
+      "description": "User direction: the public landing website should present SuiFleet as a production product independently of the app's current Testnet environment. Remove customer-facing Testnet/test-token/prelaunch environment banners and boilerplate from the marketing pages, shared footer, pricing/security/how-it-works and written product guide. Use neutral product language without inventing a mainnet launch, certified hardware safety, published third-party audit or live commercial billing. Keep app network labels and actual Testnet deployment/configuration entirely unchanged. Review public docs branding/header/footer for the same site-wide development status; preserve accurate technical network references and validation provenance rather than falsifying them. Update guide narration/captions where they unnecessarily brand the product by the demo network, preserving genuine recording provenance and truthful app indicators visible within the app footage. Retain female narration, cursor, optional captions and existing animated introduction. Add regression checks for production-facing marketing copy versus explicit app environment. Build/test and publish only the website/documentation changes to the existing owner Cloudflare projects with sealed source/file receipts and real served-byte/navigation/media checks. No contract, wallet, DNS or app-environment mutation; no mainnet claim. Preserve the user's commit identity, small commits and normal source/CI review.",
+      "evidence": "User explicitly distinguishes the production website from the app remaining on Testnet until its release.",
+      "acceptance": [
+        "User direction: the public landing website should present SuiFleet as a production product independently of the app's current Testnet environment. Remove customer-facing Testnet/test-token/prelaunch environment banners and boilerplate from the marketing pages, shared footer, pricing/security/how-it-works and written product guide. Use neutral product language without inventing a mainnet launch, certified hardware safety, published third-party audit or live commercial billing. Keep app network labels and actual Testnet deployment/configuration entirely unchanged. Review public docs branding/header/footer for the same site-wide development status; preserve accurate technical network references and validation provenance rather than falsifying them. Update guide narration/captions where they unnecessarily brand the product by the demo network, preserving genuine recording provenance and truthful app indicators visible within the app footage. Retain female narration, cursor, optional captions and existing animated introduction. Add regression checks for production-facing marketing copy versus explicit app environment. Build/test and publish only the website/documentation changes to the existing owner Cloudflare projects with sealed source/file receipts and real served-byte/navigation/media checks. No contract, wallet, DNS or app-environment mutation; no mainnet claim. Preserve the user's commit identity, small commits and normal source/CI review."
+      ],
+      "validation": "Meaningful local static release tests, sealed three-origin builds, actual Pages deployment/domain/served-byte/media evidence and no credential disclosure."
+    },
+    {
       "key": "SF-258",
       "title": "Permit stopped recovery past archived dependency wait receipts",
       "priority": "P1",
