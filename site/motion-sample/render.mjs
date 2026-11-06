@@ -22,6 +22,7 @@ if(!process.argv.includes('--stills-only')){
  const sourceFiles=['src/index.tsx','render.mjs','prepare.py','script.json','package.json','package-lock.json'];
  const source_sha256=Object.fromEntries(await Promise.all(sourceFiles.map(async p=>[`site/motion-sample/${p}`,await digest(path.join(root,p))])));
  const assets_sha256=Object.fromEntries(await Promise.all(['inter-variable.woff2','logo.svg'].map(async name=>[`site/src/assets/${name}`,await digest(path.join(root,'public',name))])));
+ for(const name of ['workstation','gateway','storage'])assets_sha256[`site/motion-sample/art/${name}.png`]=await digest(path.join(root,'public',`${name}.png`));
  const timing=JSON.parse(await fs.readFile(path.join(root,'public/timing.json')));
  await fs.writeFile(path.join(out,'render-receipt.json'),JSON.stringify({renderer:'Remotion',version:'4.0.541',fps:30,duration_seconds:20,source_sha256,assets_sha256,narration_sha256:await digest(path.join(root,'public/narration.wav')),timing,videos:await Promise.all(['landscape','portrait'].map(async name=>({name,file:`${name}.mp4`,sha256:await digest(path.join(out,`${name}.mp4`))})))},null,2)+'\n');
 }

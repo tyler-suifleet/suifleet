@@ -1,13 +1,18 @@
 # Twenty-second motion direction sample
 
-An independent Remotion 4.0.541 / React / SVG composition, with original vector
-artwork, spring-driven entrances, a continuous camera move and self-hosted Inter.
+An independent Remotion 4.0.541 / React composition combining detailed transparent
+3D illustrations with editable SVG overlays, spring-driven entrances, a continuous
+camera move and self-hosted Inter. The artwork and exact built-in image-generation
+prompts are recorded under `art/`; the original RGBA bytes/alpha are preserved.
 It explores a visual direction; it does not replace the full system overview.
-The console, approval record, software storage and device belong to one spatial
-scene. Completed steps fade as the camera follows the active step. Verification
+The workstation, approval record, software storage and device belong to one
+spatial scene. Approval now stays in focus until completion; the camera waits for
+the device-check response before following the download. A click, curved
+document handoffs, arrival pulses and an on-device scan explain the actions. Completed steps fade as the camera follows the active step. Verification
 ends at “Ready to install,” without claiming the platform installer ran.
 
-The 20-second film has 600 frames at 30 fps in landscape 1600×900 and portrait
+The spoken verb “records” is replaced with “saves” to avoid the synthesis
+ambiguity. The 20-second film has 600 frames at 30 fps in landscape 1600×900 and portrait
 900×1600. `script.json` owns the narration. `prepare.py` verifies the existing
 local Kokoro model/voice hashes, uses the female `af_heart` voice, rejects
 truncated/overlapping speech and prepares the ignored local assets. It requires
