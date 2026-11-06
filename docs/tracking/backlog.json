@@ -4999,6 +4999,27 @@
         "Meaningful offline regression tests cover refusal and allowed recovery; review and merged-only runtime installation remain required."
       ],
       "validation": "Offline recovery-control regression suite and dispatcher retirement/dependency tests. No wallet, deployment or hardware operations."
+    },
+    {
+      "key": "SF-261",
+      "title": "Reconcile merged integration members with stacked PR bases",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "After verified batch publication, a source PR whose exact head is included in main can remain OPEN because its base is a former stacked source branch. Reconciliation currently waits forever for GitHub merge recognition. Add a guarded coordinator-owned operational reconciliation route; preserve exact member/candidate/claim/manifest and independent acceptance gates.",
+      "evidence": "Recovery b6fc52a3: batch b47d4798d9514126a0893fd6a09e3acc PR681 merged ae9961ca200a820c7867737d16cf1f1f75098d2a contains PR667 head71fc48d1a124b8dc58aee38ace22e1e082e0ea7a as second parent. PR667 remains OPEN targeting work/suifleet/sf-256-47044c8b; installed batch reconcile waits awaiting verified member merge recognition.",
+      "acceptance": [
+        "Only sole coordinator may reconcile an exact reviewed member after verified candidate merge and main ancestry; changed head/claim/repository or missing acceptance proof fail closed.",
+        "Stacked-base recognition resumes without fabricating approval, forcing merge, weakening CI/testnet or personally marking ticket Done.",
+        "Regression tests cover stacked members and negative identity/proof/head cases; submit scoped PR with Closes and hand off to normal review; install only merged reviewed source."
+      ],
+      "validation": "Meaningful batch reconciliation offline regressions and full coordinator suite on current main."
     }
   ]
 }

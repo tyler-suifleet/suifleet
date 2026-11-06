@@ -703,6 +703,42 @@ class BatchController:
         self.git(project, 'push', 'origin', batch['head']+':refs/heads/main')
         self.update(batch, status='published')
 
+    def recognize_stacked_member(self, project, batch, member, pr, owner):
+        """Retarget an already-published stacked head; never merge or close it."""
+        members = json.loads(batch['members'])
+        preceding = members[:members.index(member)]
+        bases = {m['owner']['branch'] for m in preceding}
+        if (pr['state'] != 'OPEN' or pr['headRefOid'] != member['head']
+                or pr.get('baseRefName') not in bases or pr.get('isCrossRepository')
+                or pr.get('isDraft') or batch.get('publish_intent') != 1
+                or not batch.get('review_id')):
+            return False
+        approval = next((a for a in self.approval_rows(batch)
+                         if a['pr'] == member['pr']), None)
+        if (not approval or approval['status'] != 'applied'
+                or approval['head'] != member['head'] or not approval['review_node']):
+            raise RuntimeError('stacked member lacks published acceptance approval')
+        # The manifest and candidate merge were verified by reconcile. Assert
+        # the member is reachable from the actual integration branch as well.
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], 'origin/main')
+        endpoint = f"repos/{project['repository']}/pulls/{member['pr']}"
+        fresh = json.loads(self.c.gh(project, ['api', endpoint]))
+        if (fresh.get('number') != member['pr'] or fresh.get('state') != 'open'
+                or fresh.get('draft') is not False
+                or fresh.get('head', {}).get('sha') != member['head']
+                or fresh.get('base', {}).get('ref') not in bases
+                or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
+                       for side in ('head', 'base'))):
+            raise RuntimeError('stacked member identity changed before recognition')
+        # Recheck retained ownership immediately before the sole external write.
+        current = self.owner(project, member)
+        if (current.get('status') not in ('review', 'done')
+                or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                   != member['owner']['claim_hash']):
+            raise RuntimeError('stacked member claim changed before recognition')
+        self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'base=main'])
+        return True
+
     def reconcile(self, project, batch):
         self.verify_manifest(project, batch)
         self.git(project, 'fetch', '--no-tags', 'origin', 'main')
@@ -715,6 +751,9 @@ class BatchController:
             return
         for member in json.loads(batch['members']):
             pr = self.c.pr(project, member['pr'])
+            owner = self.owner(project, member)
+            if self.recognize_stacked_member(project, batch, member, pr, owner):
+                pr = self.c.pr(project, member['pr'])
             if pr['state'] != 'MERGED' or pr['headRefOid'] != member['head'] or not pr.get('mergeCommit'):
                 self.update(batch, error='awaiting verified member merge recognition')
                 return
