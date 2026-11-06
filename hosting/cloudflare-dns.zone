@@ -1,0 +1,8 @@
+; Cloudflare Pages web records only. Preserve mail and all unrelated records.
+; Add the custom domains in Pages before applying these CNAME records.
+$ORIGIN suifleet.io.
+$TTL 300
+@ IN CNAME suifleet-marketing.pages.dev. ; cf_tags=cf-proxied:true
+www IN CNAME suifleet-marketing.pages.dev. ; cf_tags=cf-proxied:true
+app IN CNAME suifleet-console.pages.dev. ; cf_tags=cf-proxied:true
+docs IN CNAME suifleet-docs.pages.dev. ; cf_tags=cf-proxied:true

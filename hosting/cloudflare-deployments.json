@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "provider": "Cloudflare Pages",
+  "account_id": "891137fc20b3722a2be4716e655769ea",
+  "zone_id": "05f2e929552eb648e1488b86f860fc94",
+  "phase": "owned-domains",
+  "origins": {
+    "origin": "https://suifleet.io",
+    "app_url": "https://app.suifleet.io/",
+    "docs_url": "https://docs.suifleet.io/"
+  },
+  "collection_sha256": "c93557c8ef229124b37c2addbefbe489f610e9ec4402d960f9400b9d51854b06",
+  "projects": {
+    "website": {
+      "id": "b98a4eb3-eedf-4a23-b17c-f8a1ddb6db55",
+      "url": "https://b98a4eb3.suifleet-marketing.pages.dev",
+      "environment": "production",
+      "latest_stage": {
+        "name": "deploy",
+        "started_on": null,
+        "ended_on": "2026-11-05T19:35:58.995904Z",
+        "status": "success"
+      },
+      "source": {
+        "branch": "production",
+        "commit_hash": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+        "commit_message": "SuiFleet immutable HTML collection c93557c8ef229124b37c2addbefbe489f610e9ec4402d960f9400b9d51854b06",
+        "commit_dirty": false
+      }
+    },
+    "app": {
+      "id": "87431e6f-2be7-4d91-971c-c8ff6f69c732",
+      "url": "https://87431e6f.suifleet-console.pages.dev",
+      "environment": "production",
+      "latest_stage": {
+        "name": "deploy",
+        "started_on": null,
+        "ended_on": "2026-11-05T19:35:57.086893Z",
+        "status": "success"
+      },
+      "source": {
+        "branch": "production",
+        "commit_hash": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+        "commit_message": "SuiFleet immutable HTML collection c93557c8ef229124b37c2addbefbe489f610e9ec4402d960f9400b9d51854b06",
+        "commit_dirty": false
+      }
+    },
+    "docs": {
+      "id": "874c9eb2-357f-4c09-805c-2eb7a1aa597b",
+      "url": "https://874c9eb2.suifleet-docs.pages.dev",
+      "environment": "production",
+      "latest_stage": {
+        "name": "deploy",
+        "started_on": null,
+        "ended_on": "2026-11-05T19:35:57.370405Z",
+        "status": "success"
+      },
+      "source": {
+        "branch": "production",
+        "commit_hash": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+        "commit_message": "SuiFleet immutable HTML collection c93557c8ef229124b37c2addbefbe489f610e9ec4402d960f9400b9d51854b06",
+        "commit_dirty": false
+      }
+    }
+  },
+  "domains": [
+    {
+      "id": "a1ff0479-2713-48ad-8b09-d35e6e4e6df5",
+      "name": "suifleet.io",
+      "status": "active",
+      "zone_tag": "05f2e929552eb648e1488b86f860fc94",
+      "validation_data": {
+        "status": "active",
+        "method": "http"
+      },
+      "verification_data": {
+        "status": "active"
+      }
+    },
+    {
+      "id": "57fbc92f-4426-414d-9d2d-d2d55b4d8336",
+      "name": "www.suifleet.io",
+      "status": "active",
+      "zone_tag": "05f2e929552eb648e1488b86f860fc94",
+      "validation_data": {
+        "status": "active",
+        "method": "http"
+      },
+      "verification_data": {
+        "status": "active"
+      }
+    },
+    {
+      "id": "73550653-0b22-4dc0-84d6-4ee8214535b3",
+      "name": "app.suifleet.io",
+      "status": "active",
+      "zone_tag": "05f2e929552eb648e1488b86f860fc94",
+      "validation_data": {
+        "status": "active",
+        "method": "http"
+      },
+      "verification_data": {
+        "status": "active"
+      }
+    },
+    {
+      "id": "f11f1f2c-31e7-45a5-921f-d0fd965f8dfe",
+      "name": "docs.suifleet.io",
+      "status": "active",
+      "zone_tag": "05f2e929552eb648e1488b86f860fc94",
+      "validation_data": {
+        "status": "active",
+        "method": "http"
+      },
+      "verification_data": {
+        "status": "active"
+      }
+    }
+  ],
+  "retired_sites_custom_domains": [
+    "suifleet.io",
+    "www.suifleet.io",
+    "app.suifleet.io",
+    "docs.suifleet.io"
+  ],
+  "observed_mx": [
+    "1 aspmx.l.google.com.",
+    "10 alt3.aspmx.l.google.com.",
+    "10 alt4.aspmx.l.google.com.",
+    "5 alt1.aspmx.l.google.com.",
+    "5 alt2.aspmx.l.google.com."
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "project_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34",
+  "role": "app",
+  "hostname": "app.suifleet.io",
+  "expected_url": "https://suifleet-console.classiccrow.chatgpt.site",
+  "status": "published",
+  "access_mode": "public",
+  "deployment_id": "appgdep_6aec356642f08191b3369339cde39d26",
+  "saved_version_id": "appgprj_6aec307b6ec081919a43e49d6b8f0a34~appgver_0eae186a3efc8191be9651fad1157be3",
+  "live_url": "https://suifleet-console.classiccrow.chatgpt.site",
+  "domain_status": "pending_dns"
+}
