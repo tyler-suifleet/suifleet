@@ -61,3 +61,10 @@ site/dist/
 # Cloudflare local deployment cache and pinned CLI dependencies
 .wrangler/
 tools/static-hosting/node_modules
+
+# Isolated video composition toolchain
+site/motion-sample/node_modules/
+site/motion-sample/public/narration.wav
+site/motion-sample/public/inter-variable.woff2
+site/motion-sample/public/logo.svg
+site/motion-sample/public/timing.json
