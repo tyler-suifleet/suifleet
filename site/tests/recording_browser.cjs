@@ -27,6 +27,8 @@ assert.throws(() => assertMutationLease('private-fixture-token', () => { throw n
       };
     });
     await page.evaluate(overlayScript);
+    await helpers(page).caption("Optional captions must not be burned into recordings.");
+    assert.equal(await page.locator("#guide-caption").count(),0);
     const cdp = await page.context().newCDPSession(page);
     const clip = { x: 395, y: 295, width: 40, height: 50, scale: 1 };
     const before = await cdp.send('Page.captureScreenshot', { format: 'png', clip });

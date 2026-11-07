@@ -99,7 +99,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  const fallbackPlayerPage=await browser.newPage();
  await fallbackPlayerPage.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
  await fallbackPlayerPage.locator('#fund video').evaluate(async v=>{v.load();await v.play()});
- assert.ok(await fallbackPlayerPage.locator('#fund video').evaluate(v=>v.currentSrc.endsWith('fund.mp4')),'MP4 plays after WebM 404');
+ assert.ok(await fallbackPlayerPage.locator('#fund video').evaluate(v=>new URL(v.currentSrc).pathname.endsWith('fund.mp4')),'MP4 plays after WebM 404');
  assert.equal(await fallbackPlayerPage.locator('#fund [data-video-error]').isVisible(),false,'working MP4 is not marked unavailable');
  await fallbackPlayerPage.close();missingMedia.clear();
  // Native captions load from the same origin on desktop and mobile. Keyboard
@@ -108,6 +108,8 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
   const captionsPage=await browser.newPage({viewport});
   await captionsPage.goto(origin+'/guide/',{waitUntil:'networkidle'});
   const player=captionsPage.locator('#sign-in video');
+  assert.equal(await captionsPage.locator('video track[default]').count(),0);
+  assert.equal(await player.evaluate(v=>v.textTracks[0].mode),'disabled');
   await player.evaluate(v=>{v.load();v.textTracks[0].mode='showing'});
   await captionsPage.waitForFunction(()=>{
    const v=document.querySelector('#sign-in video');return v.textTracks[0]?.cues?.length>0;
@@ -115,7 +117,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
   const manifest=JSON.parse(await fs.readFile(path.join(repo,'site/media/guide/videos.json'),'utf8'));
   for(const recording of manifest.videos) {
    const loaded=await captionsPage.locator(`#${recording.step} video`).evaluate(async v=>{
-    const track=v.querySelector('track');
+    const track=v.querySelector('track');track.track.mode='hidden';
     if(track.readyState!==2)await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('caption track did not load')),10000);track.addEventListener('load',()=>{clearTimeout(timeout);resolve()},{once:true});track.addEventListener('error',()=>{clearTimeout(timeout);reject(Error('caption load failed'))},{once:true});track.track.mode='hidden';v.preload='metadata';v.load()});
     return {language:track.srclang,kind:track.kind,cues:[...track.track.cues].map(c=>({start:c.startTime,end:c.endTime,text:c.text}))};
    });
@@ -134,7 +136,8 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
   await captionsPage.waitForFunction(()=>document.querySelector('#sign-in video').paused);
   await player.evaluate(async v=>{v.textTracks[0].mode='showing';v.currentTime=v.textTracks[0].cues[0].startTime+0.1;await v.play()});
   await captionsPage.waitForFunction(()=>document.querySelector('#sign-in video').textTracks[0].activeCues.length===1);
-  await player.evaluate(v=>v.pause());
+  await player.evaluate(v=>{v.pause();v.textTracks[0].mode='disabled'});
+  assert.equal(await player.evaluate(v=>v.textTracks[0].mode),'disabled');
   console.log(`PASS native English captions: every full narration/timing, keyboard Space playback, active caption at ${viewport.width}x${viewport.height}`);
   await captionsPage.close();
  }
