@@ -817,7 +817,10 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_observations'").fetchone():
                 observations = [dict(r) for r in db.execute('SELECT project,pr,ticket,owner_status,head,draft,failures,fingerprint,'
                                                             'responsibility,observed FROM ci_observations ORDER BY project,pr')]
-            return jobs, merged, pauses, observations, batch_receipts(db)
+            authentication=[]
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='worker_authentication'").fetchone():
+                authentication=[dict(r) for r in db.execute('SELECT family,diagnostic,checked FROM worker_authentication WHERE blocked=1')]
+            return jobs, merged, pauses, observations, batch_receipts(db), authentication
         finally:
             db.close()
 
@@ -829,8 +832,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     tickets, refresh, locks = tickets_data or ([], {}, [])
     runs, backoff, redirects, capacities = dispatch_data or ([], [], [], [])
     capacity_for = {r["source"]: r for r in capacities}
-    jobs, merged, pauses, observations, batches = reviews_data or (
-        [], set(), [], [], {'state': 'unavailable', 'detail': 'review store unavailable', 'rows': []})
+    jobs, merged, pauses, observations, batches, authentication = reviews_data or (
+        [], set(), [], [], {'state': 'unavailable', 'detail': 'review store unavailable', 'rows': []}, [])
+    model['authentication']=authentication
     batches['rows'] = [b for b in batches['rows'] if wanted(b['project'])]
     by_ticket = {}
     for row in tickets:
@@ -1332,6 +1336,10 @@ def render(model, width=100, delta=None, interval=None):
                 lines.append(fit(f'  {label_text}: {len(rows)} — {references}', width))
     if pipeline.get('batch_receipts') == 'unavailable':
         lines.append(fit('  Batch status unavailable: ' + (pipeline.get('detail') or 'no usable receipts'), width))
+    if model.get('authentication'):
+        lines += ['', 'AUTHENTICATION — action required']
+        for row in model['authentication']:
+            lines.append(fit(f"  {row['family']}: {row['diagnostic']}",width))
     lines += ['', 'CAPACITY (active = PID+start-time verified; held = unverified/waiting; retained = parked/quarantined)']
     if not model['capacity']:
         lines.append('  ' + ('No configured slots.' if model['sources'].get('config', {}).get('state') == 'ok' else 'Configuration unavailable.'))
