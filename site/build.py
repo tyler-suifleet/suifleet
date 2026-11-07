@@ -117,15 +117,16 @@ def render_guide(config):
                 name = video.get(key)
                 if name and Path(name).name != name:
                     raise BuildError(f"unsafe guide media filename: {name}")
-            poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
-            fallback = f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else ""
-            captions = (f'<track kind="captions" src="/media/guide/{html.escape(video["captions"])}" '
-                        'srclang="en" label="English" default>' if video.get("captions") else "")
+            media_url = lambda key: f'/media/guide/{html.escape(video[key])}?v={html.escape(video[key+"_sha256"][:16])}'
+            poster = f' poster="{media_url("poster")}"' if video.get("poster") else ""
+            fallback = f'<source src="{media_url("fallback")}" type="video/mp4">' if video.get("fallback") else ""
+            captions = (f'<track kind="captions" src="{media_url("captions")}" '
+                        'srclang="en" label="English">' if video.get("captions") else "")
             out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
-                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}{captions}'
+                       f'<source src="{media_url("file")}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
-            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
-            out.append(f'<figcaption><span>Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
+            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="{media_url("fallback" if video.get("fallback") else "file")}">download it</a>.</p></div>')
+            out.append(f'<figcaption><span>Optional subtitles (CC) · Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="{media_url("fallback" if video.get("fallback") else "file")}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')

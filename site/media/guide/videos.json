@@ -14,13 +14,13 @@
     {
       "step": "sign-in",
       "file": "sign-in.webm",
-      "file_sha256": "97113acfc2deb4addf2a00b7afa019dea868fa4b04be530a4192e83b807a79f0",
+      "file_sha256": "2479925e24535704d454310e7130b6a87e0df4d5f85d592be1f249b7bb304ad5",
       "fallback": "sign-in.mp4",
-      "fallback_sha256": "59d5f58e041651fb4adf3e15018dfe18a7b84fe13df815091defb48969e6d721",
+      "fallback_sha256": "db0643564d6e0475aebbcfb064627c3859dfa1d39dc3f26c235ae0220cf27c37",
       "poster": "sign-in.jpg",
-      "poster_sha256": "bde330c6c23fe3ec8f18af2fe8bd2bf9bf111673ce2dc317a5f643f6630588d6",
+      "poster_sha256": "3625d4cacb31168259fda49c8ad337a0a625a46e049a3490b616b426503fac5c",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 43.12,
       "caption": "Screencast: Sign in.",
       "console_commit": "ad3da5a98f79ec769aad46f7fc6109fcbd6e65ea",
@@ -90,18 +90,27 @@
         ]
       },
       "captions": "sign-in.en.vtt",
-      "captions_sha256": "a5e5f79aff39d4b9b592ca746ae2cc010e1f50e017842c6d59e46058bc0c10cb"
+      "captions_sha256": "a5e5f79aff39d4b9b592ca746ae2cc010e1f50e017842c6d59e46058bc0c10cb",
+      "caption_strip_source": {
+        "file_sha256": "97113acfc2deb4addf2a00b7afa019dea868fa4b04be530a4192e83b807a79f0",
+        "fallback_sha256": "59d5f58e041651fb4adf3e15018dfe18a7b84fe13df815091defb48969e6d721",
+        "poster_sha256": "bde330c6c23fe3ec8f18af2fe8bd2bf9bf111673ce2dc317a5f643f6630588d6",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "capacity-plan",
       "file": "capacity-plan.webm",
-      "file_sha256": "3c87183cb48ebf7d557e2cfa7aca7f9a151a74540d8b77428d5ab0324cf1465e",
+      "file_sha256": "46e0f9c3046704c6bbc67e1fc34e0e2b631cb255374060a61b94c1492d74f333",
       "fallback": "capacity-plan.mp4",
-      "fallback_sha256": "adc0de77e1778adf9728931755e395439b9d1a3f9706890b17caf85b6620dbcb",
+      "fallback_sha256": "9f371078b6ef4e4247f374b845f8f1db349a5bf093012ff8fdf0494cf8222217",
       "poster": "capacity-plan.jpg",
-      "poster_sha256": "a6ae5683dc66e44321a9f4595e4570c254467e05d4fa735d119e58fcc48d4eb5",
+      "poster_sha256": "9f2228de6568855eec14c222e991d287e0c0c64516964d155547c43cd2882cd8",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 45.56,
       "caption": "Screencast: Enable device capacity.",
       "console_commit": "ad3da5a98f79ec769aad46f7fc6109fcbd6e65ea",
@@ -163,18 +172,27 @@
         ]
       },
       "captions": "capacity-plan.en.vtt",
-      "captions_sha256": "ef1675452919319858ff62eeee4d9c781a9306e9b929adae9c9378c6d6bad71a"
+      "captions_sha256": "ef1675452919319858ff62eeee4d9c781a9306e9b929adae9c9378c6d6bad71a",
+      "caption_strip_source": {
+        "file_sha256": "3c87183cb48ebf7d557e2cfa7aca7f9a151a74540d8b77428d5ab0324cf1465e",
+        "fallback_sha256": "adc0de77e1778adf9728931755e395439b9d1a3f9706890b17caf85b6620dbcb",
+        "poster_sha256": "a6ae5683dc66e44321a9f4595e4570c254467e05d4fa735d119e58fcc48d4eb5",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "fund",
       "file": "fund.webm",
-      "file_sha256": "c7092d462b2c5237fe9a226837ec89f6f242d612c17f48971380ab303d70f468",
+      "file_sha256": "1796c9b751b6b021c1b14c0825b411c45c7dbb4b177e890a09f35473dac0ee8c",
       "fallback": "fund.mp4",
-      "fallback_sha256": "d5bcae670cf44556ad6d2690da8c53ea66f072f8f7c82ffb7aa5b64374591253",
+      "fallback_sha256": "dcbf148a14f31864ed06df559074f2e736b2adf4d1afbc5c4c2a309ba86f02de",
       "poster": "fund.jpg",
-      "poster_sha256": "a15899b1a0b856b48fdc047541f180c6f26e6f02f5401bc94d9421dc26b8df17",
+      "poster_sha256": "753c10fc6b5ef4987a268662f1bc801932ee5321f2cb2582aec6bec63d9e9907",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 35.12,
       "caption": "Screencast: Fund the network budget.",
       "console_commit": "3586b750c9e722cd7d8c0473c0f41102af46c455",
@@ -226,18 +244,27 @@
         ]
       },
       "captions": "fund.en.vtt",
-      "captions_sha256": "2dccc1e554859612abb5c3cddb23db7fb6bcd72096bbb3f0cd35a302ead9a1b0"
+      "captions_sha256": "2dccc1e554859612abb5c3cddb23db7fb6bcd72096bbb3f0cd35a302ead9a1b0",
+      "caption_strip_source": {
+        "file_sha256": "c7092d462b2c5237fe9a226837ec89f6f242d612c17f48971380ab303d70f468",
+        "fallback_sha256": "d5bcae670cf44556ad6d2690da8c53ea66f072f8f7c82ffb7aa5b64374591253",
+        "poster_sha256": "a15899b1a0b856b48fdc047541f180c6f26e6f02f5401bc94d9421dc26b8df17",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "register-device",
       "file": "register-device.webm",
-      "file_sha256": "ad5572b672b5a740e33d156a2cc235beac15d956b0799941325bcfb6abb2a3fa",
+      "file_sha256": "4954e5bd72028e77fd3cd9fed0e17638174eaf9a5af2778c1775f9c0397e40a6",
       "fallback": "register-device.mp4",
-      "fallback_sha256": "ebed9957f785a66035cba34befc95f2b9d909f1d12e69979dc1d23e1b093a3fd",
+      "fallback_sha256": "c2d412fb354f2041eb761ced821794d2813a05243a1a2fb7cf5c4536dbf1af26",
       "poster": "register-device.jpg",
-      "poster_sha256": "a2baf4fc55d892fe001c37bfd4277cf3a3c5a74a095034f4798f211d7412b75e",
+      "poster_sha256": "70c73515b5b53df0a103a0365f84fac22ec3b9a224735ebaf448851a641e3fc2",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 38.68,
       "caption": "Screencast: Register a device.",
       "console_commit": "3586b750c9e722cd7d8c0473c0f41102af46c455",
@@ -289,18 +316,27 @@
         ]
       },
       "captions": "register-device.en.vtt",
-      "captions_sha256": "1d3a10b7f8ba018e435b1a51d79b658f62e3220dbb26dda00fa13023db6062fe"
+      "captions_sha256": "1d3a10b7f8ba018e435b1a51d79b658f62e3220dbb26dda00fa13023db6062fe",
+      "caption_strip_source": {
+        "file_sha256": "ad5572b672b5a740e33d156a2cc235beac15d956b0799941325bcfb6abb2a3fa",
+        "fallback_sha256": "ebed9957f785a66035cba34befc95f2b9d909f1d12e69979dc1d23e1b093a3fd",
+        "poster_sha256": "a2baf4fc55d892fe001c37bfd4277cf3a3c5a74a095034f4798f211d7412b75e",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "enroll-batch",
       "file": "enroll-batch.webm",
-      "file_sha256": "3fae0e3cdd0a8411ecf2147f3875b989162f96fbc92ef7ca526bdc6758e6deb8",
+      "file_sha256": "7a5e70eb5cbe58c3fda77cefe501cba0c379f0747eb1240096aa72ff4ef5508f",
       "fallback": "enroll-batch.mp4",
-      "fallback_sha256": "1c2743ae7e02ed6216f1b6dd1e823b79c71c1ff5c182986cd519fb7de3791b9a",
+      "fallback_sha256": "9714cb81da00338573cc720975d1ea65f62749513f995275a28545bb74e6dcb7",
       "poster": "enroll-batch.jpg",
-      "poster_sha256": "c20ef29c82327a16b998ccdfca017d1655258748e22b782d179302a29e57bc94",
+      "poster_sha256": "084bac7ab5ff7f2186c1448f31a8c72664df20a68dc23d7e15213a61158855d3",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 55.52,
       "caption": "Screencast: Enroll a batch.",
       "console_commit": "77632f6790f184e38858cdbe67a8a1aebf1a7f2b",
@@ -371,18 +407,27 @@
         ]
       },
       "captions": "enroll-batch.en.vtt",
-      "captions_sha256": "73cb2b11f1383e3c6cbd0a5ac4717f07cd7d6e9599561640261c5b569208e8f5"
+      "captions_sha256": "73cb2b11f1383e3c6cbd0a5ac4717f07cd7d6e9599561640261c5b569208e8f5",
+      "caption_strip_source": {
+        "file_sha256": "3fae0e3cdd0a8411ecf2147f3875b989162f96fbc92ef7ca526bdc6758e6deb8",
+        "fallback_sha256": "1c2743ae7e02ed6216f1b6dd1e823b79c71c1ff5c182986cd519fb7de3791b9a",
+        "poster_sha256": "c20ef29c82327a16b998ccdfca017d1655258748e22b782d179302a29e57bc94",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "publish-version",
       "file": "publish-version.webm",
-      "file_sha256": "286a470fe2a99fd8dabade206b946e24379f5a27979446de1405a67b575d48b7",
+      "file_sha256": "a317bbd6ef3ae25ba8a30f51404a8c51a06efecf9815128a3a0a0150914f23f2",
       "fallback": "publish-version.mp4",
-      "fallback_sha256": "56d4d3ea71239b208c87390b3ad5ef0018b1337c63283f200110d7141748b30d",
+      "fallback_sha256": "e611335eb44d57e5c612065556b744bb05caf912a926c8bc492ae04462f64410",
       "poster": "publish-version.jpg",
-      "poster_sha256": "4d42194386bd3ccbaf319d5ea57b7bdf3a9eb142923461fdb7e9a81aa46e1ade",
+      "poster_sha256": "9c53d831f50fc3c21440ed813d2777ad517ebc050e453ab9f819602dc8a77aee",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 78.48,
       "caption": "Screencast: Publish a version.",
       "console_commit": "ac6c608b715315d6cd0366244f5641bb52a418ea",
@@ -454,18 +499,27 @@
         "synthesis_script_sha256": "76729838f9200130a53f934b0646ff01315b0a3e378e196711dc1add035a741c"
       },
       "captions": "publish-version.en.vtt",
-      "captions_sha256": "7c1cd8f82318f20740c274b47ffe1714f5f75a75a44f2ce027ec09fabd874b2b"
+      "captions_sha256": "7c1cd8f82318f20740c274b47ffe1714f5f75a75a44f2ce027ec09fabd874b2b",
+      "caption_strip_source": {
+        "file_sha256": "286a470fe2a99fd8dabade206b946e24379f5a27979446de1405a67b575d48b7",
+        "fallback_sha256": "56d4d3ea71239b208c87390b3ad5ef0018b1337c63283f200110d7141748b30d",
+        "poster_sha256": "4d42194386bd3ccbaf319d5ea57b7bdf3a9eb142923461fdb7e9a81aa46e1ade",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "deploy-group",
       "file": "deploy-group.webm",
-      "file_sha256": "20cfc72307fd7e97483b8f3e5f45df015bc1ab0bb85c8f27bc0b4e35f038cc70",
+      "file_sha256": "b0f13e9f5aadf89397b3c0750a3440263af8ea7e162576b54360b9b1dab46919",
       "fallback": "deploy-group.mp4",
-      "fallback_sha256": "757703433bc27cfe119e2442de1f82d54afce99cb6433b782250c790b6e7e2b4",
+      "fallback_sha256": "97c5a844afef3875a3acc4178d7b8e0e2a7dedcff60ece0045de73594b266f33",
       "poster": "deploy-group.jpg",
-      "poster_sha256": "d9060d0940ac6f8f5ffdd61e6e503680274f306a545df21c54acf0da4490f752",
+      "poster_sha256": "896345a24eefbc647a69fb04e4139fc0557ae4c678f6aa7f23f10387284ba065",
       "width": 1280,
-      "height": 800,
+      "height": 740,
       "duration_seconds": 90.96,
       "caption": "Screencast: Deploy to a group.",
       "console_commit": "88d2364047a358f0a99bb1c1cb4f98744d5cf017",
@@ -556,18 +610,27 @@
         "synthesis_script_sha256": "c01a3a9a3f929dd3d9c85d8ecf3023c186899dc987e4d7f584002d06bc8041b9"
       },
       "captions": "deploy-group.en.vtt",
-      "captions_sha256": "69e36be3b4659a29fcf80b39c5c8e54eecfa527a76561894460f66911a21b283"
+      "captions_sha256": "69e36be3b4659a29fcf80b39c5c8e54eecfa527a76561894460f66911a21b283",
+      "caption_strip_source": {
+        "file_sha256": "20cfc72307fd7e97483b8f3e5f45df015bc1ab0bb85c8f27bc0b4e35f038cc70",
+        "fallback_sha256": "757703433bc27cfe119e2442de1f82d54afce99cb6433b782250c790b6e7e2b4",
+        "poster_sha256": "d9060d0940ac6f8f5ffdd61e6e503680274f306a545df21c54acf0da4490f752",
+        "width": 1280,
+        "height": 800,
+        "crop_bottom_pixels": 60,
+        "transformation_script_sha256": "cbfb6a99eb535be0d12278bb9feac95b3e749b6e3991dce7d7f5887fcf527a2d"
+      }
     },
     {
       "step": "staged-rollout",
       "file": "staged-rollout.webm",
-      "file_sha256": "6668086a80842c652c8eccb435cbd824101d1813ab8e492f63d66c901a1494e1",
+      "file_sha256": "ae5ccfbdd61a61b59a9f3483846bb2612c6f4212c87216214a7d21da4906abbe",
       "fallback": "staged-rollout.mp4",
-      "fallback_sha256": "cd7cf5adb12ec5e8a5c491a4c670930024bca32f95800e68d64d26057f14fde2",
+      "fallback_sha256": "21d6f183fdee15f9709bb9af476732fbffb633153c45b17db381c68199548641",
       "poster": "staged-rollout.jpg",
-      "poster_sha256": "cfcf366017e4c1e0a42bfd83dce9970fac6a9d51586f8849223ff5cd3f7bc2ae",
+      "poster_sha256": "446b7e282e57e819ba69caabb02259bdb1d1d847906f93bae4a3cf8dcacd25e1",
       "width": 1280,
-      "height": 800,
+      "height": 740,
       "duration_seconds": 80.28,
       "caption": "Screencast: Run a staged rollout.",
       "console_commit": "88d2364047a358f0a99bb1c1cb4f98744d5cf017",
@@ -657,18 +720,27 @@
         "synthesis_script_sha256": "c01a3a9a3f929dd3d9c85d8ecf3023c186899dc987e4d7f584002d06bc8041b9"
       },
       "captions": "staged-rollout.en.vtt",
-      "captions_sha256": "8113dbce21eb57f3a42e8eff719111e8d0f4a177046e3d8f933b217a6e4f2346"
+      "captions_sha256": "8113dbce21eb57f3a42e8eff719111e8d0f4a177046e3d8f933b217a6e4f2346",
+      "caption_strip_source": {
+        "file_sha256": "6668086a80842c652c8eccb435cbd824101d1813ab8e492f63d66c901a1494e1",
+        "fallback_sha256": "cd7cf5adb12ec5e8a5c491a4c670930024bca32f95800e68d64d26057f14fde2",
+        "poster_sha256": "cfcf366017e4c1e0a42bfd83dce9970fac6a9d51586f8849223ff5cd3f7bc2ae",
+        "width": 1280,
+        "height": 800,
+        "crop_bottom_pixels": 60,
+        "transformation_script_sha256": "cbfb6a99eb535be0d12278bb9feac95b3e749b6e3991dce7d7f5887fcf527a2d"
+      }
     },
     {
       "step": "access-policy",
       "file": "access-policy.webm",
-      "file_sha256": "94ecfedbbb5958f96faa46c93d5d1ae53ed4d1d96e43f9d050a873a4ecfe7e65",
+      "file_sha256": "90fa26999eaf993bfb4556a1c5b8d49185eb30a85aea7ce55236aeb147171e43",
       "fallback": "access-policy.mp4",
-      "fallback_sha256": "a5dd83558c5055c42f695cb5c4aeb9ee766edab82e20e988ca7995e78a955210",
+      "fallback_sha256": "5389b0e62480d7806191850604593bd189711b716cc4ed5391213bd85c6cbdc6",
       "poster": "access-policy.jpg",
-      "poster_sha256": "aa7dee0c6d3ce8c2f51697172c06cc85e6ee5af02bb61f62e15c2aee818de909",
+      "poster_sha256": "d73108ed058f07451c8eae80b2fd09502cc7e945b88fb3817a72bba36059c486",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 30.8,
       "caption": "Screencast: Private-release access.",
       "console_commit": "88d2364047a358f0a99bb1c1cb4f98744d5cf017",
@@ -713,18 +785,27 @@
         "synthesis_script_sha256": "76729838f9200130a53f934b0646ff01315b0a3e378e196711dc1add035a741c"
       },
       "captions": "access-policy.en.vtt",
-      "captions_sha256": "b9ab575f7c57675cf870c47410c70ac553dad083bab10959ba05409a1312e4b9"
+      "captions_sha256": "b9ab575f7c57675cf870c47410c70ac553dad083bab10959ba05409a1312e4b9",
+      "caption_strip_source": {
+        "file_sha256": "94ecfedbbb5958f96faa46c93d5d1ae53ed4d1d96e43f9d050a873a4ecfe7e65",
+        "fallback_sha256": "a5dd83558c5055c42f695cb5c4aeb9ee766edab82e20e988ca7995e78a955210",
+        "poster_sha256": "aa7dee0c6d3ce8c2f51697172c06cc85e6ee5af02bb61f62e15c2aee818de909",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     },
     {
       "step": "fleet-settings",
       "file": "fleet-settings.webm",
-      "file_sha256": "6aa6fdced9db5092a8b32d046e60202b9fdc7935fdef8b3862730e6a1de94b94",
+      "file_sha256": "916be169b6afc568b18535a14d4483fd26b4201f3eb48e1c3c9b996f5637f9cb",
       "fallback": "fleet-settings.mp4",
-      "fallback_sha256": "5ac8517c7040bcb332ab2eb15306693602d90f54bede2bf1cf6fc09571dcf745",
+      "fallback_sha256": "96d66679a16d307d8284dba6e8403679cf02fc0036f5b0051fa0b7744c819dbe",
       "poster": "fleet-settings.jpg",
-      "poster_sha256": "bf3bedfc68f72c1bbd73db8ebdab00c59eb3d3ec51b9a9a84f6be94f42f12138",
+      "poster_sha256": "59cc680b9fd7c4506553bdbc140caed0ade4595577befff28d2660686228e231",
       "width": 1280,
-      "height": 800,
+      "height": 760,
       "duration_seconds": 36.88,
       "caption": "Screencast: Choose fleet settings.",
       "console_commit": "88d2364047a358f0a99bb1c1cb4f98744d5cf017",
@@ -777,7 +858,16 @@
         "synthesis_script_sha256": "76729838f9200130a53f934b0646ff01315b0a3e378e196711dc1add035a741c"
       },
       "captions": "fleet-settings.en.vtt",
-      "captions_sha256": "6bdee2ffad0e75d12eccd27a8e6aff6736492132498925930ada2d5a7df7c2b1"
+      "captions_sha256": "6bdee2ffad0e75d12eccd27a8e6aff6736492132498925930ada2d5a7df7c2b1",
+      "caption_strip_source": {
+        "file_sha256": "6aa6fdced9db5092a8b32d046e60202b9fdc7935fdef8b3862730e6a1de94b94",
+        "fallback_sha256": "5ac8517c7040bcb332ab2eb15306693602d90f54bede2bf1cf6fc09571dcf745",
+        "poster_sha256": "bf3bedfc68f72c1bbd73db8ebdab00c59eb3d3ec51b9a9a84f6be94f42f12138",
+        "width": 1280,
+        "height": 800,
+        "transformation_script_sha256": "782fc64336ad1d8634367acf7f0276ff3f8a66b3965e8eb60158b4f2b35bb8b3",
+        "crop_bottom_pixels": 40
+      }
     }
   ],
   "narration": {
@@ -826,5 +916,16 @@
   "editing": [
     "Long network waits shortened while preserving action order.",
     "Removed duplicate result-view segments appended during explicit later-step recovery; retained the first genuine Applied receipt."
-  ]
+  ],
+  "caption_strip_removal": {
+    "script_sha256": "cbfb6a99eb535be0d12278bb9feac95b3e749b6e3991dce7d7f5887fcf527a2d",
+    "source_manifest_sha256": "bfd6c8f63d7ed89b12263e72c64dae2d573ae0c9c9aadcc5a59de7d325c218f4",
+    "crop_bottom_pixels": {
+      "default": 40,
+      "deploy-group": 60,
+      "staged-rollout": 60
+    },
+    "note": "Historical viewport reframed to exclude the original caption strip; not fresh console acceptance.",
+    "reused_manifest_sha256": "a6c3928a5fb098786845197cf9331d62ddc5d7b035bb01832981506f6c2c251c"
+  }
 }

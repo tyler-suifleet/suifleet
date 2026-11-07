@@ -30,7 +30,10 @@ class SiteTest(unittest.TestCase):
     def test_native_caption_digest_and_narration_timing_are_enforced(self):
         track = self.out / "media/guide/sign-in.en.vtt"
         guide = (self.out / "guide/index.html").read_text()
-        self.assertIn('<track kind="captions" src="/media/guide/sign-in.en.vtt" srclang="en" label="English" default>', guide)
+        manifest=json.loads((SITE/'media/guide/videos.json').read_text())
+        video=next(v for v in manifest['videos'] if v['step']=='sign-in')
+        self.assertIn(f'<track kind="captions" src="/media/guide/sign-in.en.vtt?v={video["captions_sha256"][:16]}" srclang="en" label="English">', guide)
+        self.assertNotIn('label="English" default',guide)
         track.write_text(track.read_text().replace('SuiFleet', 'Wrong narration.', 1))
         rewrite_sums(self.out)
         errors = self.errors(require_videos=True)
@@ -189,7 +192,7 @@ class SiteTest(unittest.TestCase):
             build.build(self.out)
             self.assertEqual(self.errors(), [])
             guide = (self.out / "guide" / "index.html").read_text()
-            self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
+            self.assertIn(f'<source src="/media/guide/sign-in.webm?v={hashlib.sha256(video).hexdigest()[:16]}" type="video/webm">', guide)
             self.assertIn('data-console-commit="' + '1' * 40 + '"', guide)
             missing = self.errors(require_videos=True)
             self.assertEqual(len(missing), len(json.loads((SITE / "guide" / "steps.json").read_text())["steps"]) + 2, missing)
