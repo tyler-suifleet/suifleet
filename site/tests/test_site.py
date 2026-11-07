@@ -27,11 +27,34 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_lesson_production_requires_reviewed_source_hashes(self):
+        manifest=build.load_json(SITE/'media/guide/videos.json')
+        manifest['tutorial_production']={'source_sha256':{'site/guide/lessons.json':'0'*64},'assets_sha256':{}}
+        with mock.patch.object(build,'load_json',return_value=manifest):
+            with self.assertRaisesRegex(build.BuildError,'lesson source/artwork'):
+                build.videos_by_step()
+
+    def test_lesson_production_rejects_unreviewed_spoken_text(self):
+        manifest=build.load_json(SITE/'media/guide/videos.json')
+        source_names=['site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile']
+        asset_names=['site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png']
+        manifest['tutorial_production']={field:{name:build.sha256(build.ROOT/name) for name in names} for field,names in [('source_sha256',source_names),('assets_sha256',asset_names)]}
+        manifest['videos'][0]['narration']['cues'][0]['text']='Unreviewed narration.'
+        original=build.load_json
+        with mock.patch.object(build,'load_json',side_effect=lambda path:manifest if path==build.MEDIA/'guide/videos.json' else original(path)):
+            with self.assertRaisesRegex(build.BuildError,'narration/source'):
+                build.videos_by_step()
+
     def test_native_caption_digest_and_narration_timing_are_enforced(self):
         track = self.out / "media/guide/sign-in.en.vtt"
         guide = (self.out / "guide/index.html").read_text()
-        self.assertIn('<track kind="captions" src="/media/guide/sign-in.en.vtt" srclang="en" label="English" default>', guide)
-        track.write_text(track.read_text().replace('SuiFleet', 'Wrong narration.', 1))
+        manifest=json.loads((SITE/'media/guide/videos.json').read_text())
+        video=next(v for v in manifest['videos'] if v['step']=='sign-in')
+        self.assertIn(f'<track kind="captions" src="/media/guide/sign-in.en.vtt?v={video["captions_sha256"][:16]}" srclang="en" label="English">', guide)
+        self.assertNotIn('label="English" default',guide)
+        word=video['narration']['cues'][0]['text'].split()[0]
+        self.assertIn(word,track.read_text())
+        track.write_text(track.read_text().replace(word, 'Wrong narration.', 1))
         rewrite_sums(self.out)
         errors = self.errors(require_videos=True)
         self.assertTrue(any('captions differ from encoded narration' in e for e in errors), errors)
@@ -42,7 +65,7 @@ class SiteTest(unittest.TestCase):
         tree = ET.fromstring((self.out / "sitemap.xml").read_text())
         actual = {v.text for v in tree.findall("{*}url/{*}loc")}
         config = json.loads((SITE / "src/site.json").read_text())
-        expected = {config["origin"] + v["path"] for v in config["pages"] if v["path"] != "/404.html"}
+        expected = {config["origin"] + v["path"] for v in config["pages"] if v["path"] != "/404.html" and not v.get("noindex")}
         self.assertEqual(actual, expected)
         self.assertIn("Sitemap: https://suifleet.io/sitemap.xml", (self.out / "robots.txt").read_text())
 
@@ -189,7 +212,7 @@ class SiteTest(unittest.TestCase):
             build.build(self.out)
             self.assertEqual(self.errors(), [])
             guide = (self.out / "guide" / "index.html").read_text()
-            self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
+            self.assertIn(f'<source src="/media/guide/sign-in.webm?v={hashlib.sha256(video).hexdigest()[:16]}" type="video/webm">', guide)
             self.assertIn('data-console-commit="' + '1' * 40 + '"', guide)
             missing = self.errors(require_videos=True)
             self.assertEqual(len(missing), len(json.loads((SITE / "guide" / "steps.json").read_text())["steps"]) + 2, missing)

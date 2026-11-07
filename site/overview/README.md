@@ -1,66 +1,46 @@
 # Customer system overview
 
-This is an original illustrative animation, not app-control footage or a claim
-of hardware/Testnet acceptance. It precedes the task guide through the home
-page's Watch how it works link and the guide's overview link.
+A 104-second editorial animation based on the user-selected woman-at-the-computer
+scene. Eight workflow chapters explain the fleet, secure approval, publishing, device
+checks, verification, platform installation, results and staged rollout. A closing invitation dissolves the scene into a large, centred
+three-boat logo and SuiFleet wordmark. The
+woman, console and factory devices share one continuous visual setting; editable
+routes, parcels, approval, installation progress and result cards animate over
+that illustration. The source plate and exact built-in image edit prompt are in
+`site/motion-sample/art/`. Canonical three-boat branding remains code-native.
 
-Seven scenes explain the fleet, wallet approval, publishing and confidential
-file access, device-initiated checks, verified downloads/platform installation,
-separate results/health, and the complete system. The console uploads files;
-the wallet approves authority. Device checks are outbound. Installation does
-not imply current health; offline catch-up depends on deployment eligibility
-and file availability. Reboot/rollback remain platform responsibilities.
+`storyboard.json` owns the conversational narration and chapter headings.
+`site/motion-sample/src/overview.tsx` is the full Remotion composition, separate
+from the approved 20-second sample. The pinned toolchain and local female
+`af_heart` voice are shared with that sample. Sui carries approval information;
+software goes directly to Walrus and then to the devices. Device checks are
+outbound. Installer/reboot/recovery remain platform responsibilities. Result
+cards distinguish failed installations from separately sampled health. All
+scenes are illustrative, not evidence of real device or wallet acceptance.
 
-`storyboard.json` owns the complete reviewed narration and headings. `scene.html`
-renders original code-native vector diagrams using the existing three-boat
-brand and Inter. No image-generation service or third-party stock footage is
-used. `render_frames.cjs` produces actual canvas frames at20fps in landscape
-1280×720 and portrait720×1280, refusing all external browser requests.
-`render_overview.py` uses the existing hash-verified local Kokoro Heart female
-voice, then the pinned network-none ffmpeg image for MP4/WebM and full decoding.
-The output records source/media hashes and exact scene-level caption timings.
+With pinned Node 22.22.2 on PATH and the existing narration packages available:
 
 ```sh
-PYTHONPATH=/path/to/kokoro-packages CHROME_EXECUTABLE=/path/to/chrome \
+PYTHONPATH=/path/to/kokoro-packages OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 \
 python3 site/overview/render_overview.py \
   --runtime /private/new-overview-render --out /private/new-overview-output \
   --model /private/kokoro-v1.0.onnx --voices /private/voices-v1.0.bin
 ```
 
-Output must be new; models stay outside Git. Use the model/voice hashes and
-kokoro-onnx version already pinned by `site/guide/narration.json`. The code/model
-license information is retained in `site/guide/RECORDING.md`. Review the complete
-spoken text, frames and output before replacing `site/media/overview`. Changing
-render source or storyboard invalidates build checks until regeneration.
+`--prepare-only` checks narration timing and prepares inputs for review stills.
+`node site/motion-sample/overview-render.mjs /private/review --stills-only`
+produces an actual frame from every chapter in both aspect ratios. A normal run
+renders 1280×720 and 720×1280 at 30fps, then encodes WebM with the pinned
+network-none ffmpeg image. Both complete formats are decoded before acceptance.
+`--reuse-render` requires exact source, asset and audio hashes from the retained
+input receipt. Output must be new. Keys and chain calls are never used.
 
-The player has native caption controls, captions off by default, no autoplay, a phone-specific portrait video,
-English captions, an MP4 fallback and the complete transcript. Plain diagrams,
-full narration and readable text provide alternatives; colors alone never
-explain a state. No third-party scripts or remote assets are introduced.
-
-The revised animation uses separate scene compositions rather than a repeated
-fixed diagram: devices enter and regroup, a signed approval travels to shared
-records, metadata and encrypted files follow separate paths, device requests
-and responses travel in opposite directions, a download fills before verification
-and installer motion, and installation results remain separate from health.
-Narration is not burned into the frames. Short object labels describe the diagram;
-full narration is available only as a selectable caption track or transcript.
-
-`site/tests/motion_browser.cjs` compares core-scene pixels at distinct times in
-every scene and aspect ratio, excluding the header/progress line, so movement
-cannot be established by a changing progress bar alone. Visual inspection is
-still required; pixel change does not establish animation quality.
-
-For a completed matching frame render, `--reuse-frames` verifies its timeline and
-scene/renderer source receipt and exact frame count, then regenerates narration
-from the pinned engine before encoding. A stale receipt is rejected.
-
-The hosted static service does not advertise video byte ranges. The exact
-integrity-pinned local guide/player script therefore buffers the reviewed
-same-origin MP4 after playback begins, verifies its SHA256 and hands it to the
-native player as a local Blob. That enables normal seeking without an application
-server or another video service. Captions remain native and optional. No download
-starts before playback, no credentials are sent, and the script never loads a
-remote URL. Its CSP permits same-origin fetch and Blob media only on this page.
-If preparation fails, ordinary streaming and the transcript remain available.
-The no-range browser fixture exercises this path and rejects tampered bytes.
+The manifest binds renderer, storyboard, toolchain, artwork, font, brand,
+narration, captions and media. Website builds reject stale inputs. Native
+captions are optional and off by default; the complete transcript is available
+below the player. No autoplay or third-party scripts/media. The previous canvas
+renderer is retired; `site/tests/overview_browser.cjs` validates the actual
+encoded film, including movement in every chapter, caption controls, seeking,
+MP4 fallback and integrity failure. It accepts `OVERVIEW_ORIGIN` for real HTTPS
+checks as well as local builds.
+Remotion license information is retained in `site/motion-sample/README.md`.

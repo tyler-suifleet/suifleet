@@ -1,48 +1,51 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:17.373
-A gradual rollout limits how many devices receive an update at
-once, so you can check results before continuing. Cohorts are
-batches. Creation alone starts no devices, and you return to
-approve further progress. Choose Rollouts in the sidebar to
-release in stages.
+00:00:00.450 --> 00:00:08.023
+A gradual rollout lets you check a small batch before expanding.
+We’ll prepare a plan and leave it paused until reporting is
+ready.
 
 2
-00:00:18.080 --> 00:00:24.373
-Open Create a gradual rollout. Choose the published version and
-matching device platform from your library.
+00:00:08.610 --> 00:00:11.085
+Choose Rollouts to plan a release in stages.
 
 3
-00:00:25.080 --> 00:00:32.995
-A cohort is a batch of devices. Add named devices or groups to
-the first batch; a device belongs to only one batch.
+00:00:12.290 --> 00:00:16.663
+Create a gradual rollout. Choose the release and the matching
+device platform.
 
 4
-00:00:33.720 --> 00:00:42.125
-Set the pacing, observation period and failure threshold, then
-review the exact plan. Creating a rollout does not start any
-device.
+00:00:17.250 --> 00:00:22.925
+A cohort is simply a batch. Add devices or groups; a device
+belongs to only one batch.
 
 5
-00:00:42.840 --> 00:00:47.384
-Select the rollout, then admit the first devices after checking
-device health.
+00:00:23.530 --> 00:00:29.802
+Choose the pacing, observation period and failure threshold.
+Creating the plan does not start devices.
 
 6
-00:00:48.120 --> 00:00:57.443
-This plan is created with devices waiting, not installed. Only
-admit devices after reporting is configured and current signed
-health is available.
+00:00:30.410 --> 00:00:35.487
+Select the rollout. Check current device health before allowing
+the first devices to start.
 
 7
-00:00:58.160 --> 00:01:07.056
-Pause stops new devices from starting; it does not undo an
-update already allowed to start. This example deliberately
-admits no devices.
+00:00:36.090 --> 00:00:41.615
+Devices are still waiting in this example. Current reporting
+must be available before admission.
 
 8
-00:01:07.760 --> 00:01:19.749
-The saved plan is paused. Return after reporting is ready to
-resume and explicitly approve the next batch. This clip does not
-demonstrate a healthy rollout or automatic advancement.
+00:00:42.210 --> 00:00:49.293
+Pause stops new admissions. It does not undo an update already
+allowed to start; this example admits no devices.
+
+9
+00:00:49.890 --> 00:00:55.245
+The plan is paused. Return when reporting is ready and
+explicitly approve further progress.
+
+10
+00:00:55.850 --> 00:01:02.442
+This plan is saved and paused, with devices still waiting. Check
+current reporting before approving the next step.

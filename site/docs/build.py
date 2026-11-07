@@ -173,7 +173,7 @@ def build(out, origins=None):
         target = out / (path.lstrip("/") + "index.html" if path.endswith("/") else path.lstrip("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(result, encoding="utf-8")
-    emit("/", "Documentation", '<h1>SuiFleet documentation</h1><p>Install a client, enroll a device, publish components and administer your fleet. Start with <a href="/install/">the installation guide</a>.</p><p>Public testnet preview. Platform scripts own OS installation, reboot and firmware recovery. Physical, production provider, real-wallet and mainnet acceptance remain separate.</p>')
+    emit("/", "Documentation", '<h1>SuiFleet documentation</h1><p>Install a client, enroll a device, publish components and administer your fleet. Start with <a href="/install/">the installation guide</a>.</p><p>Choose the platform and configuration that match your fleet. Your platform scripts control OS installation, reboot and firmware recovery.</p>')
     for page in pages:
         text = (ROOT / page["source"]).read_text(encoding="utf-8")
         content = render(text, page["source"], pages)

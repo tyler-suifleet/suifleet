@@ -43,6 +43,26 @@ class NarrationTest(unittest.TestCase):
         import hashlib
         script=json.loads((GUIDE/'narration.json').read_text())
         manifest=json.loads((GUIDE.parent/'media/guide/videos.json').read_text())
+        if manifest.get('tutorial_production'):
+            lessons={l['step']:l for l in json.loads((GUIDE/'lessons.json').read_text())['lessons']}
+            self.assertEqual(manifest['narration']['script_sha256'],hashlib.sha256((GUIDE/'lessons.json').read_bytes()).hexdigest())
+            self.assertEqual(sorted(v['step'] for v in manifest['videos']),sorted(lessons))
+            for video in manifest['videos']:
+                lesson=lessons[video['step']];cues=video['narration']['cues'];source=video['tutorial_source']
+                self.assertEqual([c['text'] for c in cues],[lesson['intro'],*[a['text'] for a in lesson['actions']],lesson['outro']])
+                self.assertEqual(video['narration']['source_sha256'],lesson['source_sha256'])
+                self.assertEqual(source['file_sha256'],lesson['source_sha256'])
+                self.assertEqual(cues[0]['kind'],'intro');self.assertEqual(cues[-1]['kind'],'outro')
+                actions=[c for c in cues if c['kind'].startswith('action-')]
+                self.assertEqual(len(actions),len(source['narration']['cues']))
+                end=0
+                for action,original in zip(actions,source['narration']['cues']):
+                    self.assertAlmostEqual(action['source_start'],end,places=3)
+                    self.assertEqual(action['source_start'],original['start'])
+                    self.assertEqual(action['source_end'],original['start']+original['duration'])
+                    end=action['source_end']
+                self.assertAlmostEqual(end,source['duration_seconds'],places=3)
+            return
         clips={c['step']:c for c in script['clips']}
         self.assertEqual(manifest['narration']['script_sha256'],hashlib.sha256((GUIDE/'narration.json').read_bytes()).hexdigest())
         batches=manifest['narration']['render_batches'];self.assertEqual(len(batches),3)

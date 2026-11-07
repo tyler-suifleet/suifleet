@@ -1,35 +1,41 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:18.525
-Batch enrollment prepares many devices before first boot.
-Reserve names and serial numbers, then securely give each device
-its own single-use credential during manufacturing. This avoids
-registering large fleets one by one. For a production batch,
-choose Enrollment in the sidebar.
+00:00:00.450 --> 00:00:08.087
+For larger fleets, prepare devices in a batch. Each device
+receives its own single-use setup credential before first boot.
 
 2
-00:00:19.240 --> 00:00:28.797
-This recording reuses the confirmed batch policy created during
-setup. On first use, choose the device limit and expiry, then
-create the policy.
+00:00:08.690 --> 00:00:13.106
+Choose Enrollment to prepare devices during manufacturing or
+provisioning.
 
 3
-00:00:29.520 --> 00:00:34.555
-2. Reserve names and serial numbers: paste a roster CSV and
-click Check.
+00:00:13.690 --> 00:00:20.261
+Set a device limit and expiry before creating a policy. This
+example reuses an existing policy.
 
 4
-00:00:35.280 --> 00:00:41.040
-Download the credentials: the only copy of the claim keys, for
-your factory provisioning media.
+00:00:20.850 --> 00:00:25.373
+Paste a roster with names and serial numbers, then check it
+before continuing.
 
 5
-00:00:41.760 --> 00:00:48.181
-Register the reserved devices and approve the request. Each
-device then enrolls itself at first boot.
+00:00:25.970 --> 00:00:32.327
+Download the credentials and store them securely. This is the
+only download of these one-use setup keys.
 
 6
-00:00:49.800 --> 00:00:54.984
-Claims are registered and waiting for their devices to enroll
-with their installed client.
+00:00:32.930 --> 00:00:38.946
+Register the reserved devices and approve the request. Give each
+device only its own credential.
+
+7
+00:00:39.530 --> 00:00:46.250
+The reservations are ready. Devices complete enrollment when
+their configured clients start with those credentials.
+
+8
+00:00:46.850 --> 00:00:53.719
+The batch is prepared. Each device still needs its own
+credential and the configured client to enroll at first boot.

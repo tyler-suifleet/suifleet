@@ -37,10 +37,10 @@
 <h2>Revocation</h2>
 <p>You can revoke a device or its capability, remove it from groups, close enrollment policies and revoke unused claims. Revocation stops future authority; it cannot recall a release a device has already decrypted.</p>
 
-<h2 id="status">Current status</h2>
+<h2 id="status">Security review and deployment planning</h2>
 <ul>
-<li>SuiFleet runs on Sui testnet as a public preview. Mainnet service has not launched.</li>
-<li>Production Seal key-provider selection, real-hardware signers (TPM or secure element) and physical-device acceptance are still being validated.</li>
+<li>Choose the installation, recovery and key-protection strategy that matches your devices and deployment requirements.</li>
+<li>Hardware-backed identity depends on your device’s signer and provisioning setup. Confirm compatibility and validate recovery on representative devices before a wider rollout.</li>
 <li>Contract security checks run on every change (<a href="{{repo:docs/MOVE_SECURITY.md}}">Move security gates</a>, <a href="{{repo:docs/SECURITY_CI.md}}">CI security scanning</a>). No independent third-party audit has been published yet.</li>
 </ul>
 <p>Found a problem? See <a href="/contact/">how to report it</a>.</p>

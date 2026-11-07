@@ -91,6 +91,21 @@ def videos_by_step():
     if not manifest_path.exists():
         return {}, None
     manifest = load_json(manifest_path)
+    production=manifest.get('tutorial_production')
+    if production:
+        sources={'site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile'}
+        assets={'site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png'}
+        for field,expected in [('source_sha256',sources),('assets_sha256',assets)]:
+            if set(production.get(field,{}))!=expected or any(sha256(ROOT/name)!=value for name,value in production[field].items()):
+                raise BuildError('Guide lesson source/artwork changed; regenerate the lessons')
+        lessons={l['step']:l for l in load_json(GUIDE/'lessons.json')['lessons']}
+        if set(lessons)!={v['step'] for v in manifest['videos']}:
+            raise BuildError('Guide lesson coverage differs from its script')
+        for video in manifest['videos']:
+            lesson=lessons[video['step']]
+            texts=[lesson['intro'],*[a['text'] for a in lesson['actions']],lesson['outro']]
+            if texts!=[c['text'] for c in video['narration']['cues']] or video['tutorial_source']['file_sha256']!=lesson['source_sha256']:
+                raise BuildError('Guide lesson narration/source differs from reviewed script')
     return {v["step"]: v for v in manifest.get("videos", [])}, manifest
 
 
@@ -117,15 +132,16 @@ def render_guide(config):
                 name = video.get(key)
                 if name and Path(name).name != name:
                     raise BuildError(f"unsafe guide media filename: {name}")
-            poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
-            fallback = f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else ""
-            captions = (f'<track kind="captions" src="/media/guide/{html.escape(video["captions"])}" '
-                        'srclang="en" label="English" default>' if video.get("captions") else "")
+            media_url = lambda key: f'/media/guide/{html.escape(video[key])}?v={html.escape(video[key+"_sha256"][:16])}'
+            poster = f' poster="{media_url("poster")}"' if video.get("poster") else ""
+            fallback = f'<source src="{media_url("fallback")}" type="video/mp4">' if video.get("fallback") else ""
+            captions = (f'<track kind="captions" src="{media_url("captions")}" '
+                        'srclang="en" label="English">' if video.get("captions") else "")
             out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
-                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}{captions}'
+                       f'<source src="{media_url("file")}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
-            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
-            out.append(f'<figcaption><span>Narrated testnet demo · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
+            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="{media_url("fallback" if video.get("fallback") else "file")}">download it</a>.</p></div>')
+            out.append(f'<figcaption><span>Optional subtitles (CC) · Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="{media_url("fallback" if video.get("fallback") else "file")}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')
@@ -144,12 +160,27 @@ def overview_manifest():
     manifest=load_json(OVERVIEW_MEDIA/'manifest.json')
     if manifest.get('kind') != 'illustrative-animation' or {v.get('name') for v in manifest.get('variants',[])} != {'landscape','portrait'}:
         raise BuildError('Overview must contain both verified animation variants')
-    expected_sources={'site/overview/storyboard.json','site/overview/scene.html','site/overview/render_frames.cjs','site/overview/render_overview.py'}
+    expected_sources={'site/overview/storyboard.json','site/overview/render_overview.py','site/motion-sample/src/overview.tsx','site/motion-sample/overview-render.mjs','site/motion-sample/package.json','site/motion-sample/package-lock.json'}
     if set(manifest.get('source_sha256',{})) != expected_sources or any(sha256(ROOT/name) != digest for name,digest in manifest['source_sha256'].items()):
         raise BuildError('Overview render source changed; regenerate the animation')
+    assets={'site/motion-sample/art/editorial-scene.png','site/src/assets/inter-variable.woff2','site/src/assets/logo.svg'}
+    if set(manifest.get('assets_sha256',{}))!=assets or any(sha256(ROOT/name)!=value for name,value in manifest['assets_sha256'].items()):
+        raise BuildError('Overview artwork or font changed')
+    if manifest.get('renderer')!='Remotion' or manifest.get('renderer_version')!='4.0.541' or manifest.get('fps')!=30:
+        raise BuildError('Unexpected overview renderer')
     story=load_json(ROOT/'site/overview/storyboard.json')
     if [s['text'] for s in manifest['scenes']] != [s['text'] for s in story['scenes']]:
         raise BuildError('Overview narration differs from reviewed storyboard')
+    if [c['text'] for c in manifest['cues']] != [s['text'] for s in story['scenes']]:
+        raise BuildError('Overview captions differ from storyboard')
+    duration=sum(s['duration'] for s in story['scenes'])
+    if manifest['duration_seconds']!=duration:
+        raise BuildError('Overview duration differs from storyboard')
+    previous=0
+    for cue,scene in zip(manifest['cues'],manifest['scenes']):
+        if not previous<=scene['start']<=cue['speech_start']<cue['speech_end']<scene['start']+scene['duration']<=duration:
+            raise BuildError('Overview speech overlaps or exceeds its chapter')
+        previous=scene['start']+scene['duration']
     for variant in manifest['variants']:
         if (variant.get('width'),variant.get('height')) != ((1280,720) if variant['name']=='landscape' else (720,1280)):
             raise BuildError('Unexpected overview dimensions')
@@ -166,8 +197,52 @@ def overview_manifest():
     return manifest
 
 
+SAMPLE_MEDIA=SITE/'media/motion-sample'
+def motion_sample_manifest():
+    manifest=load_json(SAMPLE_MEDIA/'manifest.json')
+    expected={'site/motion-sample/'+name for name in ['src/index.tsx','render.mjs','prepare.py','script.json','package.json','package-lock.json']}
+    if manifest.get('renderer')!='Remotion' or manifest.get('version')!='4.0.541' or manifest.get('duration_seconds')!=20 or manifest.get('fps')!=30:
+        raise BuildError('Unexpected motion sample renderer or timing')
+    if set(manifest.get('source_sha256',{}))!=expected or any(sha256(ROOT/name)!=value for name,value in manifest['source_sha256'].items()):
+        raise BuildError('Motion sample source changed; regenerate the sample')
+    assets={'site/src/assets/inter-variable.woff2','site/src/assets/logo.svg'}|{'site/motion-sample/art/editorial-scene.png'}
+    if set(manifest.get('assets_sha256',{}))!=assets or any(sha256(ROOT/name)!=value for name,value in manifest['assets_sha256'].items()):
+        raise BuildError('Motion sample artwork or font changed')
+    if {v['name'] for v in manifest.get('videos',[])}!={'landscape','portrait'}:
+        raise BuildError('Motion sample needs landscape and portrait')
+    for video in manifest['videos']:
+        for key,hash_key in [('file','sha256'),('poster','poster_sha256')]:
+            if Path(video[key]).name!=video[key] or sha256(SAMPLE_MEDIA/video[key])!=video[hash_key]:
+                raise BuildError('Motion sample media failed digest verification')
+    script=load_json(ROOT/'site/motion-sample/script.json')
+    if manifest.get('voice')!=script['voice'] or [cue['text'] for cue in manifest['timing']['cues']]!=[cue['text'] for cue in script['cues']]:
+        raise BuildError('Motion sample narration differs from script')
+    previous=0
+    for cue in manifest['timing']['cues']:
+        if not previous<=cue['speech_start']<cue['speech_end']<=20:
+            raise BuildError('Motion sample narration overlaps or exceeds video')
+        previous=cue['speech_end']
+    if manifest.get('captions')!='sample.en.vtt' or sha256(SAMPLE_MEDIA/manifest['captions'])!=manifest['captions_sha256']:
+        raise BuildError('Motion sample captions failed digest verification')
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('sample_captions',GUIDE/'captions.py');captions=importlib.util.module_from_spec(spec);spec.loader.exec_module(captions)
+    if (SAMPLE_MEDIA/manifest['captions']).read_text()!=captions.webvtt(manifest['timing']['cues'],20):
+        raise BuildError('Motion sample captions differ from narration timing')
+    return manifest
+
+def motion_sample_player():
+    manifest=motion_sample_manifest();parts=['<section class="motion-sample" aria-label="Twenty-second animation sample">']
+    for video in manifest['videos']:
+        name=video['name'];w,h=(1600,900) if name=='landscape' else (900,1600)
+        parts.append(f'<video class="sample-{name}" controls playsinline preload="metadata" width="{w}" height="{h}" poster="/media/motion-sample/{video["poster"]}?v={video["poster_sha256"][:16]}" aria-label="Animation sample, {name} version"><source src="/media/motion-sample/{video["file"]}?v={video["sha256"][:16]}" type="video/mp4"><track kind="captions" src="/media/motion-sample/{manifest["captions"]}?v={manifest["captions_sha256"][:16]}" srclang="en" label="English">Your browser cannot play this video. Read the transcript below.</video>')
+    parts.append('<p class="sample-note">Female narration with optional English captions. Use the player’s captions menu to turn them on.</p><details><summary>Read the narration</summary><p>')
+    parts.append(' '.join(html.escape(cue['text']) for cue in manifest['timing']['cues']))
+    parts.append('</p></details><p><a href="/media/motion-sample/portrait.mp4" download>Download the phone version</a> · <a href="/media/motion-sample/landscape.mp4" download>Download the widescreen version</a></p></section>')
+    return ''.join(parts)
+
+
 def overview_player():
-    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A two-minute animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
+    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A short animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
     for video in manifest['variants']:
         parts.append(f'<video class="overview-video overview-{video["name"]}" data-mp4-sha256="{video["fallback_sha256"]}" controls playsinline preload="none" width="{video["width"]}" height="{video["height"]}" poster="/media/overview/{video["poster"]}?v={video["poster_sha256"][:16]}" aria-label="How SuiFleet works, {video["name"]} version" aria-describedby="overview-description"><source src="/media/overview/{video["file"]}?v={video["file_sha256"][:16]}" type="video/webm"><source src="/media/overview/{video["fallback"]}?v={video["fallback_sha256"][:16]}" type="video/mp4"><track kind="captions" src="/media/overview/{manifest["captions"]}?v={manifest["captions_sha256"][:16]}" srclang="en" label="English">Your browser cannot play the video. Read the transcript below.</video>')
     parts.append('<p class="overview-caption">Illustrative animation. Installation results and current health are different; your platform controls its installer and any reboot.</p><details><summary>Read the complete narration</summary><ol class="overview-transcript">')
@@ -191,6 +266,8 @@ def expand(text, config, source):
         if name == "guide_options" and arg is None:
             steps = load_json(GUIDE / "steps.json")["steps"]
             return "".join(f'<option value="{step["id"]}">{index}. {html.escape(step["title"])}</option>' for index, step in enumerate(steps, 1)) + '<option value="complete">Walkthrough complete</option>'
+        if name == "motion_sample_player" and arg is None:
+            return motion_sample_player()
         if name == "overview_player" and arg is None:
             return overview_player()
         if name == "guide_steps" and arg is None:
@@ -227,6 +304,8 @@ def build(out, config=None):
                   "canonical": canonical, "nav": nav, "app_url": config["app_url"],
                   "repo_url": config["repo_url"], "content": content.strip()}
         rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|content)\}\}", lambda m: values[m.group(1)], layout)
+        if page.get("noindex"):
+            rendered=rendered.replace("</head>", '<meta name="robots" content="noindex, nofollow">\n</head>')
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
         rendered = rendered.replace('href="/assets/style.css"', f'href="/assets/style.css?v={style_version}"')
         if page["path"] in ("/guide/", "/how-it-works/"):
@@ -250,6 +329,10 @@ def build(out, config=None):
     (out/'media/overview').mkdir(parents=True)
     names=[overview['captions'],'manifest.json']+[v[key] for v in overview['variants'] for key in ['file','fallback','poster']]
     for name in names:shutil.copyfile(OVERVIEW_MEDIA/name,out/'media/overview'/name)
+    sample=motion_sample_manifest()
+    (out/'media/motion-sample').mkdir(parents=True)
+    names=['manifest.json',sample['captions']]+[video[key] for video in sample['videos'] for key in ['file','poster']]
+    for name in names:shutil.copyfile(SAMPLE_MEDIA/name,out/'media/motion-sample'/name)
     for name in ("_headers", "robots.txt"):
         if name == "_headers":
             headers = (SRC / name).read_text(encoding="utf-8")
@@ -259,7 +342,7 @@ def build(out, config=None):
         else:
             shutil.copyfile(SRC / name, out / name)
     urls = "".join(f"<url><loc>{escape(config['origin'] + page['path'])}</loc></url>"
-                   for page in config["pages"] if page["path"] != "/404.html")
+                   for page in config["pages"] if page["path"] != "/404.html" and not page.get("noindex"))
     (out / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + urls + '</urlset>\n',

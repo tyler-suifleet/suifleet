@@ -133,7 +133,7 @@ Preserve the actual console commit, chain receipts, cursor and posters.
 After reviewing all configured outputs, replace `site/media/guide/` with the staged
 media, then run the site build/check with `--require-videos`. Native playback
 controls manage volume; no autoplay or third-party player is needed. The written
-guide and burned-in captions remain available without sound. No model or
+guide and optional native captions remain available without sound. No model or
 synthesis dependency is included in the static website.
 
 ## Native English captions (SF-245)
@@ -218,3 +218,69 @@ synthesis batches were used; their exact input hashes and clip lists are in
 spoken cue. Captions use final retimed speech, never original wall-clock times.
 The local review used full decoding, complete ASR and 108 cue-start/midpoint
 frames; this is not a claim of real-time human viewing or Slush approval.
+
+
+### Optional captions without a permanent recording strip
+
+New captures retain the visible cursor and click pulses, but do not draw
+instruction captions into compositor pixels. Instruction timing remains recorded
+for narration; WebVTT supplies optional subtitles, off by default in the guide.
+
+Historical clips with a 40–60px bottom annotation strip can be reframed offline:
+
+```sh
+python3 site/guide/remove_burned_captions.py \
+  --source-media /private/original-guide --output /private/reframed-guide
+```
+
+This excludes the bottom annotation area (40px for most clips, 60px for
+deployment and rollout), rather than reconstructing the
+UI that was covered by the original strip. It retains full speech, duration,
+caption timing, console revisions and transaction provenance. Both formats are
+fully decoded and decoded-audio hashes must remain identical. Original media
+hashes, dimensions, source-manifest digest and transformation-script digest are
+retained in the new manifest. `--reuse-media` can reuse a previously processed
+clip only after matching source hashes, output hashes, dimensions and decoded
+audio; reused transformation provenance is retained. This is postproduction, not a fresh console or
+live-chain acceptance run. Review the output before replacing published media.
+Versioned guide media URLs prevent browsers retaining the older captioned clips.
+
+
+### Produced, purpose-led lessons
+
+`lessons.json` owns the customer-facing lesson scripts: purpose, action headings,
+conversational narration, recap and next step. Each source digest binds the exact
+caption-free historical app clip. There is one action per reviewed source cue;
+changing the footage requires reviewing those boundaries and the script again.
+
+`lesson_cards.cjs` renders local code-native branded artwork with the same
+operator illustration, three-boat logo and Inter font as the overview. It makes
+no external requests. `render_lessons.py` synthesizes the same local female voice,
+keeps all source intervals in order, retimes them to the narration, and adds
+short animated openings, dissolves and outcome cards. Long upload/deployment
+waits are labelled as sped up; footage remains an edited demonstration. Optional
+WebVTT captions are generated from the final speech timing, off by default.
+
+```sh
+PYTHONPATH=/path/to/kokoro-packages OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 \
+python3 site/guide/render_lessons.py \
+  --source-media /private/reviewed-caption-free-guide \
+  --runtime /private/lesson-runtime --output /private/new-lesson-media
+```
+
+Use pinned Node 22.22.2 on PATH, existing hash-verified narration models and the
+network-none video encoder. `--steps sign-in` produces an isolated preview.
+`--reuse` accepts completed work only when input/source/artwork identities and
+output hashes match. The output must be new. Inspect cards and actual encoded
+frames before accepting all clips. Both formats are fully decoded; dimensions,
+audio, durations and file budgets are checked. Website builds reject changed
+producer sources, artwork or spoken text until media is regenerated.
+
+Source footage revision, recording date and transaction provenance stay intact;
+production does not establish new wallet, chain or hardware acceptance. Previous
+caption-strip processing remains source history. Never run the strip-removal
+pass on produced lessons; it rejects them to protect their framing.
+
+The reviewed caption-free inputs for this production are `site/media/guide/`
+from Git revision `d21a8757`. Preserve those original files in a private source
+directory when iterating; do not feed produced lessons back into the renderer.
