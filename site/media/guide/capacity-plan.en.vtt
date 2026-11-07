@@ -1,29 +1,36 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:09.075
-Check Device capacity before funding devices. A subscription
-provides places for devices; network deposits pay operating
-fees.
+00:00:00.450 --> 00:00:07.981
+Before adding devices, check your capacity. Your subscription
+sets the device limit; operating funds are managed separately.
 
 2
-00:00:09.800 --> 00:00:15.709
-Choose Plans and billing. Review device capacity and the price
-shown before approving your selection.
+00:00:08.570 --> 00:00:13.498
+Open Device capacity and check how many devices your
+organization can manage.
 
 3
-00:00:16.440 --> 00:00:24.931
-Review the device limit, token amount and verified payment
-recipient, then approve prepayment. It is separate from device
-operating funds.
+00:00:14.090 --> 00:00:20.149
+This demonstration uses a test plan. Review the device allowance
+and price shown in your own console.
 
 4
-00:00:25.640 --> 00:00:35.069
-Apply the due prepaid payment to activate capacity. This uses
-the subscription balance, not another wallet payment; approval
-still costs a network fee.
+00:00:20.730 --> 00:00:26.938
+Check the amount and recipient before approving prepayment. This
+is separate from device operating funds.
 
 5
-00:00:36.560 --> 00:00:45.051
-The organization now has capacity for 100 devices. Next, fund
-device activity; no software has been installed yet.
+00:00:27.530 --> 00:00:33.567
+Apply the payment when it is due. Check the wallet request
+before approving; a network fee may still apply.
+
+6
+00:00:34.170 --> 00:00:39.397
+Check the updated device allowance. Adding operating funds later
+will not change this limit.
+
+7
+00:00:40.010 --> 00:00:45.962
+Capacity is active in this example. Next, add the operating
+funds your devices will use.

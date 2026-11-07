@@ -91,6 +91,21 @@ def videos_by_step():
     if not manifest_path.exists():
         return {}, None
     manifest = load_json(manifest_path)
+    production=manifest.get('tutorial_production')
+    if production:
+        sources={'site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile'}
+        assets={'site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png'}
+        for field,expected in [('source_sha256',sources),('assets_sha256',assets)]:
+            if set(production.get(field,{}))!=expected or any(sha256(ROOT/name)!=value for name,value in production[field].items()):
+                raise BuildError('Guide lesson source/artwork changed; regenerate the lessons')
+        lessons={l['step']:l for l in load_json(GUIDE/'lessons.json')['lessons']}
+        if set(lessons)!={v['step'] for v in manifest['videos']}:
+            raise BuildError('Guide lesson coverage differs from its script')
+        for video in manifest['videos']:
+            lesson=lessons[video['step']]
+            texts=[lesson['intro'],*[a['text'] for a in lesson['actions']],lesson['outro']]
+            if texts!=[c['text'] for c in video['narration']['cues']] or video['tutorial_source']['file_sha256']!=lesson['source_sha256']:
+                raise BuildError('Guide lesson narration/source differs from reviewed script')
     return {v["step"]: v for v in manifest.get("videos", [])}, manifest
 
 
@@ -117,15 +132,16 @@ def render_guide(config):
                 name = video.get(key)
                 if name and Path(name).name != name:
                     raise BuildError(f"unsafe guide media filename: {name}")
-            poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
-            fallback = f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else ""
-            captions = (f'<track kind="captions" src="/media/guide/{html.escape(video["captions"])}" '
-                        'srclang="en" label="English" default>' if video.get("captions") else "")
+            media_url = lambda key: f'/media/guide/{html.escape(video[key])}?v={html.escape(video[key+"_sha256"][:16])}'
+            poster = f' poster="{media_url("poster")}"' if video.get("poster") else ""
+            fallback = f'<source src="{media_url("fallback")}" type="video/mp4">' if video.get("fallback") else ""
+            captions = (f'<track kind="captions" src="{media_url("captions")}" '
+                        'srclang="en" label="English">' if video.get("captions") else "")
             out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
-                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}{captions}'
+                       f'<source src="{media_url("file")}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
-            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
-            out.append(f'<figcaption><span>Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
+            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="{media_url("fallback" if video.get("fallback") else "file")}">download it</a>.</p></div>')
+            out.append(f'<figcaption><span>Optional subtitles (CC) · Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="{media_url("fallback" if video.get("fallback") else "file")}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')
