@@ -5020,6 +5020,27 @@
         "Regression tests cover stacked members and negative identity/proof/head cases; submit scoped PR with Closes and hand off to normal review; install only merged reviewed source."
       ],
       "validation": "Meaningful batch reconciliation offline regressions and full coordinator suite on current main."
+    },
+    {
+      "key": "SF-262",
+      "title": "Reconcile published batch contributions after their source PR advances",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "A verified merged batch retains an older member head while its owner legitimately advances the same PR. Recognize only the historical published contribution without closing or completing the newer source PR/claim, so unrelated candidates can proceed. Preserve sole coordinator authority and exact acceptance gates.",
+      "evidence": "Recovery run0dea457a: batch b47d4798 / PR681 published member PR667 head71fc48d1; PR667 now has newer owner commits d21a8757 and SF257 returned to Review. Current reconcile requires current head equal published head and otherwise never finishes; publish_intent holds unrelated candidates.",
+      "acceptance": [
+        "Historical recognition requires verified merged candidate/manifest, published member approval, main ancestry and unchanged retained claim/repository/branch. Changed or uncertain identities fail closed.",
+        "A newer descendant source head remains OPEN with its original claim and requires fresh exact-head/base review and actual CI/testnet. Historical reconciliation must never complete its ticket, retarget its PR or fabricate new approval.",
+        "Durable idempotent historical evidence allows the old batch to finish and releases unrelated candidates. Regression tests cover positive and negative identity/ancestry/proof cases."
+      ],
+      "validation": "Scoped offline batch regressions and complete coordinator suite against current main. Normal PR review and reviewed merged-only installation; no deployment or credential changes."
     }
   ]
 }
