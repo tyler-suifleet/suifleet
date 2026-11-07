@@ -188,9 +188,9 @@ class Activator:
                        != 'Tyler Bush <tyler.jonathan.bush@gmail.com>|Tyler Bush <tyler.jonathan.bush@gmail.com>'):
                 raise RuntimeError('local integration receipt ancestry/tree/authority mismatch')
             paths = self.git('diff', '--name-only', '--no-renames', base, commit).splitlines()
-            docs = {'docs/PR_COORDINATION.md', 'docs/ATOMIC_TICKETING.md', 'docs/RECOVERY_WATCHDOG.md'}
-            if (paths != proof.get('paths') or not paths
-                    or not all(p in docs or p.startswith(PREFIX) for p in paths)):
+            from batch_integration import local_scope
+            scope=local_scope(self.git,self.settings['repository'],base,commit,proof.get('tracking'))
+            if (paths != proof.get('paths') or scope is None or scope['tracking']!=proof.get('tracking')):
                 raise RuntimeError('local integration scope mismatch')
             expected = [
                 ['python3', '-m', 'unittest', 'discover', '-s', PREFIX+'tests'],
