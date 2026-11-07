@@ -244,3 +244,39 @@ clip only after matching source hashes, output hashes, dimensions and decoded
 audio; reused transformation provenance is retained. This is postproduction, not a fresh console or
 live-chain acceptance run. Review the output before replacing published media.
 Versioned guide media URLs prevent browsers retaining the older captioned clips.
+
+
+### Produced, purpose-led lessons
+
+`lessons.json` owns the customer-facing lesson scripts: purpose, action headings,
+conversational narration, recap and next step. Each source digest binds the exact
+caption-free historical app clip. There is one action per reviewed source cue;
+changing the footage requires reviewing those boundaries and the script again.
+
+`lesson_cards.cjs` renders local code-native branded artwork with the same
+operator illustration, three-boat logo and Inter font as the overview. It makes
+no external requests. `render_lessons.py` synthesizes the same local female voice,
+keeps all source intervals in order, retimes them to the narration, and adds
+short animated openings, dissolves and outcome cards. Long upload/deployment
+waits are labelled as sped up; footage remains an edited demonstration. Optional
+WebVTT captions are generated from the final speech timing, off by default.
+
+```sh
+PYTHONPATH=/path/to/kokoro-packages OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 \
+python3 site/guide/render_lessons.py \
+  --source-media /private/reviewed-caption-free-guide \
+  --runtime /private/lesson-runtime --output /private/new-lesson-media
+```
+
+Use pinned Node 22.22.2 on PATH, existing hash-verified narration models and the
+network-none video encoder. `--steps sign-in` produces an isolated preview.
+`--reuse` accepts completed work only when input/source/artwork identities and
+output hashes match. The output must be new. Inspect cards and actual encoded
+frames before accepting all clips. Both formats are fully decoded; dimensions,
+audio, durations and file budgets are checked. Website builds reject changed
+producer sources, artwork or spoken text until media is regenerated.
+
+Source footage revision, recording date and transaction provenance stay intact;
+production does not establish new wallet, chain or hardware acceptance. Previous
+caption-strip processing remains source history. Never run the strip-removal
+pass on produced lessons; it rejects them to protect their framing.

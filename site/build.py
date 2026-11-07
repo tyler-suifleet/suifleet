@@ -91,6 +91,21 @@ def videos_by_step():
     if not manifest_path.exists():
         return {}, None
     manifest = load_json(manifest_path)
+    production=manifest.get('tutorial_production')
+    if production:
+        sources={'site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile'}
+        assets={'site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png'}
+        for field,expected in [('source_sha256',sources),('assets_sha256',assets)]:
+            if set(production.get(field,{}))!=expected or any(sha256(ROOT/name)!=value for name,value in production[field].items()):
+                raise BuildError('Guide lesson source/artwork changed; regenerate the lessons')
+        lessons={l['step']:l for l in load_json(GUIDE/'lessons.json')['lessons']}
+        if set(lessons)!={v['step'] for v in manifest['videos']}:
+            raise BuildError('Guide lesson coverage differs from its script')
+        for video in manifest['videos']:
+            lesson=lessons[video['step']]
+            texts=[lesson['intro'],*[a['text'] for a in lesson['actions']],lesson['outro']]
+            if texts!=[c['text'] for c in video['narration']['cues']] or video['tutorial_source']['file_sha256']!=lesson['source_sha256']:
+                raise BuildError('Guide lesson narration/source differs from reviewed script')
     return {v["step"]: v for v in manifest.get("videos", [])}, manifest
 
 

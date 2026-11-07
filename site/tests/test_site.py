@@ -27,6 +27,24 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_lesson_production_requires_reviewed_source_hashes(self):
+        manifest=build.load_json(SITE/'media/guide/videos.json')
+        manifest['tutorial_production']={'source_sha256':{'site/guide/lessons.json':'0'*64},'assets_sha256':{}}
+        with mock.patch.object(build,'load_json',return_value=manifest):
+            with self.assertRaisesRegex(build.BuildError,'lesson source/artwork'):
+                build.videos_by_step()
+
+    def test_lesson_production_rejects_unreviewed_spoken_text(self):
+        manifest=build.load_json(SITE/'media/guide/videos.json')
+        source_names=['site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile']
+        asset_names=['site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png']
+        manifest['tutorial_production']={field:{name:build.sha256(build.ROOT/name) for name in names} for field,names in [('source_sha256',source_names),('assets_sha256',asset_names)]}
+        manifest['videos'][0]['narration']['cues'][0]['text']='Unreviewed narration.'
+        original=build.load_json
+        with mock.patch.object(build,'load_json',side_effect=lambda path:manifest if path==build.MEDIA/'guide/videos.json' else original(path)):
+            with self.assertRaisesRegex(build.BuildError,'narration/source'):
+                build.videos_by_step()
+
     def test_native_caption_digest_and_narration_timing_are_enforced(self):
         track = self.out / "media/guide/sign-in.en.vtt"
         guide = (self.out / "guide/index.html").read_text()

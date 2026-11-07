@@ -12,7 +12,7 @@ def audio_hash(tag,root,name):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--source-media',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--reuse-media',type=Path);a=p.parse_args()
  if a.output.exists() or a.output.resolve()==a.source_media.resolve():raise ValueError('Output must be new and separate')
- manifest=json.loads((a.source_media/'videos.json').read_text());assert 'caption_strip_removal' not in manifest
+ manifest=json.loads((a.source_media/'videos.json').read_text());assert 'caption_strip_removal' not in manifest and 'tutorial_production' not in manifest
  for v in manifest['videos']:
   assert (v['width'],v['height'])==(1280,800)
   for key in ['file','fallback','poster','captions']:
