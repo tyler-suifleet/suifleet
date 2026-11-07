@@ -68,6 +68,9 @@ class BatchController:
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batch_conflicts (
             project TEXT,pr INTEGER,head TEXT,base TEXT,batch_id TEXT,context TEXT,
             PRIMARY KEY(project,pr,head,base))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_historical_members (
+            project TEXT,batch_id TEXT,pr INTEGER,receipt TEXT,created REAL,
+            PRIMARY KEY(project,batch_id,pr))''')
 
     @staticmethod
     def suspension(project):
@@ -739,6 +742,54 @@ class BatchController:
         self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'base=main'])
         return True
 
+    def recognize_historical_member(self, project, batch, member, pr):
+        """Record an integrated contribution, leaving its advanced PR untouched.
+
+        Called only after manifest, candidate merge and main ancestry checks.
+        This is not ticket completion or approval of the owner's newer work.
+        """
+        if pr['headRefOid'] == member['head']:
+            return False
+        if (pr['state'] != 'OPEN' or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('headRefName') != member['owner']['branch']
+                or batch.get('publish_intent') != 1 or not batch.get('review_id')):
+            raise RuntimeError('advanced member identity or publication changed')
+        approval = next((a for a in self.approval_rows(batch) if a['pr'] == member['pr']), None)
+        if (not approval or approval['status'] != 'applied'
+                or approval['head'] != member['head'] or not approval['review_node']):
+            raise RuntimeError('advanced member lacks published acceptance approval')
+        endpoint = f"repos/{project['repository']}/pulls/{member['pr']}"
+        fresh = json.loads(self.c.gh(project, ['api', endpoint]))
+        if (fresh.get('number') != member['pr'] or fresh.get('state') != 'open'
+                or fresh.get('draft') is not False
+                or fresh.get('head', {}).get('sha') != pr['headRefOid']
+                or fresh.get('head', {}).get('ref') != member['owner']['branch']
+                or fresh.get('base', {}).get('ref') != pr.get('baseRefName')
+                or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
+                       for side in ('head', 'base'))):
+            raise RuntimeError('advanced member remote identity changed')
+        # Fetch only the owning branch; require the published contribution to be
+        # retained by both real main and the newer owner head, never a rewrite.
+        self.git(project, 'fetch', '--no-tags', 'origin', member['owner']['branch'])
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], 'origin/main')
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], pr['headRefOid'])
+        current = self.owner(project, member)
+        if (current.get('status') not in ('review', 'in_progress') or current.get('publish_pending')
+                or any(current.get(k) != v for k, v in member['owner'].items() if k != 'claim_hash')
+                or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                   != member['owner']['claim_hash']):
+            raise RuntimeError('advanced member retained claim changed')
+        # Detect a push or PR-state change during the Git/ownership reads. No
+        # external write follows; a later push still needs its own fresh review.
+        if json.loads(self.c.gh(project, ['api', endpoint])) != fresh:
+            raise RuntimeError('advanced member changed during historical recognition')
+        receipt = dict(manifest=batch['manifest_digest'], candidate=batch['head'],
+                       published_head=member['head'], observed_head=pr['headRefOid'],
+                       claim_hash=member['owner']['claim_hash'], approval=approval['review_node'])
+        self.db.execute('INSERT OR IGNORE INTO batch_historical_members VALUES(?,?,?,?,?)',
+                        (project['id'], batch['id'], member['pr'], canonical(receipt), self.clock()))
+        return True
+
     def reconcile(self, project, batch):
         self.verify_manifest(project, batch)
         self.git(project, 'fetch', '--no-tags', 'origin', 'main')
@@ -751,6 +802,8 @@ class BatchController:
             return
         for member in json.loads(batch['members']):
             pr = self.c.pr(project, member['pr'])
+            if self.recognize_historical_member(project, batch, member, pr):
+                continue
             owner = self.owner(project, member)
             if self.recognize_stacked_member(project, batch, member, pr, owner):
                 pr = self.c.pr(project, member['pr'])
