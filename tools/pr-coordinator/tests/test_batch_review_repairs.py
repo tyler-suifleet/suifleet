@@ -91,7 +91,13 @@ class BatchReviewRepairs(unittest.TestCase):
         for source in f.source_prs.values():self.assertEqual(f.controller.repair_context(f.project,source),{})
         selected=f.controller.select(f.project,members,failed['base'],2)
         self.assertEqual(len(selected),1)
-        self.assertEqual(len(f.controller.select(f.project,members,'f'*40,2)),1)
+        # Selection now verifies real ancestry; advance a real base rather than
+        # supplying an object ID that cannot exist in this fixture repository.
+        f.git('checkout', '-q', 'main')
+        f.git('commit', '--allow-empty', '-qm', 'advance integration base')
+        new_base = f.git('rev-parse', 'HEAD')
+        f.git('push', '-q', 'origin', 'main')
+        self.assertEqual(len(f.controller.select(f.project,members,new_base,2)),1)
         f.tick();new=f.row();self.assertNotEqual(new['id'],failed['id']);self.assertEqual(len(json.loads(new['members'])),1)
 
     def test_rejected_source_does_not_hold_an_independent_ready_pr(self):

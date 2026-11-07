@@ -72,6 +72,31 @@ class BatchController:
             project TEXT,batch_id TEXT,pr INTEGER,receipt TEXT,created REAL,
             PRIMARY KEY(project,batch_id,pr))''')
 
+    def exclude_included_sources(self, project, candidates, base):
+        """Record ancestry only, never infer approval or ticket completion."""
+        if not candidates:
+            return []
+        self.git(project, 'fetch', '--no-tags', 'origin', base,
+                 *dict.fromkeys(m['head'] for m in candidates))
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        available = []
+        for member in candidates:
+            try:
+                self.git(project, 'merge-base', '--is-ancestor', member['head'], base)
+            except subprocess.CalledProcessError as error:
+                if error.returncode != 1:
+                    raise  # Unknown ancestry must not authorize a new candidate.
+                available.append(member)
+                continue
+            receipt = dict(head=member['head'], base=base, owner=member['owner'],
+                           status='included-source-awaiting-reconciliation',
+                           acceptance_complete=False)
+            self.db.execute('INSERT OR IGNORE INTO batch_included_sources VALUES(?,?,?,?,?,?)',
+                (project['id'], member['pr'], member['head'], base, canonical(receipt), self.clock()))
+        return available
+
     @staticmethod
     def suspension(project):
         config = project.get('integration_batch', {})
@@ -1079,7 +1104,8 @@ class BatchController:
                     (row['manifest_digest'],hashlib.sha256(row['error'].encode()).hexdigest())):
                 continue  # Explicit durable authorization; the failed row is never reset.
             failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
-        pool = [m for m in candidates if ((m['pr'],m['head']),) not in failed]
+        pool = self.exclude_included_sources(project,
+            [m for m in candidates if ((m['pr'],m['head']),) not in failed], base)
         # One acceptance reviewer must be independent of every member author.
         # Split mixed-family pools instead of attributing a fictitious author.
         if pool:
