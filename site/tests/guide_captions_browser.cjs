@@ -1,8 +1,16 @@
 // Read-only acceptance of every published guide player. No wallet or chain calls.
-const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict');
+const fs=require('node:fs/promises'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const {appRequire}=require('../../scripts/frontend_test_utils.cjs'),{chromium}=appRequire('playwright');
 (async()=>{
- const origin=process.argv[2];assert.ok(origin?.startsWith('https://'),'Supply the actual HTTPS origin');
+ let origin=process.argv[2],server;assert.ok(origin,'Supply the actual HTTPS origin or a built-site directory');
+ if(!origin.startsWith('https://')){
+  const root=path.resolve(origin),policy=(await fs.readFile(path.join(root,'_headers'),'utf8')).split('Content-Security-Policy: ')[1].split('\n')[0];
+  server=http.createServer(async(req,res)=>{try{
+   let name=new URL(req.url,'http://local').pathname;if(name.endsWith('/'))name+='index.html';const file=path.resolve(root,'.'+name);if(!file.startsWith(root+path.sep))throw Error('outside root');const data=await fs.readFile(file);
+   res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.woff2':'font/woff2','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.webm':'video/webm','.mp4':'video/mp4','.vtt':'text/vtt'})[path.extname(file)]||'application/json');res.setHeader('Content-Security-Policy',policy);res.setHeader('Accept-Ranges','bytes');
+   const range=req.headers.range?.match(/^bytes=(\d+)-(\d*)$/);if(range){const start=Number(range[1]),end=range[2]?Math.min(Number(range[2]),data.length-1):data.length-1;if(start>end){res.writeHead(416);res.end();return}res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1});res.end(data.subarray(start,end+1))}else{res.setHeader('Content-Length',data.length);res.end(data)}
+  }catch{res.writeHead(404);res.end()}});await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
+ }
  const manifest=JSON.parse(await fs.readFile(path.resolve(__dirname,'../media/guide/videos.json'),'utf8'));
  const browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
  try{for(const width of [390,1440]){
@@ -40,5 +48,5 @@ const {appRequire}=require('../../scripts/frontend_test_utils.cjs'),{chromium}=a
   }
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);
   console.log('PASS every guide: captions off by default/on/off, complete narration cues, corrected video dimensions and versioned live media:',width);await page.close();
- }}finally{await browser.close()}
+ }}finally{await browser.close();if(server)await new Promise(r=>server.close(r))}
 })().catch(e=>{console.error(e);process.exitCode=1});

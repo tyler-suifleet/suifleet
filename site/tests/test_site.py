@@ -52,7 +52,9 @@ class SiteTest(unittest.TestCase):
         video=next(v for v in manifest['videos'] if v['step']=='sign-in')
         self.assertIn(f'<track kind="captions" src="/media/guide/sign-in.en.vtt?v={video["captions_sha256"][:16]}" srclang="en" label="English">', guide)
         self.assertNotIn('label="English" default',guide)
-        track.write_text(track.read_text().replace('SuiFleet', 'Wrong narration.', 1))
+        word=video['narration']['cues'][0]['text'].split()[0]
+        self.assertIn(word,track.read_text())
+        track.write_text(track.read_text().replace(word, 'Wrong narration.', 1))
         rewrite_sums(self.out)
         errors = self.errors(require_videos=True)
         self.assertTrue(any('captions differ from encoded narration' in e for e in errors), errors)

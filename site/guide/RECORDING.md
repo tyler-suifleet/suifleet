@@ -280,3 +280,7 @@ Source footage revision, recording date and transaction provenance stay intact;
 production does not establish new wallet, chain or hardware acceptance. Previous
 caption-strip processing remains source history. Never run the strip-removal
 pass on produced lessons; it rejects them to protect their framing.
+
+The reviewed caption-free inputs for this production are `site/media/guide/`
+from Git revision `d21a8757`. Preserve those original files in a private source
+directory when iterating; do not feed produced lessons back into the renderer.
