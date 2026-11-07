@@ -5041,6 +5041,28 @@
         "Durable idempotent historical evidence allows the old batch to finish and releases unrelated candidates. Regression tests cover positive and negative identity/ancestry/proof cases."
       ],
       "validation": "Scoped offline batch regressions and complete coordinator suite against current main. Normal PR review and reviewed merged-only installation; no deployment or credential changes."
+    },
+    {
+      "key": "SF-263",
+      "title": "Stop empty integration batch churn for source heads already included in main",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests"
+      ],
+      "resources": [],
+      "description": "Recovery run c5e847fb verified PR617 exact source e28c80cb is already an ancestor of main a07e2de1, but the coordinator repeatedly collects and fails empty batches. Retarget to main returns422. Add a bounded read-only included-source route before collection, with explicit diagnostic/evidence and preserved claim/PR/acceptance. Never infer merged state or complete a ticket merely from ancestry.",
+      "evidence": "Live repeated no conflict-free eligible batch members receipts; retained PR617 stacked base; current supported recovery cannot resume completed repair.",
+      "acceptance": [
+        "An already included exact source is excluded from empty candidate creation after verified main ancestry; changed heads and unrelated PRs remain eligible.",
+        "Fail closed on unknown ancestry/read failures; preserve owner claim, independent exact-head/base review, CI/testnet gates and PR state. Do not close/retarget/complete or fabricate acceptance.",
+        "Regression tests use real Git ancestry and cover changed source, ancestry failures and unrelated candidate progression; durable or current explicit diagnostics expose pending reconciliation."
+      ],
+      "validation": "Scoped offline regressions and full coordinator suite; normal PR handoff, no installation before reviewed merge."
     }
   ]
 }

@@ -1715,3 +1715,19 @@ pending reservations remain charged to the non-replenishing run allowance;
 parking a journal does not claim the unfinished exercise passed. Install the
 coordinator only from reviewed merged source; actual automatic testnet recovery
 and installed routing remain post-handoff evidence, not offline test results.
+
+### Expired worker authentication
+
+A stopped Claude review that reports an expired OAuth session enters a provider
+sign-in hold instead of repeatedly launching the same failing request. `fleet-status`
+shows the required WSL command, `claude auth login --claudeai`. Never share its
+codes or credentials in chat, issues or logs. The coordinator checks credential
+file metadata, then verifies local sign-in status after a change (or on a bounded
+five-minute recheck). Successful sign-in releases stopped review retry deadlines;
+uncertain implementation repairs retain their ownership-safe recovery checks.
+
+The local infrastructure lane also accepts the current published infrastructure
+issue's exact append-only backlog and GitHub-link records alongside infrastructure
+code. It rejects edits to existing tickets, additional tickets, changed tracker
+metadata, unpublished links and application files. The activation receipt retains
+that scope proof so installation verifies the same restriction against merged main.

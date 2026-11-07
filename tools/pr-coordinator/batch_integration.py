@@ -72,6 +72,31 @@ class BatchController:
             project TEXT,batch_id TEXT,pr INTEGER,receipt TEXT,created REAL,
             PRIMARY KEY(project,batch_id,pr))''')
 
+    def exclude_included_sources(self, project, candidates, base):
+        """Record ancestry only, never infer approval or ticket completion."""
+        if not candidates:
+            return []
+        self.git(project, 'fetch', '--no-tags', 'origin', base,
+                 *dict.fromkeys(m['head'] for m in candidates))
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        available = []
+        for member in candidates:
+            try:
+                self.git(project, 'merge-base', '--is-ancestor', member['head'], base)
+            except subprocess.CalledProcessError as error:
+                if error.returncode != 1:
+                    raise  # Unknown ancestry must not authorize a new candidate.
+                available.append(member)
+                continue
+            receipt = dict(head=member['head'], base=base, owner=member['owner'],
+                           status='included-source-awaiting-reconciliation',
+                           acceptance_complete=False)
+            self.db.execute('INSERT OR IGNORE INTO batch_included_sources VALUES(?,?,?,?,?,?)',
+                (project['id'], member['pr'], member['head'], base, canonical(receipt), self.clock()))
+        return available
+
     @staticmethod
     def suspension(project):
         config = project.get('integration_batch', {})
@@ -1079,7 +1104,8 @@ class BatchController:
                     (row['manifest_digest'],hashlib.sha256(row['error'].encode()).hexdigest())):
                 continue  # Explicit durable authorization; the failed row is never reset.
             failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
-        pool = [m for m in candidates if ((m['pr'],m['head']),) not in failed]
+        pool = self.exclude_included_sources(project,
+            [m for m in candidates if ((m['pr'],m['head']),) not in failed], base)
         # One acceptance reviewer must be independent of every member author.
         # Split mixed-family pools instead of attributing a fictitious author.
         if pool:
@@ -1368,6 +1394,52 @@ def infrastructure_scope(paths):
         for path in paths)
 
 
+TRACKING_FILES = {'docs/tracking/backlog.json', 'docs/tracking/github-state.json'}
+
+
+def local_scope(git, repository, base, head, owner=None):
+    """Permit only the current published infra ticket's append-only seed pair."""
+    paths = git('diff', '--name-only', '--no-renames', base+'..'+head).splitlines()
+    core = [p for p in paths if p not in TRACKING_FILES]
+    if not infrastructure_scope(core):
+        return None
+    tracking = set(paths) & TRACKING_FILES
+    if not tracking:
+        return {'paths': paths, 'tracking': None}
+    if tracking != TRACKING_FILES or not owner:
+        return None
+    try:
+        before, after = [], []
+        for ref, destination in [(base, before), (head, after)]:
+            for path in ['docs/tracking/backlog.json','docs/tracking/github-state.json']:
+                destination.append(json.loads(git('show', ref+':'+path)))
+        for old, new in zip(before, after):
+            if ({k:v for k,v in old.items() if k!='issues'} != {k:v for k,v in new.items() if k!='issues'}
+                    or old.get('repository') != repository):
+                return None
+        old, new = before[0]['issues'], after[0]['issues']
+        if not isinstance(old,list) or not isinstance(new,list) or new[:len(old)] != old or len(new)!=len(old)+1:
+            return None
+        spec = new[-1]; key = owner['key']
+        if (spec != owner['spec'] or spec.get('key') != key or spec.get('area')!='infra'
+                or any(v.get('key')==key for v in old)):
+            return None
+        old, new = before[1]['issues'], after[1]['issues']
+        if (not isinstance(old,dict) or not isinstance(new,dict) or key in old
+                or set(new)!=set(old)|{key} or any(new[k]!=v for k,v in old.items())):
+            return None
+        remote = new[key]; number = remote['number']
+        if (type(number) is not int or number<=0 or remote['url']!=f'https://github.com/{repository}/issues/{number}'
+                or remote['url']!=owner['remote']['url'] or remote['project_item_id']!=owner['remote']['item_id']
+                or type(remote.get('id')) is not int or remote['id']<=0
+                or not isinstance(remote.get('node_id'),str) or not remote['node_id']):
+            return None
+        proof = {'key':key,'spec':spec,'remote':{'url':remote['url'],'item_id':remote['project_item_id']}}
+        return {'paths':paths,'tracking':proof}
+    except (KeyError,TypeError,ValueError):
+        return None
+
+
 class LocalInfrastructure:
     """User-authorized local validation, distinct from independent approval."""
     def __init__(self, coordinator):
@@ -1392,8 +1464,7 @@ class LocalInfrastructure:
         if not all(SHA.fullmatch(x) for x in (base, head)):
             return False
         self.b.git(project, 'fetch', '--no-tags', 'origin', base, head)
-        paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base+'...'+head).splitlines()
-        return infrastructure_scope(paths)
+        return local_scope(lambda *args:self.b.git(project,*args), project['repository'], base, head, owner) is not None
 
     def fenced(self, project, pr, owner):
         self.c.assert_review_owner(project, owner)
@@ -1455,8 +1526,10 @@ class LocalInfrastructure:
             receipt['commit'] = self.b.git(project, 'rev-parse', 'HEAD', cwd=tree)
             receipt['tree'] = self.b.git(project, 'rev-parse', 'HEAD^{tree}', cwd=tree)
             paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base, receipt['commit']).splitlines()
-            if not infrastructure_scope(paths):
+            scope=local_scope(lambda *args:self.b.git(project,*args),project['repository'],base,receipt['commit'],owner)
+            if scope is None:
                 raise RuntimeError('combined scope is not infrastructure')
+            if scope['tracking'] is not None:receipt['tracking']=scope['tracking']
             receipt['paths'] = paths
             self.b.git(project, 'diff', '--check', base, receipt['commit'])
             for index, command in enumerate(LOCAL_COMMANDS):

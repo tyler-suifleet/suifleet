@@ -1263,6 +1263,60 @@ class Coordinator:
         self.local_infrastructure = LocalInfrastructure(self)
         self.hosted_runner_recovery = HostedRunnerRecovery(self)
 
+    AUTH_REQUIRED = 'Provider authentication required: run claude auth login --claudeai in WSL'
+
+    @staticmethod
+    def auth_failure(directory):
+        try:
+            text=(Path(directory)/'worker.log').read_text(errors='replace')[-16384:]
+        except OSError:
+            return False
+        text=text.rsplit('[pr-coordinator worker attempt]',1)[-1].lower()
+        return ('failed to authenticate' in text and 'oauth session expired' in text
+                and 'could not be refreshed' in text)
+
+    @staticmethod
+    def credential_stamp():
+        # Metadata only. Never read, persist or print credential contents.
+        path=Path(os.environ.get('CLAUDE_CONFIG_DIR',str(Path.home()/'.claude')))/'.credentials.json'
+        try:return str(path.stat().st_mtime_ns)
+        except OSError:return None
+
+    def auth_table(self):
+        self.store.db.execute('CREATE TABLE IF NOT EXISTS worker_authentication '
+                              '(family TEXT PRIMARY KEY, blocked INTEGER, checked REAL, stamp TEXT, diagnostic TEXT)')
+
+    def hold_authentication(self, row):
+        self.auth_table()
+        self.store.db.execute('INSERT INTO worker_authentication VALUES(?,?,?,?,?) '
+                              'ON CONFLICT(family) DO UPDATE SET checked=CASE WHEN blocked=0 THEN excluded.checked ELSE checked END, '
+                              'stamp=CASE WHEN blocked=0 THEN excluded.stamp ELSE stamp END, '
+                              'blocked=1,diagnostic=excluded.diagnostic',
+                              ('Claude',1,time.time(),self.credential_stamp(),self.AUTH_REQUIRED))
+        status='retry' if row['kind']=='review' else 'orphaned'
+        self.store.db.execute('UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?',
+                              (status,self.AUTH_REQUIRED,time.time()+30,row['id']))
+
+    def authentication_ready(self, family):
+        if family!='Claude':return True
+        self.auth_table()
+        row=self.store.db.execute('SELECT blocked,checked,stamp FROM worker_authentication WHERE family=?',(family,)).fetchone()
+        if not row or not row[0]:return True
+        stamp=self.credential_stamp()
+        if time.time()-row[1]<30 or (row[2] is not None and stamp==row[2] and time.time()-row[1]<300):return False
+        self.store.db.execute('UPDATE worker_authentication SET checked=? WHERE family=?',(time.time(),family))
+        try:
+            result=subprocess.run([self.config['workers'][family][0],'auth','status'],capture_output=True,text=True,timeout=15)
+            if result.returncode or json.loads(result.stdout).get('loggedIn') is not True:return False
+        except (OSError,ValueError,subprocess.TimeoutExpired):return False
+        self.store.db.execute('UPDATE worker_authentication SET blocked=0,stamp=?,diagnostic=? WHERE family=?',
+                              (stamp,'Authentication restored; stopped reviews eligible again',family))
+        self.store.db.execute("UPDATE jobs SET retry_after=0,error='Authentication restored; retry pending' "
+                              "WHERE family=? AND status='retry' AND error=?",(family,self.AUTH_REQUIRED))
+        self.store.db.execute("UPDATE jobs SET error='Authentication restored; stopped repair needs ownership-safe recovery' "
+                              "WHERE family=? AND status='orphaned' AND error=?",(family,self.AUTH_REQUIRED))
+        return True
+
     def gh(self, project, args):
         account = project['github_account']
         pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?', (account,)).fetchone()
@@ -1519,6 +1573,7 @@ class Coordinator:
             print(f"{project['id']} PR#{pr['number']}: repair not launched: {reason}", flush=True)
             return
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
+        if not self.authentication_ready(family):return
         fingerprint = repair_feedback(pr) if kind == 'fix' and pr.get('_ci_repair') else feedback(pr)
         directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{fingerprint[:12]}"
         if recovery is not None:
@@ -1845,6 +1900,12 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         print(f"{project['id']} PR#{row['pr']}: stopped orphan quarantined; family capacity freed", flush=True)
                     continue
                 if row['status'] == 'retry':
+                    if row['family']=='Claude':
+                        if (row['error']!=self.AUTH_REQUIRED and row['error']!='Authentication restored; retry pending'
+                                and worker_stopped(row['pid'],row['started']) and self.auth_failure(row['directory'])):
+                            self.hold_authentication(row)
+                        if not self.authentication_ready('Claude'):continue
+                        row=self.store.db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone()
                     if row['retry_after'] > time.time(): continue
                     receipt=Path(row['directory'])/'exit.json'
                     try:
@@ -1898,6 +1959,10 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 except Exception as error:
                     # A disappeared process with no trustworthy receipt is not automatically restarted.
                     receipt_path = Path(row['directory'])/'exit.json'
+                    if (row['family']=='Claude' and receipt_path.exists()
+                            and worker_stopped(row['pid'],row['started']) and self.auth_failure(row['directory'])):
+                        self.hold_authentication(row)
+                        continue
                     # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
                     retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
                     status = 'retry' if retry else 'orphaned'
