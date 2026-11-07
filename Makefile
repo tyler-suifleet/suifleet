@@ -126,6 +126,7 @@ test-yocto-packaging:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_layer_export.py'
 
 dapp-typecheck:
+	$(RUN) node scripts/test_subscription_card.cjs
 	$(RUN) node scripts/test_subscription_checkout.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_billing_progress_browser.cjs
 	$(MAKE) test-testnet
@@ -550,6 +551,7 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_live_subscription_card.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_abort_site.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_security_delay.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_upgrade_security_localnet.py'
@@ -842,6 +844,7 @@ test-budget-enrollment-localnet:
 # SF136: offline discovery/transaction checks and actual React/Chromium isolation.
 .PHONY: test-customer-fleets test-customer-upgrade-localnet
 test-customer-fleets:
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_subscription_card_browser.cjs
 	$(RUN) node scripts/test_customer_entitlements.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
