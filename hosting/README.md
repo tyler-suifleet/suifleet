@@ -130,3 +130,8 @@ Guide subtitle correction: all ten clips exclude their original permanent
 caption strips; native captions start off and can be toggled through CC.
 Current release evidence: `cloudflare-guide-captions-deployment.json`.
 Overview/sample and app/docs are unchanged.
+
+The guide now contains ten produced lessons with purpose-led illustrated
+openings, conversational female narration, framed app footage, recaps and next
+steps. Native captions remain optional. Current release evidence:
+`cloudflare-guide-lessons-deployment.json`. Overview/sample and app/docs are unchanged.
