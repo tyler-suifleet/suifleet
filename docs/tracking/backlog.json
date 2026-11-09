@@ -5063,6 +5063,28 @@
         "Regression tests use real Git ancestry and cover changed source, ancestry failures and unrelated candidate progression; durable or current explicit diagnostics expose pending reconciliation."
       ],
       "validation": "Scoped offline regressions and full coordinator suite; normal PR handoff, no installation before reviewed merge."
+    },
+    {
+      "key": "SF-265",
+      "title": "Reconcile published first batch members on retained stacked bases",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "description": "Published candidate 691 is merged but batch 48411097f0524e4789ff04917754b408 remains reconciling: first member PR667 exact head is in main but stays open against already integrated SF256 branch. Existing recognize_stacked_member only accepts preceding batch member branches, excluding the first member. Preserve sole coordinator writes, exact manifest/head/approval/claim/main-ancestry checks and no fabricated GitHub merge.",
+      "evidence": "Live 2026-11-09: batch reconciling awaiting verified member merge recognition; PR667 OPEN base work/suifleet/sf-256-47044c8b; candidate691 merged f20f492923aaf51d9b8cc7752c8f5e117fa83c91.",
+      "acceptance": [
+        "Sole coordinator safely recognizes exact published source on an already integrated stacked base, including first batch member; retain exact manifest, acceptance approval, owner and remote identity checks.",
+        "No arbitrary base retarget, fabricated merge, claim stealing, lost advanced work or bypass of review/CI/testnet gates.",
+        "Offline positive and negative tests cover first member and changed/unintegrated base; reviewed merged-only installation remains required."
+      ],
+      "validation": "Run scoped batch reconciliation tests and full offline coordinator tests; submit normal PR review and record installation pending."
     }
   ]
 }
