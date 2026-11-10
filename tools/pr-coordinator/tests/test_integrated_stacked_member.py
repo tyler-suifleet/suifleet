@@ -46,6 +46,16 @@ class IntegratedStackedMemberTests(unittest.TestCase):
                 return json.dumps(f.mutate(value))
             return original_gh(project, args)
         f.pr, f.gh = pr, gh
+        original_reconcile = f.reconcile
+
+        def reconcile(project, candidate, owner, review):
+            original_reconcile(project, candidate, owner, review)
+            # The real ticket CLI clears the token on completion, and owner()
+            # re-reads persisted state rather than the object passed above.
+            for persisted in f.owners:
+                if persisted['key'] == owner['key']:
+                    persisted.update(status='done', token=None)
+        f.reconcile = reconcile
         return f
 
     def test_first_member_completes_via_real_candidate_and_closes_source(self):
@@ -67,6 +77,54 @@ class IntegratedStackedMemberTests(unittest.TestCase):
         self.assertEqual(len(f.writes), 1)
         f.controller.reconcile(f.project, f.row())
         self.assertEqual(len(f.writes), 1)
+
+    def test_completion_with_cleared_token_retries_closure_failures(self):
+        for failure in ('before_closure', 'patch', 'confirmation'):
+            with self.subTest(failure=failure):
+                f = self.fixture()
+                original_gh = f.gh
+                completed_reads = 0
+                failed = False
+
+                def gh(project, args):
+                    nonlocal completed_reads, failed
+                    if (args[:2] == ['api', 'repos/owner/repo/pulls/1']
+                            and f.owners[0]['status'] == 'done' and not failed):
+                        if '--method' in args:
+                            if failure == 'patch':
+                                failed = True
+                                raise RuntimeError('transient closure failure')
+                        else:
+                            completed_reads += 1
+                            if ((failure == 'before_closure' and completed_reads == 1)
+                                    or (failure == 'confirmation' and completed_reads == 2)):
+                                failed = True
+                                raise RuntimeError('transient closure failure')
+                    return original_gh(project, args)
+
+                f.gh = gh
+                with self.assertRaisesRegex(RuntimeError, 'transient closure failure'):
+                    f.controller.reconcile(f.project, f.row())
+                self.assertEqual(f.owners[0]['status'], 'done')
+                self.assertIsNone(f.owners[0]['token'])
+                self.assertEqual(f.row()['status'], 'reconciling')
+                f.controller.reconcile(f.project, f.row())
+                self.assertEqual(f.row()['status'], 'done')
+                self.assertEqual(f.remote_state, 'closed')
+                self.assertEqual(len(f.writes), 1)
+
+    def test_completed_owner_retry_rejects_changed_identity_or_live_token(self):
+        for field in ('key', 'agent', 'model', 'session', 'branch', 'token'):
+            with self.subTest(field=field):
+                f = self.fixture()
+                f.owners[0].update(status='done', token=None)
+                f.owners[0][field] = 'replacement'
+                if field == 'key':
+                    f.controller.owner = lambda project, member: copy.deepcopy(f.owners[0])
+                with self.assertRaises(RuntimeError):
+                    f.controller.reconcile(f.project, f.row())
+                self.assertFalse(f.writes)
+                self.assertFalse(f.reconciled)
 
     def test_changed_identity_approval_and_claim_cannot_complete(self):
         for kind in ('head', 'base', 'fork', 'approval', 'claim', 'active', 'pending'):

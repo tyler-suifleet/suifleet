@@ -802,10 +802,13 @@ class BatchController:
         self.git(project, 'merge-base', '--is-ancestor', pr['baseRefOid'], 'origin/main')
         self.git(project, 'merge-base', '--is-ancestor', member['head'], batch['head'])
         current = self.owner(project, member)
+        # Completion clears the token. A retry after completion must still match
+        # every sealed owner identity field, but need not retain that token.
         if (current.get('status') not in ('review', 'done') or current.get('publish_pending')
                 or any(current.get(k) != v for k, v in member['owner'].items() if k != 'claim_hash')
-                or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
-                   != member['owner']['claim_hash']):
+                or not ((current.get('status') == 'done' and current.get('token') is None)
+                        or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                           == member['owner']['claim_hash'])):
             raise RuntimeError('integrated stacked member retained claim changed')
         if json.loads(self.c.gh(project, ['api', endpoint])) != fresh:
             raise RuntimeError('integrated stacked member changed before completion')
