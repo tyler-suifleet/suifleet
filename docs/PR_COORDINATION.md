@@ -1746,3 +1746,39 @@ REST snapshots must retain the comparison identity; live ref reads and the
 fetched branch must match the resolved tip. Both commits must be ancestors of
 main. Rechecks before completion and closure reject a moving live ref even
 when GitHub retains the same historical comparison base.
+
+### Already-included sources without a manifest (SF-267)
+
+The sole coordinator checks reviewed sources for exact inclusion in current
+remote main before candidate collection, including open stacked PRs such as
+#617 whose original integration has no retained batch manifest. Ancestry only
+excludes redundant candidate work; it never completes acceptance. The route
+requires a published independent source receipt, unchanged published Review
+ownership and dependencies, same-repository source identity, and inclusion of
+both the comparison base and live base tip.
+
+Missing full acceptance dispatches the existing bounded independent review job
+with `_review_mode: included`. Its snapshot pins current main and retains the
+original source/base/claim identities in `_included_source`. This fingerprint is
+separate from source-only reviews. An unchanged blocked result remains visible
+with its precise missing evidence; it does not repeatedly launch workers. Pending
+or failed CI cannot become acceptance through reviewer prose. Real ordinary,
+security and applicable exact-head/current-main testnet checks and a published
+independent acceptance-complete approval remain mandatory. Changed evidence or
+main requires fresh acceptance. Unrelated candidates continue during these holds.
+
+Before completion, the coordinator repeats source/main/feedback checks and the
+existing stopped implementation/helper, active-job, dependency and claim fences.
+It records evidence in `batch_included_sources`, completes the retained ticket
+through the supported ticket CLI, verifies publication, then closes the redundant
+source PR and linked issue. GitHub's source remains **closed**, never a fabricated
+**merged** PR. Branches and worktrees are preserved. An accepted but unfinished
+closure is retried from its durable receipt, including when the source is no
+longer in the open-PR list; pending mirrors or changed identities fail closed.
+
+Install only through the reviewed merged-only workflow. After installation,
+record exact runtime revision/readiness and the actual #617/ticket acceptance
+and closure receipts. Offline regressions establish neither installed behavior
+nor public-testnet acceptance; existing SF-173/SF-253 authorization holds are
+unchanged. The 2026-11-01 local infrastructure integration authorization applies
+to this repair and its actual combined-main offline validation.
