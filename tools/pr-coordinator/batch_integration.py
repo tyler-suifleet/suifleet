@@ -1809,11 +1809,81 @@ class LocalInfrastructure:
         directory = self.c.state/'implementations'/owner['session']
         path = directory/'process.json'
         if not path.exists():
-            raise RuntimeError('implementation process identity is unavailable')
+            if directory.exists() or owner['session'].startswith(('dispatch-', 'recovery-')):
+                raise RuntimeError('implementation process identity is unavailable')
+            self.manual_repair_fence(project, pr, owner)
+            return
         process = json.loads(path.read_text())
         if (not worker_stopped(process.get('pid'), process.get('started'))
                 or claim_processes(owner['token'], process.get('started'))):
             raise RuntimeError('implementation worker/helpers have not stopped')
+
+    def manual_repair_fence(self, project, pr, owner):
+        """Bind manual ownership to a verified stopped coordinator repair.
+
+        This supplies process provenance only; all acceptance gates still apply.
+        Scan from claim acquisition so helpers older than the repair remain fenced,
+        without attributing unrelated pre-claim processes to this implementation.
+        """
+        from coordinator import claim_processes, worker_stopped
+        columns = [row[1] for row in self.db.execute('PRAGMA table_info(jobs)')]
+        if not {'id', 'repair_claim', 'directory', 'pid', 'started', 'family', 'result'} <= set(columns):
+            raise RuntimeError('manual implementation lacks verified stopped repair provenance')
+        row = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind='fix' ORDER BY id DESC LIMIT 1",
+                              (project['id'], pr['number'])).fetchone()
+        if not row:
+            raise RuntimeError('manual implementation lacks verified stopped repair provenance')
+        # Never fall back past a failed, uncertain or different-claim repair.
+        job = dict(zip(columns, row))
+        try:
+            claim = json.loads(job['repair_claim'])
+            result = json.loads(job['result'])
+            directory = Path(job['directory'])
+            process = json.loads((directory/'process.json').read_text())
+            exit_receipt = json.loads((directory/'exit.json').read_text())
+            expected = dict(claim=hashlib.sha256(owner['token'].encode()).hexdigest(),
+                            key=owner['key'], branch=owner['branch'], worktree=owner['worktree'])
+            valid = (all(claim.get(k) == v for k, v in expected.items())
+                     and job['status'] == 'done' and job['family'] == owner['agent']
+                     and result['verdict'] == 'fixed' and bool(result.get('model'))
+                     and bool(result.get('evidence')) and exit_receipt['returncode'] == 0
+                     and process == dict(pid=job['pid'], started=job['started'])
+                     and type(process['pid']) is int and process['pid'] > 0
+                     and str(process['started']).isdigit())
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            valid = False
+        if not valid:
+            raise RuntimeError('manual implementation repair provenance is invalid')
+        # The ticket event binds the lower bound to this exact claim generation.
+        # Heartbeats and repair launches are too recent: older helpers could survive.
+        try:
+            events = [event for event in owner['events']
+                      if event['kind'] == 'claim' and event['actor'] == owner['session']
+                      and str(event['ticket']).split('::')[-1] == owner['key']
+                      and f"token={owner['token']}" in event['detail'].split('; ')]
+            acquired = float(events[0]['at']) if len(events) == 1 else 0
+            boot = int(next(line.split()[1] for line in Path('/proc/stat').read_text().splitlines()
+                            if line.startswith('btime ')))
+            if not 0 < acquired <= time.time():
+                raise ValueError('invalid claim timestamp')
+            # btime has whole-second precision; round down with one second of
+            # margin rather than excluding a helper on the acquisition boundary.
+            started = str(max(0, int((acquired - boot - 1) * os.sysconf('SC_CLK_TCK'))))
+        except (OSError, ValueError, TypeError, KeyError, StopIteration, OverflowError):
+            raise RuntimeError('manual implementation claim acquisition provenance is unavailable') from None
+        if not worker_stopped(process['pid'], process['started']) or claim_processes(owner['token'], started):
+            raise RuntimeError('manual implementation worker/helpers have not stopped')
+        locks = json.loads(self.c.ticket(project, 'locks'))
+        now = time.time()
+        for lock in locks:
+            if lock.get('expired') or (lock.get('expires') or 0) <= now:
+                continue
+            named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+',
+                               f"{lock.get('session') or ''} {lock.get('purpose') or ''}".upper())
+            if not (str(lock.get('ticket') or '').split('::')[-1] == owner['key']
+                    or lock.get('session') == owner['session'] or owner['key'] in named):
+                continue
+            raise RuntimeError('manual implementation still holds a resource lease')
 
     def tick(self, project, pr, owner):
         """Return True when this PR belongs to the local lane (including holds)."""

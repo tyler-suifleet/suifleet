@@ -5085,6 +5085,28 @@
         "Offline positive and negative tests cover first member and changed/unintegrated base; reviewed merged-only installation remains required."
       ],
       "validation": "Run scoped batch reconciliation tests and full offline coordinator tests; submit normal PR review and record installation pending."
+    },
+    {
+      "key": "SF-269",
+      "title": "Fence included-source closure for manual implementation origins",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "PR617/SF246 independent included-source approval job3962 passes exact pinned main CI/testnet evidence, but included_source calls LocalInfrastructure.fenced which requires implementations/<manual-session>/process.json. That path does not exist for manual origin operator-mobile-customer-readiness-20261104. Coordinator-owned stopped same-claim repair receipts exist (job3689). Add a supported fail-closed provenance route for manually originated claims using immutable same-claim repair launch/process/exit evidence; never fabricate original process receipts. Preserve worker/helper stop, ownership, resources and exact-head/base/feedback acceptance fences. Report precise safe operational blocker. No feature, credentials, DNS, chain or hardware changes.",
+      "evidence": "Installed80d8f459: batch_integration.py LocalInfrastructure.fenced unconditionally requires dispatcher original process path; manual SF246 lacks it, approved job3962 cannot reconcile.",
+      "acceptance": [
+        "Accept verified stopped same-claim repair provenance for manual origins, while rejecting wrong/missing claim/process/exit evidence and live helpers/workers or resource leases.",
+        "Preserve independent exact-source/current-main CI/security/testnet acceptance, sole coordinator authority and unrelated queues.",
+        "Meaningful offline regressions/full coordinator tests and normal PR handoff; install only reviewed merged code."
+      ],
+      "validation": "Run targeted provenance regressions and full offline coordinator suite; verify staged scope and Tyler authorship."
     }
   ]
 }
