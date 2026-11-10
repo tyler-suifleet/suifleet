@@ -1782,3 +1782,27 @@ and closure receipts. Offline regressions establish neither installed behavior
 nor public-testnet acceptance; existing SF-173/SF-253 authorization holds are
 unchanged. The 2026-11-01 local infrastructure integration authorization applies
 to this repair and its actual combined-main offline validation.
+
+### Already-included source evidence
+
+Included-source reconciliation preserves the source PR/head/claim and its original
+comparison refs. Its separate current-main evidence context authenticates the
+latest exact-main CI run, all CI jobs (including dependency/configuration and all
+CodeQL jobs), and a successful Automatic testnet producer with a matching
+`package-upgrade.json`. Main is tested against its first parent; this does not
+claim a source-head/current-main workflow ran. All other source checks, ownership,
+dependency, worker, authorization and independent acceptance gates remain required.
+Known deployment skips on a stacked source must authenticate against its original
+comparison base/ref, the pinned workflow and the actual run/job/check provenance;
+unknown skips remain blocking. The evidence identity and artifact digest enter the final review fingerprint and
+are read again at review publication and completion. An old source-only receipt
+cannot satisfy final acceptance.
+
+Missing or unsuccessful evidence holds only that reconciliation and records a
+bounded next action: repair the reported main check, then rerun that main CI run
+once (`gh run rerun RUN_ID -R OWNER/REPO`), or dispatch `ci.yml --ref main` once if
+no current-main CI exists. These are operator actions, not automatic workflow
+retargeting or retries by a waiting model. The coordinator starts fresh independent
+acceptance only after checks are available; an unchanged blocked review is not
+relaunched. Installed provenance and actual source closure must be verified after
+the normal merged-only rollout; offline tests do not establish runtime acceptance.

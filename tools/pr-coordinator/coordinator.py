@@ -171,12 +171,22 @@ def check_evidence(pr):
 
 
 def checks_blocker(pr):
-    if pr.get('_testnet_required'):
+    if pr.get('_review_mode') == 'included':
+        evidence = pr.get('_included_evidence') or {}
+        if (evidence.get('source') != pr.get('headRefOid')
+                or evidence.get('head') != pr.get('baseRefOid')
+                or not evidence.get('effects_sha256')):
+            return pr.get('_included_evidence_error') or 'authenticated current-main evidence is missing'
+    if pr.get('_testnet_required') and pr.get('_review_mode') != 'included':
         testnet = pr.get('_testnet_status') or {}
         if (testnet.get('state') != 'success'
                 or testnet.get('description') != 'base:' + pr['baseRefOid']):
             return 'exact-head testnet status for current base is missing or unsuccessful'
     checks = pr['statusCheckRollup']
+    if pr.get('_review_mode') == 'included':
+        # This one status is replaced by the authenticated main/parent pair.
+        # Every other source check and authorization gate still applies.
+        checks = [c for c in checks if c.get('context', c.get('name')) != 'testnet/package-upgrade']
     if not checks or not all((check.get('status') == 'COMPLETED' and
                               (check.get('conclusion') == 'SUCCESS' or verified_optional_skip(pr, check)))
                              if check.get('__typename') == 'CheckRun' else check.get('state') == 'SUCCESS' for check in checks):
@@ -214,11 +224,17 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
     Do not rewrite conclusions or accept skips on push/manual/live workflows.
     Mutable run/job/check evidence is fetched anew for every approval snapshot.
     """
+    included = (pr.get('_review_mode') == 'included' and pr.get('_included_source')
+                and pr.get('_included_evidence', {}).get('source') == pr.get('headRefOid')
+                and pr.get('_included_evidence', {}).get('head') == pr.get('baseRefOid'))
+    source_base = pr['_included_source']['comparison'] if included else pr['baseRefOid']
+    source_ref = pr['_included_source']['base_ref'] if included else 'main'
     for check in pr.get('statusCheckRollup', []):
         check.pop('_optional_skip', None)
         if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
                 or check.get('conclusion') != 'SKIPPED' or check.get('name') not in OPTIONAL_DEPLOYMENT_JOBS
-                or pr.get('isCrossRepository') or pr.get('baseRefName') != 'main' or not pr.get('baseIncluded')):
+                or pr.get('isCrossRepository')
+                or (not included and (pr.get('baseRefName') != 'main' or not pr.get('baseIncluded')))):
             continue
         match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
                              + r'/actions/runs/([0-9]+)/job/([0-9]+)', check.get('detailsUrl') or '')
@@ -241,7 +257,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                     or run['status'] != 'completed' or run['conclusion'] != 'success'
                     or type(attempt) is not int or attempt < 1
                     or not any(p['number'] == pr['number'] and p['head']['sha'] == pr['headRefOid']
-                               and p['base']['sha'] == pr['baseRefOid'] and p['base']['ref'] == 'main'
+                               and p['base']['sha'] == source_base and p['base']['ref'] == source_ref
                                for p in run['pull_requests'])):
                 continue
             jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
@@ -624,7 +640,7 @@ def feedback(pr):
     payload = [pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, pr['threads'], pr.get('_acceptance_policy',{}),
                check_evidence(pr) if checks_blocker(pr) is None else ['source-review-awaiting-checks']]
     if pr.get('_included_source'):
-        payload.append([pr['_included_source'], pr.get('body', '')])
+        payload.append([pr['_included_source'], pr.get('body', ''), pr.get('_included_evidence')])
     if pr.get('_integration_batch'):
         payload.append([pr['_integration_batch']['manifest_digest'], pr.get('body', '')])
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -2101,8 +2117,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                                  ('comparisonBaseOid', 'comparison')))
                                 or self.batches.main(project) != snapshot['baseRefOid']):
                             raise RuntimeError('included acceptance publication identity changed')
-                        pr = {**pr, 'baseRefName': 'main', 'baseRefOid': snapshot['baseRefOid'],
-                              '_review_mode': 'included', '_included_source': identity}
+                        current = json.loads(self.ticket(project, 'show', identity['owner']['key']))
+                        if (any(current.get(k) != v for k, v in identity['owner'].items())
+                                or hashlib.sha256((current.get('token') or '').encode()).hexdigest() != identity['claim_hash']):
+                            raise RuntimeError('included acceptance publication claim changed')
+                        self.assert_review_owner(project, current)
+                        pr = self.batches.included_snapshot(project, pr, snapshot['baseRefOid'], identity)
+                        if checks_blocker(pr) is not None:
+                            raise RuntimeError('included acceptance publication evidence unavailable')
                 if row['kind'] == 'review' and pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']:
                     body = f"{MARKER}\n{row['family']}/{result['model']} independent review of `{row['head']}`: **{result['verdict']}**.\n\n{result['evidence']}"
                     if not row['comment_id']:
