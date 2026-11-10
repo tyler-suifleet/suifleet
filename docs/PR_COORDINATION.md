@@ -1811,8 +1811,13 @@ the normal merged-only rollout; offline tests do not establish runtime acceptanc
 Manual implementation origins without a dispatcher directory can reconcile through
 the latest coordinator repair's retained same-claim process and exit receipts.
 The repair must be successful, belong to the current claim/family/branch/worktree,
-and have a verified stopped process. The coordinator checks helpers from boot
-(including helpers older than the repair) and rejects live claim resource leases.
+and have a verified stopped process. The coordinator bounds the helper scan by
+the unique acquisition event for the current claim token/session, converted to
+Linux boot ticks with conservative rounding. Helpers older than the repair remain
+fenced; unrelated processes predating the claim do not block it. Missing or
+ambiguous acquisition evidence fails closed. Live leases match qualified ticket
+keys, owner sessions, and ticket names in lease sessions/purposes; expired leases
+do not block reconciliation.
 A missing or damaged managed implementation receipt never uses this fallback.
 This provides process provenance only: independent exact-source/current-base
 acceptance and authenticated CI/security/testnet evidence are still required.
