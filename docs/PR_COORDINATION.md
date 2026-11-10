@@ -1731,3 +1731,11 @@ issue's exact append-only backlog and GitHub-link records alongside infrastructu
 code. It rejects edits to existing tickets, additional tickets, changed tracker
 metadata, unpublished links and application files. The activation receipt retains
 that scope proof so installation verifies the same restriction against merged main.
+
+When a published batch member still targets a branch integrated by an earlier
+batch, GitHub can leave the source PR open despite its exact head being in main.
+The coordinator verifies the sealed merged candidate, published member approval,
+unchanged source/claim and integration of the current stacked base. It completes
+the ticket using the real candidate merge and then closes the redundant source
+PR; it does not report a fabricated source merge or retarget the owner's branch.
+Advanced source heads retain their separate review and acceptance requirements.

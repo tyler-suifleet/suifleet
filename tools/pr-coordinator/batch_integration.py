@@ -26,6 +26,14 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
 
+def pull_identity(value):
+    """Pin reconciliation authority without volatile embedded repo metadata."""
+    return (value.get('number'), value.get('state'), value.get('draft'),
+            *((value.get(side, {}).get('sha'), value.get(side, {}).get('ref'),
+               value.get(side, {}).get('repo', {}).get('full_name'))
+              for side in ('head', 'base')))
+
+
 def batch_error(batch):
     """Classify structured failures only; retain legacy diagnostics in storage."""
     try:
@@ -767,6 +775,66 @@ class BatchController:
         self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'base=main'])
         return True
 
+    def reconcile_integrated_stacked_member(self, project, batch, candidate, member, pr):
+        """Complete through the real merged candidate, never invent a source merge.
+
+        A first member can retain a base from an earlier integrated batch. GitHub
+        may refuse a no-diff retarget, so recognize its exact contribution using
+        the sealed candidate and close the redundant source PR only afterwards.
+        """
+        branches = {m['owner']['branch'] for m in json.loads(batch['members'])}
+        if (pr['headRefOid'] != member['head'] or pr.get('baseRefName') == 'main'
+                or pr.get('baseRefName') in branches or pr['state'] not in ('OPEN', 'CLOSED')):
+            return False
+        if (pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('headRefName') != member['owner']['branch']
+                or batch.get('publish_intent') != 1 or not batch.get('review_id')):
+            raise RuntimeError('integrated stacked member publication identity changed')
+        approval = next((a for a in self.approval_rows(batch) if a['pr'] == member['pr']), None)
+        if (not approval or approval['status'] != 'applied'
+                or approval['head'] != member['head'] or not approval['review_node']):
+            raise RuntimeError('integrated stacked member lacks published acceptance approval')
+        endpoint = f"repos/{project['repository']}/pulls/{member['pr']}"
+        fresh = json.loads(self.c.gh(project, ['api', endpoint]))
+        if (fresh.get('number') != member['pr'] or fresh.get('state') != pr['state'].lower()
+                or fresh.get('draft') is not False
+                or fresh.get('head', {}).get('sha') != member['head']
+                or fresh.get('head', {}).get('ref') != member['owner']['branch']
+                or fresh.get('base', {}).get('ref') != pr.get('baseRefName')
+                or fresh.get('base', {}).get('sha') != pr.get('baseRefOid')
+                or not SHA.fullmatch(pr.get('baseRefOid', ''))
+                or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
+                       for side in ('head', 'base'))):
+            raise RuntimeError('integrated stacked member remote identity changed')
+        self.git(project, 'fetch', '--no-tags', 'origin', pr['baseRefName'])
+        self.git(project, 'merge-base', '--is-ancestor', pr['baseRefOid'], 'origin/main')
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], batch['head'])
+        current = self.owner(project, member)
+        # Completion clears the token. A retry after completion must still match
+        # every sealed owner identity field, but need not retain that token.
+        if (current.get('status') not in ('review', 'done') or current.get('publish_pending')
+                or any(current.get(k) != v for k, v in member['owner'].items() if k != 'claim_hash')
+                or not ((current.get('status') == 'done' and current.get('token') is None)
+                        or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                           == member['owner']['claim_hash'])):
+            raise RuntimeError('integrated stacked member retained claim changed')
+        if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
+            raise RuntimeError('integrated stacked member changed before completion')
+        # The candidate really is MERGED and contains the exact reviewed source.
+        # Existing completion verifies its main ancestry and closes this owner's
+        # issue. Do not pass a synthetic MERGED source PR to that code.
+        self.c.reconcile(project, candidate, current, None)
+        if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
+            raise RuntimeError('integrated stacked source changed before closure')
+        if pr['state'] == 'OPEN':
+            self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'state=closed'])
+        closed = json.loads(self.c.gh(project, ['api', endpoint]))
+        if pull_identity(closed) != pull_identity({**fresh, 'state': 'closed'}):
+            raise RuntimeError('integrated stacked source closure unconfirmed')
+        self.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,1)',
+                        (project['id'], member['pr'], member['head'], batch['head']))
+        return True
+
     def recognize_historical_member(self, project, batch, member, pr):
         """Record an integrated contribution, leaving its advanced PR untouched.
 
@@ -828,6 +896,8 @@ class BatchController:
         for member in json.loads(batch['members']):
             pr = self.c.pr(project, member['pr'])
             if self.recognize_historical_member(project, batch, member, pr):
+                continue
+            if self.reconcile_integrated_stacked_member(project, batch, candidate, member, pr):
                 continue
             owner = self.owner(project, member)
             if self.recognize_stacked_member(project, batch, member, pr, owner):
