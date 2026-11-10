@@ -623,14 +623,19 @@ def feedback(pr):
                for r in pr['reviews'] if pr.get('_receipts',{}).get(r['id']) != publication_hash(r)]
     payload = [pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, pr['threads'], pr.get('_acceptance_policy',{}),
                check_evidence(pr) if checks_blocker(pr) is None else ['source-review-awaiting-checks']]
+    if pr.get('_included_source'):
+        payload.append([pr['_included_source'], pr.get('body', '')])
     if pr.get('_integration_batch'):
         payload.append([pr['_integration_batch']['manifest_digest'], pr.get('body', '')])
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def gate(pr, owner, review):
-    if pr.get('baseIncluded') is not True: return 'owner must integrate current base and rerun checks'
-    if pr['state'] != 'OPEN' or pr['isDraft'] or pr['mergeable'] != 'MERGEABLE':
+def gate(pr, owner, review, *, included=False):
+    if not included and pr.get('baseIncluded') is not True: return 'owner must integrate current base and rerun checks'
+    ready_state = pr['state'] in ('OPEN', 'CLOSED') if included else pr['state'] == 'OPEN'
+    # Included reconciliation verifies ancestry independently; it neither merges
+    # a no-diff PR nor requires advancing the owner's already-integrated branch.
+    if not ready_state or pr['isDraft'] or (not included and pr['mergeable'] != 'MERGEABLE'):
         return 'not an open, ready, mergeable PR'
     if not owner or owner['status'] != 'review' or owner.get('publish_pending'):
         return 'implementation ownership is not in published Review'
@@ -1689,6 +1694,8 @@ USER-AUTHORIZED ACCEPTANCE SCOPE: {json.dumps(effective_policy(pr.get('_acceptan
 When the scope above names this ticket, the user explicitly permits implementation merge before the linked external integration acceptance. This latest user direction overrides older blanket live/hardware requirements in repository instructions and historical reviews ONLY for the listed deferred tests. Review all source and require local/isolated-chain compatibility, failure-path tests and current CI. Do not pretend deferred evidence exists. Record the linked acceptance issues and limitations in any approval. Code/security defects remain blocking; return changes_requested for any actionable code defect even if external acceptance also remains. This policy does not authorize public deployment, credential provisioning or hardware operations. When the scope does not name this ticket, retain its original acceptance requirements.
 Do not edit the coordinator database or forge another model's review. Only this worker result is collected.
 '''
+        if kind == 'review' and pr.get('_included_source'):
+            common += '\nINCLUDED SOURCE RECONCILIATION: the exact source is already in the pinned main base. This is full independent acceptance, not a source-only receipt. Verify the original source identity in _included_source, the actual contribution and current-main inclusion, required real CI/security/testnet and all software acceptance. Missing evidence requires blocked/acceptance_complete=false with a precise next action. Do not edit branches, merge, close PRs or invent merged provenance.\n'
         if kind == 'review' and pr.get('_integration_batch'):
             common += '\nINTEGRATION BATCH: this is a coordinator-owned integration PR, not an implementation claim. Do not create tickets or edit source branches. Validate the immutable batch manifest in the snapshot, every member source receipt, compatibility of the actual combined diff and all member acceptance requirements. Require current candidate/base CI, protected testnet and feature evidence before approval. Approval binds the batch manifest digest as well as this exact candidate commit.\n'
         if kind == 'review' and pr.get('_review_mode') == 'source':
@@ -2081,6 +2088,21 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             try:
                 result = json.loads(row['result'])
                 pr = self.pr(project, row['pr'])
+                if row['kind'] == 'review':
+                    snapshot_path = Path(row['directory'])/'snapshot.json'
+                    snapshot = json.loads(snapshot_path.read_text()) if snapshot_path.exists() else {}
+                    identity = snapshot.get('_included_source')
+                    if identity:
+                        # Reconstruct only the pinned acceptance context, after
+                        # checking the actual source refs and current remote main.
+                        if (any(pr.get(k) != identity[v] for k, v in
+                                (('headRefOid', 'head'), ('headRefName', 'branch'),
+                                 ('baseRefName', 'base_ref'), ('baseRefOid', 'base'),
+                                 ('comparisonBaseOid', 'comparison')))
+                                or self.batches.main(project) != snapshot['baseRefOid']):
+                            raise RuntimeError('included acceptance publication identity changed')
+                        pr = {**pr, 'baseRefName': 'main', 'baseRefOid': snapshot['baseRefOid'],
+                              '_review_mode': 'included', '_included_source': identity}
                 if row['kind'] == 'review' and pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']:
                     body = f"{MARKER}\n{row['family']}/{result['model']} independent review of `{row['head']}`: **{result['verdict']}**.\n\n{result['evidence']}"
                     if not row['comment_id']:

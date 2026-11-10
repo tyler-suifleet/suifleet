@@ -81,6 +81,132 @@ class BatchController:
             project TEXT,batch_id TEXT,pr INTEGER,receipt TEXT,created REAL,
             PRIMARY KEY(project,batch_id,pr))''')
 
+    def included_source(self, project, pr, owner):
+        """Handle a redundant source without inventing a GitHub merged state.
+
+        Return False only for a source which still needs normal integration.
+        The existing immutable job reservation bounds missing-evidence dispatch.
+        """
+        from coordinator import feedback, gate, checks_blocker
+        if (not owner or owner.get('status') not in ('review', 'done') or owner.get('publish_pending')
+                or owner.get('expired') or pr.get('state') not in ('OPEN', 'CLOSED')
+                or pr.get('isDraft') or pr.get('isCrossRepository')
+                or owner.get('branch') != pr.get('headRefName')
+                or not self.c.source_receipt(project, pr, owner)):
+            return False
+        if pr['state'] == 'CLOSED' and owner['status'] != 'done':
+            return False
+        base = self.main(project)
+        self.git(project, 'fetch', '--no-tags', 'origin', 'main', pr['headRefOid'])
+        try:
+            self.git(project, 'merge-base', '--is-ancestor', pr['headRefOid'], base)
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1:
+                return False
+            raise
+        if self.git(project, 'rev-parse', 'origin/main') != base:
+            raise RuntimeError('included source main moved during fetch')
+        # Both the comparison commit and resolved source base must be included.
+        for revision in (pr.get('comparisonBaseOid'), pr.get('baseRefOid')):
+            if not revision or not SHA.fullmatch(revision):
+                raise RuntimeError('included source base identity is unavailable')
+            self.git(project, 'merge-base', '--is-ancestor', revision, base)
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        prior = self.db.execute('SELECT receipt FROM batch_included_sources WHERE project=? AND pr=? AND head=? AND base=?',
+                                (project['id'], pr['number'], pr['headRefOid'], base)).fetchone()
+        prior = json.loads(prior[0]) if prior else {}
+        done = owner['status'] == 'done'
+        if done:
+            if prior.get('status') not in ('included-source-accepted', 'included-source-closed'):
+                raise RuntimeError('completed included source lacks retained acceptance')
+        else:
+            current = self.owner(project, {'owner': owner})
+            if any(current.get(k) != owner.get(k) for k in
+                   ('token', 'key', 'agent', 'model', 'session', 'branch', 'spec')):
+                raise RuntimeError('included source owner identity changed')
+            self.c.assert_review_owner(project, current)
+        identity = dict(head=pr['headRefOid'], branch=pr['headRefName'],
+                        base_ref=pr['baseRefName'], comparison=pr['comparisonBaseOid'],
+                        base=pr['baseRefOid'], owner={k: owner.get(k) for k in
+                            ('key', 'agent', 'model', 'session', 'branch')},
+                        claim_hash=(prior.get('identity', {}).get('claim_hash') if done else
+                                    hashlib.sha256(owner['token'].encode()).hexdigest()))
+        snapshot = {**pr, 'baseRefName': 'main', 'baseRefOid': base,
+                    '_review_mode': 'included', '_included_source': identity}
+        review = self.c.store.review(project['id'], pr['number'])
+        if done and prior.get('identity') != identity:
+            raise RuntimeError('completed included source identity changed')
+        blocker = gate(snapshot, {**owner, 'status': 'review'}, review, included=True)
+        receipt = dict(identity=identity, main=base, acceptance_complete=False,
+                       status='included-source-awaiting-acceptance', blocker=blocker,
+                       acceptance_job=review.get('id') if review else None,
+                       missing_evidence=(review.get('result', {}).get('evidence') if review else
+                                         'Full independent exact-source/current-main acceptance is missing'))
+        def save():
+            self.db.execute('INSERT OR REPLACE INTO batch_included_sources VALUES(?,?,?,?,?,?)',
+                (project['id'], pr['number'], pr['headRefOid'], base, canonical(receipt), self.clock()))
+        if not done:
+            save()
+        if blocker:
+            if done:
+                raise RuntimeError('completed included source acceptance is no longer current')
+            # Full acceptance has a separate fingerprint from source-only work.
+            # An unchanged blocked result is retained, never repeatedly launched.
+            if not review or review['head'] != snapshot['headRefOid'] or review['feedback'] != feedback(snapshot):
+                self.c.launch(project, snapshot, owner, 'review')
+            return True
+        # Reuse the existing stopped-process/helper, dependency and claim fences.
+        if not done:
+            LocalInfrastructure(self.c).fenced(project, pr, owner)
+        fresh = self.c.pr(project, pr['number'])
+        if (self.main(project) != base or any(fresh.get(k) != pr.get(k) for k in
+                ('state', 'headRefOid', 'headRefName', 'baseRefName', 'baseRefOid',
+                 'comparisonBaseOid', 'isDraft', 'isCrossRepository'))
+                or feedback({**fresh, 'baseRefName': 'main', 'baseRefOid': base,
+                             '_review_mode': 'included', '_included_source': identity}) != feedback(snapshot)
+                or checks_blocker(snapshot)):
+            raise RuntimeError('included source acceptance changed before completion')
+        if not done:
+            self.c.assert_review_owner(project, owner)
+        evidence = (f"Included source PR #{pr['number']} head {pr['headRefOid']} in main {base}; "
+                    f"accepted for redundant-source closure, not a GitHub merge. Independent acceptance job {review['id']}: "
+                    + review['result']['evidence'])
+        # Persist acceptance before completion so a failed remote mirror retains
+        # the exact evidence and can be investigated without replaying acceptance.
+        receipt.update(status='included-source-accepted', acceptance_complete=True,
+                       review=review['id'], evidence=evidence)
+        save()
+        if not done:
+            self.c.ticket(project, 'complete', owner['key'], '--expect-token', owner['token'],
+                          '--reviewer', review['family']+'/'+review['result']['model'],
+                          '--merged-commit', pr['headRefOid'], '--integration-ref', 'origin/main', '--text', evidence)
+        # Completion publication must succeed before any closure. Neither branch
+        # nor source merge metadata is rewritten or deleted.
+        completed = self.owner(project, {'owner': owner})
+        if completed.get('status') != 'done' or completed.get('publish_pending'):
+            raise RuntimeError('included source completion mirror is pending')
+        endpoint = f"repos/{project['repository']}/pulls/{pr['number']}"
+        if self.main(project) != base or self.c.pr(project, pr['number']) != fresh:
+            raise RuntimeError('included source changed before closure')
+        if pr['state'] == 'OPEN':
+            self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'state=closed'])
+        closed = self.c.pr(project, pr['number'])
+        if closed['state'] != 'CLOSED' or closed['headRefOid'] != pr['headRefOid']:
+            raise RuntimeError('included source closure unconfirmed')
+        issue = self.c.issue_number(project, owner)
+        self.c.gh(project, ['api', f"repos/{project['repository']}/issues/{issue}",
+                            '--method', 'PATCH', '-f', 'state=closed', '-f', 'state_reason=completed'])
+        confirmed_issue = json.loads(self.c.gh(project, ['api', f"repos/{project['repository']}/issues/{issue}"]))
+        if confirmed_issue.get('state') != 'closed':
+            raise RuntimeError('included source issue closure unconfirmed')
+        receipt.update(status='included-source-closed')
+        save()
+        self.db.execute('INSERT OR REPLACE INTO integrations VALUES(?,?,?,?,1)',
+                        (project['id'], pr['number'], pr['headRefOid'], base))
+        return True
+
     def exclude_included_sources(self, project, candidates, base):
         """Record ancestry only, never infer approval or ticket completion."""
         if not candidates:
@@ -1323,18 +1449,43 @@ class BatchController:
             for terminal in self.rows(project):
                 if terminal['status'] in TERMINAL:
                     self.cleanup_terminal(project, terminal)
+        # Retry accepted-but-unfinished closures even after GitHub stops listing
+        # the closed source. The durable receipt never manufactures merge state.
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        if execute:
+            for row in self.db.execute('SELECT pr,receipt FROM batch_included_sources WHERE project=?', (project['id'],)).fetchall():
+                if json.loads(row[1]).get('status') != 'included-source-accepted':
+                    continue
+                try:
+                    pending = self.c.pr(project, row[0])
+                    self.included_source(project, pending, self.c.owner(project, pending, owners))
+                except Exception as error:
+                    print(f"{project['id']} PR#{row[0]}: included closure retained ({type(error).__name__})", flush=True)
         candidates = []
+        included = set()
         def priority(pr):
             owner = self.c.owner(project, pr, owners) or {}
             return (owner.get('spec',{}).get('priority','P9'),pr['number'])
         for pr in sorted(prs, key=priority):
             if pr.get('headRefName', '').startswith('integration/batch/'):
                 continue
+            if execute:
+                try:
+                    if self.included_source(project, pr, self.c.owner(project, pr, owners)):
+                        included.add(pr['number'])
+                        continue
+                except Exception as error:
+                    # An unsafe included source cannot delay unrelated queues.
+                    included.add(pr['number'])
+                    print(f"{project['id']} PR#{pr['number']}: included reconciliation held ({type(error).__name__})", flush=True)
+                    continue
             source = self.source(project, pr, self.c.owner(project, pr, owners))
             if source:
                 candidates.append(source)
                 # source() already validates Review ownership without renewing a lease.
-        held = {member['pr'] for member in candidates}
+        held = included | {member['pr'] for member in candidates}
         active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
         limit = project.get('integration_batch', {}).get('max_in_flight', 2)
         if type(limit) is not int or not 1 <= limit <= 4:
