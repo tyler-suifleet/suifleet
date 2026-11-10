@@ -96,7 +96,7 @@ class JobTimeouts(unittest.TestCase):
             # Exercise the real PR reader; only GitHub transport is a fixture.
             def gh(project, args):
                 if args[0] == 'pr':
-                    return json.dumps({**self.pr, 'baseRefName': 'main'})
+                    return json.dumps({**self.pr, 'baseRefName': 'main', 'baseRefOid': 'd'*40})
                 if args[1] == 'graphql':
                     return json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {
                         'nodes': [], 'pageInfo': {'hasNextPage': False}}}}}})
@@ -114,6 +114,8 @@ class JobTimeouts(unittest.TestCase):
             with patch.object(engine, 'gh', side_effect=gh):
                 fresh = c.Coordinator.pr(engine, {**project, 'repository': 'owner/repo',
                                                    'github_account': 'acct'}, 7)
+            self.assertEqual(fresh['comparisonBaseOid'], 'd'*40)
+            self.assertEqual(fresh['baseRefOid'], self.pr['baseRefOid'])
             self.assertEqual(c.failed_checks(fresh)[0]['classification'], 'job_timeout')
             previous.CheckFreshnessTests().configure_scan(engine, fresh, owner)
             with patch.object(engine, 'launch') as launch, patch.object(engine, 'merge') as merge:

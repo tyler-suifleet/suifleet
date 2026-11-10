@@ -1739,3 +1739,10 @@ unchanged source/claim and integration of the current stacked base. It completes
 the ticket using the real candidate merge and then closes the redundant source
 PR; it does not report a fabricated source merge or retarget the owner's branch.
 Advanced source heads retain their separate review and acceptance requirements.
+
+The integrated stacked-member check keeps `comparisonBaseOid` (the historical
+PR comparison commit) separate from `baseRefOid` (the resolved live branch tip).
+REST snapshots must retain the comparison identity; live ref reads and the
+fetched branch must match the resolved tip. Both commits must be ancestors of
+main. Rechecks before completion and closure reject a moving live ref even
+when GitHub retains the same historical comparison base.

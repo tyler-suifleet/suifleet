@@ -22,6 +22,7 @@ class IntegratedStackedMemberTests(unittest.TestCase):
         f.reconciled.clear()
         f.git('push', '-q', 'origin', f.base+':refs/heads/previous')
         f.base_sha = f.base
+        f.comparison_base_sha = f.base
         f.remote_state = 'open'
         f.writes = []
         original_pr, original_gh = f.pr, f.gh
@@ -31,10 +32,13 @@ class IntegratedStackedMemberTests(unittest.TestCase):
             value = original_pr(project, number)
             if number == 1:
                 value.update(state=f.remote_state.upper(), baseRefName='previous',
-                             baseRefOid=f.base_sha, mergeCommit=None)
+                             baseRefOid=f.base_sha, comparisonBaseOid=f.comparison_base_sha, mergeCommit=None)
             return value
 
         def gh(project, args):
+            if args[:2] == ['api', 'repos/owner/repo/git/ref/heads/previous']:
+                return json.dumps(dict(ref='refs/heads/previous',
+                    object=dict(type='commit', sha=f.base_sha)))
             if args[:2] == ['api', 'repos/owner/repo/pulls/1']:
                 if '--method' in args:
                     self.assertEqual(args[-1], 'state=closed')
@@ -42,7 +46,7 @@ class IntegratedStackedMemberTests(unittest.TestCase):
                     f.remote_state = 'closed'
                 value = dict(number=1, state=f.remote_state, draft=False,
                              head=dict(sha=f.heads[0], ref='work/1', repo=dict(full_name='owner/repo')),
-                             base=dict(ref='previous', sha=f.base_sha, repo=dict(full_name='owner/repo')))
+                             base=dict(ref='previous', sha=f.comparison_base_sha, repo=dict(full_name='owner/repo')))
                 return json.dumps(f.mutate(value))
             return original_gh(project, args)
         f.pr, f.gh = pr, gh
@@ -77,6 +81,55 @@ class IntegratedStackedMemberTests(unittest.TestCase):
         self.assertEqual(len(f.writes), 1)
         f.controller.reconcile(f.project, f.row())
         self.assertEqual(len(f.writes), 1)
+
+    def test_historical_comparison_base_differs_from_integrated_live_tip(self):
+        f = self.fixture()
+        f.base_sha = f.heads[1]
+        f.git('push', '-q', 'origin', f.base_sha+':refs/heads/previous')
+        self.assertNotEqual(f.base_sha, f.comparison_base_sha)
+        f.controller.reconcile(f.project, f.row())
+        self.assertEqual(f.row()['status'], 'done')
+        self.assertEqual(f.remote_state, 'closed')
+
+    def test_live_base_race_before_completion_or_closure_is_rejected(self):
+        for boundary in ('fetch', 'completion', 'closure', 'confirmation'):
+            with self.subTest(boundary=boundary):
+                f = self.fixture()
+                original = f.gh
+                reads = 0
+
+                def gh(project, args):
+                    nonlocal reads
+                    value = json.loads(original(project, args))
+                    if args[1].endswith('/git/ref/heads/previous'):
+                        reads += 1
+                        if reads >= dict(fetch=1, completion=2, closure=3, confirmation=4)[boundary]:
+                            value['object']['sha'] = f.heads[1]
+                    return json.dumps(value)
+
+                f.gh = gh
+                with self.assertRaisesRegex(RuntimeError, 'live base changed'):
+                    f.controller.reconcile(f.project, f.row())
+                self.assertEqual(len(f.writes), int(boundary == 'confirmation'))
+                if boundary in ('fetch', 'completion'): self.assertFalse(f.reconciled)
+
+    def test_fetch_race_and_unintegrated_comparison_base_cannot_complete(self):
+        for kind in ('fetch', 'comparison'):
+            with self.subTest(kind=kind):
+                f = self.fixture()
+                original = f.controller.git
+                if kind == 'comparison':
+                    f.comparison_base_sha = f.git('commit-tree', f.base+'^{tree}',
+                                                  '-p', f.base, '-m', 'unintegrated')
+                else:
+                    def git(project, *args):
+                        if args == ('rev-parse', 'FETCH_HEAD'): return f.heads[1]
+                        return original(project, *args)
+                    f.controller.git = git
+                with self.assertRaises((RuntimeError, subprocess.CalledProcessError)):
+                    f.controller.reconcile(f.project, f.row())
+                self.assertFalse(f.writes)
+                self.assertFalse(f.reconciled)
 
     def test_volatile_repository_metadata_does_not_require_retry(self):
         f = self.fixture()
