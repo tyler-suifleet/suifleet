@@ -78,6 +78,48 @@ class IntegratedStackedMemberTests(unittest.TestCase):
         f.controller.reconcile(f.project, f.row())
         self.assertEqual(len(f.writes), 1)
 
+    def test_volatile_repository_metadata_does_not_require_retry(self):
+        f = self.fixture()
+        reads = 0
+
+        def metadata(value):
+            nonlocal reads
+            reads += 1
+            for side in ('head', 'base'):
+                value[side]['repo'].update(
+                    open_issues_count=15 - int(f.owners[0]['status'] == 'done')
+                    - int(f.remote_state == 'closed'),
+                    pushed_at=str(reads), updated_at=str(reads))
+            return value
+
+        f.mutate = metadata
+        f.controller.reconcile(f.project, f.row())
+        self.assertEqual(f.row()['status'], 'done')
+        self.assertEqual(f.remote_state, 'closed')
+        self.assertEqual(len(f.writes), 1)
+        self.assertGreaterEqual(reads, 4)
+
+    def test_identity_changes_during_closure_are_rejected(self):
+        for field in ('number', 'draft', 'head_sha', 'head_ref', 'head_repo',
+                      'base_sha', 'base_ref', 'base_repo'):
+            with self.subTest(field=field):
+                f = self.fixture()
+
+                def mutate(value):
+                    if f.remote_state == 'closed':
+                        if field == 'number': value['number'] = 999
+                        elif field == 'draft': value['draft'] = True
+                        else:
+                            side, key = field.split('_')
+                            if key == 'repo': value[side]['repo']['full_name'] = 'fork/repo'
+                            else: value[side][key] = 'changed'
+                    return value
+
+                f.mutate = mutate
+                with self.assertRaisesRegex(RuntimeError, 'closure unconfirmed'):
+                    f.controller.reconcile(f.project, f.row())
+                self.assertEqual(f.row()['status'], 'reconciling')
+
     def test_completion_with_cleared_token_retries_closure_failures(self):
         for failure in ('before_closure', 'patch', 'confirmation'):
             with self.subTest(failure=failure):

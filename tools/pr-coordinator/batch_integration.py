@@ -26,6 +26,14 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
 
+def pull_identity(value):
+    """Pin reconciliation authority without volatile embedded repo metadata."""
+    return (value.get('number'), value.get('state'), value.get('draft'),
+            *((value.get(side, {}).get('sha'), value.get(side, {}).get('ref'),
+               value.get(side, {}).get('repo', {}).get('full_name'))
+              for side in ('head', 'base')))
+
+
 def batch_error(batch):
     """Classify structured failures only; retain legacy diagnostics in storage."""
     try:
@@ -810,19 +818,18 @@ class BatchController:
                         or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
                            == member['owner']['claim_hash'])):
             raise RuntimeError('integrated stacked member retained claim changed')
-        if json.loads(self.c.gh(project, ['api', endpoint])) != fresh:
+        if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
             raise RuntimeError('integrated stacked member changed before completion')
         # The candidate really is MERGED and contains the exact reviewed source.
         # Existing completion verifies its main ancestry and closes this owner's
         # issue. Do not pass a synthetic MERGED source PR to that code.
         self.c.reconcile(project, candidate, current, None)
-        if json.loads(self.c.gh(project, ['api', endpoint])) != fresh:
+        if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
             raise RuntimeError('integrated stacked source changed before closure')
         if pr['state'] == 'OPEN':
             self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'state=closed'])
         closed = json.loads(self.c.gh(project, ['api', endpoint]))
-        if (closed.get('state') != 'closed' or closed.get('head') != fresh.get('head')
-                or closed.get('base') != fresh.get('base')):
+        if pull_identity(closed) != pull_identity({**fresh, 'state': 'closed'}):
             raise RuntimeError('integrated stacked source closure unconfirmed')
         self.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,1)',
                         (project['id'], member['pr'], member['head'], batch['head']))
