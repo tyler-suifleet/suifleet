@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from urllib.parse import quote
 
 IDENTITY = 'Tyler Bush <tyler.jonathan.bush@gmail.com>'
 TERMINAL = ('done', 'invalidated', 'failed')
@@ -801,13 +802,30 @@ class BatchController:
                 or fresh.get('head', {}).get('sha') != member['head']
                 or fresh.get('head', {}).get('ref') != member['owner']['branch']
                 or fresh.get('base', {}).get('ref') != pr.get('baseRefName')
-                or fresh.get('base', {}).get('sha') != pr.get('baseRefOid')
+                or fresh.get('base', {}).get('sha') != pr.get('comparisonBaseOid')
+                or not SHA.fullmatch(pr.get('comparisonBaseOid', ''))
                 or not SHA.fullmatch(pr.get('baseRefOid', ''))
                 or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
                        for side in ('head', 'base'))):
             raise RuntimeError('integrated stacked member remote identity changed')
+        # REST pins the historical comparison base, while Coordinator.pr binds
+        # baseRefOid to the live branch tip. Neither may substitute for the other.
+        ref_endpoint = (f"repos/{project['repository']}/git/ref/heads/"
+                        + quote(pr['baseRefName'], safe='/'))
+
+        def assert_live_base():
+            reference = json.loads(self.c.gh(project, ['api', ref_endpoint]))
+            if (reference.get('ref') != 'refs/heads/' + pr['baseRefName']
+                    or reference.get('object', {}).get('type') != 'commit'
+                    or reference.get('object', {}).get('sha') != pr['baseRefOid']):
+                raise RuntimeError('integrated stacked member live base changed')
+
+        assert_live_base()
         self.git(project, 'fetch', '--no-tags', 'origin', pr['baseRefName'])
-        self.git(project, 'merge-base', '--is-ancestor', pr['baseRefOid'], 'origin/main')
+        if self.git(project, 'rev-parse', 'FETCH_HEAD') != pr['baseRefOid']:
+            raise RuntimeError('integrated stacked member fetched base changed')
+        for base in (pr['comparisonBaseOid'], pr['baseRefOid']):
+            self.git(project, 'merge-base', '--is-ancestor', base, 'origin/main')
         self.git(project, 'merge-base', '--is-ancestor', member['head'], batch['head'])
         current = self.owner(project, member)
         # Completion clears the token. A retry after completion must still match
@@ -820,17 +838,20 @@ class BatchController:
             raise RuntimeError('integrated stacked member retained claim changed')
         if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
             raise RuntimeError('integrated stacked member changed before completion')
+        assert_live_base()
         # The candidate really is MERGED and contains the exact reviewed source.
         # Existing completion verifies its main ancestry and closes this owner's
         # issue. Do not pass a synthetic MERGED source PR to that code.
         self.c.reconcile(project, candidate, current, None)
         if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
             raise RuntimeError('integrated stacked source changed before closure')
+        assert_live_base()
         if pr['state'] == 'OPEN':
             self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'state=closed'])
         closed = json.loads(self.c.gh(project, ['api', endpoint]))
         if pull_identity(closed) != pull_identity({**fresh, 'state': 'closed'}):
             raise RuntimeError('integrated stacked source closure unconfirmed')
+        assert_live_base()
         self.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,1)',
                         (project['id'], member['pr'], member['head'], batch['head']))
         return True

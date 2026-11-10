@@ -1373,6 +1373,7 @@ class Coordinator:
         # GitHub's PR baseRefOid can retain the original comparison base.
         # Approval must bind to the actual current integration branch tip.
         reference=json.loads(self.gh(project,['api',f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'],safe='/')}"]))
+        pr['comparisonBaseOid'] = pr['baseRefOid']
         pr['baseRefOid']=reference['object']['sha']
         comparison=self.immutable_read(project,f"repos/{project['repository']}/compare/{pr['baseRefOid']}...{pr['headRefOid']}")
         pr['baseIncluded']=comparison['merge_base_commit']['sha'] == pr['baseRefOid']
