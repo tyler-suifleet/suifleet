@@ -81,6 +81,91 @@ class BatchController:
             project TEXT,batch_id TEXT,pr INTEGER,receipt TEXT,created REAL,
             PRIMARY KEY(project,batch_id,pr))''')
 
+    def included_evidence(self, project, source, base):
+        """Read-only evidence for main's actual (main,parent) test identity.
+
+        Never retarget a source workflow or turn ancestry into acceptance. The
+        latest main CI and status must authenticate successful producer runs.
+        Mutable metadata is re-read on every review/publication/completion.
+        """
+        prefix = f"repos/{project['repository']}"
+        read = lambda path: json.loads(self.c.gh(project, ['api', path]))
+        commit = read(f'{prefix}/commits/{base}')
+        parent = commit['parents'][0]['sha']
+        if commit.get('sha') != base or not SHA.fullmatch(parent):
+            raise RuntimeError('included evidence commit identity unavailable')
+        def valid(run, name, path, events):
+            return (run.get('name') == name and run.get('path') == path
+                and run.get('head_sha') == base and run.get('head_branch') == 'main'
+                and run.get('event') in events and run.get('status') == 'completed'
+                and run.get('conclusion') == 'success'
+                and type(run.get('id')) is int and run['id'] > 0
+                and type(run.get('run_attempt')) is int and run['run_attempt'] > 0
+                and all(run.get(k, {}).get('full_name') == project['repository']
+                        for k in ('repository', 'head_repository')))
+        runs = read(f'{prefix}/actions/workflows/ci.yml/runs?head_sha={base}&branch=main&per_page=1')['workflow_runs']
+        if not runs:
+            raise RuntimeError('included evidence needs current-main CI; run gh workflow run ci.yml --ref main once')
+        ci = read(f"{prefix}/actions/runs/{runs[0]['id']}")
+        if not valid(ci, 'CI', '.github/workflows/ci.yml', ('push', 'workflow_dispatch', 'schedule')):
+            raise RuntimeError(f"included evidence CI is pending or failed; after repair run gh run rerun {ci['id']} -R {project['repository']} once")
+        jobs = read(f"{prefix}/actions/runs/{ci['id']}/attempts/{ci['run_attempt']}/jobs?per_page=100")
+        names = {j.get('name') for j in jobs['jobs']}
+        required = {'check', 'Security dependencies, secrets and configuration',
+                    *('Security CodeQL ('+lang+')' for lang in ('javascript-typescript', 'python', 'rust', 'actions'))}
+        if (jobs.get('total_count') != len(jobs['jobs']) or not required <= names
+                or not all(j.get('head_sha') == base and j.get('status') == 'completed'
+                           and j.get('conclusion') == 'success' for j in jobs['jobs'])):
+            raise RuntimeError('included evidence CI/security jobs are incomplete or unsuccessful')
+        statuses = read(f'{prefix}/commits/{base}/status')
+        status = next((s for s in statuses['statuses'] if s.get('context') == 'testnet/package-upgrade'), {})
+        match = re.fullmatch(r'https://github\.com/' + re.escape(project['repository'])
+                             + r'/actions/runs/([1-9][0-9]*)', status.get('target_url', ''))
+        if (status.get('state') != 'success' or status.get('description') != 'base:'+parent or not match):
+            raise RuntimeError('included evidence needs successful main/parent testnet; rerun current-main CI once after repair')
+        path = f'{prefix}/actions/runs/{match[1]}'
+        testnet = read(path)
+        if (str(testnet.get('id')) != match[1] or not valid(testnet, 'Automatic testnet',
+                '.github/workflows/testnet.yml', ('workflow_run',))):
+            raise RuntimeError('included evidence testnet producer is unauthenticated')
+        with tempfile.TemporaryDirectory(prefix='included-main-effects-') as directory:
+            self.c.gh(project, ['run', 'download', match[1], '-R', project['repository'],
+                               '-n', 'testnet-effects-'+base, '-D', directory])
+            file = Path(directory)/'package-upgrade.json'
+            if file.is_symlink() or not file.is_file() or file.stat().st_size > 4_000_000:
+                raise RuntimeError('included evidence effects unavailable; rerun current-main CI once')
+            raw = file.read_bytes()
+            effects = json.loads(raw)
+        if (effects.get('success') is not True or effects.get('head') != base
+                or effects.get('base') != parent or effects.get('chain', effects.get('chain_identifier')) != '4c78adac'):
+            raise RuntimeError('included evidence effects identity or outcome mismatch')
+        if (read(path) != testnet or read(f"{prefix}/actions/runs/{ci['id']}") != ci
+                or read(f'{prefix}/commits/{base}/status') != statuses
+                or self.main(project) != base):
+            raise RuntimeError('included evidence changed while authenticating')
+        return dict(source=source, head=base, base=parent, ci=ci['id'], ci_attempt=ci['run_attempt'],
+                    testnet=testnet['id'], testnet_attempt=testnet['run_attempt'],
+                    effects_sha256=hashlib.sha256(raw).hexdigest())
+
+    def included_snapshot(self, project, pr, base, identity):
+        snapshot = {**pr, 'baseRefName': 'main', 'baseRefOid': base,
+                    '_review_mode': 'included', '_included_source': identity,
+                    'statusCheckRollup': [dict(check) for check in pr['statusCheckRollup']]}
+        snapshot.pop('_included_evidence', None)
+        snapshot.pop('_included_evidence_error', None)
+        try:
+            snapshot['_included_evidence'] = self.included_evidence(project, pr['headRefOid'], base)
+            from coordinator import annotate_optional_skips
+            annotate_optional_skips(snapshot, project['repository'],
+                lambda path: json.loads(self.c.gh(project, ['api', path])),
+                lambda path: self.c.immutable_read(project, path))
+        except Exception as error:
+            # No worker is launched to wait on unavailable checks. Keep a bounded,
+            # executable operator action in the receipt and retry reads next tick.
+            snapshot['_included_evidence_error'] = (str(error) if type(error) is RuntimeError
+                else 'included evidence unavailable; inspect current-main CI/testnet and rerun CI once after repair')
+        return snapshot
+
     def included_source(self, project, pr, owner):
         """Handle a redundant source without inventing a GitHub merged state.
 
@@ -133,17 +218,19 @@ class BatchController:
                             ('key', 'agent', 'model', 'session', 'branch')},
                         claim_hash=(prior.get('identity', {}).get('claim_hash') if done else
                                     hashlib.sha256(owner['token'].encode()).hexdigest()))
-        snapshot = {**pr, 'baseRefName': 'main', 'baseRefOid': base,
-                    '_review_mode': 'included', '_included_source': identity}
+        snapshot = self.included_snapshot(project, pr, base, identity)
         review = self.c.store.review(project['id'], pr['number'])
         if done and prior.get('identity') != identity:
             raise RuntimeError('completed included source identity changed')
-        blocker = gate(snapshot, {**owner, 'status': 'review'}, review, included=True)
+        blocker = checks_blocker(snapshot) or gate(snapshot, {**owner, 'status': 'review'}, review, included=True)
         receipt = dict(identity=identity, main=base, acceptance_complete=False,
                        status='included-source-awaiting-acceptance', blocker=blocker,
                        acceptance_job=review.get('id') if review else None,
-                       missing_evidence=(review.get('result', {}).get('evidence') if review else
-                                         'Full independent exact-source/current-main acceptance is missing'))
+                       check_evidence=snapshot.get('_included_evidence'),
+                       next_action=(f"Inspect/repair the reported evidence failure, then run gh workflow run ci.yml --ref main -R {project['repository']} once; never retarget the source branch"
+                                    if snapshot.get('_included_evidence_error') else None),
+                       missing_evidence=(snapshot.get('_included_evidence_error') or (review.get('result', {}).get('evidence') if review else
+                                         'Full independent exact-source/current-main acceptance is missing')))
         def save():
             self.db.execute('INSERT OR REPLACE INTO batch_included_sources VALUES(?,?,?,?,?,?)',
                 (project['id'], pr['number'], pr['headRefOid'], base, canonical(receipt), self.clock()))
@@ -154,7 +241,8 @@ class BatchController:
                 raise RuntimeError('completed included source acceptance is no longer current')
             # Full acceptance has a separate fingerprint from source-only work.
             # An unchanged blocked result is retained, never repeatedly launched.
-            if not review or review['head'] != snapshot['headRefOid'] or review['feedback'] != feedback(snapshot):
+            if (checks_blocker(snapshot) is None and (not review or review['head'] != snapshot['headRefOid']
+                    or review['feedback'] != feedback(snapshot))):
                 self.c.launch(project, snapshot, owner, 'review')
             return True
         # Reuse the existing stopped-process/helper, dependency and claim fences.
@@ -164,8 +252,7 @@ class BatchController:
         if (self.main(project) != base or any(fresh.get(k) != pr.get(k) for k in
                 ('state', 'headRefOid', 'headRefName', 'baseRefName', 'baseRefOid',
                  'comparisonBaseOid', 'isDraft', 'isCrossRepository'))
-                or feedback({**fresh, 'baseRefName': 'main', 'baseRefOid': base,
-                             '_review_mode': 'included', '_included_source': identity}) != feedback(snapshot)
+                or feedback(self.included_snapshot(project, fresh, base, identity)) != feedback(snapshot)
                 or checks_blocker(snapshot)):
             raise RuntimeError('included source acceptance changed before completion')
         if not done:
