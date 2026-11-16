@@ -319,6 +319,29 @@ class ReadThrottleTests(unittest.TestCase):
                 self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20, 40])
                 self.assertTrue(all(call == ran.call_args for call in ran.call_args_list))
 
+    transport = CompletedProcess([], 1, "", "code: 'The service is currently unavailable', message: \"upstream connect error or disconnect/reset before headers. reset reason: connection termination\"")
+
+    def test_package_receipt_object_read_recovers_from_observed_disconnect(self):
+        with patch.object(live_common.subprocess, "run", side_effect=[self.transport, CompletedProcess([], 0, '{"content": {}}', "")]) as ran, patch.object(live_common.time, "sleep") as sleep:
+            self.assertEqual(live_package_upgrade.package_client("sui", "wallet.yaml", "object", "receipt"), {"content": {}})
+        self.assertEqual(ran.call_count, 2)
+        self.assertEqual(ran.call_args_list[0], ran.call_args_list[1])
+        sleep.assert_called_once_with(5)
+
+    def test_persistent_transport_failure_stops_at_existing_bound(self):
+        with patch.object(live_common.subprocess, "run", return_value=self.transport) as ran, patch.object(live_common.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "connection termination"):
+                self.client()("object", "receipt")
+        self.assertEqual(ran.call_count, 5)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20, 40])
+
+    def test_transport_failure_never_replays_mutations(self):
+        for command in ("ptb", "execute-signed-tx", "serialized-tx", "publish", "faucet", "unknown"):
+            with self.subTest(command=command), patch.object(live_common.subprocess, "run", return_value=self.transport) as ran, patch.object(live_common.time, "sleep") as sleep:
+                self.assertIs(self.client()(command, check=False, json_output=False), self.transport)
+                self.assertEqual(ran.call_count, 1)
+                sleep.assert_not_called()
+
     def test_package_unsigned_ptb_build_retries_throttle_before_signing(self):
         command = ["ptb", "--move-call", "0x1::audit::record",
                    "--gas-budget", "35000000", "--serialize-unsigned-transaction"]
