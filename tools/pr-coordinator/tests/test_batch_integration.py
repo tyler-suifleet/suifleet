@@ -152,7 +152,12 @@ class Fixture:
         owner['status']='done'
         self.db.execute('update integrations set reconciled=1 where project=? and pr=?',('test',pr['number']))
 
-    def row(self):return self.controller.rows(self.project)[-1]
+    def row(self):
+        # The fixture asks for its latest inserted epoch. Wall-clock rollback or
+        # equal timestamps must not select an older failed epoch instead.
+        latest = self.db.execute('SELECT id FROM integration_batches WHERE project=? ORDER BY rowid DESC LIMIT 1',
+                                 (self.project['id'],)).fetchone()[0]
+        return next(row for row in self.controller.rows(self.project) if row['id'] == latest)
     def tick(self):return self.controller.tick(self.project,[self.pr(self.project,n) for n in self.source_prs],self.owners,True)
 
     def green(self):
