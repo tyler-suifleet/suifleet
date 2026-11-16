@@ -9,6 +9,8 @@ import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 import { normalizeSuiAddress, toBase58 } from "@mysten/sui/utils";
 import { dAppKit as kit } from "@/lib/dapp-kit";
+import { FleetSelectionProvider, FleetScope, onboardingRoute } from "@/hooks/useFleetSelection";
+import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { FirstRun } from "@/components/FirstRun";
 import { DeviceBcs } from "@/lib/move-bcs";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
@@ -81,5 +83,5 @@ Object.assign(window, { acceptance: {
   unsupportedChain: () => { account.chains = ["sui:mainnet"]; listeners.forEach((fn) => fn({ accounts: [account] })); },
   wallets: () => kit.stores.$wallets.get().map((w) => w.name), signCalls: () => signCalls, disconnect: () => kit.disconnectWallet(),
 } });
-function App() { return <FirstRun connect={<ConnectButton />} />; }
+function App() { return COLD_START ? <FleetSelectionProvider><FleetSwitcher /><FleetScope allowWithoutFleet={onboardingRoute("/get-started/")}><FirstRun connect={<ConnectButton />} /></FleetScope><FleetScope><p>Restricted fleet content</p></FleetScope></FleetSelectionProvider> : <FirstRun connect={<ConnectButton />} />; }
 createRoot(document.getElementById("root")).render(<QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><App /></DAppKitProvider></QueryClientProvider>);
