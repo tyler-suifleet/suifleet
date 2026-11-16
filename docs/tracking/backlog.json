@@ -5131,6 +5131,31 @@
         "Locally tested infrastructure is integrated under the user local-test policy with Tyler authorship, installed runtime provenance and verified issue/project reconciliation."
       ],
       "validation": "Coordinator regression suite on actual combined main candidate; offline tracking tests and dry run; exact receipt/source/CI/job proof and runtime/service checks. No hardware or chain writes required."
+    },
+    {
+      "key": "SF-279",
+      "title": "Restore testnet CI compatibility with protocol142",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "Dockerfile",
+        "scripts/sui_toolchain.py",
+        "scripts/tests/test_testnet_toolchain.py",
+        "docs/TESTNET.md"
+      ],
+      "resources": [],
+      "description": "Split the independently scoped protocol142 transaction-CLI repair from queue-recovery PR712 so the latter can use its local-test runtime integration lane. Public testnet advanced beyond the pinned1.83.0 transaction CLI max140, causing shared preflight failures on otherwise passing customer fixes. Preserve original repair commit9a5b7408, update only the transaction CLI pin/checksums/protocol limit to verified testnet-v1.84.0, and keep the release compiler/bytecode framework/wallet/spending protections unchanged. Integrate tested CI infrastructure under the existing user local-test policy, with exact main candidate evidence; do not invent hosted-CI success.",
+      "evidence": "Customer PR714 and related testnet/package-upgrade failures share protocol142 versus transaction CLI1.83.0 max140. Original repair9a5b7408 is preserved in PR712 history; its file changes are separated from runtime-core repair to avoid a scope-routing deadlock.",
+      "acceptance": [
+        "Dockerfile transaction CLI and NETWORK metadata agree with official release1.84.0, SHA256 identities and supported protocol142; unsupported143 still fails closed.",
+        "Release compiler/toolchain and all account/network/upgrade/spend verification remain unchanged.",
+        "Meaningful offline toolchain tests, binary identity validation and read-only protocol preflight pass on the actual combined main candidate; no testnet write is required to verify the pin itself.",
+        "Preserve honest hosted-CI state; after merge, relevant CI/testnet runs use the upgraded verified transaction CLI and remaining failures receive bounded targeted repair."
+      ],
+      "validation": "Run scripts/tests/test_testnet_toolchain.py plus tracking validation/diff checks; verify SHA256/version of the actual pinned binary and read-only live-network compatibility. Record precise local versus hosted evidence. No mainnet, account transfers, secret changes or approval fabrication."
     }
   ]
 }
