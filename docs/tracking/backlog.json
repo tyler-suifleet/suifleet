@@ -5107,6 +5107,30 @@
         "Meaningful offline regressions/full coordinator tests and normal PR handoff; install only reviewed merged code."
       ],
       "validation": "Run targeted provenance regressions and full offline coordinator suite; verify staged scope and Tyler authorship."
+    },
+    {
+      "key": "SF-270",
+      "title": "Recover completed-ticket publication and included-source CI waits",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Resolve verified coordinator gaps found during the owner-requested customer audit: SF-246 reached Done at revision12 with publication stuck at11, leaving approved included PR617/issue614 open; completed-source closure is then blocked by a newer same-head CI whose macOS job never acquired a hosted runner. Closed invalidated integration PR687/688 retain stopped retry jobs. Preserve current-main security/CI evidence and exact accepted-source authority. Retry pending Done mirrors before included-source closure, recognize narrowly authenticated current-main hosted-runner acquisition failures through existing bounded recovery, and retire only stopped obsolete closed review jobs with fresh remote and terminal-batch proof. Keep normal source/wallet/spending/release/hardware/mainnet protections unchanged.",
+      "evidence": "2026-11-16 actual SQLite/GitHub investigation: SF246 local12/published11, approved included acceptance job3968, CI43931104228 failed only job133523425081 cancelled before zero steps/no runner with exact GitHub hosted-capacity annotations. Supported publication retry and targeted runner rerun performed; no acceptance fabricated. Jobs3949/3950 reference closed invalidated PR687/688 and remain retry.",
+      "acceptance": [
+        "A completed ticket whose remote mirror fails is retried with bounded backoff and exact claim/revision checks before included-source closure; no duplicate completion or approval.",
+        "A current-main CI hosted-runner acquisition failure is eligible for the existing strict bounded job recovery only with authenticated current main/included-source evidence; test failures and arbitrary cancelled jobs remain blocked.",
+        "Closed/invalidated review retries are superseded only after exact process/helper stop and fresh matching remote/batch verification; uncertain workers remain reserved.",
+        "Regression tests reproduce all recovered failure modes and preserve failures for changed ownership, stale main, missing/altered acceptance and live processes.",
+        "Locally tested infrastructure is integrated under the user local-test policy with Tyler authorship, installed runtime provenance and verified issue/project reconciliation."
+      ],
+      "validation": "Coordinator regression suite on actual combined main candidate; offline tracking tests and dry run; exact receipt/source/CI/job proof and runtime/service checks. No hardware or chain writes required."
     }
   ]
 }
