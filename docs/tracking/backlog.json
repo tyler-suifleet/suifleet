@@ -5117,8 +5117,8 @@
       "kind": "type:bug",
       "depends_on": [],
       "paths": [
-        "tools/pr-coordinator",
-        "docs/PR_COORDINATION.md"
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
       ],
       "resources": [],
       "description": "Resolve verified coordinator gaps found during the owner-requested customer audit: SF-246 reached Done at revision12 with publication stuck at11, leaving approved included PR617/issue614 open; completed-source closure is then blocked by a newer same-head CI whose macOS job never acquired a hosted runner. Closed invalidated integration PR687/688 retain stopped retry jobs. Preserve current-main security/CI evidence and exact accepted-source authority. Retry pending Done mirrors before included-source closure, recognize narrowly authenticated current-main hosted-runner acquisition failures through existing bounded recovery, and retire only stopped obsolete closed review jobs with fresh remote and terminal-batch proof. Keep normal source/wallet/spending/release/hardware/mainnet protections unchanged.",
