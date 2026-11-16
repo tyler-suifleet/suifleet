@@ -248,7 +248,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </StepCard>
 
     <StepCard id="update" index={4} title="Deploy a first update" state={steps[3].state}>
-      <p className="text-gray-700">Publish a version in Components, then choose the device that should receive it. The update applies after the device client is running and picks it up; check results on Deployments.</p>
+      <p className="text-gray-700">Publish a version in Software library, then choose the device that should receive it. The update applies after the device client is running and picks it up; check results on Deployments.</p>
       {steps[3].state === "current"
         ? <Link className={PRIMARY} href="/firmware">Deploy a component</Link>
         : <p className="text-gray-600">Available after you register a device.</p>}
