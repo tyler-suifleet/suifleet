@@ -1,6 +1,10 @@
 # Public documentation build (SF-177)
 
-Source of truth: the explicitly listed Markdown files under docs/ in pages.json.
+Source of truth: the explicitly listed customer Markdown files under docs/ in pages.json.
+Customer pages use CUSTOMER_ filenames, with INSTALL_DEVICE_CLIENT.md retained
+for stable console anchors. Engineering documents remain separately linked under
+Technical reference; they are not copied into public pages or search. Public slugs
+remain stable when their source filename changes.
 No directory crawl publishes tracking, agent, coordination, business plans or
 validation receipts as documentation pages. Relative links to other existing
 repository files become public GitHub source links; they are not copied into the
@@ -27,10 +31,13 @@ marked docs output can be replaced by the builder. Build output has no timestamp
 
 With existing dapp dependencies and local Google Chrome installed, optional
 offline browser QA exercises mobile/desktop layout and search/navigation without
-opening a port or making network requests:
+opening a port or making network requests. Set `SUIFLEET_PLAYWRIGHT_MODULE`
+to an installed Playwright module when dependencies live outside this checkout:
 
 ~~~sh
 node site/docs/tests/browser.cjs /tmp/suifleet-docs
+python3 site/build.py --out /tmp/suifleet-site
+node site/docs/tests/customer-flow.cjs /tmp/suifleet-site /tmp/suifleet-docs /tmp/suifleet-docs-qa
 ~~~
 
 ## Stable public contract

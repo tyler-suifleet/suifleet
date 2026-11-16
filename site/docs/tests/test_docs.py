@@ -63,6 +63,49 @@ class DocsTest(unittest.TestCase):
         self.assertIn('/device-client/', (self.out / "install/index.html").read_text())
         self.assertIn('docs/INSTALL_DEVICE_CLIENT.md', {p["source"] for p in build.catalog()})
 
+    def test_customer_contract_and_setup_handoff(self):
+        build.build(self.out)
+        for page in build.catalog():
+            text = (build.ROOT / page["source"]).read_text()
+            with self.subTest(page=page["slug"]):
+                self.assertNotRegex(text, r"SF-\d+")
+                self.assertIn("## Prerequisites", text)
+                self.assertRegex(text, r"## Expected result")
+                self.assertRegex(text, r"## Recovery")
+                self.assertIn("## Technical reference", text)
+                self.assertNotRegex(page["title"], r"SF-\d+")
+        setup = (self.out / "device-client/index.html").read_text()
+        for phrase in ["Download connection settings", "device_object_id", "device_cap_id", "signer.toml", "config.toml"]:
+            self.assertIn(phrase, setup)
+        self.assertNotIn("Download deployment.json", setup)
+        helper = (build.ROOT / "dapp/src/components/DeviceClientHelp.tsx").read_text()
+        self.assertIn(">Download connection settings</button>", helper)
+        devices = (build.ROOT / "dapp/src/app/devices/page.tsx").read_text()
+        self.assertIn(">Register by address</button>", devices)
+        # All three entry points retain the ID handoff, not just the deep guide.
+        for slug in ["install", "enrollment", "deployment-manifest"]:
+            text = (self.out / slug / "index.html").read_text()
+            self.assertIn("DeviceCap", text)
+        # Engineering histories stay linked as reference, outside search/pages.
+        self.assertNotIn("docs/ENROLLMENT.md", {p["source"] for p in build.catalog()})
+        self.assertIn("/blob/main/docs/ENROLLMENT.md", (self.out / "enrollment/index.html").read_text())
+
+    def test_handover_guide_matches_console_controls(self):
+        guide = (build.ROOT / "docs/CUSTOMER_HANDOVER.md").read_text()
+        console = (build.ROOT / "dapp/src/app/handover/page.tsx").read_text()
+        for label in ["Administration", "Choose what to transfer",
+                      "New administrator’s account address", "Resources you manage",
+                      "Advanced: specify additional resources", "Additional resource list",
+                      "Create transfer request", "Transfer reference", "Review transfer",
+                      "Accept as new administrator", "Finish transfer"]:
+            with self.subTest(label=label):
+                self.assertIn(label, guide)
+                self.assertIn(label, console)
+        self.assertIn("Transfer next N resources", guide)
+        self.assertIn("Transfer next {Math.min(pending.length, 16)} resources", console)
+        for stale in ["Fleet handover", "Handover ID", "Confirm as recipient", "**Finish**"]:
+            self.assertNotIn(stale, guide)
+
     def test_links_fail_on_missing_page_and_anchor(self):
         with self.assertRaisesRegex(ValueError, "Incomplete"):
             build.check(self.out)
@@ -82,7 +125,7 @@ class DocsTest(unittest.TestCase):
 
     def test_repository_links_and_sources_are_validated(self):
         pages = build.catalog()
-        self.assertEqual(build.rewrite_url("ENROLLMENT.md#claim-enrollment-and-bulk-onboarding", "docs/INSTALL.md", pages), "/enrollment/#claim-enrollment-and-bulk-onboarding")
+        self.assertEqual(build.rewrite_url("CUSTOMER_ENROLLMENT.md#steps", "docs/CUSTOMER_INSTALL.md", pages), "/enrollment/#steps")
         self.assertIn("/blob/main/suifleet-edge/config.example.toml", build.rewrite_url("../suifleet-edge/config.example.toml", "docs/INSTALL.md", pages))
         for bad in ("MISSING.md", "../../../../../etc/passwd", "javascript:alert(1)"):
             with self.assertRaises(ValueError):
