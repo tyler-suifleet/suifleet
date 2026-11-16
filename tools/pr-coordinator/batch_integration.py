@@ -166,6 +166,157 @@ class BatchController:
                 else 'included evidence unavailable; inspect current-main CI/testnet and rerun CI once after repair')
         return snapshot
 
+    def included_checkpoint_evidence(self, project, source, base, expected):
+        """Authenticate the original successful attempts, never a newer run ID."""
+        prefix = 'repos/'+project['repository']
+        read = lambda path: json.loads(self.c.gh(project, ['api', path]))
+        if (not isinstance(expected, dict) or expected.get('source') != source or expected.get('head') != base
+                or not re.fullmatch(r'[0-9a-f]{64}', expected.get('effects_sha256', ''))
+                or any(type(expected.get(k)) is not int or expected[k] <= 0
+                       for k in ('ci','ci_attempt','testnet','testnet_attempt'))):
+            raise RuntimeError('completed source checkpoint evidence is malformed')
+        commit = read(prefix+'/commits/'+base)
+        parent = commit['parents'][0]['sha']
+        if commit.get('sha') != base or parent != expected.get('base'):
+            raise RuntimeError('completed source checkpoint parent changed')
+        def attempt(kind, name, path, events):
+            endpoint = prefix+'/actions/runs/'+str(expected[kind])+'/attempts/'+str(expected[kind+'_attempt'])
+            run = read(endpoint)
+            if (run.get('id') != expected[kind] or run.get('run_attempt') != expected[kind+'_attempt']
+                    or run.get('name') != name or run.get('path') != path or run.get('event') not in events
+                    or run.get('head_sha') != base or run.get('head_branch') != 'main'
+                    or run.get('status') != 'completed' or run.get('conclusion') != 'success'
+                    or any((run.get(k) or {}).get('full_name') != project['repository']
+                           for k in ('repository','head_repository'))):
+                raise RuntimeError('completed source checkpoint producer is unauthenticated')
+            return endpoint, run
+        ci_path, ci = attempt('ci','CI','.github/workflows/ci.yml',('push','workflow_dispatch','schedule'))
+        jobs = read(ci_path+'/jobs?per_page=100')
+        required = {'check','Security dependencies, secrets and configuration',
+                    *('Security CodeQL ('+lang+')' for lang in ('javascript-typescript','python','rust','actions'))}
+        if (jobs.get('total_count') != len(jobs['jobs']) or not required <= {j.get('name') for j in jobs['jobs']}
+                or not all(j.get('head_sha') == base and j.get('status') == 'completed'
+                           and j.get('conclusion') == 'success' for j in jobs['jobs'])):
+            raise RuntimeError('completed source checkpoint CI/security jobs are unsuccessful')
+        testnet_path, testnet = attempt('testnet','Automatic testnet','.github/workflows/testnet.yml',('workflow_run',))
+        with tempfile.TemporaryDirectory(prefix='included-checkpoint-effects-') as directory:
+            self.c.gh(project, ['run','download',str(expected['testnet']),'-R',project['repository'],
+                               '-n','testnet-effects-'+base,'-D',directory])
+            file = Path(directory)/'package-upgrade.json'
+            if file.is_symlink() or not file.is_file() or file.stat().st_size > 4_000_000:
+                raise RuntimeError('completed source checkpoint effects unavailable')
+            raw = file.read_bytes(); effects = json.loads(raw)
+        if (hashlib.sha256(raw).hexdigest() != expected['effects_sha256'] or effects.get('success') is not True
+                or effects.get('head') != base or effects.get('base') != parent
+                or effects.get('chain', effects.get('chain_identifier')) != '4c78adac'
+                or read(ci_path) != ci or read(testnet_path) != testnet):
+            raise RuntimeError('completed source checkpoint effects changed')
+        return expected
+
+    def continue_completed_source(self, project, pr, owner):
+        """Finish only already-Done metadata; never accept or merge new work."""
+        from coordinator import feedback, gate, source_feedback
+        if (owner.get('status') != 'done' or owner.get('publish_pending') or owner.get('expired')
+                or pr.get('state') not in ('OPEN','CLOSED') or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('headRefName') != owner.get('branch')):
+            return False
+        rows = self.db.execute('SELECT head,base,receipt FROM batch_included_sources WHERE project=? AND pr=? AND head=? ORDER BY created DESC',
+            (project['id'],pr['number'],pr['headRefOid'])).fetchall()
+        accepted = [(head,base,json.loads(raw)) for head,base,raw in rows
+                    if json.loads(raw).get('status') in ('included-source-accepted','included-source-closed')]
+        if not accepted:
+            return False
+        head, base, receipt = accepted[0]
+        identity = receipt.get('identity') or {}
+        if (receipt.get('acceptance_complete') is not True or receipt.get('main') != base
+                or identity.get('head') != head
+                or identity.get('owner') != {k:owner.get(k) for k in ('key','agent','model','session','branch')}
+                or (receipt.get('status') == 'included-source-closed' and pr['state'] == 'OPEN')):
+            raise RuntimeError('completed source checkpoint authority changed')
+        row = self.db.execute("SELECT * FROM jobs WHERE id=? AND project=? AND pr=? AND head=? AND kind='review' AND status='done' AND publication_done=1",
+            (receipt.get('review'),project['id'],pr['number'],head)).fetchone()
+        if row is None:
+            raise RuntimeError('completed source checkpoint review unavailable')
+        review = dict(row); review['result'] = json.loads(review['result']); review['publication_pending'] = False
+        snapshot = json.loads((Path(review['directory'])/'snapshot.json').read_text())
+        if (snapshot.get('_review_mode') != 'included' or snapshot.get('_included_source') != identity
+                or snapshot.get('baseRefOid') != base or snapshot.get('headRefOid') != head
+                or snapshot.get('_included_evidence') != receipt.get('check_evidence')
+                or snapshot.get('ticket', {}).get('spec') != owner.get('spec')
+                or review['feedback'] != feedback(snapshot)
+                or gate(snapshot,{**owner,'status':'review'},review,included=True) is not None):
+            raise RuntimeError('completed source checkpoint review changed')
+        expected_evidence = (f"Included source PR #{pr['number']} head {head} in main {base}; "
+            f"accepted for redundant-source closure, not a GitHub merge. Independent acceptance job {review['id']}: "
+            + review['result']['evidence'])
+        if receipt.get('evidence') != expected_evidence:
+            raise RuntimeError('completed source checkpoint completion evidence changed')
+        events = owner.get('events', [])
+        claims = [e for e in events if e.get('kind') == 'claim' and e.get('actor') == owner['session']
+                  and str(e.get('ticket','')).split('::')[-1] == owner['key']]
+        tokens = [p.split('=',1)[1] for e in claims for p in e.get('detail','').split('; ') if p.startswith('token=')]
+        completion = {receipt.get('evidence'),str(receipt.get('evidence'))+'\nMerged commit: '+head}
+        if (len(claims) != 1 or len(tokens) != 1 or hashlib.sha256(tokens[0].encode()).hexdigest() != identity.get('claim_hash')
+                or not any(e.get('kind') == 'complete' and e.get('actor') == review['family']+'/'+review['result']['model']
+                           and str(e.get('ticket','')).split('::')[-1] == owner['key'] and e.get('detail') in completion for e in events)):
+            raise RuntimeError('completed source checkpoint claim/completion provenance unavailable')
+        newer = self.db.execute("SELECT result FROM jobs WHERE project=? AND pr=? AND head=? AND kind='review' AND status='done' AND id>?",
+            (project['id'],pr['number'],head,review['id'])).fetchall()
+        if any(json.loads(r[0]).get('verdict') == 'changes_requested' or json.loads(r[0]).get('source_complete') is False for r in newer):
+            raise RuntimeError('completed source checkpoint has a newer source finding')
+        main = self.main(project)
+        self.git(project,'fetch','--no-tags','origin','main',head,base)
+        for older,newer in ((head,base),(base,main),(identity.get('base'),base),(identity.get('comparison'),base)):
+            if not SHA.fullmatch(older or '') or not SHA.fullmatch(newer or ''):
+                raise RuntimeError('completed source checkpoint ancestry unavailable')
+            self.git(project,'merge-base','--is-ancestor',older,newer)
+        if self.git(project,'rev-parse','origin/main') != main:
+            raise RuntimeError('completed source checkpoint main changed')
+        evidence = self.included_checkpoint_evidence(project,head,base,receipt.get('check_evidence'))
+        recovery = getattr(self.c, 'hosted_runner_recovery', None)
+        if recovery and receipt['status'] == 'included-source-accepted':
+            notice = recovery.included_main(project,pr,owner,receipt)
+            if notice:
+                print(canonical(dict(project=project['id'],pr=pr['number'],hosted_runner_recovery=notice)),flush=True)
+        def fresh_checkpoint(fresh, current):
+            if (current.get('status') != 'done' or current.get('publish_pending') or current.get('expired')
+                    or any(current.get(k) != owner.get(k) for k in ('key','agent','model','session','branch','spec','revision'))
+                    or fresh.get('state') not in ('OPEN','CLOSED') or fresh.get('isCrossRepository')
+                    or any(fresh.get(k) != identity.get(v) for k,v in
+                        (('headRefOid','head'),('headRefName','branch'),('baseRefName','base_ref'),
+                         ('baseRefOid','base'),('comparisonBaseOid','comparison')))
+                    or source_feedback(fresh) != source_feedback(snapshot)
+                    or not self.c.source_receipt(project,fresh,current)):
+                raise RuntimeError('completed source checkpoint source/owner changed')
+            check = {**fresh,'baseRefName':'main','baseRefOid':base,'_review_mode':'included',
+                     '_included_source':identity,'_included_evidence':evidence}
+            from coordinator import annotate_optional_skips
+            annotate_optional_skips(check, project['repository'],
+                lambda path:json.loads(self.c.gh(project,['api',path])),lambda path:self.c.immutable_read(project,path))
+            if gate(check,{**current,'status':'review'},review,included=True) is not None:
+                raise RuntimeError('completed source checkpoint current source/security feedback changed')
+        fresh = self.c.pr(project,pr['number']); current = self.owner(project,{'owner':owner})
+        fresh_checkpoint(fresh,current)
+        again = self.c.pr(project,pr['number']); current = self.owner(project,{'owner':owner})
+        fresh_checkpoint(again,current)
+        if self.main(project) != main or again != fresh:
+            raise RuntimeError('completed source checkpoint changed before closure')
+        if again['state'] == 'OPEN':
+            self.c.gh(project,['api',f"repos/{project['repository']}/pulls/{pr['number']}",'--method','PATCH','-f','state=closed'])
+        closed = self.c.pr(project,pr['number'])
+        if closed.get('state') != 'CLOSED' or closed.get('headRefOid') != head:
+            raise RuntimeError('completed source checkpoint closure unconfirmed')
+        issue = self.c.issue_number(project,owner)
+        endpoint = f"repos/{project['repository']}/issues/{issue}"
+        self.c.gh(project,['api',endpoint,'--method','PATCH','-f','state=closed','-f','state_reason=completed'])
+        if json.loads(self.c.gh(project,['api',endpoint])).get('state') != 'closed':
+            raise RuntimeError('completed source checkpoint issue closure unconfirmed')
+        receipt.update(status='included-source-closed',completion_continuation=dict(main=main,review=review['id'],owner_revision=current['revision']))
+        self.db.execute('UPDATE batch_included_sources SET receipt=? WHERE project=? AND pr=? AND head=? AND base=?',
+            (canonical(receipt),project['id'],pr['number'],head,base))
+        self.db.execute('INSERT OR REPLACE INTO integrations VALUES(?,?,?,?,1)',(project['id'],pr['number'],head,base))
+        return True
+
     def included_source(self, project, pr, owner):
         """Handle a redundant source without inventing a GitHub merged state.
 
@@ -173,6 +324,8 @@ class BatchController:
         The existing immutable job reservation bounds missing-evidence dispatch.
         """
         from coordinator import feedback, gate, checks_blocker
+        if owner and owner.get('status') == 'done':
+            return self.continue_completed_source(project, pr, owner)
         if (not owner or owner.get('status') not in ('review', 'done') or owner.get('publish_pending')
                 or owner.get('expired') or pr.get('state') not in ('OPEN', 'CLOSED')
                 or pr.get('isDraft') or pr.get('isCrossRepository')
@@ -238,11 +391,6 @@ class BatchController:
             save()
         if blocker:
             if done:
-                recovery = getattr(self.c, 'hosted_runner_recovery', None)
-                if recovery:
-                    notice = recovery.included_main(project, pr, owner, prior)
-                    if notice:
-                        print(canonical(dict(project=project['id'], pr=pr['number'], hosted_runner_recovery=notice)), flush=True)
                 raise RuntimeError('completed included source acceptance is no longer current')
             # Full acceptance has a separate fingerprint from source-only work.
             # An unchanged blocked result is retained, never repeatedly launched.
