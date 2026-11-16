@@ -43,7 +43,7 @@ export default function SettingsPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><h2 className="text-lg font-semibold tracking-tight text-slate-900">Device reporting</h2>
               <p className="mt-1 text-sm leading-relaxed text-slate-500">Set the rhythm for software checks and health reports.</p></div>
-            <Link href="/budget/" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">View network budget <span aria-hidden="true">↗</span></Link>
+            <Link href="/budget/" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">View device operating budget <span aria-hidden="true">↗</span></Link>
           </div>
           <FleetReportingSetup />
           <FleetSettingsPanel />

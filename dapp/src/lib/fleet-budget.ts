@@ -1,6 +1,6 @@
 import type { NamedFleet } from "./customer-fleets";
 // Prepaid fleet network costs (SF-083): transaction builders and reads for the
-// on-chain fleet budget (sui_edge::fleet_budget) and, when configured, the
+// on-chain device operating budget (sui_edge::fleet_budget) and, when configured, the
 // owner-prepaid Walrus storage (fleet_storage). See docs/FLEET_BUDGET.md.
 import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
@@ -15,14 +15,14 @@ import { allEvents, allOwned } from "./sui";
 
 const CLOCK = "0x6";
 
-/** Whether this deployment's package has the fleet budget (all its type origins). */
+/** Whether this deployment's package has the device operating budget (all its type origins). */
 export function budgetSupported(manifest = MANIFEST): boolean {
   return !!manifest && BUDGET_TYPES.every((name) => name in manifest.type_origins);
 }
 
 function requireBudget() {
   requireManifest();
-  if (!budgetSupported()) throw new Error("This deployment's package has no fleet budget; upgrade the contracts first");
+  if (!budgetSupported()) throw new Error("This deployment's package has no device operating budget; upgrade the contracts first");
 }
 
 export interface Limits {
@@ -63,7 +63,7 @@ export function enrollmentError(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : "Wallet request failed";
   if (/fleet_budget/.test(message) && /MoveAbort|abort/i.test(message) &&
       /(?:abort code[:\s]*11\b|[,)]\s*11\s*\)|\bcode[":\s]+11\b)/i.test(message)) {
-    return "The fleet budget no longer has enough SUI for this device’s starting balance and reserve. Fund the fleet budget, refresh, and try again, or turn off budget enrollment.";
+    return "The device operating budget no longer has enough SUI for this device’s starting balance and reserve. Fund the device operating budget, refresh, and try again, or turn off budget enrollment.";
   }
   return message;
 }

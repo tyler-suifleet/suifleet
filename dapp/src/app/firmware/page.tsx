@@ -528,7 +528,7 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
       <details><summary>Storage expiry and renewal details</summary>
       <p className="text-gray-500">
         Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}
-        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your fleet budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
+        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your device operating budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
         {storage.costFrost !== undefined && <> · cost {storage.costFrost.toString()} FROST</>}
       </p>
       </details>

@@ -52,8 +52,8 @@ export function useFleetStorage() {
     ? { config, storageId: value.id, budgetId: budget.id, capId: budget.capId, managed: selection.fleet ? { customerId: selection.fleet.customerId, fleetId: selection.fleet.id } : undefined } : undefined;
   const why = reason ?? (budgets.error ? formatStorageQueryError(budgets.error, "Fleet budget")
     : storage.error ? formatStorageQueryError(storage.error)
-    : !budget ? (budgets.isLoading ? "Loading your fleet budget…" : "Create a fleet budget on the Network budget page first.")
-    : !value ? (storage.isLoading ? "Loading fleet storage…" : "Create and fund fleet storage on the Network budget page first.")
+    : !budget ? (budgets.isLoading ? "Loading your device operating budget…" : "Create a device operating budget on the Device and storage budgets page first.")
+    : !value ? (storage.isLoading ? "Loading fleet storage…" : "Create and fund fleet storage on the Device and storage budgets page first.")
     : undefined);
   return { budget, loading: budgets.isLoading || storage.isLoading, budgetError: budgets.error, storage: value ?? undefined, config, target, reason: why, refetch: storage.refetch };
 }

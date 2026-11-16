@@ -109,7 +109,7 @@ export async function releaseObjects(client: SuiGrpcClient, owner: string, fleet
 }
 
 export function requireDirectExtension(retained: boolean | undefined) {
-  if (retained) throw Error('This blob has scheduled retention. Manage its renewal target on the Network budget page; direct extension would strand prepaid storage.');
+  if (retained) throw Error('This blob has scheduled retention. Manage its renewal target on the Device and storage budgets page; direct extension would strand prepaid storage.');
 }
 export function requireFleetUploadPeriod(retained: boolean, poolEnd: number | undefined, targetEnd: number) {
   if (retained && (poolEnd === undefined || poolEnd < targetEnd)) throw Error('Refill the fleet storage pool to cover the chosen period before uploading with retention, or choose wallet-paid storage.');
