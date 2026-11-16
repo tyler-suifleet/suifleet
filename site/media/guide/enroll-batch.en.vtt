@@ -1,41 +1,42 @@
 WEBVTT
 
 1
-00:00:00.450 --> 00:00:08.087
-For larger fleets, prepare devices in a batch. Each device
-receives its own single-use setup credential before first boot.
+00:00:00.450 --> 00:00:11.181
+Batch enrollment is optional for larger fleets. For one device,
+skip this lesson after registration. Each batch device receives
+its own single-use setup credential.
 
 2
-00:00:08.690 --> 00:00:13.106
+00:00:11.770 --> 00:00:16.186
 Choose Enrollment to prepare devices during manufacturing or
 provisioning.
 
 3
-00:00:13.690 --> 00:00:20.261
+00:00:16.770 --> 00:00:23.341
 Set a device limit and expiry before creating a policy. This
 example reuses an existing policy.
 
 4
-00:00:20.850 --> 00:00:25.373
+00:00:23.930 --> 00:00:28.453
 Paste a roster with names and serial numbers, then check it
 before continuing.
 
 5
-00:00:25.970 --> 00:00:32.327
+00:00:29.050 --> 00:00:35.407
 Download the credentials and store them securely. This is the
 only download of these one-use setup keys.
 
 6
-00:00:32.930 --> 00:00:38.946
+00:00:36.010 --> 00:00:42.026
 Register the reserved devices and approve the request. Give each
 device only its own credential.
 
 7
-00:00:39.530 --> 00:00:46.250
+00:00:42.610 --> 00:00:49.330
 The reservations are ready. Devices complete enrollment when
 their configured clients start with those credentials.
 
 8
-00:00:46.850 --> 00:00:53.719
+00:00:49.930 --> 00:00:56.799
 The batch is prepared. Each device still needs its own
 credential and the configured client to enroll at first boot.

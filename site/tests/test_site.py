@@ -119,6 +119,23 @@ class SiteTest(unittest.TestCase):
                 self.assertTrue(summary.startswith("Optional "), summary)
                 self.assertIn(summary, guide)
 
+    def test_first_device_route_and_private_prerequisite_order(self):
+        steps = build.load_json(SITE / 'guide/steps.json')['steps']
+        ids = [s['id'] for s in steps]
+        self.assertLess(ids.index('access-policy'), ids.index('publish-version'))
+        by_id = {s['id']: s for s in steps}
+        self.assertIn('First device:', by_id['sign-in']['summary'])
+        self.assertIn('Skip batch enrollment and staged rollout', by_id['sign-in']['summary'])
+        self.assertIn('unencrypted', by_id['publish-version']['summary'])
+        self.assertNotIn('A catalog version deploys once', ' '.join(by_id['deploy-group']['actions']))
+        self.assertIn('Library versions support', ' '.join(by_id['deploy-group']['actions']))
+        self.assertIn('Desired state supports groups only', ' '.join(by_id['deploy-group']['actions']))
+        self.assertIn('no unattended advancement', by_id['staged-rollout']['summary'])
+        self.assertIn('closing the browser stops coordination', ' '.join(by_id['staged-rollout']['actions']))
+        # Published lesson cards use the same sequence, including the moved policy.
+        lessons = build.load_json(SITE / 'guide/lessons.json')['lessons']
+        self.assertEqual([l['step'] for l in lessons], ids)
+
     def test_logo_download_preserves_transparency(self):
         for page in json.loads((SITE / "src" / "site.json").read_text())["pages"]:
             html = build.output_path(self.out, page["path"]).read_text()
