@@ -104,7 +104,7 @@ export default function FirmwarePage() {
     try {
       const release = releaseProtection(client, delivery, policies);
       // Fleet-paid storage is never silently replaced by the publisher.
-      if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+      if (fleetPaid && !fleet.store) throw new Error(`Storage budget is unavailable: ${fleet.reason ?? "unknown reason"}`);
       if (period.error || !period.epochs || period.loading) throw Error(period.error ?? "Wait for storage settings");
       const chosen = fleetPaid ? period.fleetStore : period.publisherStore;
       const result = await uploadArtifact(file, account?.address ?? null, release, setUploadProgress, chosen);
@@ -528,7 +528,7 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
       <details><summary>Storage expiry and renewal details</summary>
       <p className="text-gray-500">
         Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}
-        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your fleet budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
+        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your storage budget" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
         {storage.costFrost !== undefined && <> · cost {storage.costFrost.toString()} FROST</>}
       </p>
       </details>

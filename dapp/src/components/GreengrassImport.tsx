@@ -71,7 +71,7 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
       // One release identity for every artifact and recipe; no plaintext fallback.
       const protection=protect(delivery);
       // Fleet-paid storage is never silently replaced by the publisher.
-      if(fleetPaid&&!fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason??'unknown reason'}`);
+      if(fleetPaid&&!fleet.store) throw new Error(`Storage budget is unavailable: ${fleet.reason??'unknown reason'}`);
       if(period.error||!period.epochs||period.loading||period.price===undefined) throw Error(period.error??"Wait for the storage period and price");
       const store=fleetPaid?period.fleetStore:period.publisherStore;
       const used=new Set(preview.manifests.map(m=>m.recipe.artifactBlobId));

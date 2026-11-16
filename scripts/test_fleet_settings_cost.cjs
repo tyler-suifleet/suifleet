@@ -204,7 +204,7 @@ console.log("PASS: the recommended deposit follows health, archives, retention, 
   const budget = { id: "0x" + "b1".repeat(32), capId: "0x" + "c1".repeat(32) };
   assert.match(saving.settingsSaver(budget, withoutSettings).reason, /Saving settings is not available/);
   assert.equal(saving.settingsSaver(budget, withoutSettings).build, undefined);
-  assert.match(saving.settingsSaver(undefined).reason, /create one on the Network budget page/);
+  assert.equal(saving.settingsSaver(undefined).reason, "Settings are stored on your device operating budget: create one on the Device and storage budgets page first.");
   const chosen = settings.toSettings({ ...defaults, healthIntervalMs: 3_600_000 }, "testnet");
   const data = saving.settingsSaver(budget).build(chosen).getData();
   const [call] = data.commands.map((c) => c.MoveCall);
