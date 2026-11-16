@@ -69,6 +69,14 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       await page.route("https://api.coingecko.com/**", (route) => { usdRequests.push(route.request().url());
         return route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(USD) }); });
       await page.goto(`${origin}/?scenario=${scenario}`);
+      const reportingHelp = page.getByText('Enable logs and understand reporting status', {exact:true});
+      await reportingHelp.click();
+      const help = page.locator('details').filter({has:reportingHelp});
+      assert.match(await help.innerText(), /Unreported means no verified sample/);
+      assert.match(await help.innerText(), /Unavailable means the app could not read or verify/);
+      assert.match(await help.getByRole('link', {name:/Fleet settings/}).getAttribute('href'), /^\/settings\/?#reporting$/);
+      assert.match(await help.getByRole('link', {name:/Integrator guide/}).getAttribute('href'), /SERVERLESS_FLEET_DATA.md#native-deployment$/);
+      await reportingHelp.click();
       const body = () => page.textContent("body");
       const waitText = (value) => page.waitForFunction((v) => document.body.textContent.includes(v), value, { timeout: 30_000 })
         .catch(async (error) => { throw new Error(`${error.message}; waiting for ${value}; page shows: ${await body()}`); });

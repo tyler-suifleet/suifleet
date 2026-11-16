@@ -13,6 +13,7 @@ export default function BudgetPage() {
     <PageHeader title="Network budget" subtitle="Keep devices funded for activity and storage, with spending limits you control." />
     <InfoCard title="Two balances, each with a different job">
       <p>Device activity funds pay for update results and health reports. Storage funds pay for software and device-data uploads. Your personal account balance is separate until you approve a deposit.</p>
+      <p>Amounts use SUI for device activity and WAL for storage. Size estimates use MiB (1,048,576 bytes). Storage periods follow the storage network’s schedule; expand technical details for exact epochs. Funding alone does not enable device reporting or log collection; complete Device reporting in Fleet settings first.</p>
       <p>Deposits are prepaid network funds, not a SuiFleet subscription purchase. Every funding action asks for approval. Saving Fleet settings does not make a deposit here.</p>
     </InfoCard>
     <div className="grid gap-4 md:grid-cols-2">
