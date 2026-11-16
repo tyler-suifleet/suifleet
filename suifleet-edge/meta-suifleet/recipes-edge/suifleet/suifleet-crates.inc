@@ -138,6 +138,7 @@ SRC_URI += " \
     crate://crates.io/jiff/0.2.38 \
     crate://crates.io/jiff-core/0.1.1 \
     crate://crates.io/jiff-static/0.2.38 \
+    crate://crates.io/jiff-tzdb/0.1.9 \
     crate://crates.io/jobserver/0.1.35 \
     crate://crates.io/js-sys/0.3.98 \
     crate://crates.io/keccak/0.1.6 \
@@ -489,6 +490,7 @@ SRC_URI[itoa-1.0.18.sha256sum] = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c
 SRC_URI[jiff-0.2.38.sha256sum] = "b2b005715dcbeb0089a3c0dab99f2ff1cc3b2525323552703d648585d342a383"
 SRC_URI[jiff-core-0.1.1.sha256sum] = "5e52fe76043ccecc9005d2305ebaadf7d7fc0cc89ca6baa10a94d6bc68c7128c"
 SRC_URI[jiff-static-0.2.38.sha256sum] = "2cc9817253cf7c7ee4684451bd327e88d6f3658014e54a29198625590650695c"
+SRC_URI[jiff-tzdb-0.1.9.sha256sum] = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
 SRC_URI[jobserver-0.1.35.sha256sum] = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 SRC_URI[js-sys-0.3.98.sha256sum] = "67df7112613f8bfd9150013a0314e196f4800d3201ae742489d999db2f979f08"
 SRC_URI[keccak-0.1.6.sha256sum] = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
