@@ -59,10 +59,10 @@ export function FleetSelectionProvider({ children }: { children: ReactNode }) {
 }
 export function useFleetSelection() { return useContext(Context); }
 
-/** Remount local forms, decrypted plaintext and sessions on every identity
- * change; unresolved/revoked selection never renders prior fleet content. */
 export function onboardingRoute(pathname: string) { return pathname === "/get-started" || pathname === "/get-started/"; }
 
+/** Remount local forms, decrypted plaintext and sessions on every identity
+ * change; unresolved/revoked selection never renders prior fleet content. */
 export function FleetScope({ children, allowWithoutFleet = false, pendingHeader }: { children: ReactNode; allowWithoutFleet?: boolean; pendingHeader?: ReactNode }) {
   const selection = useFleetSelection();
   if (allowWithoutFleet) return <div key={selection.identity}>{children}</div>;

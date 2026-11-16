@@ -72,9 +72,16 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   });
   const capacity = fleet ? { available: fleet.activeDevices < fleet.deviceLimit, administrator: fleet.administrator } : undefined;
   const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0) && (!selection.supported || !!fleet) && (!capacity || (capacity.available && capacity.administrator));
+  const missingFleet = !!account && selection.supported && !fleet;
+  const firstFleet = missingFleet && !selection.loading && !selection.error && !selection.stale && selection.fleets.length === 0;
+  const fleetNext = selection.loading ? "Checking fleet access…" : selection.error ? "Fleet access unavailable; retry the fleet check above."
+    : firstFleet ? "Create a fleet using Create default fleet above, then check device capacity." : "Choose an accessible fleet using the Fleet selector above.";
   const steps = onboardingProgress(!!account,
     state.isSuccess ? { status: "success", value: state.data } : state.isError ? { status: "error" } : { status: "pending" },
     devices.isSuccess ? { status: "success", value: devices.data.length } : devices.isError ? { status: "error" } : { status: "pending" }, capacity);
+  if (missingFleet) {
+    steps[2] = { ...steps[2], state: state.isSuccess && BigInt(state.data) > BigInt(0) ? "current" : "upcoming", status: selection.loading ? "Checking fleet access…" : firstFleet ? "Create a fleet" : "Choose a fleet" };
+  }
   const next = steps.find((step) => step.state === "current" || step.state === "blocked");
   const accountName = account?.label || currentWallet?.name;
 
@@ -122,7 +129,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </nav>
 
     {next && <p role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-950">
-      <span className="font-semibold">Next: </span>{nextAction(next, config.enabled)}
+      <span className="font-semibold">Next: </span>{missingFleet && next.id === "register" ? fleetNext : nextAction(next, config.enabled)}
     </p>}
 
     <StepCard id="account" index={1} title="Sign in or connect" state={steps[0].state}>
@@ -173,7 +180,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         <Disclosure summary="How to fund this address">
           <p>Send SUI on this network to your address from another wallet. For the testnet preview, use the <a className={LINK} href="https://faucet.sui.io/" target="_blank" rel="noopener noreferrer">official testnet faucet</a> to request free test SUI. For a local development network, ask its operator for test funds. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
         </Disclosure>
-        {selection.supported && !fleet && <div className="rounded-md border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold">Create your first fleet</h3><p>After funding account fees, use Create default fleet above and review its preview. A new customer has zero device capacity: check Device capacity before registration. If checkout is not configured, ask the operator how capacity can be enabled; an account or network-budget deposit cannot buy capacity.</p><p>Then choose reporting funds and spending limits on Network budget. Device reporting uses separate funds; creating a fleet does not fund it. Registration stays unavailable until fleet access and capacity are verified.</p></div>}
+        {firstFleet && <div className="rounded-md border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold">Create your first fleet</h3><p>After funding account fees, use Create default fleet above and review its preview. A new customer has zero device capacity: check Device capacity before registration. If checkout is not configured, ask the operator how capacity can be enabled; an account or network-budget deposit cannot buy capacity.</p><p>Then choose reporting funds and spending limits on Network budget. Device reporting uses separate funds; creating a fleet does not fund it. Registration stays unavailable until fleet access and capacity are verified.</p></div>}
         {(!selection.supported || !!fleet) && budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
           <h3 className="font-semibold">Prepay network costs</h3>
           <p className="text-gray-700">Your account balance pays for actions you approve. The fleet budget is separate: prepay device network costs and set spending limits. Each device receives a small starting balance and can refill only within those limits.</p>
@@ -242,7 +249,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
             <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending || pending.waiting.length > 0 || !!fleet && fleet.activeDevices >= fleet.deviceLimit}>{mutation.isPending ? "Registering…" : "Register device"}</button>
-            {!ready && state.isSuccess && <p className="text-gray-600">Add funds to this account to enable registration.</p>}
+            {!ready && state.isSuccess && <p className="text-gray-600">{BigInt(state.data) === BigInt(0) ? "Add funds to this account to enable registration." : missingFleet ? fleetNext : capacity && !capacity.administrator ? "Ask a fleet administrator to register this device." : "Check Device capacity before registering this device."}</p>}
           </div>
         </form>
         <div aria-live="polite">{phase && <p className="text-blue-900">{PHASE[phase]}</p>}</div>

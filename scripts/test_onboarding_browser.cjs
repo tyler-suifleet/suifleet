@@ -97,6 +97,11 @@ function audit() {
       await page.getByRole("link", { name: "official testnet faucet" }).waitFor();
       await page.evaluate(() => window.acceptance.fund());
       await page.getByRole("button", { name: "Refresh account and inventory" }).click();
+      await progress.getByText("Funds available", { exact: true }).waitFor();
+      await progress.getByText("Create a fleet", { exact: true }).waitFor();
+      await next.filter({ hasText: "Create a fleet using Create default fleet above" }).waitFor();
+      assert.equal(await progress.getByText("Checking inventory…", { exact: true }).count(), 0);
+      assert.equal(await page.getByText("Add funds to this account to enable registration.", { exact: true }).count(), 0);
       assert.equal(await register.isDisabled(), true);
       await page.getByRole("button", { name: "Create default fleet", exact: true }).click();
       await page.getByRole("heading", { name: "Review fleet creation" }).waitFor();
@@ -106,6 +111,14 @@ function audit() {
       await layout("cold-connected-preview");
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
       assert.equal(await page.evaluate(() => window.acceptance.signCalls()), 0);
+      await page.evaluate(() => window.acceptance.staleFleet(true));
+      await progress.getByText("Choose a fleet", { exact: true }).waitFor();
+      await next.filter({ hasText: "Choose an accessible fleet" }).waitFor();
+      assert.equal(await page.getByText("Create your first fleet", { exact: true }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "Create default fleet", exact: true }).count(), 0);
+      assert.equal(await register.isDisabled(), true);
+      await page.evaluate(() => window.acceptance.staleFleet(false));
+      await page.getByText("Create your first fleet", { exact: true }).waitFor();
       assert.deepEqual(errors, []);
       console.log("PASS: cold-start desktop/mobile signed-out, optional sign-in unavailable, connected-no-fleet funding/faucet, preview/cancel, capacity/reporting disclosures and restricted content gate; no signing");
       return;
