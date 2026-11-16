@@ -16,10 +16,12 @@ import { verifySupportDiagnostics } from "@/lib/fleet-support";
 import type { FleetDataConfig } from "@/lib/fleet-data";
 import type { Transaction } from "@mysten/sui/transactions";
 import { requireManifest, verifyDeployment } from "@/lib/deployment-manifest";
+import { FleetTransactionError, isWalletRejection } from "@/lib/tx-feedback";
 
 import { readAccount, depositTx, coin, units, validatePayment, type Payment } from "@/lib/subscription";
 
 export type TransactionPhase = "validating" | "wallet" | "confirming";
+type FleetTransactionInput = { transaction: Transaction; subscriptionDeposit?: Payment; onProgress?: (phase: TransactionPhase) => void; onSubmitted?: (digest: string) => void; onDefiniteFailure?: () => void; support?: { config: FleetDataConfig; deviceId: string } };
 
 export function useFleetTransaction() {
   const selection = useFleetSelection();
@@ -27,8 +29,7 @@ export function useFleetTransaction() {
   const latest = useRef(selection); latest.current = selection;
   const client = useCurrentClient();
   const wallet = useDAppKit();
-  return useMutation({
-    mutationFn: async ({ transaction, onProgress, onSubmitted, onDefiniteFailure, support, subscriptionDeposit }: { transaction: Transaction; subscriptionDeposit?: Payment; onProgress?: (phase: TransactionPhase) => void; onSubmitted?: (digest: string) => void; onDefiniteFailure?: () => void; support?: { config: FleetDataConfig; deviceId: string } }) => {
+  async function execute({ transaction, onProgress, onSubmitted, onDefiniteFailure, support, subscriptionDeposit }: FleetTransactionInput, progress: { sent: boolean; digest?: string }) {
       const captured = selection;
       onProgress?.("validating");
       const manifest = requireManifest();
@@ -85,7 +86,8 @@ export function useFleetTransaction() {
       // executing the approved action still requires its configured factors.
       const requiresPasskey = !approvalDecisionsOnly(transaction) && policy && policy.requirements.some(v => (v & 2) !== 0) && transaction.getData().commands.some(command => !!command.MoveCall);
       const submit = async () => {
-        if (!requiresPasskey || !captured.fleet) return wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network });
+        // From here the wallet may submit; a later transport error is ambiguous.
+        if (!requiresPasskey || !captured.fleet) { progress.sent = true; return wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network }); }
         transaction = withSponsorFunding(transaction);
         const signer = await enrolledSigner(client, captured.fleet.customerId, address);
         transaction.setSender(address); transaction.setGasOwner(signer.toSuiAddress());
@@ -99,29 +101,45 @@ export function useFleetTransaction() {
         if (!now || now.address !== address || JSON.stringify([...new Set(now.chains)].sort()) !== chains || wallet.stores.$currentNetwork.get() !== manifest.network || latest.current.identity !== captured.identity) throw Error("Wallet, network or fleet changed while signing");
         await verifyDeployment(client);
         if (wallet.stores.$connection.get().account?.address !== address || wallet.stores.$currentNetwork.get() !== manifest.network || latest.current.identity !== captured.identity || (localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id)) throw Error("Wallet, network or fleet changed before submission");
+        progress.sent = true;
         return client.executeTransaction({ transaction: fromBase64(signed.bytes), signatures: [signed.signature, passkey.signature], include: { effects: true, events: true } });
       };
       const result = await submit().catch((error: unknown) => {
         // A transport error can hide an executed transaction. Only explicit
-        // wallet rejection permits the caller to retry automatically.
-        const rejected = error as { code?: number; name?: string; message?: string } | null;
-        if (rejected?.code === 4001 || rejected?.name === "UserRejectedRequestError" || rejected?.message === "User rejected the request") onDefiniteFailure?.();
-        throw error;
+        // wallet rejection, or a failure before anything was handed over for
+        // execution (passkey preparation), permits the caller to retry.
+        if (isWalletRejection(error)) { onDefiniteFailure?.(); throw new FleetTransactionError("rejected", error); }
+        if (!progress.sent) { onDefiniteFailure?.(); throw new FleetTransactionError("not-submitted", error); }
+        throw new FleetTransactionError("uncertain", error);
       });
       if (result.FailedTransaction || !result.Transaction.status.success) {
         onDefiniteFailure?.();
-        throw new Error(result.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");
+        throw new FleetTransactionError("failed", new Error(result.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful"), result.FailedTransaction?.digest ?? result.Transaction?.digest);
       }
       // Confirm against the verified fleet node, independently of wallet effects.
       onProgress?.("confirming");
+      progress.digest = result.Transaction.digest;
       onSubmitted?.(result.Transaction.digest);
       const confirmed = await client.waitForTransaction({ digest: result.Transaction.digest, include: { effects: true, events: true } });
       if (confirmed.FailedTransaction || !confirmed.Transaction.status.success) {
-        throw new Error(confirmed.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");
+        // The wallet reported success but the verified node did not: treat the
+        // outcome as unconfirmed rather than safe to repeat.
+        throw new FleetTransactionError("uncertain", new Error(confirmed.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful"), result.Transaction.digest);
       }
       void cache.invalidateQueries({ queryKey: ["customer-fleets"] });
       // Events from the verified node's confirmed effects, not the wallet's.
       return { digest: confirmed.Transaction.digest, events: confirmed.Transaction.events ?? [] };
+  }
+  return useMutation({
+    // Every failure is a FleetTransactionError whose stage tells callers and
+    // customers whether anything may have reached the chain (SF-277).
+    mutationFn: async (input: FleetTransactionInput) => {
+      const progress = { sent: false, digest: undefined as string | undefined };
+      try { return await execute(input, progress); }
+      catch (error) {
+        if (error instanceof FleetTransactionError) throw error;
+        throw new FleetTransactionError(progress.sent ? "uncertain" : "not-submitted", error, progress.digest);
+      }
     },
   });
 }
