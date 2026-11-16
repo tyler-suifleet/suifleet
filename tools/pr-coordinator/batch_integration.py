@@ -238,6 +238,11 @@ class BatchController:
             save()
         if blocker:
             if done:
+                recovery = getattr(self.c, 'hosted_runner_recovery', None)
+                if recovery:
+                    notice = recovery.included_main(project, pr, owner, prior)
+                    if notice:
+                        print(canonical(dict(project=project['id'], pr=pr['number'], hosted_runner_recovery=notice)), flush=True)
                 raise RuntimeError('completed included source acceptance is no longer current')
             # Full acceptance has a separate fingerprint from source-only work.
             # An unchanged blocked result is retained, never repeatedly launched.

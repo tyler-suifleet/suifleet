@@ -1136,15 +1136,85 @@ class HostedRunnerRecovery:
     @staticmethod
     def run_matches(project, pr, run):
         repo = project['repository'].lower()
-        return (run.get('event') == 'pull_request'
+        main = pr.get('_included_main')
+        identity = ((run.get('event') in ('push', 'workflow_dispatch', 'schedule')
+                     and run.get('head_branch') == 'main' and main.get('main') == pr['headRefOid'])
+                    if main else (run.get('event') == 'pull_request' and any(
+                        p.get('number') == pr['number'] and (p.get('head') or {}).get('sha') == pr['headRefOid']
+                        for p in run.get('pull_requests', []))))
+        return (identity
                 and run.get('path') == '.github/workflows/ci.yml'
                 and run.get('head_sha') == pr['headRefOid']
                 and (run.get('repository') or {}).get('full_name', '').lower() == repo
                 and (run.get('head_repository') or {}).get('full_name', '').lower() == repo
-                and type(run.get('run_attempt')) is int and run['run_attempt'] >= 1
-                and any(p.get('number') == pr['number']
-                        and (p.get('head') or {}).get('sha') == pr['headRefOid']
-                        for p in run.get('pull_requests', [])))
+                and type(run.get('run_attempt')) is int and run['run_attempt'] >= 1)
+
+    def main_authority(self, project, pr):
+        """Authenticate retained included-source acceptance, not a caller label."""
+        proof = pr.get('_included_main')
+        if not proof or proof.get('main') != pr.get('headRefOid'):
+            return False
+        source = proof.get('source') or {}
+        row = self.db.execute('SELECT receipt FROM batch_included_sources WHERE project=? AND pr=? AND head=? AND base=?',
+            (project['id'], pr['number'], source.get('head'), proof['main'])).fetchone()
+        if not row:
+            return False
+        receipt = json.loads(row[0])
+        if (receipt.get('status') != 'included-source-accepted' or receipt.get('acceptance_complete') is not True
+                or receipt.get('identity') != source or receipt.get('main') != proof['main']
+                or hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest() != proof.get('receipt')):
+            return False
+        owner = json.loads(self.c.ticket(project, 'show', source['owner']['key']))
+        if (owner.get('status') != 'done' or owner.get('publish_pending') or owner.get('expired')
+                or {k:owner.get(k) for k in ('key','agent','model','session','branch')} != source['owner']):
+            return False
+        review = self.c.store.review(project['id'], pr['number'])
+        if not review or review['id'] != receipt.get('review') or review.get('publication_pending'):
+            return False
+        snapshot = json.loads((Path(review['directory'])/'snapshot.json').read_text())
+        if (snapshot.get('_included_source') != source or snapshot.get('baseRefOid') != proof['main']
+                or snapshot.get('_included_evidence') != receipt.get('check_evidence')
+                or snapshot.get('ticket', {}).get('spec') != owner.get('spec')):
+            return False
+        if gate(snapshot, {**owner, 'status':'review'}, review, included=True) is not None:
+            return False
+        fresh = self.c.pr(project, pr['number'])
+        reference = self.read(project, 'repos/'+project['repository']+'/git/ref/heads/main')
+        if (reference.get('object', {}).get('sha') != proof['main']
+                or fresh.get('state') != 'OPEN' or fresh.get('isDraft') or fresh.get('isCrossRepository')
+                or any(fresh.get(k) != source.get(v) for k,v in
+                    (('headRefOid','head'),('headRefName','branch'),('baseRefName','base_ref'),
+                     ('baseRefOid','base'),('comparisonBaseOid','comparison')))
+                or source_feedback(fresh) != source_feedback(snapshot)
+                or not self.c.source_receipt(project, fresh, owner)):
+            return False
+        self.c.batches.git(project, 'merge-base', '--is-ancestor', source['head'], proof['main'])
+        return True
+
+    def included_main(self, project, pr, owner, receipt):
+        """Retry only the never-started main CI job blocking accepted closure."""
+        main = receipt.get('main')
+        if (owner.get('status') != 'done' or receipt.get('status') != 'included-source-accepted'
+                or not re.fullmatch(r'[0-9a-f]{40}', main or '')):
+            return
+        synthetic = dict(number=pr['number'], state='OPEN', isDraft=False, isCrossRepository=False,
+            headRefOid=main, statusCheckRollup=[], _included_main=dict(main=main,
+                source=receipt['identity'], receipt=hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest()))
+        if not self.main_authority(project, synthetic):
+            return dict(state='included_main_authority_changed')
+        prefix = 'repos/'+project['repository']
+        runs = self.read(project, prefix+'/actions/workflows/ci.yml/runs?head_sha='+main+'&branch=main&per_page=1')['workflow_runs']
+        if not runs:
+            return
+        run = self.read(project, prefix+'/actions/runs/'+str(runs[0]['id']))
+        if not self.run_matches(project, synthetic, run):
+            return dict(state='included_main_run_changed')
+        jobs = self.read(project, prefix+'/actions/runs/'+str(run['id'])+'/attempts/'+str(run['run_attempt'])+'/jobs?per_page=100')
+        if jobs.get('total_count') != len(jobs['jobs']):
+            return dict(state='included_main_jobs_incomplete')
+        synthetic['statusCheckRollup'] = [dict(name=job.get('name'), status=str(job.get('status')).upper(),
+            conclusion=str(job.get('conclusion')).upper(), detailsUrl=job.get('html_url')) for job in jobs['jobs']]
+        return self.tick(project, synthetic)
 
     def update(self, project, job, state):
         self.db.execute('UPDATE hosted_runner_retries SET state=?,next_check=?,updated=? '
@@ -1231,18 +1301,23 @@ class HostedRunnerRecovery:
             if run.get('conclusion') != 'failure':
                 self.update(project, job_id, 'refused')
                 continue
-            used = self.db.execute("SELECT count(*) FROM hosted_runner_retries WHERE project=? AND pr=? AND head=? "
-                                   "AND state IN ('intent','submitted','observed','uncertain')",
-                                   (project['id'], pr['number'], pr['headRefOid'])).fetchone()[0]
+            scope = "project=? AND head=?" if pr.get('_included_main') else "project=? AND head=? AND pr=?"
+            parameters = (project['id'], pr['headRefOid']) + (() if pr.get('_included_main') else (pr['number'],))
+            used = self.db.execute("SELECT count(*) FROM hosted_runner_retries WHERE "+scope+
+                                   " AND state IN ('intent','submitted','observed','uncertain')", parameters).fetchone()[0]
             if used >= self.LIMIT:
                 self.update(project, job_id, 'exhausted')
                 return dict(state='exhausted', run=run_id, job=job_id, attempts=used)
             # Fresh authority and run state immediately before an irreversible
             # request. An unrelated branch/head or user cancellation is refused.
-            fresh = self.read(project, prefix + '/pulls/' + str(pr['number']))
-            if (fresh.get('state') != 'open' or fresh.get('draft') or fresh.get('head', {}).get('sha') != pr['headRefOid']
-                    or fresh.get('head', {}).get('repo', {}).get('full_name', '').lower() != project['repository'].lower()
-                    or self.read(project, run_path) != run):
+            if pr.get('_included_main'):
+                authority = self.main_authority(project, pr)
+            else:
+                fresh = self.read(project, prefix + '/pulls/' + str(pr['number']))
+                authority = (fresh.get('state') == 'open' and not fresh.get('draft')
+                    and fresh.get('head', {}).get('sha') == pr['headRefOid']
+                    and fresh.get('head', {}).get('repo', {}).get('full_name', '').lower() == project['repository'].lower())
+            if not authority or self.read(project, run_path) != run:
                 self.update(project, job_id, 'refused')
                 return dict(state='changed_before_retry', job=job_id)
             self.update(project, job_id, 'intent')  # durable autocommit BEFORE POST
