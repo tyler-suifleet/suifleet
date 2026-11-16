@@ -5,7 +5,7 @@ import { DAppKitProvider, useWalletConnection } from "@mysten/dapp-kit-react";
 import dynamic from "next/dynamic";
 import { dAppKit } from "@/lib/dapp-kit";
 import { usePathname } from "next/navigation";
-import { FleetSelectionProvider, FleetScope } from "@/hooks/useFleetSelection";
+import { FleetSelectionProvider, FleetScope, onboardingRoute } from "@/hooks/useFleetSelection";
 import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { NETWORK } from "@/lib/constants";
 import "./globals.css";
@@ -108,7 +108,7 @@ function SignedOutGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(), connection = useWalletConnection(), hydrated = useHydrated();
   const route = NAV.find(item => item.href !== "/get-started" && isActive(item.href, pathname));
   if (pathname === "/billing" || pathname === "/billing/") return <>{children}</>;
-  if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"} pendingHeader={<PageHeader title={NAV.find(item => isActive(item.href, pathname))?.label ?? "Your fleet"} />}>{children}</FleetScope>;
+  if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements" || onboardingRoute(pathname)} pendingHeader={<PageHeader title={NAV.find(item => isActive(item.href, pathname))?.label ?? "Your fleet"} />}>{children}</FleetScope>;
   if (!route) return <>{children}</>;
   if (!hydrated || connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;
   return <ConnectionRequired title={route.label} description={route.description} />;
