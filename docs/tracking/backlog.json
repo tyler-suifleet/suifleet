@@ -5107,6 +5107,209 @@
         "Meaningful offline regressions/full coordinator tests and normal PR handoff; install only reviewed merged code."
       ],
       "validation": "Run targeted provenance regressions and full offline coordinator suite; verify staged scope and Tyler authorship."
+    },
+    {
+      "key": "SF-271",
+      "title": "Record independent customer reviews and complete remediation coverage",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs/customer-review",
+        "docs/tracking"
+      ],
+      "resources": [],
+      "description": "Save the owner-requested independent Codex and actual Claude Opus5.5 customer-perspective reviews of the public landing website, every app route, all public guides and all ten narrated lessons. Consolidate specific reproducible findings and map them to focused implementation tickets. Preserve the user direction: production-oriented marketing without testnet jargon; app-side evaluation labels remain truthful. Include accurate evidence limits, positives and actual queue recovery. This is the audit record, not a claim that remediation or real wallet acceptance is finished.",
+      "evidence": "2026-11-16 independent public desktop/mobile browser crawls, Codex read-only Wallet Standard connection with signing disabled, current source b9bb2ef6, actual Claude reports and full-doc/source addendum. Evidence is retained privately under /tmp/suifleet-customer-audit-20261116.",
+      "acceptance": [
+        "Both independent reviewer reports and a consolidated actionable review are committed with explicit coverage and test limits.",
+        "Every material finding has severity, exact source/URL or reproduction, user consequence, recommendation and a published existing/new issue mapping.",
+        "User marketing constraints and deferred real-wallet/hardware/mainnet/provider evidence remain explicit; review completion does not mean fixes deployed."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-272",
+      "title": "Make a new wallet able to complete first-fleet onboarding",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "scripts/browser",
+        "scripts/tests",
+        "site/guide"
+      ],
+      "resources": [],
+      "description": "Fix the cold-start setup path for a non-crypto customer. Keep Get started usable after connection when no fleet exists, so account funding and first-fleet guidance remain reachable. Explain and preview fleet creation, device capacity and device reporting funds in order; keep the same identity/access isolation for every other fleet page. Use one account/sign-in vocabulary and actionable unsupported-wallet/network/rejection/funding guidance. Do not promise Google sign-in when this build does not provide it. Do not grant free device authority or silently sponsor fees.",
+      "evidence": "Codex live read-only empty test wallet reproduced Get started replaced by Choose a fleet, hiding funding/faucet instructions. Claude independently confirmed layout.tsx111/FleetScope gate and zero new-customer capacity. Slush handoff returned451 in the audit environment; do not assume all regions or real users share that outcome.",
+      "acceptance": [
+        "Connected account without a fleet can read account-fee funding and first-fleet next steps; restricted fleet data/actions stay gated.",
+        "The first update path explains capacity and fees before irreversible approvals, including new zero-capacity customers and absent checkout configuration.",
+        "Wallet connect/cancel/reject/wrong-network/insufficient-funds/pending states offer plain-language next steps without unsafe duplicate submission or hidden technical prerequisites.",
+        "Tests cover signed-out, connected-no-fleet, existing fleet, read-only/revoked access, optional sign-in unavailable and public app-side evaluation messaging."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-273",
+      "title": "Publish customer documentation instead of internal engineering notes",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site/docs",
+        "site/src/pages/docs.html",
+        "docs",
+        "dapp/src/lib/device-client.ts"
+      ],
+      "resources": [],
+      "description": "Repair the public documentation entry point and rewrite the curated operator, integrator and administrator pages for their actual audiences. The marketing Docs page currently says docs.suifleet.io is not live even though it is. Public docs contain internal SF ticket histories, raw Move CLI setup and stale feature-status statements. Lead with prerequisites, exact current console labels/commands, supported installation availability, expected results and troubleshooting. Keep deep contracts/ABI/provenance in clearly marked technical reference instead of deleting safety boundaries.",
+      "evidence": "Both live crawls confirm suifleet.io/docs falsely says the public docs domain is not live. Full read of21 published docs found Download deployment.json versus actual Download connection settings, missing first-device ID handoff, ticket-led pages and outdated Greengrass availability claims.",
+      "acceptance": [
+        "All public Docs navigation resolves to the live public docs host and removes the false unavailable-domain claim.",
+        "Every curated doc has customer purpose, prerequisites, executable/current steps, expected result and recovery path; operator pages do not open with internal ticket or Move API history.",
+        "Installation and registration consistently explain connection-settings download and how device IDs reach runtime config; release/package/layer availability is honest and does not invent downloads or claim unrun device acceptance.",
+        "Document feature support using current implemented behavior and tracked limitations; public page titles/copy contain no internal ticket IDs."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-274",
+      "title": "Align all narrated guide lessons with the current customer workflow",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site/guide",
+        "site/media/guide",
+        "site/src/assets/guide.js",
+        "site/tests",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Correct all ten written/video lessons against actual app behavior and make the first-device route explicit. Preserve optional native captions and female narration, clear why/what/result descriptions and the viewport-sized step interface. Private-policy prerequisites must appear before private publishing; optional bulk enrollment and gradual rollout should not look mandatory for one device. Distinguish automatic health gates from the current explicit per-batch approval flow. Regenerate only genuinely changed media with honest provenance and spending limits.",
+      "evidence": "Codex found the group-deployment written instruction says catalog/library versions are one-shot and desired state requires ad-hoc upload, while current firmware143/buildCatalogDeploymentTx accepts desiredTargets and the video says desired state persists. The guide orders policy creation at stage9 after publishing at6. All ten published captions passed live390/1440 checks.",
+      "acceptance": [
+        "Written instructions, visible labels, narration, captions and actual control behavior agree across all10 stages, including library desired state and manual rollout advancement.",
+        "Beginner path identifies required steps and optional bulk/staged/private branches, including policy prerequisites before confidential publication.",
+        "Changed lessons use a coherent current build or clearly documented compatible capture; video has optional CC on/off, readable cursor/UI and no permanently burned narration.",
+        "Live or locally served real player checks verify every caption cue and changed lesson; no mocked wallet is described as Slush acceptance."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-275",
+      "title": "Make pricing and pilot contact understandable without crypto knowledge",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site/src/pages",
+        "site/docs",
+        "dapp/src/app/billing",
+        "dapp/src/components/PilotReadiness.tsx",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Present the existing approved commercial pricing in plain language with honest worked examples and clearly separated included/optional/customer-funded resources. Resolve contradictory subscription-versus-network wording without inventing prices or changing business terms. Keep wallet/token mechanics under optional detail and app-side evaluation tariffs explicitly separate from commercial offers. Provide a consistent private pilot/contact path and remove stale contradictory mailbox/docs claims only with honest verification. Do not add testnet jargon/banners to marketing; explain evaluation status inside the app/CTA handoff.",
+      "evidence": "Both independent reviews found pricing hard to interpret for50 or1000 devices, including all-in proposal versus below0.07 customer-funded assumptions, four funds vocabularies and a contact email explicitly disclaimed while privacy uses it. Marketing content must remain production-oriented by explicit owner direction.",
+      "acceptance": [
+        "A non-crypto reader can calculate an example monthly platform bill and understand included reporting/storage versus optional/customer-funded costs using unchanged approved terms.",
+        "Commercial quote availability and current app evaluation are clearly distinguished without presenting test tariffs as purchasable production pricing.",
+        "Use consistent terms for device capacity, account approval fees, device operating budget and storage budget; token mechanics do not dominate the main purchase explanation.",
+        "Sales/contact/privacy links agree; no mailbox delivery, SLA availability or payment-provider readiness is claimed without evidence, and remaining provider/mailbox acceptance is tracked separately."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-276",
+      "title": "Simplify console navigation and software delivery tasks",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app",
+        "dapp/src/components",
+        "dapp/src/lib",
+        "scripts/browser",
+        "scripts/tests"
+      ],
+      "resources": [],
+      "description": "Reduce ambiguity across the16 console routes while preserving existing functions and authority. Make Software library/publish versus deploy-existing versus advanced direct-file delivery explicit; improve mobile discovery beyond an unlabelled16-item horizontal strip. Hide raw object identifiers, bytes, Walrus epochs and contract parameters behind useful technical details and explain optional reporting/log activation with a real next step rather than just intervals that do not enable logs. Keep actual technical controls available to integrators and do not misrepresent partial health as live.",
+      "evidence": "Signed-in read-only public demo browsing and both source reviews show two different publishing/deploy flows under Components and Deploy component; raw Artifact/Recipe terminology and JSON overlays at first upload;16 mobile tabs with only firstfew discoverable; log interval controls say they do not enable logging but provide no activation path.",
+      "acceptance": [
+        "Every primary navigation item has a customer task/purpose and mobile users can discover all sections without guessing horizontal scrolling.",
+        "The library-first first update path is coherent, while direct artifact deployment and JSON/installer controls are clearly optional advanced workflows.",
+        "Budget/settings/data views explain human units and prerequisites; users can find how logs are actually enabled and diagnose unreported versus unavailable health.",
+        "Technical identifiers and integrations remain inspectable without dominating normal tasks; meaningful responsive and existing-flow regressions pass."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-277",
+      "title": "Provide safe clear feedback for approvals and irreversible fleet actions",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/hooks/useFleetTransaction.ts",
+        "dapp/src/app",
+        "dapp/src/components",
+        "dapp/src/lib",
+        "scripts/browser",
+        "scripts/tests"
+      ],
+      "resources": [],
+      "description": "Give transaction failures, cancellation, pending approvals and uncertain submission consistent inline customer guidance. Preserve distinctions among rejected-before-submit, executed failure and submitted-but-unconfirmed so retries never create duplicate charges/actions. Enrollment credential downloads must explain single-copy handling before the download, and lost-credential recovery must point to revoke/reissue safely. Fleet transfer actions need clear human review of recipient/resources and irreversible effects before signing. Do not add authority, reset ownership or conceal wallet verification data.",
+      "evidence": "Claude source audit found raw network/Move/SDK strings reaching browser alerts across devices/deployments, generic archive errors, the single-copy enrollment warning after its download button, and handover Transfer/Finish actions without a customer summary confirmation. Codex confirmed source behavior and wallet bootstrap barriers; real wallet signing remains unrun.",
+      "acceptance": [
+        "Common rejected/wrong-network/insufficient-funds/pending/uncertain states show concise next actions and optional diagnostic details with no invented success or unsafe retry.",
+        "Enrollment warns before the only credential download and provides an explicit lost-file revoke/reissue path without regenerating already enrolled identities.",
+        "Irreversible handover steps display the intended recipient/resources and remaining authority effects before wallet approval; existing recipient consent and contract checks remain required.",
+        "Failure/restart/double-click tests demonstrate no duplicate transaction, overwritten ownership, hidden failed effect or loss of credential-recovery guidance."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-278",
+      "title": "Align the pinned Yocto client with supported evaluation profiles",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/meta-suifleet",
+        "kas",
+        "scripts",
+        "docs/YOCTO_PACKAGING.md",
+        "docs/INSTALL_DEVICE_CLIENT.md"
+      ],
+      "resources": [],
+      "description": "Fix an independently confirmed customer-installation incompatibility: the Yocto recipe pins daemon0.2.1 at2d231cad, but the current seal-testnet deployment profile requires >=0.2.3 and the client rejects versions outside the manifest range. Update to an appropriate reviewed fixed source revision and regenerate the crate include, crate version and Cargo.lock digest together. Rebuild relevant supported recipe/profile without requiring physical Pi access. Add a meaningful drift guard between packaged client and supported shipping/evaluation profiles. Preserve network manifest/version rejection, runtime-only device identity, signer separation and pinned toolchain/security boundaries.",
+      "evidence": "2026-11-16 independent Claude customer audit plus Codex source confirmation: suifleet_1.0.bb SRCREV2d231cad/SUIFLEET_CRATE_VERSION0.2.1; profiles/seal-testnet/deployment.json supported_clients.edge.min0.2.3; config.rs474-477 rejects unsupported edge version. No physical build/run was claimed by the audit.",
+      "acceptance": [
+        "Recipe source pin, crate version, generated crate include and lock digest agree with a reviewed supported client; no AUTOREV or loosened manifest checks.",
+        "Relevant Yocto recipe/profile is rebuilt and exact toolchain/source/build evidence is retained; no device keys or enrollment credentials enter the image.",
+        "A regression guard detects packaged-client/profile version drift before customers flash an incompatible image.",
+        "Documentation accurately distinguishes rebuilt software/image artifacts from unrun physical Pi/reboot/mainnet/release-signing acceptance."
+      ],
+      "validation": "Run packaging/version consistency tests and rebuild the supported relevant recipe/image profile. Verify produced client/build-info and intended deployment manifest compatibility without physical hardware. Record exact commands and real limitations; do not replace rebuild evidence with a string comparison alone."
     }
   ]
 }
