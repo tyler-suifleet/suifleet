@@ -45,7 +45,7 @@ export function useReleasePeriod(sizes: number[]) {
     return stored;
   };
   const fleetStore: BlobStore = async (body, progress) => {
-    if (!s || error || !epochs || !fleet.target || !prepaid.store) throw Error('Fleet storage or storage period unavailable');
+    if (!s || error || !epochs || !fleet.target || !prepaid.store) throw Error('Storage budget or storage period unavailable');
     // A prepaid pool can have a longer period than requested; it cannot shorten a blob.
     const current = await storageSchedule(client);
     const targetEnd = current.epoch + periodEpochs(days, current);
@@ -59,7 +59,7 @@ export function useReleasePeriod(sizes: number[]) {
     return blob;
   };
   return { days, setDays, epochs, refresh, refreshing, schedule: s, expiry: s && epochs ? expiryTime(s.epoch + epochs, s) : undefined,
-    price: quote.data, error: error ?? (fleet.budgetError ? formatStorageQueryError(fleet.budgetError, 'Fleet budget') :
+    price: quote.data, error: error ?? (fleet.budgetError ? formatStorageQueryError(fleet.budgetError, 'Device operating budget') :
       schedule.error ? formatStorageQueryError(schedule.error, 'Storage schedule') :
       settings.error ? formatStorageQueryError(settings.error, 'Storage defaults') :
       quote.error ? formatStorageQueryError(quote.error, 'Storage price') : undefined),

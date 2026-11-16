@@ -253,7 +253,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     {result.deposit && shortfall && <div className="border rounded p-2 text-xs" data-testid="deposit">
       <h3 className="font-semibold">Recommended deposit for {months} month(s) of these settings</h3>
       <p>{formatToken(result.deposit.suiDepositMist)} SUI (device activity and starting balances, with 20% headroom) and {formatToken(result.deposit.walDepositFrost)} WAL (storage and uploads), about {usd(result.deposit.usd.total)}.</p>
-      <p>Your device operating budget holds {budget ? `${formatToken(budget.balance)} SUI` : "nothing yet (no budget)"}{walCounted ? `; your storage budget holds ${storage ? `${formatToken(storage.walBalance)} WAL` : "nothing yet"}` : "; this deployment has no fleet storage, so Walrus fees are paid by each upload's wallet"}.</p>
+      <p>Your device operating budget holds {budget ? `${formatToken(budget.balance)} SUI` : "nothing yet (no budget)"}{walCounted ? `; your storage budget holds ${storage ? `${formatToken(storage.walBalance)} WAL` : "nothing yet"}` : "; this deployment has no storage budget, so Walrus fees are paid by each upload's wallet"}.</p>
       {shortfall.enough ? <p role="status">The current deposit covers this plan.</p>
         : <p>Short by {formatToken(shortfall.suiMist)} SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} WAL` : ""}. <a className="underline" href="/budget/">Deposit on the Device and storage budgets page</a>.</p>}
     </div>}

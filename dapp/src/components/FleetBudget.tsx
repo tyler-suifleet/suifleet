@@ -362,9 +362,9 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
   const alerts = storage ? storageAlerts(storage, walrusState.data?.epoch) : [];
   return <div className="space-y-3 text-xs">
     {!storage && <div className="space-y-2">
-      <p>No fleet storage budget yet. Create one to prepay software and device-data uploads. Devices cannot delete paid uploads or shorten their storage period.</p>
+      <p>No storage budget yet. Create one to prepay software and device-data uploads. Devices cannot delete paid uploads or shorten their storage period.</p>
       <p>Each device may upload up to {(Number(DEFAULT_QUOTA.encodedBytesPerPeriod) / MIB).toFixed(0)} MiB encoded in {DEFAULT_QUOTA.uploadsPerPeriod.toString()} uploads per day, at most {(Number(DEFAULT_QUOTA.maxBlobSize) / MIB).toFixed(0)} MiB per blob and {wal(DEFAULT_QUOTA.writeFeesPerPeriod)} in write fees.</p>
-      <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create fleet storage</button>
+      <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create storage budget</button>
     </div>}
     {storage && <>
       <RetentionPanel config={config} storage={storage.id} version={storage.version} budget={budget.id} cap={budget.capId} epoch={walrusState.data?.epoch} schedule={walrusState.data} />

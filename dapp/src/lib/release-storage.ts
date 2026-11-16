@@ -100,7 +100,7 @@ export async function releaseObjects(client: SuiGrpcClient, owner: string, fleet
         const record = RecordBcs.parse(field.value.bcs);
         objects.push({ blobId: blobIdFromInt(BigInt(record.blob_id)), id: bcs.Address.parse(field.name.bcs), endEpoch: record.end_epoch, size: Number(record.size), fleet: true });
       }
-      if (page.hasNextPage && (!page.cursor || page.cursor === cursor)) throw Error('Fleet storage pagination made no progress');
+      if (page.hasNextPage && (!page.cursor || page.cursor === cursor)) throw Error('Storage budget pagination made no progress');
       cursor = page.hasNextPage ? page.cursor : undefined;
     } while (cursor);
     for (const object of objects) if (object.fleet) object.retained = retained.has(object.id);
@@ -112,5 +112,5 @@ export function requireDirectExtension(retained: boolean | undefined) {
   if (retained) throw Error('This blob has scheduled retention. Manage its renewal target on the Device and storage budgets page; direct extension would strand prepaid storage.');
 }
 export function requireFleetUploadPeriod(retained: boolean, poolEnd: number | undefined, targetEnd: number) {
-  if (retained && (poolEnd === undefined || poolEnd < targetEnd)) throw Error('Refill the fleet storage pool to cover the chosen period before uploading with retention, or choose wallet-paid storage.');
+  if (retained && (poolEnd === undefined || poolEnd < targetEnd)) throw Error('Refill the storage budget pool to cover the chosen period before uploading with retention, or choose wallet-paid storage.');
 }
