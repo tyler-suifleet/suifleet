@@ -21,6 +21,8 @@ class PreviewConfigTest(unittest.TestCase):
             self.assertIn('https://site.example/',(out/'sitemap.xml').read_text())
             docs=(out/'docs/index.html').read_text()
             self.assertNotIn('not live', docs)
+            self.assertNotIn('docs.suifleet.io', docs)
+            self.assertIn('>the public documentation site</a>', docs)
             self.assertIn('href="https://help.example/install/"', docs)
             for item in config['pages']:
                 text=(out / (item['path'].strip('/') + '/index.html' if item['path'].endswith('/') and item['path'] != '/' else 'index.html' if item['path'] == '/' else item['path'].lstrip('/'))).read_text()

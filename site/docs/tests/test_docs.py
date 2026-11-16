@@ -90,6 +90,22 @@ class DocsTest(unittest.TestCase):
         self.assertNotIn("docs/ENROLLMENT.md", {p["source"] for p in build.catalog()})
         self.assertIn("/blob/main/docs/ENROLLMENT.md", (self.out / "enrollment/index.html").read_text())
 
+    def test_handover_guide_matches_console_controls(self):
+        guide = (build.ROOT / "docs/CUSTOMER_HANDOVER.md").read_text()
+        console = (build.ROOT / "dapp/src/app/handover/page.tsx").read_text()
+        for label in ["Administration", "Choose what to transfer",
+                      "New administrator’s account address", "Resources you manage",
+                      "Advanced: specify additional resources", "Additional resource list",
+                      "Create transfer request", "Transfer reference", "Review transfer",
+                      "Accept as new administrator", "Finish transfer"]:
+            with self.subTest(label=label):
+                self.assertIn(label, guide)
+                self.assertIn(label, console)
+        self.assertIn("Transfer next N resources", guide)
+        self.assertIn("Transfer next {Math.min(pending.length, 16)} resources", console)
+        for stale in ["Fleet handover", "Handover ID", "Confirm as recipient", "**Finish**"]:
+            self.assertNotIn(stale, guide)
+
     def test_links_fail_on_missing_page_and_anchor(self):
         with self.assertRaisesRegex(ValueError, "Incomplete"):
             build.check(self.out)
