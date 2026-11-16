@@ -2280,6 +2280,64 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         self.launch(project, pr, owner, 'review')
         return True
 
+    def retire_closed_review_retries(self, project):
+        """Retain uncertain work; retire stopped retries for terminal batch PRs."""
+        from batch_integration import TERMINAL
+        rows = self.store.db.execute("SELECT j.*,b.id AS batch_id,b.branch AS batch_branch,b.status AS batch_status "
+            "FROM jobs j JOIN integration_batches b ON b.project=j.project AND b.pr=j.pr AND b.head=j.head "
+            "WHERE j.project=? AND j.kind='review' AND j.status='retry' AND j.result IS NULL "
+            "AND j.launch_intent IS NULL AND j.repair_claim IS NULL AND j.publication_done=0", (project['id'],)).fetchall()
+        self.store.db.execute('CREATE TABLE IF NOT EXISTS review_retirements '
+            '(job INTEGER PRIMARY KEY,project TEXT,pr INTEGER,head TEXT,batch TEXT,proof TEXT,created REAL)')
+        for row in rows:
+            if row['batch_status'] not in TERMINAL or not worker_stopped(row['pid'], row['started']):
+                continue
+            try:
+                directory = Path(row['directory'])
+                if directory.is_symlink() or not directory.resolve().is_relative_to(self.state.resolve()):
+                    continue
+                process, exit_path = directory/'process.json', directory/'exit.json'
+                if (process.is_symlink() or exit_path.is_symlink()
+                        or process.stat().st_size > 1024 or exit_path.stat().st_size > 1024):
+                    continue
+                identity, stopped = json.loads(process.read_text()), json.loads(exit_path.read_text())
+                if (identity != dict(pid=row['pid'],started=row['started'])
+                        or type(stopped.get('returncode')) is not int or not 0 < stopped['returncode'] < 124):
+                    continue
+                endpoint = 'repos/'+project['repository']+'/pulls/'+str(row['pr'])
+                def remote_identity():
+                    remote = json.loads(self.gh(project, ['api', endpoint]))
+                    return dict(state=remote.get('state'), head=(remote.get('head') or {}).get('sha'),
+                        branch=(remote.get('head') or {}).get('ref'),
+                        repository=((remote.get('head') or {}).get('repo') or {}).get('full_name'))
+                remote = remote_identity()
+                if (remote != dict(state='closed',head=row['head'],branch=row['batch_branch'],repository=project['repository'])
+                        or remote_identity() != remote or not worker_stopped(row['pid'], row['started'])):
+                    continue
+                db = self.store.db
+                db.execute('BEGIN IMMEDIATE')
+                try:
+                    batch = db.execute('SELECT status,head,branch FROM integration_batches WHERE project=? AND id=?',
+                        (project['id'], row['batch_id'])).fetchone()
+                    if batch is None or tuple(batch) != (row['batch_status'],row['head'],row['batch_branch']):
+                        db.execute('ROLLBACK'); continue
+                    updated = db.execute("UPDATE jobs SET status='superseded',error=? WHERE id=? AND status='retry' "
+                        "AND pid=? AND started=? AND head=? AND result IS NULL AND launch_intent IS NULL AND repair_claim IS NULL AND publication_done=0",
+                        ('Verified stopped review superseded: closed remote PR and terminal integration batch',
+                         row['id'],row['pid'],row['started'],row['head']))
+                    if updated.rowcount:
+                        proof = json.dumps(dict(remote=remote,batch_status=row['batch_status']),sort_keys=True)
+                        db.execute('INSERT OR REPLACE INTO review_retirements VALUES(?,?,?,?,?,?,?)',
+                            (row['id'],project['id'],row['pr'],row['head'],row['batch_id'],proof,time.time()))
+                    db.execute('COMMIT')
+                except BaseException:
+                    db.execute('ROLLBACK'); raise
+            except Exception as error:
+                # Unknown remote/process state remains reserved; one failed read
+                # must not abort unrelated source/review scheduling.
+                print(f"{project['id']} PR#{row['pr']}: stopped review retirement held ({type(error).__name__})", flush=True)
+                continue
+
     def tick_project(self, project, execute):
         owners = self.owners(project)
         if execute:
@@ -2309,6 +2367,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             prs = self.prs(project, on_snapshot, owners)
         else:
             prs = self.prs(project)
+        if execute:
+            self.retire_closed_review_retries(project)
         if execute and getattr(self, 'hosted_runner_recovery', None):
             for notice in self.hosted_runner_recovery.scan(project, prs):
                 print(json.dumps(dict(project=project['id'], hosted_runner_recovery=notice)), flush=True)
