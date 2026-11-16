@@ -154,7 +154,7 @@ class SiteTest(unittest.TestCase):
         self.assertTrue(any("not in site.json external_hosts" in e for e in self.errors()))
 
     def test_repository_link_must_exist(self):
-        self.edit("docs/index.html", "/blob/main/docs/ENROLLMENT.md", "/blob/main/docs/NOT_A_DOC.md")
+        self.edit("docs/index.html", "/blob/main/suifleet-edge/config.example.toml", "/blob/main/docs/NOT_A_DOC.md")
         self.assertTrue(any("repository path does not exist" in e for e in self.errors()))
 
     def test_build_refuses_missing_repository_path(self):
