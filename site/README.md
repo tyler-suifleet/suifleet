@@ -2,7 +2,7 @@
 
 Static product pages, a written console guide, an offline console screenshot,
 proposed pricing, documentation entry, security/custody and contact/privacy.
-The nine guide stages include testnet WebM/MP4 recordings, posters, complete written instructions and console-build provenance. The viewport-sized player shows one instruction at a time with local instruction arrows and Back/Next stage controls; long instructions are divided to fit without clipping or scroll panes. Changing stages pauses inactive videos. Stage and instruction links are kept in the URL fragment. Regeneration and spending controls are described
+The ten guide stages include testnet WebM/MP4 recordings, posters, complete written instructions and console-build provenance. The viewport-sized player shows one instruction at a time with local instruction arrows and Back/Next stage controls; long instructions are divided to fit without clipping or scroll panes. Changing stages pauses inactive videos. Stage and instruction links are kept in the URL fragment. Regeneration and spending controls are described
 in [guide/RECORDING.md](guide/RECORDING.md).
 Standard-library Python 3.10+; no install or network needed to build:
 

@@ -1,51 +1,55 @@
 WEBVTT
 
 1
-00:00:00.450 --> 00:00:08.023
-A gradual rollout lets you check a small batch before expanding.
-We’ll prepare a plan and leave it paused until reporting is
-ready.
+00:00:00.450 --> 00:00:11.437
+A gradual rollout is optional for larger fleets. Health gates
+run when you approve checks; each batch needs explicit operator
+advancement. This example leaves the plan paused.
 
 2
-00:00:08.610 --> 00:00:11.085
+00:00:12.050 --> 00:00:14.525
 Choose Rollouts to plan a release in stages.
 
 3
-00:00:12.290 --> 00:00:16.663
+00:00:15.730 --> 00:00:20.103
 Create a gradual rollout. Choose the release and the matching
 device platform.
 
 4
-00:00:17.250 --> 00:00:22.925
+00:00:20.690 --> 00:00:26.365
 A cohort is simply a batch. Add devices or groups; a device
 belongs to only one batch.
 
 5
-00:00:23.530 --> 00:00:29.802
+00:00:26.970 --> 00:00:33.242
 Choose the pacing, observation period and failure threshold.
 Creating the plan does not start devices.
 
 6
-00:00:30.410 --> 00:00:35.487
-Select the rollout. Check current device health before allowing
-the first devices to start.
+00:00:33.850 --> 00:00:42.810
+Select the rollout and waiting devices. Check device health and
+continue requires wallet approval. Admission does not prove a
+device is online.
 
 7
-00:00:36.090 --> 00:00:41.615
-Devices are still waiting in this example. Current reporting
-must be available before admission.
+00:00:43.410 --> 00:00:52.199
+Devices are still waiting here. After admission, signed post-
+apply health and observation gates control progression when you
+approve further checks.
 
 8
-00:00:42.210 --> 00:00:49.293
+00:00:52.810 --> 00:00:59.893
 Pause stops new admissions. It does not undo an update already
 allowed to start; this example admits no devices.
 
 9
-00:00:49.890 --> 00:00:55.245
-The plan is paused. Return when reporting is ready and
-explicitly approve further progress.
+00:01:00.490 --> 00:01:08.383
+The plan is paused. Resume when ready, then explicitly approve
+checks and each later batch. Closing the browser stops
+coordination.
 
 10
-00:00:55.850 --> 00:01:02.442
-This plan is saved and paused, with devices still waiting. Check
-current reporting before approving the next step.
+00:01:08.970 --> 00:01:17.269
+This plan is saved and paused; no devices were admitted.
+Automatic health gates do not replace your explicit approvals
+for further progress.
