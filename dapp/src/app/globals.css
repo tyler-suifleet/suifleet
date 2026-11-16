@@ -41,6 +41,11 @@
     font-size: 0.875rem;
     transition: border-color 120ms, box-shadow 120ms;
   }
+  /* Native file-picker widths vary with browser/platform fonts. */
+  .fleet-content :where(input[type="file"]) {
+    max-width: 100%;
+    min-width: 0;
+  }
   .fleet-content :where(input, textarea)::placeholder { color: #64748b; }
   .fleet-content :where(input, select, textarea):disabled { background-color: #f1f5f9; color: #64748b; }
   .fleet-content :where(input[type="checkbox"], input[type="radio"]) { accent-color: #2563eb; }
