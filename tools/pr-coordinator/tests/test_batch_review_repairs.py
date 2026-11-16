@@ -98,6 +98,9 @@ class BatchReviewRepairs(unittest.TestCase):
         new_base = f.git('rev-parse', 'HEAD')
         f.git('push', '-q', 'origin', 'main')
         self.assertEqual(len(f.controller.select(f.project,members,new_base,2)),1)
+        # A clock step must not make the fixture's latest-batch helper mistake
+        # the correctly created successor for the old failed epoch.
+        f.controller.clock = lambda: failed['created'] - 1
         f.tick();new=f.row();self.assertNotEqual(new['id'],failed['id']);self.assertEqual(len(json.loads(new['members'])),1)
 
     def test_rejected_source_does_not_hold_an_independent_ready_pr(self):
