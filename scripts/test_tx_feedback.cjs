@@ -7,17 +7,17 @@ const { loader } = require("./frontend_test_utils.cjs");
 
 const id = (n) => "0x" + n.toString(16).padStart(64, "0");
 const manifest = { network: "localnet" };
-let wallet, client, mutation;
+let wallet, client, mutation, selection = { supported: false, identity: "legacy" }, policyRead = async () => null;
 const account = { address: id(10), chains: ["sui:localnet"] };
 const stubs = {
   react: { useRef: (value) => ({ current: value }) },
   "@tanstack/react-query": { useMutation: (options) => (mutation = options), useQueryClient: () => ({ invalidateQueries: async () => {} }) },
   "@mysten/dapp-kit-react": { useCurrentClient: () => client, useDAppKit: () => wallet },
   "@mysten/enoki": { getSession: async () => null, isEnokiWallet: () => false },
-  "@/lib/security-policy": { fetchOrganizationSecurity: async () => null },
+  "@/lib/security-policy": { fetchOrganizationSecurity: (...args) => policyRead(...args) },
   "@/lib/passkey-factor": { approvalDecisionsOnly: () => false, assertSponsorSafe() {}, enrolledSigner: async () => { throw Error("unused"); }, withSponsorFunding: (t) => t },
   "@/lib/customer-entitlements": { checkDeviceCapacity: async () => {} },
-  "./useFleetSelection": { useFleetSelection: () => ({ supported: false, identity: "legacy" }) },
+  "./useFleetSelection": { useFleetSelection: () => selection },
   "@/lib/customer-fleets": { fetchCustomerFleets: async () => [], selectionKey: () => "k", withManagedBudgetCap: (t) => t },
   "@/lib/fleet-budget": { fetchManagedBudget: async () => ({}) },
   "@/lib/fleet-support": { verifySupportDiagnostics: async () => {} },
@@ -98,6 +98,21 @@ async function run(options) {
   r = await run({ execute: async () => ({ Transaction: { digest: "OK", status: { success: true } } }) });
   assert.equal(r.error, undefined); assert.equal(r.result.digest, "OK"); assert.deepEqual(r.seen.phases, ["validating", "wallet", "confirming"]);
 
+  // A managed-fleet read that fails after the wallet phase is reported but
+  // before anything is handed over: not submitted, and the caller is told it
+  // definitely failed exactly once so enrollment can release its marker.
+  selection = { supported: false, identity: "managed", fleet: { id: id(5), customerId: id(6) } };
+  policyRead = async () => { throw Error("Failed to fetch organization security policy"); };
+  r = await run({ execute: async () => { throw Error("must not reach the wallet"); } });
+  assert.equal(r.calls.execute, 0); assert.equal(r.error.stage, "not-submitted");
+  assert.deepEqual(r.seen.phases, ["validating", "wallet"]); assert.equal(r.seen.definite, 1);
+  assert.equal(feedback.describeTransactionFailure(r.error).retry !== "check-first", true);
+  // The same policy read succeeding still reaches the wallet once.
+  policyRead = async () => null;
+  r = await run({ execute: async () => ({ Transaction: { digest: "OK2", status: { success: true } } }) });
+  assert.equal(r.calls.execute, 1); assert.equal(r.result.digest, "OK2"); assert.equal(r.seen.definite, 0);
+  selection = { supported: false, identity: "legacy" };
+
   // Errors raised outside the hook (builders, preflight reads) never reached a wallet.
   f = feedback.describeTransactionFailure(new Error("Fleet access was revoked"), "Moving the device");
   assert.equal(f.stage, "not-submitted"); assert.equal(f.kind, "access"); assert.match(f.next, /administrator/);
@@ -115,5 +130,5 @@ async function run(options) {
   assert.deepEqual(plan.wait.map((v) => v.entry.serial), ["SN-4"]);
   assert.deepEqual(plan.blocked.map((v) => v.entry.serial), ["SN-6"]);
   assert.deepEqual(plan.unknown, ["SN-9"]);
-  console.log("PASS: transaction stages (rejected, not submitted, executed failure, unconfirmed), definite-failure callbacks, customer guidance without invented success, and lost-credential revoke/reissue planning");
+  console.log("PASS: transaction stages (rejected, not submitted, executed failure, unconfirmed), definite-failure callbacks (including a pre-submission managed-fleet read failure), customer guidance without invented success, and lost-credential revoke/reissue planning");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -138,7 +138,13 @@ export function useFleetTransaction() {
       try { return await execute(input, progress); }
       catch (error) {
         if (error instanceof FleetTransactionError) throw error;
-        throw new FleetTransactionError(progress.sent ? "uncertain" : "not-submitted", error, progress.digest);
+        if (progress.sent) throw new FleetTransactionError("uncertain", error, progress.digest);
+        // A check or read that failed before anything was handed over (for
+        // example the organization security policy) is a definite failure,
+        // whichever phase was last reported. Classified errors above already
+        // notified the caller, so this never fires twice.
+        input.onDefiniteFailure?.();
+        throw new FleetTransactionError("not-submitted", error);
       }
     },
   });

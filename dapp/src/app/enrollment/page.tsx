@@ -22,6 +22,7 @@ import {
 import type { DeviceGroup, DeviceObject } from "@/lib/sui";
 import type { Transaction } from "@mysten/sui/transactions";
 import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
+import { transactionStage } from "@/lib/tx-feedback";
 import { parseSerials, planLostCredentials, type LostCredentialPlan } from "@/lib/credential-recovery";
 
 const STATUS_LABEL: Record<EntryStatus, string> = {
@@ -209,9 +210,10 @@ function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyStat
           record(step.label, claims.size, digest);
         } catch (e) {
           const message = (e as Error).message;
-          // Validation/refusal or explicit failed effects permit retry. A
-          // wallet transport failure is ambiguous and must stay submitted.
-          if (registers.size && (phase === "validating" || definiteFailure)) markEntries(registers, { submitted: undefined });
+          // Validation/refusal, a check that failed before anything was sent,
+          // or explicit failed effects permit retry. Only an uncertain outcome
+          // (possibly sent) must stay submitted.
+          if (registers.size && (phase === "validating" || definiteFailure || transactionStage(e) !== "uncertain")) markEntries(registers, { submitted: undefined });
           markEntries(claims, { error: message });
           record(step.label, claims.size, undefined, message);
           onFailure(e, step.label);
