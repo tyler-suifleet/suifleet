@@ -185,7 +185,11 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
       assert.equal(await page.locator('footer [role="alert"]').count(),0);
       assert.equal(await page.getByRole('button',{name:'Unavailable action'}).isDisabled(),true);
       assert.equal(await page.getByText('Healthy',{exact:true}).isVisible(),true);
-      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      for (const picker of await page.locator('input[type="file"]').all()) {
+        assert.equal(await picker.evaluate(el => getComputedStyle(el).maxWidth), '100%', 'native file picker constrained across platform fonts');
+        assert.equal(await picker.evaluate(el => el.getBoundingClientRect().right <= innerWidth), true, `file picker fits at ${width}px`);
+      }
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false, `populated fixture: no overflow at ${width}px`);
       await page.getByRole('button',{name:'Clear diagnostic'}).click(); assert.equal(await page.locator('footer').count(),0);
     }
     assert.deepEqual(errors,[]);
