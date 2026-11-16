@@ -6,7 +6,11 @@ import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
  * row keeps the change visible, and the action that made it disabled, until
  * the list catches up.
  */
-export interface PendingRow { id: string; label: string; kind: "create" | "delete"; since: number }
+export interface PendingRow {
+  id: string; label: string; kind: "create" | "delete"; since: number;
+  /** Submitted with an unknown outcome (SF-277): blocks a repeat like a confirmed change, but never claims success. */
+  unconfirmed?: boolean;
+}
 
 /** After this long a pending row stops polling and asks for a later refresh. */
 export const PENDING_TIMEOUT_MS = 60_000;

@@ -2,6 +2,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot } from 'react-dom/client';
 import FirmwarePage from '../../dapp/src/app/firmware/page';
+import { FleetTransactionError } from '../../dapp/src/lib/tx-feedback';
 
 
 const storageClient = {
@@ -54,7 +55,8 @@ window.uploadAcceptance = {
     request.onload();
   },
   phase(phase) { state.onProgress(phase); },
-  reject() { state.reject(new Error('User rejected signing')); },
+  reject() { state.reject(new FleetTransactionError('rejected', Object.assign(new Error('User rejected the request'), { code: 4001 }))); },
+  uncertain() { state.reject(new FleetTransactionError('uncertain', new TypeError('Failed to fetch'))); },
   succeed() { state.resolve({ digest: 'confirmed-fixture' }); },
 };
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><FirmwarePage /></QueryClientProvider>);

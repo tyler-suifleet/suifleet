@@ -34,6 +34,8 @@ import { filterDevices, resolveDeviceList, type ListResolution } from "@/lib/gro
 import { PageHeader, HealthBadge } from "@/components/ui";
 import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import type { DeviceRef } from "@/lib/sui";
+import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
+import { transactionStage } from "@/lib/tx-feedback";
 
 type Tab = "devices" | "groups";
 
@@ -69,12 +71,14 @@ function DevicesTab() {
   const account = useCurrentAccount();
   const { data: devices = [], isLoading, isSuccess, refetch } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
+  const failure = useTransactionFeedback();
   // Keyed by device address: registration knows it before the object ID exists.
   const pending = usePendingRows("devices", isSuccess ? devices.map((d) => d.deviceAddress) : undefined, refetch);
   const adding = pending.waiting.filter((row) => row.kind === "create");
   // A registration not listed yet blocks another: the contract does not reject a second device for the same address.
   const registering = isPending || adding.length > 0;
   const removing = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => normalizeSuiAddress(row.id)));
+  const removalUnconfirmed = new Set(pending.waiting.filter((row) => row.kind === "delete" && row.unconfirmed).map((row) => normalizeSuiAddress(row.id)));
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [technical, setTechnical] = useState(false);
@@ -106,6 +110,7 @@ function DevicesTab() {
     const fd = new FormData(e.currentTarget);
     const name = fd.get("name") as string, deviceAddress = fd.get("deviceAddress") as string;
     if (registering) return;
+    failure.clear();
     const unlisted = [...pending.waiting, ...pending.stale].find((row) => row.kind === "create" && normalizeSuiAddress(row.id) === normalizeSuiAddress(deviceAddress));
     if (unlisted) { alert(`“${unlisted.label}” is already registered with this address but is not listed yet. Refresh the page in a minute before registering it again.`); return; }
     const tx = buildRegisterDeviceTx(
@@ -118,7 +123,12 @@ function DevicesTab() {
       { transaction: tx },
       {
         onSuccess: () => { setShowModal(false); pending.add([{ id: deviceAddress, label: name, kind: "create" }]); },
-        onError: (err) => alert(`Registration failed: ${registrationFailure(err.message)}`),
+        onError: (err) => {
+          failure.report(err, "Device registration");
+          // The contract accepts a second device for the same address, so an
+          // unconfirmed registration blocks another until it is listed or checked.
+          if (transactionStage(err) === "uncertain") { setShowModal(false); pending.add([{ id: deviceAddress, label: name, kind: "create", unconfirmed: true }]); }
+        },
       }
     );
   }
@@ -169,10 +179,12 @@ function DevicesTab() {
           )}
         </form>
       )}
+      {!showModal && <TransactionFeedback feedback={failure.feedback} onDismiss={failure.clear} />}
       {linkedDevice && !isLoading && !devices.some(device => device.objectId === linkedDevice) && <p role="alert">This device is unavailable in your fleet. Its history may still be visible on Deployments.</p>}
       {pending.stale.map((row) => (
         <p key={row.id} role="status" className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-2">
-          {row.kind === "create" ? `“${row.label}” was registered but is not listed yet.` : `“${row.label}” was removed but is still listed.`} Refresh the page in a minute before repeating this action.{" "}
+          {row.unconfirmed ? (row.kind === "create" ? `The registration of “${row.label}” was submitted but never confirmed, and it is not listed.` : `The removal of “${row.label}” was submitted but never confirmed, and it is still listed.`)
+            : row.kind === "create" ? `“${row.label}” was registered but is not listed yet.` : `“${row.label}” was removed but is still listed.`} {row.unconfirmed ? "Check your wallet activity and refresh before repeating this action." : "Refresh the page in a minute before repeating this action."}{" "}
           <button className="underline" onClick={() => pending.dismiss(row.id)}>Dismiss</button>
         </p>
       ))}
@@ -200,7 +212,7 @@ function DevicesTab() {
               {adding.map((row) => (
                 <tr key={row.id} className="bg-blue-50/50" aria-busy="true">
                   <td className="py-3 pl-4" />
-                  <td className="py-3 px-4 text-xs text-gray-600" role="status">Registered · adding to the list…</td>
+                  <td className="py-3 px-4 text-xs text-gray-600" role="status">{row.unconfirmed ? "Submitted · not confirmed yet…" : "Registered · adding to the list…"}</td>
                   <td colSpan={technical ? 7 : 5} className="py-3 pr-4 font-medium">{row.label}</td>
                 </tr>
               ))}
@@ -240,7 +252,7 @@ function DevicesTab() {
                     <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
                   </>}
                   <td className="py-3 flex items-center gap-3">
-                    {removing.has(normalizeSuiAddress(d.deviceAddress)) ? <span role="status" className="text-xs text-gray-600">Removed · updating the list…</span> : <>
+                    {removing.has(normalizeSuiAddress(d.deviceAddress)) ? <span role="status" className="text-xs text-gray-600">{removalUnconfirmed.has(normalizeSuiAddress(d.deviceAddress)) ? "Removal submitted · not confirmed yet…" : "Removed · updating the list…"}</span> : <>
                     {!d.ownerCapId && !d.managed && (
                       <button
                         disabled={isPending}
@@ -249,7 +261,7 @@ function DevicesTab() {
                             { transaction: buildActivateDeviceTx(d.objectId, account!.address) },
                             {
                               onSuccess: () => setTimeout(() => refetch(), 3000),
-                              onError: (err) => alert(`Failed: ${err.message}`),
+                              onError: (err) => failure.report(err, `Activating “${d.name}”`),
                             }
                           );
                         }}
@@ -262,11 +274,18 @@ function DevicesTab() {
                       disabled={isPending}
                       onClick={async () => {
                         if (!confirm(`Remove "${d.name}"? This cannot be undone.`)) return;
+                        failure.clear();
+                        let transaction;
+                        try { transaction = fleet ? await buildDeregisterManagedDeviceTx(client, fleet, d.objectId) : buildDeregisterDeviceTx(d); }
+                        catch (err) { failure.report(err, `Removing “${d.name}”`); return; }
                         signAndExecute(
-                          { transaction: fleet ? await buildDeregisterManagedDeviceTx(client, fleet, d.objectId) : buildDeregisterDeviceTx(d) },
+                          { transaction },
                           {
                             onSuccess: () => pending.add([{ id: d.deviceAddress, label: d.name, kind: "delete" }]),
-                            onError: (err) => alert(`Failed: ${err.message}`),
+                            onError: (err) => {
+                              failure.report(err, `Removing “${d.name}”`);
+                              if (transactionStage(err) === "uncertain") pending.add([{ id: d.deviceAddress, label: d.name, kind: "delete", unconfirmed: true }]);
+                            },
                           }
                         );
                       }}
@@ -323,6 +342,7 @@ function DevicesTab() {
                 <option value="riscv64">riscv64</option>
               </select>
             </div>
+            <TransactionFeedback feedback={failure.feedback} />
             <ModalButtons isPending={registering || !!fleet && fleet.activeDevices >= fleet.deviceLimit} label="Register" onCancel={() => setShowModal(false)} />
           </form>
         </Modal>
@@ -341,6 +361,11 @@ function GroupsTab() {
   const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
   const pending = usePendingRows("groups", isSuccess ? groups.map((g) => g.objectId) : undefined, refetch);
+  const failure = useTransactionFeedback();
+  // A group creation with an unknown outcome has no ID to watch; creating
+  // another could duplicate it, so wait for the customer to check first.
+  const [creationUnconfirmed, setCreationUnconfirmed] = useState(false);
+  const dismissFailure = () => { failure.clear(); setCreationUnconfirmed(false); };
   const deleting = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => row.id));
   const creating = pending.waiting.some((row) => row.kind === "create");
   const [showCreate, setShowCreate] = useState(false);
@@ -369,7 +394,7 @@ function GroupsTab() {
       { transaction: buildDesiredRevisionTx([groupId], undefined, [component], fleet) },
       {
         onSuccess: () => { setTimeout(() => refetchDesired(), 3000); },
-        onError: (err) => alert(`Failed: ${err.message}`),
+        onError: (err) => failure.report(err, `Stopping “${component}”`),
       }
     );
   }
@@ -387,7 +412,10 @@ function GroupsTab() {
           if (ids.length) pending.add(ids.map((id) => ({ id, label: name, kind: "create" as const })));
           else void refetch();
         },
-        onError: (err) => alert(`Failed: ${err.message}`),
+        onError: (err) => {
+          failure.report(err, "Group creation");
+          if (transactionStage(err) === "uncertain") { setShowCreate(false); setCreationUnconfirmed(true); }
+        },
       }
     );
   }
@@ -399,24 +427,26 @@ function GroupsTab() {
 
   async function handleAddDevice(groupId: string, device: DeviceRef) {
     let known;
-    try { known = await inboxes([device.objectId]); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
+    failure.clear();
+    try { known = await inboxes([device.objectId]); } catch (err) { failure.report(err, "Adding the device to the group"); return; }
     signAndExecute(
       { transaction: buildAddDeviceToGroupTx(groupId, device, known?.has(device.objectId), fleet) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
-        onError: (err) => alert(`Failed: ${err.message}`),
+        onError: (err) => failure.report(err, "Adding the device to the group"),
       }
     );
   }
 
   async function handleRemoveDevice(groupId: string, deviceId: string) {
     let known;
-    try { known = await inboxes([deviceId]); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
+    failure.clear();
+    try { known = await inboxes([deviceId]); } catch (err) { failure.report(err, "Removing the device from the group"); return; }
     signAndExecute(
       { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId, known?.has(deviceId), fleet) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
-        onError: (err) => alert(`Failed: ${err.message}`),
+        onError: (err) => failure.report(err, "Removing the device from the group"),
       }
     );
   }
@@ -428,13 +458,14 @@ function GroupsTab() {
    */
   async function handleIndex(groupId: string, unindexed: number) {
     let pending;
-    try { pending = await unlistedMembers(client, groupId, operatedMembers); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
+    failure.clear();
+    try { pending = await unlistedMembers(client, groupId, operatedMembers); } catch (err) { failure.report(err, "Listing group members"); return; }
     if (unindexed === 0 && pending.length === 0) { void refetchUnlisted(); return; }
     signAndExecute(
       { transaction: buildIndexGroupTx(groupId, pending.slice(0, LISTING_BATCH), unindexed > 0) },
       {
         onSuccess: () => { setTimeout(() => { void refetch(); void refetchUnlisted(); }, 3000); },
-        onError: (err) => alert(`Failed: ${err.message}`),
+        onError: (err) => failure.report(err, "Listing group members"),
       }
     );
   }
@@ -444,16 +475,19 @@ function GroupsTab() {
   return (
     <>
       <div className="flex justify-end">
-        <button onClick={() => setShowCreate(true)} disabled={isPending || creating} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded disabled:opacity-50">
+        <button onClick={() => { dismissFailure(); setShowCreate(true); }} disabled={isPending || creating || creationUnconfirmed} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded disabled:opacity-50">
           {creating ? "Adding group…" : "Create group"}
         </button>
       </div>
       {pending.stale.map((row) => (
         <p key={row.id} role="status" className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-2">
-          {row.kind === "create" ? `Group “${row.label}” was created but is not listed yet.` : `Group “${row.label}” was deleted but is still listed.`} Refresh the page in a minute before repeating this action.{" "}
+          {row.unconfirmed ? `Deleting group “${row.label}” was submitted but never confirmed, and it is still listed. Check your wallet activity and refresh before repeating this action.`
+            : <>{row.kind === "create" ? `Group “${row.label}” was created but is not listed yet.` : `Group “${row.label}” was deleted but is still listed.`} Refresh the page in a minute before repeating this action.</>}{" "}
           <button className="underline" onClick={() => pending.dismiss(row.id)}>Dismiss</button>
         </p>
       ))}
+      {!showCreate && !managedGroup && <TransactionFeedback feedback={failure.feedback} onDismiss={dismissFailure} />}
+      {creationUnconfirmed && <p role="status" className="text-sm text-amber-800">Creating another group is paused until you check whether the last one was created. Dismiss the message above once you have checked.</p>}
 
       {conflicts.length > 0 && (
         <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-3 space-y-1">
@@ -504,7 +538,7 @@ function GroupsTab() {
                   </td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{g.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
-                    {deleting.has(g.objectId) ? <span role="status" className="text-xs text-gray-600">Deleted · removing from the list…</span> : <>
+                    {deleting.has(g.objectId) ? <span role="status" className="text-xs text-gray-600">{pending.waiting.some((row) => row.id === g.objectId && row.unconfirmed) ? "Deletion submitted · not confirmed yet…" : "Deleted · removing from the list…"}</span> : <>
                     <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#4DA2FF] hover:underline">
                       Manage
                     </button>
@@ -516,7 +550,10 @@ function GroupsTab() {
                           { transaction: buildDeleteGroupTx(g.objectId, fleet) },
                           {
                             onSuccess: () => pending.add([{ id: g.objectId, label: g.name, kind: "delete" }]),
-                            onError: (err) => alert(`Failed: ${err.message}`),
+                            onError: (err) => {
+                              failure.report(err, `Deleting group “${g.name}”`);
+                              if (transactionStage(err) === "uncertain") pending.add([{ id: g.objectId, label: g.name, kind: "delete", unconfirmed: true }]);
+                            },
                           }
                         );
                       }}
@@ -538,6 +575,7 @@ function GroupsTab() {
           <form onSubmit={handleCreateGroup} className="space-y-4">
             <FormField label="Group name" name="name" placeholder="production-pi4s" required />
             <FormField label="Description" name="description" placeholder="Optional" />
+            <TransactionFeedback feedback={failure.feedback} />
             <ModalButtons isPending={isPending} label="Create" onCancel={() => setShowCreate(false)} />
           </form>
         </Modal>
@@ -546,6 +584,7 @@ function GroupsTab() {
       {managedGroup && (
         <Modal title={`Manage — ${managedGroup.name}`} onClose={() => setManagingGroup(null)}>
           <div className="space-y-4">
+            <TransactionFeedback feedback={failure.feedback} onDismiss={dismissFailure} />
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase mb-2">
                 Desired state{desired[managedGroup.objectId] ? ` (revision ${desired[managedGroup.objectId].revision})` : ""}

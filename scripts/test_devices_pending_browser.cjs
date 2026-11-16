@@ -33,6 +33,19 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright');
   await page.getByRole('status').filter({hasText:'adding to the list'}).waitFor({state:'detached'});
   assert.equal(await open.isDisabled(),false,'listing the device re-enables registration');
   assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),1);assert.deepEqual(dialogs,[]);
-  assert.deepEqual(errors,[]);console.log('PASS Devices screen: lagged registration shows pending, blocks a duplicate (also after switching tabs) and re-enables once listed');
+  // SF-277: a wallet rejection shows inline guidance (no browser alert); nothing is pending and registering again is allowed.
+  await page.evaluate(()=>window.acceptance.fail('rejected'));const third='0x'+'3'.repeat(64);await register('Third Pi',third);
+  let alert=page.getByRole('alert').filter({hasText:'Device registration was cancelled in your wallet.'});await alert.waitFor();assert.equal(await alert.count(),1,'one alert, inside the open form');assert.match(await alert.innerText(),/Nothing was submitted or charged/);
+  assert.equal(await page.locator('form').count(),1,'the form stays open for a safe retry');assert.equal(await page.getByRole('status').filter({hasText:'not confirmed yet'}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Register',exact:true}).isDisabled(),false);assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),2);
+  // An unconfirmed registration closes the form, warns against repeating and blocks another registration.
+  await page.evaluate(()=>window.acceptance.fail('uncertain'));await page.getByRole('button',{name:'Register',exact:true}).click();
+  alert=page.getByRole('alert').filter({hasText:'Device registration may have been submitted, but its result is not confirmed.'});await alert.waitFor();assert.match(await alert.innerText(),/Do not try again yet/);
+  await page.getByRole('status').filter({hasText:'Submitted · not confirmed yet…'}).waitFor();assert.equal(await page.getByText('Third Pi',{exact:true}).count(),1);
+  assert.equal(await page.locator('form').count(),0);assert.equal(await open.isDisabled(),true,'an unconfirmed registration blocks a duplicate');
+  await open.click({force:true});assert.equal(await page.locator('form').count(),0);assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),3);
+  assert.equal(await page.getByRole('link',{name:'Third Pi',exact:true}).count(),0,'never shown as a registered device');
+  assert.deepEqual(dialogs,[],'no browser alerts');
+  assert.deepEqual(errors,[]);console.log('PASS Devices screen: lagged registration shows pending, blocks a duplicate (also after switching tabs) and re-enables once listed; rejected registration shows inline guidance and allows retry; unconfirmed registration blocks a duplicate without claiming success');
  }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1});
