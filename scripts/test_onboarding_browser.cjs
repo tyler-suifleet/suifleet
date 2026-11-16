@@ -95,7 +95,7 @@ function audit() {
       assert.equal(await page.evaluate(() => document.activeElement?.href), `https://docs.suifleet.io/${slug}/`);
       assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
     }
-    for (const [name, href] of [["Check device capacity →", "/entitlements"], ["Check account funds →", "#funding"], ["Check network budget →", "/budget"]]) {
+    for (const [name, href] of [["Check device capacity →", "/entitlements"], ["Check account approval fees →", "#funding"], ["Check device operating budget →", "/budget"]]) {
       await page.keyboard.press("Tab");
       assert.equal(await page.evaluate(() => document.activeElement?.textContent), name);
       assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), href);

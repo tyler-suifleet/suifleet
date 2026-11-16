@@ -18,6 +18,13 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     const css = (await appRequire('postcss')([appRequire('@tailwindcss/postcss')({ base: path.join(root, 'dapp') })]).process(await fs.readFile(cssPath, 'utf8'), { from: cssPath })).css;
     await page.route('http://fleet.test/**', r => r.fulfill({ contentType: 'text/html', body: '<meta name="viewport" content="width=device-width, initial-scale=1"><style>' + css + '</style><body class="p-4"><div id="root"></div></body>' }));
     await page.goto('http://fleet.test'); await page.addScriptTag({ content: result.outputFiles[0].text });
+    for (const width of [1440, 375]) {
+      await page.setViewportSize({ width, height: 667 });
+      const capacity = page.getByRole('heading', { name: 'Capacity plans' }).locator('..');
+      assert.match(await capacity.innerText(), /checkout and settings tariffs do not establish the all-in commercial offer/);
+      assert.equal(await capacity.getByRole('link', { name: 'Contact', exact: true }).getAttribute('href'), 'https://suifleet.io/contact/');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
     await page.getByLabel('Plan and payment coin').selectOption('0x' + '1'.repeat(64));
     async function visible(button, text) {
       const status = page.getByRole('status').filter({ hasText: text });
