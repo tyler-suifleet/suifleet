@@ -6,15 +6,16 @@ import { useFleetSelection } from "@/hooks/useFleetSelection";
 
 const POLL_MS = 2_000;
 const NONE: PendingRow[] = [];
-/** Browser storage for unconfirmed rows; the key carries chain, registry, network, account and fleet. */
+/** Browser storage for rows not reflected in the list yet; the key carries chain, registry, network, account and fleet. */
 const SAVED = "suifleet:unconfirmed:v1:";
 
 // Pending rows outlive the component that added them: switching tabs or
 // screens must not re-enable an action whose change is still unlisted.
 // Keyed by chain, account and fleet so another identity never sees them.
-// Unconfirmed rows (SF-277) are also saved in browser storage so a reload or
-// restart keeps the duplicate guard until the change is listed or the
-// customer explicitly confirms they checked.
+// Pending rows (SF-277), confirmed or unconfirmed, are also saved in browser
+// storage so a reload or restart keeps the duplicate guard until the change
+// is listed or the customer explicitly dismisses it. A confirmed registration
+// the inventory has not indexed yet is just as easy to repeat after a reload.
 const rows = new Map<string, PendingRow[]>();
 const hydrated = new Set<string>();
 const listeners = new Set<() => void>();
@@ -31,8 +32,7 @@ function hydrate(key: string) {
 function persist(key: string, list: PendingRow[]) {
   const store = storage();
   if (!store) return;
-  const keep = list.filter((row) => row.unconfirmed);
-  try { if (keep.length) store.setItem(SAVED + key, JSON.stringify(keep)); else store.removeItem(SAVED + key); } catch { /* storage full or blocked: the in-memory guard remains */ }
+  try { if (list.length) store.setItem(SAVED + key, JSON.stringify(list)); else store.removeItem(SAVED + key); } catch { /* storage full or blocked: the in-memory guard remains */ }
 }
 function update(key: string, change: (current: PendingRow[]) => PendingRow[]) {
   hydrate(key);

@@ -31,9 +31,11 @@ const type = `${id(2)}::device_group::GroupCreated`;
 assert.deepEqual(eventIds([event(type, id(7)), event(`${id(3)}::device_group::GroupCreated`, id(8)), event("0x2::device_group::GroupCreated", id(9))],
   type, (bytes) => Created.parse(bytes).group_id), [id(7), id(9)]);
 assert.deepEqual(eventIds([], type, () => { throw Error("unused"); }), []);
-// Saved unconfirmed rows (SF-277): only well-formed unconfirmed rows are restored; extra fields are dropped.
+// Saved rows (SF-277): well-formed confirmed and unconfirmed rows are restored; extra fields are dropped,
+// and only an explicit unconfirmed: true restores an unconfirmed row (a confirmed change is never relabelled).
 const saved = { id: id(4), label: "Pi", kind: "create", since: 5, unconfirmed: true };
-assert.deepEqual(parseSavedRows(JSON.stringify([{ ...saved, extra: "x" }, { ...saved, unconfirmed: false }, { ...saved, kind: "other" }, { ...saved, since: "5" }, null, 3])), [saved]);
+const confirmed = { id: id(5), label: "Pi 2", kind: "create", since: 6 };
+assert.deepEqual(parseSavedRows(JSON.stringify([{ ...saved, extra: "x" }, { ...confirmed, unconfirmed: false }, confirmed, { ...saved, unconfirmed: "yes" }, { ...saved, kind: "other" }, { ...saved, since: "5" }, null, 3])), [saved, confirmed, confirmed]);
 assert.deepEqual(parseSavedRows(null), []); assert.deepEqual(parseSavedRows("{}"), []);
 assert.throws(() => parseSavedRows("{"));
-console.log("PASS: pending rows settle on listing/removal, time out to stale, read IDs from matching confirmed events, restore only well-formed saved unconfirmed rows");
+console.log("PASS: pending rows settle on listing/removal, time out to stale, read IDs from matching confirmed events, restore well-formed saved rows without relabelling confirmed ones");

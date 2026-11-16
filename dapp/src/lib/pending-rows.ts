@@ -30,15 +30,19 @@ export function outstanding(pending: PendingRow[], listed: string[] | undefined,
   };
 }
 
-/** Unconfirmed rows saved in browser storage; anything malformed is ignored. */
+/**
+ * Pending rows saved in browser storage, confirmed or not; anything
+ * malformed is ignored. Only an explicit `unconfirmed: true` restores an
+ * unconfirmed row, so a confirmed change is never relabelled uncertain.
+ */
 export function parseSavedRows(text: string | null): PendingRow[] {
   if (!text) return [];
   const value: unknown = JSON.parse(text);
   if (!Array.isArray(value)) return [];
   return value.filter((row): row is PendingRow => !!row && typeof row === "object" &&
     typeof row.id === "string" && typeof row.label === "string" && (row.kind === "create" || row.kind === "delete") &&
-    typeof row.since === "number" && Number.isFinite(row.since) && row.unconfirmed === true)
-    .map(({ id, label, kind, since }) => ({ id, label, kind, since, unconfirmed: true }));
+    typeof row.since === "number" && Number.isFinite(row.since) && (row.unconfirmed === undefined || typeof row.unconfirmed === "boolean"))
+    .map(({ id, label, kind, since, unconfirmed }) => (unconfirmed ? { id, label, kind, since, unconfirmed: true } : { id, label, kind, since }));
 }
 
 /** IDs read from confirmed transaction events of one Move type. */
