@@ -38,10 +38,24 @@ def render(prices, policy, plan_digest):
         previous = limit
     examples = []
     for devices in (50, 1000):
-        raw = Decimal(str(base['tiers'][0]['usdPerDeviceMonth'])) * devices
+        raw = Decimal(0)
+        charged_devices = 0
+        terms = []
+        for tier in base['tiers']:
+            count = min(devices, tier['upToDevices']) - charged_devices
+            if count > 0:
+                rate = Decimal(str(tier['usdPerDeviceMonth']))
+                raw += rate * count
+                terms.append(f'{count:,} × {usd(rate)}')
+            charged_devices = tier['upToDevices']
+            if devices <= charged_devices:
+                break
+        else:
+            raise ValueError('worked example exceeds published device tiers; a custom quote is required')
+        calculation = ' + '.join(terms)
         monthly = max(raw, Decimal(str(base['monthlyMinimumUsd'])))
         activation = Decimal(str(base['activationUsdPerDevice'])) * devices
-        examples.append(f'<tr><td>{devices:,}</td><td>{devices:,} × {usd(base["tiers"][0]["usdPerDeviceMonth"])} = {usd(raw)}</td><td>{usd(monthly)}</td><td>{usd(activation)}</td></tr>')
+        examples.append(f'<tr><td>{devices:,}</td><td>{calculation} = {usd(raw)}</td><td>{usd(monthly)}</td><td>{usd(activation)}</td></tr>')
     out += [f'<tr><td>Above {previous:,}</td><td>Custom, from {usd(base["customFromUsdPerDeviceMonth"])}</td></tr>',
             '</tbody></table>',
             f'<p>Monthly minimum: <strong>{usd(base["monthlyMinimumUsd"])}</strong>. '
@@ -58,7 +72,7 @@ def render(prices, policy, plan_digest):
             f'<p>At-cost tier: up to {at_cost["max_devices"]:,} devices per organization with no SuiFleet margin. '
             f'Pay only network and hosting costs, estimated at about {usd(at_cost["estimated_usd_per_device_month"])} '
             'per device per month at default settings. Billed annually in advance, with community support only. '
-            'Customers paying in SUI can fund the fleet budget directly.</p>',
+            'Customers paying in SUI can fund the device operating budget directly.</p>',
             f'<p>Design partners: up to {partners["max_devices"]:,} devices each at cost for {partners["term_months"]} months, '
             'with managed onboarding free. Three to five companies provide regular feedback, a production reference '
             'and permission for a case study. Afterwards, partners move to list price or a pre-agreed discount. '
