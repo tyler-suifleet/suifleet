@@ -1845,3 +1845,14 @@ matching remote reads, and an unchanged terminal batch record. A durable retirem
 proof is retained. Missing identities, timeout/signal outcomes, active workers,
 changed/reopened PRs and uncertain launch/publication state remain reserved. This
 cleanup changes no ticket, implementation claim, approval or acceptance result.
+
+Once an included source is already Done, unfinished PR/issue closure is metadata
+continuation rather than another implementation acceptance. The coordinator binds
+that continuation to the original retained accepted receipt, published independent
+review, original successful CI/testnet attempts and effects digest, retired claim
+and completion events, and unchanged owner/spec/source/feedback. Its accepted main
+and source must remain ancestors of current main. New same-byte CI producer IDs or
+later independently integrated main commits do not require another completion or
+approval. Fresh source/security/change-request guards still apply; unknown evidence
+fails closed. This path only closes the redundant source PR and linked issue. It
+cannot merge code, accept a changed source, resume a claim or waive release checks.
