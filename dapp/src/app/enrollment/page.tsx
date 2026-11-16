@@ -21,6 +21,8 @@ import {
 } from "@/lib/enrollment";
 import type { DeviceGroup, DeviceObject } from "@/lib/sui";
 import type { Transaction } from "@mysten/sui/transactions";
+import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
+import { parseSerials, planLostCredentials, type LostCredentialPlan } from "@/lib/credential-recovery";
 
 const STATUS_LABEL: Record<EntryStatus, string> = {
   unregistered: "Reserved", unfunded: "Needs enrollment gas", "awaiting-device": "Waiting for device", revoked: "Revoked",
@@ -52,15 +54,16 @@ export default function EnrollmentPage() {
   const [created, setCreated] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const failure = useTransactionFeedback();
   const policies = useQuery({ queryKey: ["enrollment-policies", NETWORK, account?.address, selection.identity, created], queryFn: () => fetchPolicies(client, fleet?.id ?? account!.address, created, fleet),
     enabled: !!account?.address, refetchInterval: 60_000, placeholderData: keepPreviousData });
   const policy = policies.data?.find((p) => p.id === selected);
   const loadingSelected = !!selected && !policy && policies.isFetching;
 
   async function run(transaction: Transaction) {
-    setBusy(true); setError("");
+    setBusy(true); setError(""); failure.clear();
     try { return await mutateAsync({ transaction }); }
-    catch (e) { setError((e as Error).message); return undefined; }
+    catch (e) { failure.report(e, "The policy change"); return undefined; }
     finally { setBusy(false); }
   }
 
@@ -83,6 +86,7 @@ export default function EnrollmentPage() {
       <PageHeader title="Enrollment" subtitle="Reserve device names and serial numbers; devices enroll themselves with single-use credentials" />
       <DeviceClientHelp variant="enroll" />
       {error && <p role="alert" className="text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+      <TransactionFeedback feedback={failure.feedback} onDismiss={failure.clear} />
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
         <h2 className="font-semibold">1. Enrollment batch policy</h2>
         <p className="text-gray-500">A policy limits how many devices may enroll and until when. Each reservation gets one single-use claim; you can revoke unused claims or close the policy at any time.</p>
@@ -102,7 +106,7 @@ export default function EnrollmentPage() {
         </form>
         {policy && <PolicyControls policy={policy} busy={busy} run={async (tx) => { if (await run(tx)) await policies.refetch(); }} />}
       </section>
-      {policy && <JobPanel key={policy.id} policy={policy} operator={fleet?.id ?? account.address} onError={setError} />}
+      {policy && <JobPanel key={policy.id} policy={policy} operator={fleet?.id ?? account.address} onError={setError} onFailure={(e, action) => { setError(""); failure.report(e, action); }} />}
     </div>
   );
 }
@@ -135,7 +139,7 @@ function PolicyControls({ policy, busy, run }: { policy: PolicyState; busy: bool
 
 type AddMode = "csv" | "pair" | "roster";
 
-function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator: string; onError: (message: string) => void }) {
+function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyState; operator: string; onError: (message: string) => void; onFailure: (error: unknown, action: string) => void }) {
   const client = useCurrentClient();
   const devicesQuery = useDevices(), groupsQuery = useGroups();
   const devices = useMemo(() => devicesQuery.data ?? [], [devicesQuery.data]), groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
@@ -152,6 +156,9 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
   const jobRef = useRef(job); jobRef.current = job;
   const [progress, setProgress] = useState<{ step: number; total: number; label: string; phase?: TransactionPhase } | null>(null);
   const stop = useRef(false);
+  // A second click can arrive before the progress state renders (for example
+  // after a confirmation dialog); never start a second run of wallet requests.
+  const running = useRef(false);
   const chain = useQuery({
     queryKey: ["enrollment-job", NETWORK, policy.id, job.entries.length],
     queryFn: () => snapshot(client, jobRef.current, policy.fleet),
@@ -186,6 +193,8 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
    * re-plans from fresh chain state.
    */
   async function runSteps(list: { label: string; entries: { claim: string }[]; build: () => Transaction; registers?: { claim: string }[] }[]) {
+    if (running.current) return;
+    running.current = true;
     stop.current = false;
     try {
       for (let i = 0; i < list.length && !stop.current; i++) {
@@ -205,12 +214,13 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
           if (registers.size && (phase === "validating" || definiteFailure)) markEntries(registers, { submitted: undefined });
           markEntries(claims, { error: message });
           record(step.label, claims.size, undefined, message);
-          onError(`${step.label}: ${message}`);
+          onFailure(e, step.label);
           break;
         }
       }
     } finally {
       setProgress(null);
+      running.current = false;
       await chain.refetch();
     }
   }
@@ -230,6 +240,22 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
     markEntries(new Set(unused.map((v) => v.entry.claim)), { revoked: true });
     runSteps(chunk(unused, LIMITS.revokesPerTx).map((part, i, all) => ({ label: `Revoke claims ${i + 1}/${all.length}`, entries: part.map((v) => v.entry),
       build: () => buildRevokeClaimsTx(policy.id, part.map((v) => v.entry.claim), policy.fleet) })));
+  }
+  /** Revoke only the named unused claims whose credential file was lost. */
+  function revokeLost(plan: LostCredentialPlan) {
+    const lost = plan.revoke;
+    if (!lost.length || !confirm(`Revoke ${lost.length} lost claim${lost.length === 1 ? "" : "s"} (${lost.map((v) => v.entry.serial).join(", ")})? Their credential files stop working permanently. Enrolled devices and other claims are not affected.`)) return;
+    // Mark first: an interrupted revocation must never be re-registered automatically.
+    markEntries(new Set(lost.map((v) => v.entry.claim)), { revoked: true });
+    runSteps(chunk(lost, LIMITS.revokesPerTx).map((part, i, all) => ({ label: `Revoke lost claims ${i + 1}/${all.length}`, entries: part.map((v) => v.entry),
+      build: () => buildRevokeClaimsTx(policy.id, part.map((v) => v.entry.claim), policy.fleet) })));
+  }
+  /** Free the serials of lost reservations that hold no live claim, so they can be reserved again. */
+  function releaseLost(plan: LostCredentialPlan) {
+    const claims = new Set(plan.release.map((v) => v.entry.claim));
+    if (!claims.size || !confirm(`Remove ${claims.size} reservation${claims.size === 1 ? "" : "s"} (${plan.release.map((v) => v.entry.serial).join(", ")})? You can then reserve the same serial again and download a new credential file.`)) return;
+    const next = { ...jobRef.current, entries: jobRef.current.entries.filter((e) => !claims.has(e.claim)) };
+    jobRef.current = next; setJob(next);
   }
   function forgetReserved() {
     const reserved = new Set(views.filter((v) => v.status === "unregistered" || v.status === "withdrawn" || v.status === "revoked").map((v) => v.entry.claim));
@@ -309,6 +335,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
           <button className={button} disabled={!!progress || !(counts.complete || counts.binding)} onClick={fundDevices}>Fund enrolled devices</button>
         </div>
         <EntryTable views={views} groups={groups} />
+        <LostCredentials views={views} busy={!!progress} onRevoke={revokeLost} onRelease={releaseLost} />
       </section>
     </>
   );
@@ -329,7 +356,9 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
   const [groupId, setGroupId] = useState("");
   const [fund, setFund] = useState((Number(job.claimFundMist) / 1e9).toString());
   const [check, setCheck] = useState<ReservationCheck & { parseIssues: number } | null>(null);
-  useEffect(() => setCheck(null), [mode, csv, template, start, alias, serial, groupId]);
+  // The archive is the only copy of its claim keys: confirm before each download.
+  const [acknowledged, setAcknowledged] = useState(false);
+  useEffect(() => { setCheck(null); setAcknowledged(false); }, [mode, csv, template, start, alias, serial, groupId]);
 
   function validate() {
     if (!inventory.ready) return;
@@ -339,7 +368,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
     setCheck({ accepted: result.accepted, issues: [...parsed.issues, ...result.issues], parseIssues: parsed.issues.length });
   }
   function generate() {
-    if (!check?.accepted.length) return;
+    if (!check?.accepted.length || !acknowledged) return;
     const mist = toMist(fund);
     if (!mist || mist > MIST / BigInt(10)) return alert("Enrollment gas per claim must be more than 0 and at most 0.1 SUI");
     const { entries, credentials } = generateCredentials(check.accepted);
@@ -348,7 +377,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
     credentials.length = 0;
     onAdd(entries, mist.toString());
     setStart(start + entries.length);
-    setCheck(null); setAlias(""); setSerial("");
+    setCheck(null); setAcknowledged(false); setAlias(""); setSerial("");
   }
 
   return (
@@ -387,7 +416,15 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
             </label>
             <label>Enrollment gas per claim (SUI) <input aria-label="Enrollment gas per claim" value={fund} onChange={(e) => setFund(e.target.value)} className={`${input} w-20 ml-1`} /></label>
             <button className={button} disabled={!inventory.ready} onClick={validate}>{inventory.ready || inventory.error ? "Check" : "Loading devices and groups…"}</button>
-            <button className={primary} disabled={!check?.accepted.length} onClick={generate}>
+          </div>
+          <div role="note" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1" data-testid="credential-warning">
+            <p className="font-medium">Before you download: this file is the only copy of the claim keys.</p>
+            <p>SuiFleet does not keep them and cannot download them again. Put each <code>enrollment/SERIAL/</code> folder on that device&apos;s private provisioning media, keep the archive offline and delete it once devices have enrolled.</p>
+            <p>If the file is lost before a device enrolls, use “Lost a credential file?” below to revoke that claim and issue a new one. Enrolled devices keep their own keys and never need a new file.</p>
+            <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={acknowledged} disabled={!check?.accepted.length} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand this download is the only copy of these credentials</label>
+          </div>
+          <div className="flex flex-wrap gap-2 items-end">
+            <button className={primary} disabled={!check?.accepted.length || !acknowledged} onClick={generate}>
               {check ? `Download credentials for ${check.accepted.length} device${check.accepted.length === 1 ? "" : "s"}` : "Download credentials"}
             </button>
           </div>
@@ -396,7 +433,6 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
             <p>{check.accepted.length} ready{check.issues.length ? `, ${check.issues.length} rejected` : ""}.{check.accepted.length > BROWSER_CREDENTIAL_LIMIT && ` The browser generates at most ${BROWSER_CREDENTIAL_LIMIT}; use scripts/claims.py.`}</p>
             {check.issues.slice(0, 50).map((i) => <p key={`${i.line}-${i.message}`} className="text-red-700 text-xs">Line {i.line}{i.serial ? ` (${i.serial})` : ""}: {i.message}</p>)}
           </div>}
-          <p className="text-xs text-gray-500">The download is the only copy of the claim keys. Put each <code>enrollment/SERIAL/</code> folder on that device&apos;s private provisioning media, keep the archive offline and delete it once devices have enrolled.</p>
         </div>
       )}
     </section>
@@ -404,6 +440,34 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
 }
 
 const SHOWN = 200;
+
+function LostCredentials({ views, busy, onRevoke, onRelease }: { views: EntryView[]; busy: boolean; onRevoke: (plan: LostCredentialPlan) => void; onRelease: (plan: LostCredentialPlan) => void }) {
+  const [text, setText] = useState("");
+  const serials = parseSerials(text);
+  // Recomputed from current chain state on every render, never a stale snapshot.
+  const plan = serials.length ? planLostCredentials(views, serials) : null;
+  const list = (items: EntryView[]) => items.map((v) => v.entry.serial).join(", ");
+  return (
+    <details className="border-t pt-3" data-testid="lost-credentials">
+      <summary className="cursor-pointer font-medium">Lost a credential file?</summary>
+      <div className="mt-2 space-y-2">
+        <p className="text-gray-500">A lost file cannot be downloaded again. Revoke each unused claim it contained so nobody can enroll with it, remove the reservation, then reserve the same serial again to download a new file. Devices that already enrolled are unaffected and must not be given new credentials.</p>
+        <label className="block">Serial numbers from the lost file
+          <textarea aria-label="Lost credential serials" value={text} onChange={(e) => setText(e.target.value)} rows={2} className={`${input} block w-full font-mono`} placeholder="SN-000123, SN-000124" />
+        </label>
+        {plan && <div className="space-y-1" role="status">
+          {plan.revoke.length > 0 && <p>Revoke first: {list(plan.revoke)}. <button className={button} disabled={busy} onClick={() => onRevoke(plan)}>Revoke {plan.revoke.length} lost claim{plan.revoke.length === 1 ? "" : "s"}</button></p>}
+          {plan.release.length > 0 && <p>No live claim; ready to reissue: {list(plan.release)}. <button className={button} disabled={busy} onClick={() => onRelease(plan)}>Remove {plan.release.length} reservation{plan.release.length === 1 ? "" : "s"} to reissue</button></p>}
+          {plan.enrolled.length > 0 && <p className="text-green-700">Already enrolled; nothing to do: {list(plan.enrolled)}. The device keeps its own key; do not issue a new credential.</p>}
+          {plan.wait.length > 0 && <p className="text-amber-700">Registration not confirmed yet: {list(plan.wait)}. Refresh and wait for it to confirm before revoking.</p>}
+          {plan.blocked.length > 0 && <p className="text-red-700">Needs review before any change: {list(plan.blocked)}.</p>}
+          {plan.unknown.length > 0 && <p className="text-gray-500">Not in this job: {plan.unknown.join(", ")}.</p>}
+          {plan.revoke.length > 0 && <p className="text-xs text-gray-500">After revocation confirms, the serial shows as Revoked here; remove its reservation, then reserve it again in step 2.</p>}
+        </div>}
+      </div>
+    </details>
+  );
+}
 
 function EntryTable({ views, groups }: { views: EntryView[]; groups: { objectId: string; name: string }[] }) {
   const [filter, setFilter] = useState<EntryStatus | "">("");

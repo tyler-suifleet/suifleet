@@ -1,7 +1,7 @@
 // SF-277: the real fleet transaction hook classifies where a transaction
 // stopped, and customer guidance never claims success or invites an unsafe
-// retry. Wallet, chain and fleet dependencies are scripted stand-ins; the hook
-// and outcome classifier are the real modules.
+// retry. Wallet, chain and fleet dependencies are scripted stand-ins; the hook,
+// outcome classifier and credential-recovery planner are the real modules.
 const assert = require("node:assert/strict");
 const { loader } = require("./frontend_test_utils.cjs");
 
@@ -28,6 +28,7 @@ const load = loader(stubs);
 const feedback = load("lib/tx-feedback.ts");
 stubs["@/lib/tx-feedback"] = feedback;
 const { useFleetTransaction } = load("hooks/useFleetTransaction.ts");
+const recovery = load("lib/credential-recovery.ts");
 
 function setup({ network = "localnet", execute, wait } = {}) {
   const calls = { execute: 0 };
@@ -103,5 +104,16 @@ async function run(options) {
   f = feedback.describeTransactionFailure("plain", "X");
   assert.equal(f.details, "plain"); assert.equal(f.retry, "safe");
 
-  console.log("PASS: transaction stages (rejected, not submitted, executed failure, unconfirmed), definite-failure callbacks, customer guidance without invented success");
+  // Lost-credential plan: revoke only unused live claims; never reissue enrolled devices.
+  const view = (serial, status) => ({ entry: { serial, alias: serial, claim: id(serial.length + serial.charCodeAt(serial.length - 1)) }, status });
+  const views = [view("SN-1", "awaiting-device"), view("SN-2", "complete"), view("SN-3", "unregistered"), view("SN-4", "confirming"), view("SN-5", "unfunded"), view("SN-6", "conflict"), view("SN-7", "revoked")];
+  assert.deepEqual(recovery.parseSerials(" SN-1, sn-2;SN-1\nSN-9 "), ["SN-1", "sn-2", "SN-9"]);
+  const plan = recovery.planLostCredentials(views, recovery.parseSerials("SN-1 sn-2 SN-3 SN-4 SN-5 SN-6 SN-7 SN-9"));
+  assert.deepEqual(plan.revoke.map((v) => v.entry.serial), ["SN-1", "SN-5"]);
+  assert.deepEqual(plan.enrolled.map((v) => v.entry.serial), ["SN-2"]);
+  assert.deepEqual(plan.release.map((v) => v.entry.serial), ["SN-3", "SN-7"]);
+  assert.deepEqual(plan.wait.map((v) => v.entry.serial), ["SN-4"]);
+  assert.deepEqual(plan.blocked.map((v) => v.entry.serial), ["SN-6"]);
+  assert.deepEqual(plan.unknown, ["SN-9"]);
+  console.log("PASS: transaction stages (rejected, not submitted, executed failure, unconfirmed), definite-failure callbacks, customer guidance without invented success, and lost-credential revoke/reissue planning");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
