@@ -1523,13 +1523,23 @@ class Coordinator:
         return run(['ticket', '--project', project['id'], *args], timeout=timeout)
 
     def retry_review_publication(self, project, owner):
-        """Retry a recoverable Project mirror failure for one listed Review claim.
+        return self.retry_ownership_publication(project, owner, 'review')
+
+    def retry_ownership_publication(self, project, owner, expected_status):
+        """Retry one exact listed Review or Done publication without new completion.
 
         Only the exact listed claim/revision is published, through the supported
         `ticket publish` path. Nothing is resumed, released or reassigned. Returns
         the freshly re-read, published owner, or None to defer this PR only.
         """
-        claim = hashlib.sha256(owner['token'].encode()).hexdigest()
+        if (expected_status not in ('review', 'done') or owner.get('status') != expected_status
+                or (expected_status == 'review' and not owner.get('token'))):
+            return None
+        # Completion retires the active token. Bind retries to its retained owner
+        # identity and revision instead of requiring a live implementation lease.
+        identity = owner.get('token') or json.dumps({k: owner.get(k) for k in
+            ('key', 'agent', 'model', 'session', 'branch')}, sort_keys=True)
+        claim = hashlib.sha256(identity.encode()).hexdigest()
         key, revision = owner['key'], owner.get('revision')
         row = self.store.db.execute('SELECT * FROM ownership_publication WHERE project=? AND ticket=?',
                                     (project['id'], key)).fetchone()
@@ -1538,10 +1548,10 @@ class Coordinator:
         if row and row['retry_after'] > time.time():
             return None
         def unchanged(current):
-            return (current.get('status') == 'review' and not current.get('expired')
+            return (current.get('status') == expected_status and not current.get('expired')
                     and current.get('revision') == revision
                     and all(current.get(name) == owner.get(name) for name in
-                            ('token', 'agent', 'model', 'session', 'branch', 'worktree')))
+                            ('token', 'agent', 'model', 'session', 'branch', 'worktree', 'spec')))
         current = json.loads(self.ticket(project, 'show', key))
         if not unchanged(current):
             print(f"{project['id']} {key}: ownership changed before publication retry; deferred to next scan", flush=True)
@@ -1570,7 +1580,7 @@ class Coordinator:
             print(f"{project['id']} {key}: ownership changed during publication retry; deferred to next scan", flush=True)
             return None
         self.store.db.execute('DELETE FROM ownership_publication WHERE project=? AND ticket=?', (project['id'], key))
-        print(f"{project['id']} {key}: pending Review ownership published at revision {revision}", flush=True)
+        print(f"{project['id']} {key}: pending {expected_status} ownership published at revision {revision}", flush=True)
         return current
 
     def development_blocker(self, project, owner):
@@ -2197,7 +2207,18 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 
     def tick_project(self, project, execute):
         owners = self.owners(project)
-        if execute: self.collect(project,owners)
+        if execute:
+            # Completion can commit locally before its remote mirror fails.
+            # Publish that same immutable revision before included-source closure.
+            for index, owner in enumerate(owners):
+                if owner.get('status') == 'done' and owner.get('publish_pending'):
+                    try:
+                        current = self.retry_ownership_publication(project, owner, 'done')
+                        if current is not None:
+                            owners[index] = current
+                    except Exception as error:
+                        print(f"{project['id']} {owner['key']}: completed publication retained ({type(error).__name__})", flush=True)
+            self.collect(project,owners)
         if execute and project.get('shared_acceptance_repair'):
             try:
                 from batch_integration import SharedAcceptanceRepair
