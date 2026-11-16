@@ -30,6 +30,7 @@ import { ConfigurationFields } from "@/components/ConfigurationFields";
 import Link from "next/link";
 import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
 import { transactionStage } from "@/lib/tx-feedback";
+import { useUnconfirmedAction } from "@/hooks/usePendingRows";
 
 type Step = "artifact" | "recipe" | "deploy" | "done";
 
@@ -68,7 +69,8 @@ export default function FirmwarePage() {
   const { mutateAsync: signAndExecute, isPending: txPending } = useFleetTransaction();
   const failure = useTransactionFeedback();
   // An unconfirmed deployment stays guarded until the customer has checked it.
-  const [deployUnconfirmed, setDeployUnconfirmed] = useState(false);
+  // Saved before the wallet can submit, so a reload or restart keeps it.
+  const deployIntent = useUnconfirmedAction("deploy");
 
   const [step, setStep] = useState<Step>("artifact");
   const [uploading, setUploading] = useState(false);
@@ -76,6 +78,8 @@ export default function FirmwarePage() {
   const deploymentInFlight = useRef(false);
   const [uploadProgress, setUploadProgress] = useState<Progress | null>(null);
   const [deployPhase, setDeployPhase] = useState<DeploymentPhase | null>(null);
+  // Only after the attempt ends: while the wallet is open the deploy phase shows instead.
+  const deployUnconfirmed = !!deployIntent.row && deployPhase === null;
   const [deploymentStartedAt, setDeploymentStartedAt] = useState(0);
   const [recipeProgress, setRecipeProgress] = useState<Progress | null>(null);
   const [artifact, setArtifact] = useState<ArtifactResult | null>(null);
@@ -132,7 +136,7 @@ export default function FirmwarePage() {
   async function handleDeploy() {
     // A ref closes the gap before React renders busy state, including the
     // entire recipe upload; mutation.isPending starts too late for that.
-    if (deploymentInFlight.current || step !== "deploy" || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
+    if (deploymentInFlight.current || deployIntent.row || step !== "deploy" || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
     if (!catalogVersion && (!artifact || !protection)) return;
     if (desired && selectedDevices.size > 0) {
       alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
@@ -144,6 +148,7 @@ export default function FirmwarePage() {
     setDeployPhase("preparing");
     setRecipeProgress(null);
     let guarded = false;
+    const label = catalogVersion ? `catalog version ${catalogVersion.objectId}` : `${componentName} ${version}`;
     try {
       let transaction;
       if (catalogVersion) {
@@ -164,13 +169,15 @@ export default function FirmwarePage() {
               !selectedFleet && account && inboxSupported() ? announcementsFor(groups, devices, account.address, [...selectedGroups],
                 [...selectedDevices], await existingInboxes(client, [...selectedDevices])) : undefined, selectedFleet);
       }
-      const result = await signAndExecute({ transaction, onProgress: setDeployPhase });
+      const result = await signAndExecute({ transaction, onProgress: (phase) => { setDeployPhase(phase); if (phase === "wallet") deployIntent.mark(label); } });
+      deployIntent.clear();
       guarded = true;
       setTxDigest(result.digest);
       setStep("done");
     } catch (error) {
       failure.report(error, "The deployment");
-      if (transactionStage(error) === "uncertain") { guarded = true; setDeployUnconfirmed(true); }
+      if (transactionStage(error) === "uncertain") { guarded = true; deployIntent.mark(label); }
+      else deployIntent.clear();
     } finally {
       // A successful or unconfirmed operation stays guarded until the customer
       // explicitly chooses "Deploy another" or confirms it is not listed.
@@ -402,8 +409,8 @@ export default function FirmwarePage() {
 
       <TransactionFeedback feedback={failure.feedback} onDismiss={deployUnconfirmed ? undefined : failure.clear} />
       {deployUnconfirmed && <div role="status" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-        <p>Deploying again is paused so the same update is not created twice. Check <Link href="/deployments" className="underline">Deployments</Link> and your wallet activity first.</p>
-        <button type="button" className="mt-2 underline" onClick={() => { deploymentInFlight.current = false; setDeployUnconfirmed(false); failure.clear(); }}>I checked: it is not listed, allow deploying again</button>
+        <p>Deploying {deployIntent.row!.label} was submitted but never confirmed. Deploying again is paused so the same update is not created twice. Check <Link href="/deployments" className="underline">Deployments</Link> and your wallet activity first.</p>
+        <button type="button" className="mt-2 underline" onClick={() => { deploymentInFlight.current = false; deployIntent.clear(); failure.clear(); }}>I checked: it is not listed, allow deploying again</button>
       </div>}
       {deployPhase && <DeploymentProgress phase={deployPhase} progress={recipeProgress} startedAt={deploymentStartedAt} catalog={!!catalogVersion} />}
       {/* Step 3 — Targets */}

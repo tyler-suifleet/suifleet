@@ -127,7 +127,19 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await deploy.evaluate(button => button.click());
     assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 4);
     assert.equal(await page.evaluate(() => window.uploadAcceptance.walletCalls()), 2);
+    // The guard is saved: a reloaded (fresh) firmware page in the same browser stays paused too.
+    const saved = () => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('suifleet:unconfirmed:v1:') && k.endsWith('|action:deploy')).length);
+    assert.equal(await saved(), 1);
+    const storage = await page.evaluate(() => Object.entries(localStorage));
+    const restarted = await browser.newContext();
+    await restarted.addInitScript((entries) => { for (const [k, v] of entries) localStorage.setItem(k, v); }, storage);
+    const reloaded = await restarted.newPage();
+    await reloaded.goto(page.url());
+    await reloaded.getByRole('status').filter({ hasText: 'was submitted but never confirmed. Deploying again is paused' }).waitFor();
+    assert.equal(await reloaded.getByRole('button', { name: 'I checked: it is not listed, allow deploying again' }).count(), 1);
+    await restarted.close();
     await page.getByRole('button', { name: 'I checked: it is not listed, allow deploying again' }).click();
+    assert.equal(await saved(), 0, 'explicit check clears the saved guard');
     await deploy.click();
     await page.waitForFunction(() => window.uploadAcceptance.count() === 5);
     await page.evaluate(() => window.uploadAcceptance.finish(4));
@@ -139,7 +151,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 5);
     assert.equal((await page.evaluate(() => window.uploadAcceptance.alerts())).length, alertsBefore, 'no deployment-failure browser alerts');
     assert.deepEqual(errors, []);
-    console.log('PASS: same file re-selectable after missing-name, confidential-setup, public-acknowledgement and upload-failure alerts; real upload UI progress/unknown total/processing; duplicate clicks yield one upload; upload failure and wallet cancellation show inline guidance and allow explicit retry; an unconfirmed deployment blocks a repeat until explicitly checked; success shown without React key warnings');
+    console.log('PASS: same file re-selectable after missing-name, confidential-setup, public-acknowledgement and upload-failure alerts; real upload UI progress/unknown total/processing; duplicate clicks yield one upload; upload failure and wallet cancellation show inline guidance and allow explicit retry; an unconfirmed deployment blocks a repeat (also on a reloaded page) until explicitly checked; success shown without React key warnings');
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise(resolve => server.close(resolve));

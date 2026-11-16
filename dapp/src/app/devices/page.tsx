@@ -13,7 +13,7 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDesiredStates } from "@/hooks/useDesiredStates";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
-import { usePendingRows } from "@/hooks/usePendingRows";
+import { usePendingRows, useUnconfirmedAction } from "@/hooks/usePendingRows";
 import { eventIds } from "@/lib/pending-rows";
 import { moveType } from "@/lib/deployment-manifest";
 import { GroupCreatedBcs } from "@/lib/move-bcs";
@@ -74,11 +74,11 @@ function DevicesTab() {
   const failure = useTransactionFeedback();
   // Keyed by device address: registration knows it before the object ID exists.
   const pending = usePendingRows("devices", isSuccess ? devices.map((d) => d.deviceAddress) : undefined, refetch);
-  const adding = pending.waiting.filter((row) => row.kind === "create");
+  const adding = pending.blocking.filter((row) => row.kind === "create");
   // A registration not listed yet blocks another: the contract does not reject a second device for the same address.
   const registering = isPending || adding.length > 0;
-  const removing = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => normalizeSuiAddress(row.id)));
-  const removalUnconfirmed = new Set(pending.waiting.filter((row) => row.kind === "delete" && row.unconfirmed).map((row) => normalizeSuiAddress(row.id)));
+  const removing = new Set(pending.blocking.filter((row) => row.kind === "delete").map((row) => normalizeSuiAddress(row.id)));
+  const removalUnconfirmed = new Set(pending.blocking.filter((row) => row.kind === "delete" && row.unconfirmed).map((row) => normalizeSuiAddress(row.id)));
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [technical, setTechnical] = useState(false);
@@ -119,15 +119,18 @@ function DevicesTab() {
       fd.get("arch") as string,
       account!.address, fleet,
     );
+    // The contract accepts a second device for the same address, so an
+    // unconfirmed registration blocks another until it is listed or checked.
+    // It is saved before the wallet can submit, so a reload keeps the guard.
+    const unconfirmed = { id: deviceAddress, label: name, kind: "create" as const, unconfirmed: true };
     signAndExecute(
-      { transaction: tx },
+      { transaction: tx, onProgress: (phase) => { if (phase === "wallet") pending.add([unconfirmed]); } },
       {
         onSuccess: () => { setShowModal(false); pending.add([{ id: deviceAddress, label: name, kind: "create" }]); },
         onError: (err) => {
           failure.report(err, "Device registration");
-          // The contract accepts a second device for the same address, so an
-          // unconfirmed registration blocks another until it is listed or checked.
-          if (transactionStage(err) === "uncertain") { setShowModal(false); pending.add([{ id: deviceAddress, label: name, kind: "create", unconfirmed: true }]); }
+          if (transactionStage(err) === "uncertain") { setShowModal(false); pending.add([unconfirmed]); }
+          else pending.dismiss(deviceAddress);
         },
       }
     );
@@ -212,7 +215,7 @@ function DevicesTab() {
               {adding.map((row) => (
                 <tr key={row.id} className="bg-blue-50/50" aria-busy="true">
                   <td className="py-3 pl-4" />
-                  <td className="py-3 px-4 text-xs text-gray-600" role="status">{row.unconfirmed ? "Submitted · not confirmed yet…" : "Registered · adding to the list…"}</td>
+                  <td className="py-3 px-4 text-xs text-gray-600" role="status">{row.unconfirmed ? (isPending ? "Waiting for the wallet…" : "Submitted · not confirmed yet…") : "Registered · adding to the list…"}</td>
                   <td colSpan={technical ? 7 : 5} className="py-3 pr-4 font-medium">{row.label}</td>
                 </tr>
               ))}
@@ -252,7 +255,7 @@ function DevicesTab() {
                     <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
                   </>}
                   <td className="py-3 flex items-center gap-3">
-                    {removing.has(normalizeSuiAddress(d.deviceAddress)) ? <span role="status" className="text-xs text-gray-600">{removalUnconfirmed.has(normalizeSuiAddress(d.deviceAddress)) ? "Removal submitted · not confirmed yet…" : "Removed · updating the list…"}</span> : <>
+                    {removing.has(normalizeSuiAddress(d.deviceAddress)) ? <span role="status" className="text-xs text-gray-600">{removalUnconfirmed.has(normalizeSuiAddress(d.deviceAddress)) ? (isPending ? "Waiting for the wallet…" : "Removal submitted · not confirmed yet…") : "Removed · updating the list…"}</span> : <>
                     {!d.ownerCapId && !d.managed && (
                       <button
                         disabled={isPending}
@@ -278,13 +281,15 @@ function DevicesTab() {
                         let transaction;
                         try { transaction = fleet ? await buildDeregisterManagedDeviceTx(client, fleet, d.objectId) : buildDeregisterDeviceTx(d); }
                         catch (err) { failure.report(err, `Removing “${d.name}”`); return; }
+                        const unconfirmed = { id: d.deviceAddress, label: d.name, kind: "delete" as const, unconfirmed: true };
                         signAndExecute(
-                          { transaction },
+                          { transaction, onProgress: (phase) => { if (phase === "wallet") pending.add([unconfirmed]); } },
                           {
                             onSuccess: () => pending.add([{ id: d.deviceAddress, label: d.name, kind: "delete" }]),
                             onError: (err) => {
                               failure.report(err, `Removing “${d.name}”`);
-                              if (transactionStage(err) === "uncertain") pending.add([{ id: d.deviceAddress, label: d.name, kind: "delete", unconfirmed: true }]);
+                              if (transactionStage(err) === "uncertain") pending.add([unconfirmed]);
+                              else pending.dismiss(d.deviceAddress);
                             },
                           }
                         );
@@ -364,9 +369,11 @@ function GroupsTab() {
   const failure = useTransactionFeedback();
   // A group creation with an unknown outcome has no ID to watch; creating
   // another could duplicate it, so wait for the customer to check first.
-  const [creationUnconfirmed, setCreationUnconfirmed] = useState(false);
-  const dismissFailure = () => { failure.clear(); setCreationUnconfirmed(false); };
-  const deleting = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => row.id));
+  // Saved before the wallet can submit, so reloads and tab switches keep it.
+  const creation = useUnconfirmedAction("group-create");
+  const creationUnconfirmed = !!creation.row && !isPending;
+  const dismissFailure = failure.clear;
+  const deleting = new Set(pending.blocking.filter((row) => row.kind === "delete").map((row) => row.id));
   const creating = pending.waiting.some((row) => row.kind === "create");
   const [showCreate, setShowCreate] = useState(false);
   const [managingGroup, setManagingGroup] = useState<string | null>(null);
@@ -403,10 +410,12 @@ function GroupsTab() {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const name = fd.get("name") as string;
+    if (creation.row) return;
     signAndExecute(
-      { transaction: buildCreateGroupTx(name, fd.get("description") as string, fleet) },
+      { transaction: buildCreateGroupTx(name, fd.get("description") as string, fleet), onProgress: (phase) => { if (phase === "wallet") creation.mark(name); } },
       {
         onSuccess: (result) => {
+          creation.clear();
           setShowCreate(false);
           const ids = eventIds(result.events, moveType("device_group::GroupCreated"), (bytes) => GroupCreatedBcs.parse(bytes).group_id);
           if (ids.length) pending.add(ids.map((id) => ({ id, label: name, kind: "create" as const })));
@@ -414,7 +423,8 @@ function GroupsTab() {
         },
         onError: (err) => {
           failure.report(err, "Group creation");
-          if (transactionStage(err) === "uncertain") { setShowCreate(false); setCreationUnconfirmed(true); }
+          if (transactionStage(err) === "uncertain") { setShowCreate(false); creation.mark(name); }
+          else creation.clear();
         },
       }
     );
@@ -475,7 +485,7 @@ function GroupsTab() {
   return (
     <>
       <div className="flex justify-end">
-        <button onClick={() => { dismissFailure(); setShowCreate(true); }} disabled={isPending || creating || creationUnconfirmed} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded disabled:opacity-50">
+        <button onClick={() => { dismissFailure(); setShowCreate(true); }} disabled={isPending || creating || !!creation.row} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded disabled:opacity-50">
           {creating ? "Adding group…" : "Create group"}
         </button>
       </div>
@@ -487,7 +497,10 @@ function GroupsTab() {
         </p>
       ))}
       {!showCreate && !managedGroup && <TransactionFeedback feedback={failure.feedback} onDismiss={dismissFailure} />}
-      {creationUnconfirmed && <p role="status" className="text-sm text-amber-800">Creating another group is paused until you check whether the last one was created. Dismiss the message above once you have checked.</p>}
+      {creationUnconfirmed && <p role="status" className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-2">
+        Creating group “{creation.row!.label}” was submitted but never confirmed. Creating another group is paused so it is not created twice: check your wallet activity and refresh the list first.{" "}
+        <button className="underline" onClick={() => { creation.clear(); failure.clear(); }}>I checked: it is not listed, allow creating a group</button>
+      </p>}
 
       {conflicts.length > 0 && (
         <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-3 space-y-1">
@@ -508,7 +521,7 @@ function GroupsTab() {
         ) : groups.length === 0 && !creating ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No device groups yet.</p>
-            <button onClick={() => setShowCreate(true)} className="mt-2 text-xs text-[#4DA2FF] hover:underline">Create your first group</button>
+            <button onClick={() => setShowCreate(true)} disabled={!!creation.row} className="mt-2 text-xs text-[#4DA2FF] hover:underline disabled:opacity-50">Create your first group</button>
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -538,7 +551,7 @@ function GroupsTab() {
                   </td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{g.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
-                    {deleting.has(g.objectId) ? <span role="status" className="text-xs text-gray-600">{pending.waiting.some((row) => row.id === g.objectId && row.unconfirmed) ? "Deletion submitted · not confirmed yet…" : "Deleted · removing from the list…"}</span> : <>
+                    {deleting.has(g.objectId) ? <span role="status" className="text-xs text-gray-600">{pending.blocking.some((row) => row.id === g.objectId && row.unconfirmed) ? (isPending ? "Waiting for the wallet…" : "Deletion submitted · not confirmed yet…") : "Deleted · removing from the list…"}</span> : <>
                     <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#4DA2FF] hover:underline">
                       Manage
                     </button>
@@ -546,13 +559,15 @@ function GroupsTab() {
                       disabled={isPending}
                       onClick={() => {
                         if (!confirm(`Delete group "${g.name}"? This cannot be undone.`)) return;
+                        const unconfirmed = { id: g.objectId, label: g.name, kind: "delete" as const, unconfirmed: true };
                         signAndExecute(
-                          { transaction: buildDeleteGroupTx(g.objectId, fleet) },
+                          { transaction: buildDeleteGroupTx(g.objectId, fleet), onProgress: (phase) => { if (phase === "wallet") pending.add([unconfirmed]); } },
                           {
                             onSuccess: () => pending.add([{ id: g.objectId, label: g.name, kind: "delete" }]),
                             onError: (err) => {
                               failure.report(err, `Deleting group “${g.name}”`);
-                              if (transactionStage(err) === "uncertain") pending.add([{ id: g.objectId, label: g.name, kind: "delete", unconfirmed: true }]);
+                              if (transactionStage(err) === "uncertain") pending.add([unconfirmed]);
+                              else pending.dismiss(g.objectId);
                             },
                           }
                         );

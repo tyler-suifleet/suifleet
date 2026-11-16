@@ -30,6 +30,17 @@ export function outstanding(pending: PendingRow[], listed: string[] | undefined,
   };
 }
 
+/** Unconfirmed rows saved in browser storage; anything malformed is ignored. */
+export function parseSavedRows(text: string | null): PendingRow[] {
+  if (!text) return [];
+  const value: unknown = JSON.parse(text);
+  if (!Array.isArray(value)) return [];
+  return value.filter((row): row is PendingRow => !!row && typeof row === "object" &&
+    typeof row.id === "string" && typeof row.label === "string" && (row.kind === "create" || row.kind === "delete") &&
+    typeof row.since === "number" && Number.isFinite(row.since) && row.unconfirmed === true)
+    .map(({ id, label, kind, since }) => ({ id, label, kind, since, unconfirmed: true }));
+}
+
 /** IDs read from confirmed transaction events of one Move type. */
 export function eventIds(events: readonly { eventType: string; bcs: Uint8Array }[], type: string, read: (bcs: Uint8Array) => string): string[] {
   const wanted = normalizeStructTag(type);

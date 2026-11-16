@@ -3,7 +3,7 @@
 //   node scripts/test_pending_rows.cjs
 const assert = require("node:assert/strict");
 const { loader, appRequire } = require("./frontend_test_utils.cjs");
-const { outstanding, eventIds, PENDING_TIMEOUT_MS } = loader()("lib/pending-rows.ts");
+const { outstanding, eventIds, parseSavedRows, PENDING_TIMEOUT_MS } = loader()("lib/pending-rows.ts");
 const { bcs } = appRequire("@mysten/sui/bcs");
 
 const id = (n) => "0x" + n.toString(16).padStart(64, "0");
@@ -31,4 +31,9 @@ const type = `${id(2)}::device_group::GroupCreated`;
 assert.deepEqual(eventIds([event(type, id(7)), event(`${id(3)}::device_group::GroupCreated`, id(8)), event("0x2::device_group::GroupCreated", id(9))],
   type, (bytes) => Created.parse(bytes).group_id), [id(7), id(9)]);
 assert.deepEqual(eventIds([], type, () => { throw Error("unused"); }), []);
-console.log("PASS: pending rows settle on listing/removal, time out to stale, read IDs from matching confirmed events");
+// Saved unconfirmed rows (SF-277): only well-formed unconfirmed rows are restored; extra fields are dropped.
+const saved = { id: id(4), label: "Pi", kind: "create", since: 5, unconfirmed: true };
+assert.deepEqual(parseSavedRows(JSON.stringify([{ ...saved, extra: "x" }, { ...saved, unconfirmed: false }, { ...saved, kind: "other" }, { ...saved, since: "5" }, null, 3])), [saved]);
+assert.deepEqual(parseSavedRows(null), []); assert.deepEqual(parseSavedRows("{}"), []);
+assert.throws(() => parseSavedRows("{"));
+console.log("PASS: pending rows settle on listing/removal, time out to stale, read IDs from matching confirmed events, restore only well-formed saved unconfirmed rows");

@@ -45,7 +45,46 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright');
   assert.equal(await page.locator('form').count(),0);assert.equal(await open.isDisabled(),true,'an unconfirmed registration blocks a duplicate');
   await open.click({force:true});assert.equal(await page.locator('form').count(),0);assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),3);
   assert.equal(await page.getByRole('link',{name:'Third Pi',exact:true}).count(),0,'never shown as a registered device');
+  // The unconfirmed registration is saved in browser storage, scoped by the selection identity.
+  const saved=()=>page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('suifleet:unconfirmed:v1:')).map(k=>[k,JSON.parse(localStorage.getItem(k))]));
+  let stored=await saved();assert.equal(stored.length,1);assert.match(stored[0][0],/\|devices$/);assert.deepEqual(stored[0][1].map(r=>[r.label,r.kind,r.unconfirmed]),[['Third Pi','create',true]]);
+  const notConfirmed=page.getByRole('status').filter({hasText:'Submitted · not confirmed yet…'});
+  // SF-277 review: a reload while inventory reads are unavailable keeps the warning and the guard.
+  await page.evaluate(()=>localStorage.setItem('fixture-unavailable','1'));await page.reload();
+  await notConfirmed.waitFor();assert.equal(await open.isDisabled(),true,'reload with unavailable reads keeps the duplicate guard');
+  await open.click({force:true});assert.equal(await page.locator('form').count(),0);assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),0);
+  // Reads available again but the device is still not listed: still guarded, also after switching tabs.
+  await page.evaluate(()=>localStorage.removeItem('fixture-unavailable'));await page.reload();
+  await page.getByRole('link',{name:'Alpha Pi',exact:true}).waitFor();await notConfirmed.waitFor();
+  assert.equal(await open.isDisabled(),true,'reload keeps the unconfirmed registration guard');
+  await page.getByRole('button',{name:'Device groups'}).click();await open.waitFor({state:'detached'});
+  await page.getByRole('button',{name:'Devices',exact:true}).click();await notConfirmed.waitFor();assert.equal(await open.isDisabled(),true);
+  // Past the polling window it still blocks; only an explicit check releases it.
+  await page.evaluate(()=>{for(const k of Object.keys(localStorage))if(k.startsWith('suifleet:unconfirmed:v1:'))localStorage.setItem(k,JSON.stringify(JSON.parse(localStorage.getItem(k)).map(r=>({...r,since:r.since-120000}))));});
+  await page.reload();await page.getByRole('link',{name:'Alpha Pi',exact:true}).waitFor();
+  const staleNote=page.getByRole('status').filter({hasText:'The registration of “Third Pi” was submitted but never confirmed, and it is not listed.'});await staleNote.waitFor();
+  assert.equal(await open.isDisabled(),true,'an old unconfirmed registration still blocks a duplicate');
+  await staleNote.getByRole('button',{name:'Dismiss'}).click();await staleNote.waitFor({state:'detached'});
+  assert.equal(await open.isDisabled(),false,'explicit dismissal after checking releases the guard');assert.deepEqual(await saved(),[]);
+  // An unconfirmed registration that did execute settles once it is listed, and its saved guard is removed.
+  await page.evaluate(()=>window.acceptance.fail('uncertain-executed'));await register('Fourth Pi','0x'+'4'.repeat(64));
+  await page.getByRole('status').filter({hasText:'Submitted · not confirmed yet…'}).waitFor();assert.equal((await saved()).length,1);
+  await page.reload();await page.getByRole('status').filter({hasText:'Submitted · not confirmed yet…'}).waitFor();
+  await page.evaluate(()=>window.acceptance.index());
+  await page.getByRole('link',{name:'Fourth Pi',exact:true}).waitFor();await page.getByRole('status').filter({hasText:'not confirmed yet'}).waitFor({state:'detached'});
+  assert.deepEqual(await saved(),[]);assert.equal(await open.isDisabled(),false);
+  // Group creation with an unknown outcome stays paused across a reload and tab switches until checked.
+  await page.getByRole('button',{name:'Device groups'}).click();const createGroup=page.getByRole('button',{name:'Create group',exact:true});await createGroup.waitFor();
+  await page.evaluate(()=>window.acceptance.fail('uncertain'));await createGroup.click();await page.locator('input[name=name]').fill('Edge');await page.getByRole('button',{name:'Create',exact:true}).click();
+  const paused=page.getByRole('status').filter({hasText:'Creating group “Edge” was submitted but never confirmed.'});await paused.waitFor();
+  assert.equal(await createGroup.isDisabled(),true);
+  await page.getByRole('button',{name:'Devices',exact:true}).click();await page.getByRole('button',{name:'Device groups'}).click();await paused.waitFor();assert.equal(await createGroup.isDisabled(),true,'tab switch keeps the group creation guard');
+  await page.reload();await page.getByRole('button',{name:'Device groups'}).click();await paused.waitFor();
+  assert.equal(await createGroup.isDisabled(),true,'reload keeps the group creation guard');
+  assert.equal(await page.getByRole('button',{name:'Create your first group'}).isDisabled(),true);
+  await paused.getByRole('button',{name:'I checked: it is not listed, allow creating a group'}).click();await paused.waitFor({state:'detached'});
+  assert.equal(await createGroup.isDisabled(),false);assert.deepEqual(await saved(),[]);
   assert.deepEqual(dialogs,[],'no browser alerts');
-  assert.deepEqual(errors,[]);console.log('PASS Devices screen: lagged registration shows pending, blocks a duplicate (also after switching tabs) and re-enables once listed; rejected registration shows inline guidance and allows retry; unconfirmed registration blocks a duplicate without claiming success');
+  assert.deepEqual(errors,[]);console.log('PASS Devices screen: lagged registration shows pending, blocks a duplicate (also after switching tabs) and re-enables once listed; rejected registration shows inline guidance and allows retry; unconfirmed registration blocks a duplicate without claiming success, across reloads (also with unavailable reads), tab switches and the polling window until listed or explicitly checked; unconfirmed group creation stays paused across reload');
  }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1});
