@@ -129,7 +129,7 @@ export async function buildEnrollReporting(client: SuiGrpcClient, fleet: NamedFl
   const current = await resolveFleetReporting(client, fleet);
   if (!current || current.fleetId !== config.fleetId) throw Error("Reporting configuration changed; refresh");
   const account = await fetchAccount(client, fleet.budgetId, device);
-  if (!account) throw Error("Enroll this device in the network budget first");
+  if (!account) throw Error("Enroll this device in the device operating budget first");
   if (await readDeviceData(client, config, device)) throw Error("Device reporting already enrolled; refresh to download settings");
   const budget = await fetchManagedBudget(client, fleet.budgetId), tx = new Transaction();
   tx.moveCall({ target: `${config.packageId}::fleet_data::enroll`, arguments: [tx.object(config.fleetId), tx.object(fleet.budgetId), tx.object(budget.capId), tx.object(account.accountId)] });

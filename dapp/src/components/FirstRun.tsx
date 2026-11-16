@@ -159,7 +159,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         </div>}
         {state.isSuccess && (BigInt(state.data) === BigInt(0)
           ? <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">Fund this address before registering. Send SUI on <strong>{NETWORK}</strong> to <span className="break-all font-mono">{account.address}</span>.</p>
-          : <p className="text-gray-700">Adding a device costs a small network fee. Your approval app shows the amount before you confirm. This account balance is separate from your fleet budget.</p>)}
+          : <p className="text-gray-700">Adding a device costs a small network fee. Your approval app shows the amount before you confirm. This account balance is separate from your device operating budget.</p>)}
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" disabled={state.isFetching} onClick={async () => {
             const [balance, inventory] = await Promise.all([state.refetch(), devices.refetch()]);
@@ -172,14 +172,14 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           <p>Send SUI on this network to your address from another wallet. For the testnet preview, use the <a className={LINK} href="https://faucet.sui.io/" target="_blank" rel="noopener noreferrer">official testnet faucet</a> to request free test SUI. For a local development network, ask its operator for test funds. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
         </Disclosure>
         {budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
-          <h3 className="font-semibold">Prepay network costs</h3>
-          <p className="text-gray-700">Your account balance pays for actions you approve. The fleet budget is separate: prepay device network costs and set spending limits. Each device receives a small starting balance and can refill only within those limits.</p>
+          <h3 className="font-semibold">Fund the device operating budget</h3>
+          <p className="text-gray-700">Your account balance pays for actions you approve. The device operating budget is separate: prepay device network costs and set spending limits. Each device receives a small starting balance and can refill only within those limits.</p>
           <EstimatePanel onEstimate={setEstimate} />
           <h4 className="font-semibold">Fund by card (optional)</h4>
           <CardFunding asset="SUI" amount={estimate ? formatToken(estimate.suiDepositMist) : "1"} />
           <h4 className="font-semibold">Deposit</h4>
           <DepositForm suggestedMist={estimate?.suiDepositMist} />
-          <p className="text-gray-700">Manage the balance, per-device usage and limits on the <Link className={LINK} href="/budget">Network budget page</Link>.</p>
+          <p className="text-gray-700">Manage the balance, per-device usage and limits on the <Link className={LINK} href="/budget">Device and storage budgets page</Link>.</p>
         </div>}
         <Disclosure summary="Technical details">
           <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[max-content_1fr]">
