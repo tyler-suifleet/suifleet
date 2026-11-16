@@ -27,7 +27,7 @@ def render(prices, policy, plan_digest):
            '<p class="lead">A subscription for deployment and fleet management, with configurable reporting and storage.</p>',
            '<p class="note"><strong>Plan for your fleet.</strong> Prices shown help you compare options. '
            'Final terms are set in your written quote. '
-           'Contact us to confirm availability and a written quote.</p>',
+           'Contact us to confirm availability and a written quote. <a href="/contact/">Discuss a private pilot or quote</a>.</p>',
            '<h2>Platform plan</h2><p>You can start below the first band’s maximum. Prices are in US dollars per device per month; each band applies only to the devices in that band.</p>',
            '<table><thead><tr><th>Devices</th><th>Per device per month</th></tr></thead><tbody>']
     previous = 0
@@ -36,15 +36,24 @@ def render(prices, policy, plan_digest):
         label = f'First {limit:,}' if previous == 0 else f'{previous + 1:,} to {limit:,}'
         out.append(f'<tr><td>{label}</td><td>{usd(tier["usdPerDeviceMonth"])}</td></tr>')
         previous = limit
+    examples = []
+    for devices in (50, 1000):
+        raw = Decimal(str(base['tiers'][0]['usdPerDeviceMonth'])) * devices
+        monthly = max(raw, Decimal(str(base['monthlyMinimumUsd'])))
+        activation = Decimal(str(base['activationUsdPerDevice'])) * devices
+        examples.append(f'<tr><td>{devices:,}</td><td>{devices:,} × {usd(base["tiers"][0]["usdPerDeviceMonth"])} = {usd(raw)}</td><td>{usd(monthly)}</td><td>{usd(activation)}</td></tr>')
     out += [f'<tr><td>Above {previous:,}</td><td>Custom, from {usd(base["customFromUsdPerDeviceMonth"])}</td></tr>',
             '</tbody></table>',
             f'<p>Monthly minimum: <strong>{usd(base["monthlyMinimumUsd"])}</strong>. '
             f'Activation: {usd(base["activationUsdPerDevice"])} per device, one-time. '
             f'Annual prepay: {base["annualPrepayDiscountPercent"]}% discount on the platform charge after the minimum; data charges are separate.</p>',
+            '<h2>Example monthly platform bills</h2><p>At default settings, before optional services, extra data and any separately quoted costs. The monthly bill is the greater of the graduated device charge and the monthly minimum. Activation is a separate one-time charge.</p>',
+            '<table><thead><tr><th>Device capacity</th><th>Device charge</th><th>Monthly platform bill</th><th>One-time activation</th></tr></thead><tbody>' + ''.join(examples) + '</tbody></table>',
+            '<p>These are Platform plan examples, not the at-cost or design-partner offers below. Annual prepay applies the stated discount after the monthly minimum; it does not remove activation or extra data charges.</p>',
             '<h2>Managed plan</h2>',
             f'<p>The platform price plus {usd(managed["premium_usd_per_device_month"])} per device per month, '
             f'with a {usd(managed["monthly_minimum_usd"])} monthly minimum. Includes onboarding, help integrating '
-            'SuiFleet into your device image, and a support SLA. The premium funds support time.</p>',
+            'SuiFleet into your device image, and a support SLA as proposed scope. Confirm service availability, response commitments and exclusions in the written agreement; no SLA is activated by this page. The premium funds support time.</p>',
             '<h2>Getting started</h2>',
             f'<p>At-cost tier: up to {at_cost["max_devices"]:,} devices per organization with no SuiFleet margin. '
             f'Pay only network and hosting costs, estimated at about {usd(at_cost["estimated_usd_per_device_month"])} '
@@ -71,21 +80,24 @@ def render(prices, policy, plan_digest):
             f'<p>Includes {data["includedBytesPerDeviceMonth"] / 1_000_000:g} MB written per device per month, kept for '
             f'{data["includedRetentionDays"]} days. Additional writes: {usd(data["writeUsdPerGB"])} per GB; '
             f'storage: {usd(data["storageUsdPerGBMonth"])} per GB-month. Logs count as device data. Reading data back has no Walrus egress fee.</p>',
-            '<h2>What you pay on the networks</h2><p>The all-in subscription proposal funds the fleet network budget, so customers need not hold SUI or WAL. '
-            'For customer-funded arrangements, SUI pays on-chain transactions, storage deposits and gas float through the fleet budget; '
-            'WAL pays Walrus artifact and device-data writes and retention. Release uploads can also require SUI relay fees. '
-            'Volume rates below about $0.07 per device assume customer-funded SUI network costs. '
-            'The console shows subscription prices separately from estimated network costs; they are not a second subscription charge. '
-            'Provider services and actual workloads can change the total.</p><p><strong>Capacity and operating funds:</strong> buying device capacity and adding network funds are separate steps. Saving fleet settings does not deposit money.</p>',
-            '<p><a href="{{app:settings/}}">Estimate your fleet settings and network costs in the console</a>. '
-            'Deployment-specific price overrides may differ from this public proposal.</p>',
-            '<h2>SUI price and renewals</h2>',
+            '<h2>Included, optional and customer-funded costs</h2><ul>'
+            '<li><strong>Included:</strong> the all-in subscription proposal covers network fees for the agreed reporting and storage settings. SuiFleet would fund those operating resources from the subscription; do not add the same network estimate to that bill again.</li>'
+            '<li><strong>Optional:</strong> faster reporting, longer retention, encrypted delivery, extra data and Managed support use the prices above and the scope in your quote. Live telemetry is outside the base product.</li>'
+            '<li><strong>Customer-funded arrangements:</strong> volume rates below about $0.07 per device assume customer-funded SUI network costs. Those rates alone are not an all-in total. A quote must identify the network costs, storage, provider services and working funds you supply separately, including any activation costs.</li></ul>'
+            '<p>Request a written quote that states device capacity, reporting frequency, data volume and retention, included services, separately funded resources and the total payable. Provider services and actual workloads can change the total.</p>',
+            '<details><summary>Optional detail: operating resources and network tokens</summary><p>'
+            'Device capacity is the number of devices your plan permits. Account approval fees pay for changes you approve. '
+            'The device operating budget pays for device reports; the storage budget pays for file and log retention. '
+            'These are different resources, not four subscription charges. SUI pays on-chain transactions, storage deposits and gas float; '
+            'WAL pays Walrus writes and retention. Uploads can also require SUI relay fees. Saving fleet settings does not deposit money.</p></details>',
+            '<p><a href="{{app:settings/}}">Explore settings in the console</a>. Console estimates and deployment-specific tariffs are separate from a written commercial quote.</p>',
+            '<details><summary>Optional detail: SUI price and renewals</summary>',
             f'<p>Prices stay fixed in USD for the term. When a prepaid annual invoice is paid, the proposal buys '
             f'{Decimal(policy["hedge"]["term_sui_purchased_fraction"]).normalize() * 100:.0f}% of the term’s estimated SUI quantity. '
             'This protects that quantity against token-price rises; gas-price or workload increases can still require more SUI. '
             f'If the USD cost of SUI operations at renewal is at least {policy["renewal_repricing_trigger_multiple"]}× the quote basis, '
             f'the renewal is requoted with at least {policy["renewal_notice_days"]} days’ notice. '
-            'Prices never change mid-term, and falling SUI prices do not automatically reduce them.</p>', '</div>']
+            'Prices never change mid-term, and falling SUI prices do not automatically reduce them.</p></details>', '</div>']
     return '\n'.join(out) + '\n'
 
 

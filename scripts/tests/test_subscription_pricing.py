@@ -452,6 +452,14 @@ class PublicPricingTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'stale'):
                         self.site.generate(check=True)
 
+    def test_examples_include_minimum_and_separate_activation(self):
+        page = self.site.generated()
+        self.assertIn('50 × $0.08 = $4.00</td><td>$49.00</td><td>$5.00', page)
+        self.assertIn('1,000 × $0.08 = $80.00</td><td>$80.00</td><td>$100.00', page)
+        self.assertIn('do not add the same network estimate to that bill again', page)
+        self.assertIn('Those rates alone are not an all-in total', page)
+        self.assertIn('href="/contact/"', page)
+
     def test_model_changes_invalidate_page(self):
         from unittest.mock import patch
         original = self.site.generated()
