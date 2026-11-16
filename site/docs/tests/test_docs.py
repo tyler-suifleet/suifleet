@@ -63,6 +63,33 @@ class DocsTest(unittest.TestCase):
         self.assertIn('/device-client/', (self.out / "install/index.html").read_text())
         self.assertIn('docs/INSTALL_DEVICE_CLIENT.md', {p["source"] for p in build.catalog()})
 
+    def test_customer_contract_and_setup_handoff(self):
+        build.build(self.out)
+        for page in build.catalog():
+            text = (build.ROOT / page["source"]).read_text()
+            with self.subTest(page=page["slug"]):
+                self.assertNotRegex(text, r"SF-\d+")
+                self.assertIn("## Prerequisites", text)
+                self.assertRegex(text, r"## Expected result")
+                self.assertRegex(text, r"## Recovery")
+                self.assertIn("## Technical reference", text)
+                self.assertNotRegex(page["title"], r"SF-\d+")
+        setup = (self.out / "device-client/index.html").read_text()
+        for phrase in ["Download connection settings", "device_object_id", "device_cap_id", "signer.toml", "config.toml"]:
+            self.assertIn(phrase, setup)
+        self.assertNotIn("Download deployment.json", setup)
+        helper = (build.ROOT / "dapp/src/components/DeviceClientHelp.tsx").read_text()
+        self.assertIn(">Download connection settings</button>", helper)
+        devices = (build.ROOT / "dapp/src/app/devices/page.tsx").read_text()
+        self.assertIn(">Register by address</button>", devices)
+        # All three entry points retain the ID handoff, not just the deep guide.
+        for slug in ["install", "enrollment", "deployment-manifest"]:
+            text = (self.out / slug / "index.html").read_text()
+            self.assertIn("DeviceCap", text)
+        # Engineering histories stay linked as reference, outside search/pages.
+        self.assertNotIn("docs/ENROLLMENT.md", {p["source"] for p in build.catalog()})
+        self.assertIn("/blob/main/docs/ENROLLMENT.md", (self.out / "enrollment/index.html").read_text())
+
     def test_links_fail_on_missing_page_and_anchor(self):
         with self.assertRaisesRegex(ValueError, "Incomplete"):
             build.check(self.out)
@@ -82,7 +109,7 @@ class DocsTest(unittest.TestCase):
 
     def test_repository_links_and_sources_are_validated(self):
         pages = build.catalog()
-        self.assertEqual(build.rewrite_url("ENROLLMENT.md#claim-enrollment-and-bulk-onboarding", "docs/INSTALL.md", pages), "/enrollment/#claim-enrollment-and-bulk-onboarding")
+        self.assertEqual(build.rewrite_url("CUSTOMER_ENROLLMENT.md#steps", "docs/CUSTOMER_INSTALL.md", pages), "/enrollment/#steps")
         self.assertIn("/blob/main/suifleet-edge/config.example.toml", build.rewrite_url("../suifleet-edge/config.example.toml", "docs/INSTALL.md", pages))
         for bad in ("MISSING.md", "../../../../../etc/passwd", "javascript:alert(1)"):
             with self.assertRaises(ValueError):
