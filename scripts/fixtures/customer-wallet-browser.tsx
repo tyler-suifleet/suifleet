@@ -3,7 +3,7 @@ const listeners = new Set<() => void>();
 let version = 0;
 export const A = "0x" + "a".repeat(64), B = "0x" + "b".repeat(64);
 export const state = { account: A, network: "localnet", revoked: false, warning: false, fail: false, delayed: false,
-  created: false, transactions: [] as unknown[], pending: [] as (() => void)[] };
+  readOnly: false, created: false, transactions: [] as unknown[], pending: [] as (() => void)[] };
 function emit() { version++; for (const listener of listeners) listener(); }
 function useVersion() { useSyncExternalStore(fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }, () => version, () => 0); }
 export function useCurrentAccount() { useVersion(); return state.account ? { address: state.account, chains: ["sui:localnet"] } : null; }
