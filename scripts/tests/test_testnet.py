@@ -672,7 +672,17 @@ class TrustTests(unittest.TestCase):
             reused = live.load_state(path, '4c78adac', '0xa')['fixtures']['content-hash']
             self.assertTrue(live.fixture_alive(reused, '0xa', client))
             owners['0x3'] = {'AddressOwner':'0xd'}
-            self.assertFalse(live.fixture_alive(reused, '0xa', client))
+            diagnostics = []
+            self.assertFalse(live.fixture_alive(reused, '0xa', client, diagnostics))
+            self.assertEqual(diagnostics, [dict(object_id='0x3', expected_owner='0xa', actual_owner='0xd')])
+            owners['0x3'] = {'AddressOwner':'0xa'}
+            def unreadable(command, object_id):
+                if object_id == '0x7':
+                    raise RuntimeError('untrusted provider text must not enter evidence')
+                return client(command, object_id)
+            diagnostics = []
+            self.assertFalse(live.fixture_alive(reused, '0xa', unreadable, diagnostics))
+            self.assertEqual(diagnostics, [dict(object_id='0x7', error='package read failed')])
             self.assertEqual(live.load_state(path, '4c78adac', '0xd')['fixtures'], {})
 
 class PublicEnvironmentTests(unittest.TestCase):
