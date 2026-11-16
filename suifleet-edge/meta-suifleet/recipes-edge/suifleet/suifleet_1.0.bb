@@ -17,16 +17,16 @@ SRC_URI = " \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
-SRCREV = "2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f"
+SRCREV = "b9bb2ef6210624d732ab2de2075ea1826e5300c1"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/git"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
-SUIFLEET_LOCK_SHA256 = "310102d73d7644815fe05df24917c332136836d64dcff5f7ca35b44c63b2d937"
+SUIFLEET_LOCK_SHA256 = "c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6"
 # The daemon crate version at SRCREV; recorded in build-info and checked below.
-SUIFLEET_CRATE_VERSION = "0.2.1"
+SUIFLEET_CRATE_VERSION = "0.2.3"
 CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
