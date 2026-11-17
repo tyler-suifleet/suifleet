@@ -7,7 +7,7 @@ const { createElement } = appRequire('react');
 const format = loader()('lib/storage-errors.ts').formatStorageQueryError;
 const raw = new Error('["fleet-storage","testnet","0x1843","0x4253"] data is undefined');
 for (const error of [raw, new Error('transport secret'), undefined, null, 'undefined', { message: '0x123' }]) {
-  assert.equal(format(error), 'Fleet storage could not be loaded. Try again. If the problem continues, check the selected fleet and network.');
+  assert.equal(format(error), 'Storage budget could not be loaded. Try again. If the problem continues, check the selected fleet and network.');
 }
 let storageResult, storageError, budgetError, readFailure, loading = false, queries = [];
 const budget = { id: '0xb', capId: '0xc' }, config = { packageId: '0xp' };
@@ -46,16 +46,16 @@ function choice() {
     readFailure = undefined;
     storageResult = empty.value;
     html = choice();
-    assert.match(html, /Create and fund fleet storage/);
-    assert.match(html, /href="\/budget\/">Create or fund fleet storage/);
+    assert.match(html, /Create and fund a storage budget/);
+    assert.match(html, /href="\/budget\/">Create or fund a storage budget/);
     assert.match(html, /disabled=""/);
     assert.doesNotMatch(html, /undefined|fleet-storage|0x1843/);
     loading = true;
-    assert.match(choice(), /Loading fleet storage/);
+    assert.match(choice(), /Loading storage budget/);
     assert.doesNotMatch(choice(), /href=/);
     loading = false; storageError = raw;
     assert.equal(hook().target, undefined, 'a failed refetch cannot retain a write target');
-    assert.match(choice(), /Fleet storage could not be loaded/);
+    assert.match(choice(), /Storage budget could not be loaded/);
     assert.doesNotMatch(choice(), /href=/);
     assert.doesNotMatch(choice(), /undefined|fleet-storage|0x1843/);
     // Configured storage must retain the selected route on retention failure,
@@ -79,7 +79,7 @@ function choice() {
     assert.match(html, /checked=""/);
     assert.doesNotMatch(html, /disabled=|undefined|fleet-storage|0x1843/);
     storageError = undefined; budgetError = raw;
-    assert.match(choice(), /Fleet budget could not be loaded/);
+    assert.match(choice(), /Device operating budget could not be loaded/);
     budgetError = undefined;
     storageResult = { id: '0xs', poolSize: 100n, walBalance: 2n, endEpoch: 600 };
     html = choice();
