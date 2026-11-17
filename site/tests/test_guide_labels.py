@@ -38,10 +38,11 @@ class GuideLabelsTest(unittest.TestCase):
         self.assertIn('>Create storage budget</button>', (ROOT / 'dapp/src/components/FleetBudget.tsx').read_text())
         self.assertIn('title="Storage funding"', (ROOT / 'dapp/src/app/budget/page.tsx').read_text())
 
-    def test_current_guide_sources_have_no_obsolete_page_label(self):
+    def test_current_guide_sources_have_no_obsolete_budget_terms(self):
         for name in ('steps.json', 'lessons.json', 'narration.json', 'record_guide.cjs'):
             text = (ROOT / 'site/guide' / name).read_text()
-            self.assertNotIn('Network budget', text, name)
+            for obsolete in ('network budget', 'fleet budget'):
+                self.assertNotIn(obsolete, text.casefold(), name)
 
     def test_recorded_snapshot_remains_digest_checked(self):
         manifest = build.load_json(ROOT / 'site/media/guide/videos.json')
