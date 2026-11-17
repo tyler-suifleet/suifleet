@@ -284,3 +284,24 @@ pass on produced lessons; it rejects them to protect their framing.
 The reviewed caption-free inputs for this production are `site/media/guide/`
 from Git revision `d21a8757`. Preserve those original files in a private source
 directory when iterating; do not feed produced lessons back into the renderer.
+
+### SF-274 selective workflow refresh
+
+See [the ten-lesson audit](../../docs/validation/SF274_GUIDE_AUDIT.md) for the
+current behavior and compatibility boundary. Private access now precedes
+publication in both written stage and lesson-card order. The first-device route
+is explicit; bulk enrollment and staged rollout remain optional.
+
+Use the original caption-free `d21a8757` inputs and `render_lessons.py --steps
+register-device,enroll-batch,access-policy,publish-version,deploy-group,staged-rollout`.
+Merge only those produced entries/files into the existing manifest. Preserve the
+four other entries/media bytes, check their scripts and card ordinals are unchanged,
+and retain the original production record plus regenerated/retained hashes under
+`selective_refresh`. Global source hashes describe the refreshed script; retained
+bytes must also match their original production record. Do not relabel historical
+captures as fresh recordings. Offline synthesis and encoding spend no chain funds.
+
+`lessons.json` is the current customer-facing speech/card script.
+`narration.json` and each `tutorial_source.narration` retain historical source
+speech/timing for provenance and action boundaries; they are not the refreshed
+player’s captions. Never change those historical records to imply a recapture.
