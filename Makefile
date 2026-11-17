@@ -260,7 +260,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
+CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-transaction-feedback test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -846,6 +846,16 @@ test-retention-scale-upgrade:
 .PHONY: test-budget-enrollment-localnet
 test-budget-enrollment-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment
+
+# SF-277: transaction outcome stages and customer guidance, handover review
+# before approval, devices duplicate guard and enrollment credential warnings
+# and lost-file recovery in a real browser (fixture chain/wallet only).
+.PHONY: test-transaction-feedback
+test-transaction-feedback:
+	$(RUN) node scripts/test_tx_feedback.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_administration_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_devices_pending_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_enrollment_feedback_browser.cjs
 
 # SF136: offline discovery/transaction checks and actual React/Chromium isolation.
 .PHONY: test-customer-fleets test-customer-upgrade-localnet

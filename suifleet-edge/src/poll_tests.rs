@@ -336,12 +336,15 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         assert_eq!(error.downcast_ref::<tonic::Status>().unwrap().code(), code);
     }
     assert_eq!(*node.starts.lock().unwrap(), [10, 10, 12]);
-    // Missing transactions outside initial membership discovery retain their error.
-    assert!(fresh.transaction_checkpoint(&sui_sdk_types::Digest::new([7; 32]).to_string())
-        .await.err().unwrap().downcast_ref::<HistoryPruned>().is_none());
-    // An archival node needs no publication lookup to start at genesis.
+    // General transaction reads must not claim membership-history recovery.
+    *node.publication_error.lock().unwrap() = Some(tonic::Code::NotFound);
+    let error = fresh.transaction_checkpoint(&sui_sdk_types::Digest::new([7; 32]).to_string())
+        .await.err().unwrap();
+    assert!(error.downcast_ref::<HistoryPruned>().is_none());
+    assert_eq!(error.downcast_ref::<tonic::Status>().unwrap().code(), tonic::Code::NotFound);
+    // Archival nodes still start at genesis without publication lookup.
     node.floor.store(0, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(fresh.membership_start().await.unwrap(), 0);
+    assert_eq!(client(&sui.manifest().rpc_url).membership_start().await.unwrap(), 0);
 }
 
 #[tokio::test]

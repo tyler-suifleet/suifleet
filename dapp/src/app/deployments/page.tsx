@@ -20,6 +20,7 @@ import { buildDeleteDeploymentStepTx } from "@/lib/sui";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
+import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
 
 export default function DeploymentsPage() {
   const { fleet } = useFleetSelection();
@@ -29,6 +30,7 @@ export default function DeploymentsPage() {
   const account = useCurrentAccount();
   const client = useCurrentClient();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
+  const failure = useTransactionFeedback();
 
   return (
     <div className="space-y-4 max-w-5xl">
@@ -55,6 +57,7 @@ export default function DeploymentsPage() {
       {view === "deployments" && <>
       {deployments.length > 0 && <DeploymentReclaimPanel deployments={deployments} />}
       {error && <p role="alert" className="text-sm text-red-600">Failed to load deployments: {error.message}</p>}
+      <TransactionFeedback feedback={failure.feedback} onDismiss={failure.clear} />
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
@@ -85,23 +88,25 @@ export default function DeploymentsPage() {
                   groups={groups.data ?? []}
                   canDelete={fleet ? fleet.administrator && fleet.id === d.creator : account?.address === d.creator}
                   isPending={isPending}
-                  onControl={(control) => signAndExecute(
+                  onControl={(control) => { failure.clear(); signAndExecute(
                     { transaction: buildDeploymentControlTx(d.deploymentId, control, fleet) },
-                    { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
-                  )}
-                  onRecurring={(recurring) => signAndExecute(
+                    { onSuccess: () => refetch(), onError: (err) => failure.report(err, `Changing “${d.componentName} ${d.version}”`) }
+                  ); }}
+                  onRecurring={(recurring) => { failure.clear(); signAndExecute(
                     { transaction: buildRecurringWindowTx(d.deploymentId, recurring, fleet) },
-                    { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
-                  )}
+                    { onSuccess: () => refetch(), onError: (err) => failure.report(err, `Changing the update window of “${d.componentName} ${d.version}”`) }
+                  ); }}
                   onDelete={async () => {
                     if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
+                    const action = `Deleting “${d.componentName} ${d.version}”`;
+                    failure.clear();
                     try { signAndExecute(
                       { transaction: await buildDeleteDeploymentStepTx(client, d.deploymentId, d.schemaVersion, fleet) },
                       {
                         onSuccess: () => setTimeout(() => refetch(), 3000),
-                        onError: (err) => alert(`Failed: ${err.message}`),
+                        onError: (err) => failure.report(err, action),
                       }
-                    ); } catch (error) { alert(`Failed: ${error instanceof Error ? error.message : String(error)}`); }
+                    ); } catch (error) { failure.report(error, action); }
                   }}
                 />
               ))}

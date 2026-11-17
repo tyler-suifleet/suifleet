@@ -67,7 +67,7 @@
       "cues": [
         {
           "source_start": 0.0,
-          "text": "The network budget pays operating fees, such as sending device reports. It is separate from your subscription device limit. Choose Network budget in the sidebar."
+          "text": "The device operating budget pays operating fees, such as sending device reports. It is separate from your subscription device limit. Choose Device and storage budgets in the sidebar."
         },
         {
           "source_start": 3.708,
@@ -144,7 +144,7 @@
       "cues": [
         {
           "source_start": 0.0,
-          "text": "Your software library stores a release once so you can deploy the same version to different devices later. Publishing alone does not install it. Choose Components in the sidebar to publish software."
+          "text": "Your software library stores a release once so you can deploy the same version to different devices later. Publishing alone does not install it. Choose Software library in the sidebar to publish software."
         },
         {
           "source_start": 7.434,
@@ -284,7 +284,7 @@
         },
         {
           "source_start": 7.978,
-          "text": "Devices apply settings at their next check. Network budget holds their funds separately."
+          "text": "Devices apply settings at their next check. The Device and storage budgets page holds their funds separately."
         }
       ],
       "source_sha256": "f9c9c80a36545f414a651549f50085ad86af17adda6db118c02a02d0c01fcf22",

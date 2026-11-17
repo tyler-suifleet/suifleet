@@ -45,7 +45,7 @@ The Data live index omits expired/released archives using their **current** held
 record, so a later owner extension overrides the original anchor expiry. A read
 failure is unavailable, never an empty successful scan. Expiry makes bytes
 unavailable automatically; recovering deposits requires an owner wallet
-transaction in Network budget, using SF-129's preview-bound reclaim flow.
+transaction in Device and storage budgets, using SF-129's preview-bound reclaim flow.
 Select the stream, scan, dry run and sign. The chain rechecks exclusive expiry;
 stale, duplicate and early calls abort atomically. Batches remain at most 64 per
 call and 256 removals per transaction. Rescanning after success selects nothing
@@ -195,7 +195,7 @@ blob renewals. The worker pays gas itself; only a successful extension earns the
 configured bounded SUI reimbursement. Failed/no-op/duplicate calls earn nothing.
 
 1. Install dependencies with `make dapp-install`.
-2. Configure/migrate storage in the Network budget page. Select the dedicated
+2. Configure/migrate storage in the Device and storage budgets page. Select the dedicated
    executor address, finite blob targets and measured quote ceilings. Deposit
    enough isolated WAL and SUI reserves before discretionary writes.
 3. Put the dedicated executor's `suiprivkey...` (or 32-byte hex seed) in a 0600

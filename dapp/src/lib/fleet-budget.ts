@@ -1,6 +1,6 @@
 import type { NamedFleet } from "./customer-fleets";
 // Prepaid fleet network costs (SF-083): transaction builders and reads for the
-// on-chain fleet budget (sui_edge::fleet_budget) and, when configured, the
+// on-chain device operating budget (sui_edge::fleet_budget) and, when configured, the
 // owner-prepaid Walrus storage (fleet_storage). See docs/FLEET_BUDGET.md.
 import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
@@ -15,14 +15,14 @@ import { allEvents, allOwned } from "./sui";
 
 const CLOCK = "0x6";
 
-/** Whether this deployment's package has the fleet budget (all its type origins). */
+/** Whether this deployment's package has the device operating budget (all its type origins). */
 export function budgetSupported(manifest = MANIFEST): boolean {
   return !!manifest && BUDGET_TYPES.every((name) => name in manifest.type_origins);
 }
 
 function requireBudget() {
   requireManifest();
-  if (!budgetSupported()) throw new Error("This deployment's package has no fleet budget; upgrade the contracts first");
+  if (!budgetSupported()) throw new Error("This deployment's package has no device operating budget; upgrade the contracts first");
 }
 
 export interface Limits {
@@ -63,7 +63,7 @@ export function enrollmentError(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : "Wallet request failed";
   if (/fleet_budget/.test(message) && /MoveAbort|abort/i.test(message) &&
       /(?:abort code[:\s]*11\b|[,)]\s*11\s*\)|\bcode[":\s]+11\b)/i.test(message)) {
-    return "The fleet budget no longer has enough SUI for this device’s starting balance and reserve. Fund the fleet budget, refresh, and try again, or turn off budget enrollment.";
+    return "The device operating budget no longer has enough SUI for this device’s starting balance and reserve. Fund the device operating budget, refresh, and try again, or turn off budget enrollment.";
   }
   return message;
 }
@@ -469,7 +469,7 @@ export function storageConfig(network = MANIFEST?.network, packageId = process.e
 /** Why the deposit cannot swap SUI for WAL on this network, if it cannot. */
 export function swapRoute(network = MANIFEST?.network): { route?: "testnet-exchange"; explanation: string } {
   if (network === "testnet") {
-    return { route: "testnet-exchange", explanation: "Fleet storage can be funded in SUI only: its deposit swaps SUI for WAL through Walrus's pinned Testnet exchange at its posted fixed rate, deposits the WAL and can buy the storage, all in one transaction that aborts if fewer WAL than the minimum arrive." };
+    return { route: "testnet-exchange", explanation: "Storage budget can be funded in SUI only: its deposit swaps SUI for WAL through Walrus's pinned Testnet exchange at its posted fixed rate, deposits the WAL and can buy the storage, all in one transaction that aborts if fewer WAL than the minimum arrive." };
   }
   return { explanation: "No DEX route is pinned and verified for this network, so the deposit cannot swap SUI for WAL safely in one transaction. Buy WAL directly (an exchange, or a card on-ramp that sells WAL) and deposit it." };
 }
@@ -625,7 +625,7 @@ export async function fetchStorage(client: SuiGrpcClient, config: StorageConfig,
     catch (error) { if (error instanceof ObjectError && (error.reason === "notFound" || error.reason === "deleted")) continue; throw error; }
     if (normalizeStructTag(object.type) !== normalizeStructTag(`${config.storageOrigin ?? config.packageId}::fleet_storage::FleetStorage`)) throw new Error("Unexpected FleetStorage type");
     const fields = FleetStorageBcs.parse(object.content);
-    if (normalizeSuiAddress(fields.budget_id) !== normalizeSuiAddress(budgetId)) throw new Error("The fleet storage belongs to another budget");
+    if (normalizeSuiAddress(fields.budget_id) !== normalizeSuiAddress(budgetId)) throw new Error("The storage budget belongs to another budget");
     const q = fields.default_quota;
     return { id: object.objectId, version: BigInt(fields.version), poolSize: fields.pool ? BigInt(fields.pool.storage_size) : BigInt(0),
       startEpoch: fields.pool?.start_epoch, endEpoch: fields.pool?.end_epoch, walBalance: BigInt(fields.wal.value),
@@ -639,8 +639,8 @@ export async function fetchStorage(client: SuiGrpcClient, config: StorageConfig,
 /** Warnings about fleet storage running out or expiring. */
 export function storageAlerts(storage: StorageView, currentEpoch: number | undefined): BudgetAlert[] {
   const alerts: BudgetAlert[] = [];
-  if (storage.poolSize === BigInt(0)) alerts.push({ severity: "warning", text: "Fleet storage holds no prepaid space: fleet-paid uploads fail until you buy storage." });
-  if (storage.walBalance === BigInt(0)) alerts.push({ severity: "warning", text: "Fleet storage holds no WAL for write fees: fleet-paid uploads fail until you deposit WAL." });
+  if (storage.poolSize === BigInt(0)) alerts.push({ severity: "warning", text: "Storage budget holds no prepaid space: fleet-paid uploads fail until you buy storage." });
+  if (storage.walBalance === BigInt(0)) alerts.push({ severity: "warning", text: "Storage budget holds no WAL for write fees: fleet-paid uploads fail until you deposit WAL." });
   if (storage.endEpoch !== undefined && currentEpoch !== undefined && storage.endEpoch <= currentEpoch) {
     alerts.push({ severity: "critical", text: `Prepaid storage expired at Walrus epoch ${storage.endEpoch}: fleet-paid uploads fail until you refill the pool.` });
   } else if (storage.endEpoch !== undefined && currentEpoch !== undefined && storage.endEpoch - currentEpoch <= 1) {

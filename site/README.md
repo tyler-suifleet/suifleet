@@ -34,6 +34,8 @@ The user split issue #338 on 2026-10-27:
 - The rendered docs site under site/docs serves the curated customer guides.
   Public Docs navigation uses the configured docs origin (docs.suifleet.io by default);
   /docs/ remains a topic directory with explicit technical-reference links.
+  SF-275 verified the public docs root returned HTTP 200 with the documentation
+  title on 2026-11-16; that read-only check does not verify every published page.
 - SF-178 owns pricing generated from the canonical model. The present page is
   generated from the shared console price table and subscription policy, including
   Managed plan and entry offers. It mirrors the proposed terms in docs/BUSINESS_PLAN.md;

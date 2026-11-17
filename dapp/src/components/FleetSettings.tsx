@@ -226,7 +226,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     {result.error && <p role="alert">{result.error}</p>}
     {result.network && result.price && <div className="grid md:grid-cols-2 gap-3">
       <div className="border rounded p-2" data-testid="network-cost">
-        <h3 className="font-semibold text-xs">Network cost per month, at cost (paid from your fleet budget)</h3>
+        <h3 className="font-semibold text-xs">Network cost per month, at cost (paid from your device operating budget)</h3>
         <p className="text-xs">Per device {usd(result.network.usdPerDevice)}; per fleet {usd(result.network.usdPerFleet)}, including {usd(result.network.base.releasesUsdPerFleet)} of release uploads.</p>
         <p className="text-xs text-gray-600">Device activity and storage fees only. This deposit is separate from the SuiFleet subscription and has no SuiFleet markup.</p>
       </div>
@@ -254,14 +254,14 @@ function SettingsForm({ table }: { table: PriceTable }) {
     {result.deposit && shortfall && <div className="border rounded p-2 text-xs" data-testid="deposit">
       <h3 className="font-semibold">Recommended deposit for {months} month(s) of these settings</h3>
       <p>{formatToken(result.deposit.suiDepositMist)} SUI (device activity and starting balances, with 20% headroom) and {formatToken(result.deposit.walDepositFrost)} WAL (storage and uploads), about {usd(result.deposit.usd.total)}.</p>
-      <p>Your fleet budget holds {budget ? `${formatToken(budget.balance)} SUI` : "nothing yet (no budget)"}{walCounted ? `; fleet storage holds ${storage ? `${formatToken(storage.walBalance)} WAL` : "nothing yet"}` : "; this deployment has no fleet storage, so Walrus fees are paid by each upload's wallet"}.</p>
+      <p>Your device operating budget holds {budget ? `${formatToken(budget.balance)} SUI` : "nothing yet (no budget)"}{walCounted ? `; your storage budget holds ${storage ? `${formatToken(storage.walBalance)} WAL` : "nothing yet"}` : "; this deployment has no storage budget, so Walrus fees are paid by each upload's wallet"}.</p>
       {shortfall.enough ? <p role="status">The current deposit covers this plan.</p>
-        : <p>Short by {formatToken(shortfall.suiMist)} SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} WAL` : ""}. <a className="underline" href="/budget/">Deposit on the Network budget page</a>.</p>}
+        : <p>Short by {formatToken(shortfall.suiMist)} SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} WAL` : ""}. <a className="underline" href="/budget/">Deposit on the Device and storage budgets page</a>.</p>}
     </div>}
 
     </details>
     <section className="rounded-xl border border-blue-100 bg-blue-50/60 p-5 space-y-3">
-      <h3 className="font-semibold text-slate-900">Save your changes</h3><p className="text-sm leading-relaxed text-slate-600">Devices apply these settings at their next check. Your wallet shows the network fee before you approve.</p><p className="text-xs leading-relaxed text-slate-500"><strong className="font-medium">Saving settings does not buy a subscription or add money to your budget.</strong> Settings are stored securely on the network alongside your fleet budget.</p>
+      <h3 className="font-semibold text-slate-900">Save your changes</h3><p className="text-sm leading-relaxed text-slate-600">Devices apply these settings at their next check. Your wallet shows the network fee before you approve.</p><p className="text-xs leading-relaxed text-slate-500"><strong className="font-medium">Saving settings does not buy a subscription or add money to your budget.</strong> Settings are stored securely on the network alongside your device operating budget.</p>
     <div className="space-y-2 text-xs">
       {!account && <p>Connect a wallet to save settings.</p>}
       {saver.reason && <p>{saver.reason}</p>}
