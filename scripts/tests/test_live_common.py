@@ -1025,6 +1025,29 @@ class ShardedReceiptViewTests(unittest.TestCase):
 
 
 class CatalogDesiredStateTests(unittest.TestCase):
+    def test_legacy_group_migration_verifies_device_and_membership(self):
+        for device, groups, error in (("0x10", ["0x20"], None),
+                                      ("0x11", ["0x20"], "another device"),
+                                      ("0x10", [], "absent from inbox"),
+                                      ("0x10", ["0x21"], "absent from inbox")):
+            with self.subTest(device=device, groups=groups):
+                run = Mock(evidence={})
+                run.created.return_value = ["0x30"]
+                run.object.return_value = {"content": {"fields": {"device_id": device, "groups": groups}}}
+                transaction = Mock()
+                def migrate():
+                    live_upgrade_security.follow_legacy_group(run, transaction, "0xa", "0xb", "0xc", "0x10", "0x20")
+                if error:
+                    with self.assertRaisesRegex(AssertionError, error):
+                        migrate()
+                    self.assertNotIn("catalog_group_inbox", run.evidence)
+                else:
+                    migrate()
+                    self.assertEqual(run.evidence["catalog_group_inbox"], "0x30")
+                args = transaction.call_args.args
+                self.assertLess(args.index("0xa::fleet_inbox::new_inbox"), args.index("0xa::fleet_inbox::follow_group"))
+                self.assertLess(args.index("0xa::fleet_inbox::follow_group"), args.index("0xa::fleet_inbox::share_inbox"))
+
     def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
         run = Mock()
         run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}

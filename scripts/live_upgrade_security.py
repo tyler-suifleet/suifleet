@@ -80,6 +80,24 @@ DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charge
 CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
 
 
+def follow_legacy_group(live, transaction, package, registry, owner_cap, device, group):
+    """Make the old-package membership discoverable without retained events.
+
+    The fixture is new on every run: its base-package add_device cannot
+    populate an inbox. Do this after legacy/receipt acceptance, before testing
+    catalog reconciliation, which must work on a pruned public fullnode too.
+    """
+    result = transaction("follow legacy group in device inbox (head)",
+        "--move-call", f"{package}::fleet_inbox::new_inbox", f"@{registry}", f"@{owner_cap}",
+        "--assign", "inbox", "--move-call", f"{package}::fleet_inbox::follow_group", "inbox", f"@{group}",
+        "--move-call", f"{package}::fleet_inbox::share_inbox", "inbox")
+    inbox, = live.created(result, "::fleet_inbox::DeviceInbox")
+    fields = plain(live.object(inbox)["content"])
+    assert dm.object_id(fields["device_id"]) == dm.object_id(device), "inbox belongs to another device"
+    assert [dm.object_id(value) for value in fields["groups"]] == [dm.object_id(group)], "legacy group absent from inbox"
+    live.evidence["catalog_group_inbox"] = inbox
+
+
 def fixture_valid(live, fixture):
     """Free reads: the cached packages are still this operator's lineage."""
     try:
@@ -284,6 +302,7 @@ def run(args):
                 f"{new}::component_catalog::create_catalog"), "::component_catalog::ComponentCatalog")[0]
             stop_daemon(daemon)
             daemon = None
+            follow_legacy_group(live, transaction, new, registry, owner_cap, device, group)
             for version in ("3.0.0", "4.0.0"):
                 name, _, blob, artifact_hash, recipe_hash = deployment_args(walrus, version, run_id)
                 # Only the second manifest matches this x86_64 daemon.
