@@ -138,7 +138,7 @@ export function CardFunding({ asset, amount }: { asset: OnrampAsset; amount: str
     {pending && <div role="status" className="border rounded p-2 bg-gray-50">
       {!status && <p>Checking the wallet for your purchase…</p>}
       {status?.state === "waiting" && <p>Purchase started {new Date(pending.startedAt).toLocaleTimeString()}: waiting for {pending.asset} to arrive in this wallet. Nothing is credited until it arrives and your deposit confirms.</p>}
-      {status?.state === "arrived" && <p>{formatToken(status.received)} {pending.asset} arrived in your wallet. Deposit it into the fleet budget below; it is credited only once that transaction confirms.</p>}
+      {status?.state === "arrived" && <p>{formatToken(status.received)} {pending.asset} arrived in your wallet. Deposit it into the device operating budget below; it is credited only once that transaction confirms.</p>}
       {status?.state === "unconfirmed" && <p>Purchase not confirmed: nothing arrived in this wallet. It may have failed, been cancelled or still be processing with the provider; check with them. Your fleet, storage and devices are unaffected, and this is not a budget shortfall.</p>}
       <button type="button" className="underline" onClick={dismiss}>Dismiss</button>
     </div>}
@@ -178,7 +178,7 @@ export function DepositForm({ suggestedMist }: { suggestedMist?: bigint }) {
   const [amount, setAmount] = useState("");
   if (!account) return null;
   if (!budgetSupported()) return <p className="text-xs">Shared fleet funding is not available in this setup. Devices must cover their own network fees.</p>;
-  if (isLoading) return <p className="text-xs">Loading your fleet budget…</p>;
+  if (isLoading) return <p className="text-xs">Loading your device operating budget…</p>;
   if (readError) return <p role="alert" className="text-xs">Budget unavailable: {readError.message}</p>;
   const value = amount || (suggestedMist ? formatToken(suggestedMist) : "");
   return <form className="space-y-2 text-xs" onSubmit={(event) => {
@@ -188,7 +188,7 @@ export function DepositForm({ suggestedMist }: { suggestedMist?: bigint }) {
     void submit(() => budget ? buildDepositTx(budget.id, budget.capId, mist)
       : buildCreateBudgetTx(mist, DEFAULT_LIMITS, mist / BigInt(5), account.address));
   }}>
-    <p>{budget ? `Fleet budget balance: ${sui(budget.balance)}.` : "No fleet budget yet. Your first deposit creates one that your account manages."} This budget is separate from your account balance. Devices can use it only within the spending limits you set.</p>
+    <p>{budget ? `Device operating budget balance: ${sui(budget.balance)}.` : "No device operating budget yet. Your first deposit creates one that your account manages."} This budget is separate from your account balance. Devices can use it only within the spending limits you set.</p>
     <label className="block">{budget ? "Deposit (SUI)" : "Initial deposit (SUI)"} <input className="border p-1" value={value} onChange={(e) => setAmount(e.target.value)} /></label>
     <button className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending}>{budget ? "Deposit" : "Create budget and deposit"}</button>
     {message && <p role="status">{message}</p>}
@@ -249,7 +249,7 @@ export function BudgetManager() {
   const alerts = budgetAlerts(budget, enrolled, now, runway);
   return <div className="space-y-3 text-xs">
     <p>Unallocated {sui(budget.balance)} (spendable {sui(budget.balance)}; reserved 0) {accountsReady && <>and {sui(reserves)} in device reserves.</>} Deposited {sui(budget.totalDeposited)}, withdrawn {sui(budget.totalWithdrawn)}, paid straight to devices {sui(budget.totalPaid)}, allocated to reserves {sui(budget.totalAllocated)}, reclaimed {sui(budget.totalReclaimed)}. {accountsReady && (runway === null ? "No draws this period." : `About ${runway.toFixed(1)} days left at this period's rate.`)}</p>
-    <p>Each device spends from its own reserved balance. Refill these balances from the fleet budget, and recover unused funds before withdrawing.</p>
+    <p>Each device spends from its own reserved balance. Refill these balances from the device operating budget, and recover unused funds before withdrawing.</p>
     {accountsReady && alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
       <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.deviceId ? `Device ${alert.deviceId.slice(0, 10)}…: ` : ""}{alert.text}</li>)}</ul>}
     <div className="flex gap-2 items-center flex-wrap">
@@ -362,9 +362,9 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
   const alerts = storage ? storageAlerts(storage, walrusState.data?.epoch) : [];
   return <div className="space-y-3 text-xs">
     {!storage && <div className="space-y-2">
-      <p>No fleet storage budget yet. Create one to prepay software and device-data uploads. Devices cannot delete paid uploads or shorten their storage period.</p>
+      <p>No storage budget yet. Create one to prepay software and device-data uploads. Devices cannot delete paid uploads or shorten their storage period.</p>
       <p>Each device may upload up to {(Number(DEFAULT_QUOTA.encodedBytesPerPeriod) / MIB).toFixed(0)} MiB encoded in {DEFAULT_QUOTA.uploadsPerPeriod.toString()} uploads per day, at most {(Number(DEFAULT_QUOTA.maxBlobSize) / MIB).toFixed(0)} MiB per blob and {wal(DEFAULT_QUOTA.writeFeesPerPeriod)} in write fees.</p>
-      <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create fleet storage</button>
+      <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create storage budget</button>
     </div>}
     {storage && <>
       <RetentionPanel config={config} storage={storage.id} version={storage.version} budget={budget.id} cap={budget.capId} epoch={walrusState.data?.epoch} schedule={walrusState.data} />

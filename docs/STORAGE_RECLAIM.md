@@ -81,7 +81,7 @@ the creator can still delete them individually after review.
 
 ## dApp
 
-- **Network budget → Reclaim expired archives.** Scans every enrolled device's
+- **Device and storage budgets → Reclaim expired archives.** Scans every enrolled device's
   chain index at the live Walrus epoch, lists expired indexed archives and
   unindexed expired device blobs, and offers a dry run. Owner-registered
   release and recipe blobs are never selected.

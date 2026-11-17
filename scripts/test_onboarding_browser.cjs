@@ -140,7 +140,7 @@ function audit() {
       assert.equal(await page.evaluate(() => document.activeElement?.href), `https://docs.suifleet.io/${slug}/`);
       assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
     }
-    for (const [name, href] of [["Check device capacity →", "/entitlements"], ["Check account funds →", "#funding"], ["Check network budget →", "/budget"]]) {
+    for (const [name, href] of [["Check device capacity →", "/entitlements"], ["Check account approval fees →", "#funding"], ["Check device operating budget →", "/budget"]]) {
       await page.keyboard.press("Tab");
       assert.equal(await page.evaluate(() => document.activeElement?.textContent), name);
       assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), href);
@@ -197,13 +197,15 @@ function audit() {
     await page.getByRole("button", { name: "Refresh account and inventory" }).click();
     await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor({ state: "detached" });
 
+    assert.doesNotMatch(await page.locator("#root").innerText(), /fleet budget|network budget/i);
+    assert.match(await page.locator("#root").innerText(), /device operating budget/i);
     // A budget depleted while approval is open gets an actionable message.
     await page.evaluate(() => window.acceptance.budgetRace());
     await register.click();
     const budgetError = page.getByRole("alert").filter({ hasText: "no longer has enough SUI" });
     await budgetError.waitFor();
     assert.doesNotMatch(await budgetError.innerText(), /MoveAbort|abort code/);
-    assert.match(await budgetError.innerText(), /Fund the fleet budget/);
+    assert.match(await budgetError.innerText(), /Fund the device operating budget/);
     await page.evaluate(() => window.acceptance.reset());
 
     // Duplicate submission: a double activation while the wallet is open signs once.
