@@ -13,7 +13,7 @@ import build
 
 class GuideLabelsTest(unittest.TestCase):
     def test_guide_routes_and_sidebar_actions_use_current_labels(self):
-        layout = (ROOT / 'dapp/src/app/layout.tsx').read_text()
+        layout = (ROOT / 'dapp/src/components/ConsoleNavigation.tsx').read_text()
         nav = dict(re.findall(r'href: "([^"]+)",\s*label: "([^"]+)"', layout))
         steps = json.loads((ROOT / 'site/guide/steps.json').read_text())['steps']
         for step in steps:

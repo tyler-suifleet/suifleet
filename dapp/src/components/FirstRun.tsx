@@ -41,7 +41,8 @@ const BADGE: Record<StepState, string> = {
 const STATUS_TEXT: Record<StepState, string> = { done: "text-green-800", current: "text-blue-800", blocked: "text-red-800", upcoming: "text-gray-600" };
 
 export function FirstRun({ connect }: { connect: ReactNode }) {
-  const { fleet } = useFleetSelection();
+  const selection = useFleetSelection();
+  const { fleet } = selection;
   const account = useCurrentAccount(), client = useCurrentClient(), cache = useQueryClient();
   const wallet = useDAppKit(), currentWallet = useCurrentWallet();
   const devices = useDevices(), mutation = useFleetTransaction();
@@ -70,15 +71,22 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     },
   });
   const capacity = fleet ? { available: fleet.activeDevices < fleet.deviceLimit, administrator: fleet.administrator } : undefined;
-  const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0) && (!capacity || (capacity.available && capacity.administrator));
+  const ready = !!account && state.isSuccess && BigInt(state.data) > BigInt(0) && (!selection.supported || !!fleet) && (!capacity || (capacity.available && capacity.administrator));
+  const missingFleet = !!account && selection.supported && !fleet;
+  const firstFleet = missingFleet && !selection.loading && !selection.error && !selection.stale && selection.fleets.length === 0;
+  const fleetNext = selection.loading ? "Checking fleet access…" : selection.error ? "Fleet access unavailable; retry the fleet check above."
+    : firstFleet ? "Create a fleet using Create default fleet above, then check device capacity." : "Choose an accessible fleet using the Fleet selector above.";
   const steps = onboardingProgress(!!account,
     state.isSuccess ? { status: "success", value: state.data } : state.isError ? { status: "error" } : { status: "pending" },
     devices.isSuccess ? { status: "success", value: devices.data.length } : devices.isError ? { status: "error" } : { status: "pending" }, capacity);
+  if (missingFleet) {
+    steps[2] = { ...steps[2], state: state.isSuccess && BigInt(state.data) > BigInt(0) ? "current" : "upcoming", status: selection.loading ? "Checking fleet access…" : firstFleet ? "Create a fleet" : "Choose a fleet" };
+  }
   const next = steps.find((step) => step.state === "current" || step.state === "blocked");
   const accountName = account?.label || currentWallet?.name;
 
   async function submit(transaction: Transaction, device: { name: string; deviceAddress: string }) {
-    if (!account || inFlight.current) return;
+    if (!account || !ready || !devices.isSuccess || inFlight.current) return;
     inFlight.current = true;
     const address = account.address;
     setError(null); setMessage(null);
@@ -101,7 +109,8 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   return <div className="max-w-4xl space-y-6 text-sm text-gray-900">
     <header className="space-y-1">
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
-      <p className="text-gray-700">Connect your account, add funds for network fees, register a device and send your first update.</p>
+      <p className="text-gray-700">Connect your account, check account fees, create a fleet, arrange device capacity and reporting funds, then register a device and send your first update.</p>
+      <p className="text-gray-700">Public testnet evaluation: test SUI pays network fees only. It does not include device capacity, paid storage or production service. Check availability before making a payment.</p>
       <p className="flex flex-wrap gap-x-4 gap-y-1">
         <a className={LINK} href={docsUrl("install")}>Install the device client</a>
         <a className={LINK} href={docsUrl("enrollment")}>Enrollment guide</a>
@@ -120,7 +129,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </nav>
 
     {next && <p role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-950">
-      <span className="font-semibold">Next: </span>{nextAction(next, config.enabled)}
+      <span className="font-semibold">Next: </span>{missingFleet && next.id === "register" ? fleetNext : nextAction(next, config.enabled)}
     </p>}
 
     <StepCard id="account" index={1} title="Sign in or connect" state={steps[0].state}>
@@ -129,7 +138,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         <span className="font-mono text-gray-700" title={account.address}>{shortAddress(account.address)}</span>
         <NetworkBadge />
       </div> : <>
-        <p className="text-gray-700">{config.enabled ? "Use Google sign-in or Slush" : "Use Slush"} in the wallet menu—no extension needed. Existing extension wallets also work.</p>
+        <p className="text-gray-700">{config.enabled ? "Use Google sign-in or Slush" : "Use Slush"} in the wallet menu—no extension needed. Supported Sui extension wallets also work. If Slush cannot open in your browser or region, choose an available supported wallet; never share recovery words with SuiFleet. Closing or cancelling the menu leaves you signed out; open it again when ready.</p>
         {!config.enabled && <p role="status" className="text-gray-700">{config.reason}</p>}
       </>}
       <p className="text-gray-700">Your wallet is the account app that approves changes and payments. SuiFleet asks for approval before submitting an action.</p>
@@ -143,7 +152,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         </ul>
       </div>
       <Disclosure summary="About account custody and sessions">
-        <p>A Google zkLogin address is controlled by your Google account and Enoki’s app-specific salt service. Losing that account can mean losing your fleet and funds. Enoki availability is also required to sign in and generate proofs.</p>
+        <p>When Google sign-in is configured, a Google zkLogin address is controlled by your Google account and Enoki’s app-specific salt service. Losing that account can mean losing your fleet and funds. Enoki availability is also required to sign in and generate proofs.</p>
         <p>Your sign-in session expires periodically. Sign in again when prompted.</p>
         <p>For a business fleet, use stronger custody such as a hardware-backed extension wallet or multisig before making large deposits. Move ownership with the recipient-confirmed fleet handover (under Advanced below) while you still have account access.</p>
       </Disclosure>
@@ -171,10 +180,10 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         <Disclosure summary="How to fund this address">
           <p>Send SUI on this network to your address from another wallet. For the testnet preview, use the <a className={LINK} href="https://faucet.sui.io/" target="_blank" rel="noopener noreferrer">official testnet faucet</a> to request free test SUI. For a local development network, ask its operator for test funds. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
         </Disclosure>
-        {budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
+        {firstFleet && <div className="rounded-md border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold">Create your first fleet</h3><p>After funding account fees, use Create default fleet above and review its preview. A new customer has zero device capacity: check Device capacity before registration. If checkout is not configured, ask the operator how capacity can be enabled; an account or device operating budget deposit cannot buy capacity.</p><p>Then choose reporting funds and spending limits on Device and storage budgets. Device reporting uses separate funds; creating a fleet does not fund it. Registration stays unavailable until fleet access and capacity are verified.</p></div>}
+        {(!selection.supported || !!fleet) && budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
           <h3 className="font-semibold">Fund the device operating budget</h3>
-          <p className="text-gray-700">Your account balance pays for actions you approve. The device operating budget is separate: prepay device network costs and set spending limits. Each device receives a small starting balance and can refill only within those limits.</p>
-          <EstimatePanel onEstimate={setEstimate} />
+          <p className="text-gray-700">Your account balance pays for actions you approve. The device operating budget is separate: prepay device network costs and set spending limits. Each device receives a small starting balance and can refill only within those limits.</p>          <EstimatePanel onEstimate={setEstimate} />
           <h4 className="font-semibold">Fund by card (optional)</h4>
           <CardFunding asset="SUI" amount={estimate ? formatToken(estimate.suiDepositMist) : "1"} />
           <h4 className="font-semibold">Deposit</h4>
@@ -215,6 +224,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
           try {
+            if (!ready || !devices.isSuccess || mutation.isPending) throw new Error("Verify account funds, fleet access and device capacity before registering.");
             const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
             // A confirmed registration that is still unlisted, even past the pending timeout, must not be signed again.
             const unlisted = [...pending.waiting, ...pending.stale].find((row) => row.kind === "create" && normalizeSuiAddress(row.id) === input.deviceAddress);
@@ -238,7 +248,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
             <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending || pending.waiting.length > 0 || !!fleet && fleet.activeDevices >= fleet.deviceLimit}>{mutation.isPending ? "Registering…" : "Register device"}</button>
-            {!ready && state.isSuccess && <p className="text-gray-600">Add funds to this account to enable registration.</p>}
+            {!ready && state.isSuccess && <p className="text-gray-600">{BigInt(state.data) === BigInt(0) ? "Add funds to this account to enable registration." : missingFleet ? fleetNext : capacity && !capacity.administrator ? "Ask a fleet administrator to register this device." : "Check Device capacity before registering this device."}</p>}
           </div>
         </form>
         <div aria-live="polite">{phase && <p className="text-blue-900">{PHASE[phase]}</p>}</div>
@@ -248,7 +258,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </StepCard>
 
     <StepCard id="update" index={4} title="Deploy a first update" state={steps[3].state}>
-      <p className="text-gray-700">Publish a version in Components, then choose the device that should receive it. The update applies after the device client is running and picks it up; check results on Deployments.</p>
+      <p className="text-gray-700">Publish a version in Software library, then choose the device that should receive it. The update applies after the device client is running and picks it up; check results on Deployments.</p>
       {steps[3].state === "current"
         ? <Link className={PRIMARY} href="/firmware">Deploy a component</Link>
         : <p className="text-gray-600">Available after you register a device.</p>}

@@ -128,14 +128,14 @@
       "id": "publish-version",
       "title": "Publish a version",
       "console_route": "components/",
-      "console_label": "Components",
+      "console_label": "Software library",
       "summary": "A version is a named component with one artifact per platform and a recipe describing how to install and run it. The browser encrypts both before uploading them to Walrus and records their digests on chain.",
       "before": [
         "The artifact file for each platform.",
         "An access policy (Access policies page) naming who may decrypt it, for confidential delivery."
       ],
       "actions": [
-        "Choose Components in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
+        "Choose Software library in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
         "Click Publish version, enter the Component name and Semantic version, and continue.",
         "For each platform choose the Operating system and Architecture, attach the Artifact and, if needed, an Install command.",
         "Under Delivery keep Confidential and choose the Access policy for proprietary software. The recorded example chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
@@ -157,7 +157,7 @@
       "id": "deploy-group",
       "title": "Deploy to a group",
       "console_route": "firmware/",
-      "console_label": "Deploy component",
+      "console_label": "Deploy software",
       "summary": "Groups let one deployment reach many devices, and membership is checked by each device at apply time. A deployment records the version, the targets and the wallet that authorized it.",
       "before": [
         "A published version.",
@@ -166,8 +166,8 @@
       "actions": [
         "On Devices, open the Device groups tab, click Create group and give it a Group name.",
         "Click Manage on the group and Add the devices that should receive the release.",
-        "In the component library click Deploy this version, or choose Deploy component in the sidebar.",
-        "Under Select targets & review tick the group (or individual devices) and click Deploy to 1 target. A catalog version deploys once; to make it a group's desired version, use the ad-hoc Deploy component flow.",
+        "In the component library click Deploy this version, or choose Deploy software in the sidebar.",
+        "Under Select targets & review tick the group (or individual devices) and click Deploy to 1 target. A catalog version deploys once; to make it a group's desired version, use the ad-hoc Deploy software flow.",
         "Approve the transaction, then open View deployments to follow each device's signed result."
       ],
       "result": "Deployment created. Each device in the group reports success or failure under Deployments.",

@@ -1,4 +1,5 @@
 "use client";
+import { ReportingHelp } from "@/components/ReportingHelp";
 import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -195,7 +196,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
       </table></div></details>
     </fieldset>;
   return <div className="space-y-5 text-sm">
-    <div className="space-y-4">{settingCard("checkIntervalMs")}{settingCard("healthIntervalMs")}</div>
+    <ReportingHelp /><div className="space-y-4">{settingCard("checkIntervalMs")}{settingCard("healthIntervalMs")}</div>
     <details className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="reporting-advanced">
       <summary className="cursor-pointer font-semibold text-slate-800">More reporting options<span className="mt-1 block text-xs font-normal text-slate-500">Checks during updates, log archive schedule and shared retention</span></summary>
       <p className="mt-4 text-sm leading-relaxed text-slate-600">Archive settings apply when device data uploads are enabled. Changing these defaults does not turn uploads on.</p>

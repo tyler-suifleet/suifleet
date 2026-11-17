@@ -144,7 +144,7 @@
       "cues": [
         {
           "source_start": 0.0,
-          "text": "Your software library stores a release once so you can deploy the same version to different devices later. Publishing alone does not install it. Choose Components in the sidebar to publish software."
+          "text": "Your software library stores a release once so you can deploy the same version to different devices later. Publishing alone does not install it. Choose Software library in the sidebar to publish software."
         },
         {
           "source_start": 7.434,

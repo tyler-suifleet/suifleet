@@ -1,4 +1,5 @@
 "use client";
+import { ReportingHelp } from "@/components/ReportingHelp";
 import { ReportingReadiness } from "@/components/ReportingReadiness";
 import { liveArchiveEntries } from "@/lib/stream-retention";
 import { StreamRetentionPanel } from "@/components/StreamRetention";
@@ -163,7 +164,7 @@ export default function FleetDataPage() {
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
   return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device files and logs, verify their contents and choose who can access them." /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
-    <StreamRetentionPanel />
+    <ReportingHelp /><StreamRetentionPanel />
     {!DATA_CONFIG ? <ReportingReadiness /> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}

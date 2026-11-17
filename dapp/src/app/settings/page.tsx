@@ -21,6 +21,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const showLinkedSection = () => {
       if (window.location.hash === "#connection-history") setActive("advanced");
+      else if (window.location.hash === "#reporting") setActive("reporting");
     };
     showLinkedSection();
     window.addEventListener("hashchange", showLinkedSection);
