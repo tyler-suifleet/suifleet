@@ -595,7 +595,28 @@ def daemon_progress(journal, log):
     categories = ('Sync failed', 'Deployment schema rejected', 'Deployment finished', 'Apply admitted',
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
-                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
+                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded',
+                  # Fixed markers only: provider errors can contain private
+                  # configuration or response bodies. Keep enough structure to
+                  # diagnose a pre-discovery failure without exporting them.
+                  'incomplete watch batch', 'watch read failed',
+                  'missing discovery fence', 'missing discovery merge fence',
+                  'combined discovery requires a migrated cursor',
+                  'event frame without watermark', 'event outside requested type',
+                  'unknown event query completion reason',
+                  'event index has not reached the cursor-merge checkpoint fence',
+                  'event stream ended without completion',
+                  'event stream frame without a resume cursor',
+                  'event stream returned an unusable resume cursor',
+                  'undecodable DeviceAddedToGroup event',
+                  'undecodable DeploymentCreated event',
+                  'undecodable head components', 'undecodable head component',
+                  'announced records have no baseline',
+                  'InvalidArgument', 'FailedPrecondition', 'OutOfRange',
+                  'Unavailable', 'Unimplemented', 'ResourceExhausted',
+                  'Invalid argument', 'Failed precondition', 'Out of range',
+                  'Service was not ready', 'Operation is not implemented',
+                  'Resource exhausted')
     return dict(initialized=state.get('initialized') is True, outcomes=public,
                 log_counts={name: text.count(name) for name in categories})
 

@@ -53,6 +53,17 @@ class TrustTests(unittest.TestCase):
             self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             log.write_text('Deployment schema rejected PRIVATE-CANARY')
             self.assertEqual(daemon_progress(journal, log)['log_counts']['Deployment schema rejected'], 1)
+            # Reproduce the failed CI's pre-discovery sync failure shape.
+            # Export the fixed cause, never the provider message or log line.
+            for marker in ('watch read failed', 'Invalid argument',
+                           'event frame without watermark',
+                           'event index has not reached the cursor-merge checkpoint fence',
+                           'undecodable DeviceAddedToGroup event'):
+                log.write_text(f'Sync failed; retrying: {marker}: PRIVATE-CANARY\n' * 50)
+                diagnostic = daemon_progress(journal, log)
+                self.assertEqual(diagnostic['log_counts']['Sync failed'], 50)
+                self.assertEqual(diagnostic['log_counts'][marker], 50)
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
