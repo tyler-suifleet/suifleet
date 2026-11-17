@@ -35,7 +35,7 @@ const NAV = [
   { href: "/entitlements", label: "Device capacity", description: "Review how many devices your organization can manage and how to increase that limit." },
   { href: "/settings",    label: "Fleet settings", description: "Choose when devices check for updates, send health reports and upload data." },
   { href: "/billing", label: "Plans and billing", description: "Choose capacity, prepay subscriptions and download receipts." },
-  { href: "/budget",      label: "Network budget", description: "Keep devices funded for activity and storage, with spending limits you control." },
+  { href: "/budget",      label: "Device and storage budgets", description: "Keep devices funded for activity and storage, with spending limits you control." },
 ];
 const NAV_GROUPS = [
   { label: "Workspace", routes: ["/", "/get-started"] },

@@ -123,6 +123,7 @@ class ProtocolPreflight(unittest.TestCase):
             tc.preflight({'build': dict(tc.BUILD), 'network': old}, facts, '4c78adac')
         result = tc.preflight(self.TOOLS, facts, '4c78adac')
         self.assertEqual(result['protocol_version'], 142)
+        self.assertEqual(result['network_cli_max_protocol'], 142)
         self.assertEqual(result['build_cli_max_protocol'], 138)
         self.assertTrue(result['build_cli_offline'])
 

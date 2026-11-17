@@ -67,7 +67,7 @@ export function StreamRetentionPanel() {
           <label> Additional storage (Walrus epochs) <input type="number" min={1} max={53} step={1} value={extension} onChange={e => setExtension(Number(e.target.value))} /></label>
           <button className="border rounded p-2" disabled={!cap || !storage || isPending} onClick={() => void extend()}>Extend archive before expiry</button></div>
       </details>
-      <p>Your wallet, the app that approves account actions, must approve changes and extensions. New device writes pay for the full storage period using WAL, the asset used to buy storage, within the device’s spending and upload limits. The cost estimate uses the shared storage setting; custom periods also require enough WAL in the device’s existing allowance. Extensions must be approved before expiry and stay within the storage network’s maximum future period. Expired data cannot be restored by extending an archive. Recover eligible expired storage deposits in Network budget after reviewing the reclaim preview.</p>
+      <p>Your wallet, the app that approves account actions, must approve changes and extensions. New device writes pay for the full storage period using WAL, the asset used to buy storage, within the device’s spending and upload limits. The cost estimate uses the shared storage setting; custom periods also require enough WAL in the device’s existing allowance. Extensions must be approved before expiry and stay within the storage network’s maximum future period. Expired data cannot be restored by extending an archive. Recover eligible expired storage deposits in Device and storage budgets after reviewing the reclaim preview.</p>
     </>}{message && <p role="status">{message}</p>}
   </section>;
 }

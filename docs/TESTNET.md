@@ -611,6 +611,10 @@ The same preflight refusal also affected PR #716 in
 its independently integrated SF-279 repair uses the same verified pins. Neither
 failed preflight submitted a transaction.
 
+The same preflight refusal affected SF-275 / PR #714 in
+[run 43974014003](https://github.com/tyler-suifleet/suifleet/actions/runs/43974014003),
+also before funding or writes. Both repairs use the single transaction pin above.
+
 **SF-196 protocol-140 repair (2026-10-31).** The former 1.82.1 pin supports only
 139 and correctly refused current testnet before signing. The replacement is
 [testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0).

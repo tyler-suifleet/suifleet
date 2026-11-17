@@ -1,0 +1,406 @@
+{
+  "schema": 1,
+  "voice": "af_heart",
+  "lessons": [
+    {
+      "step": "sign-in",
+      "title": "Connect your account",
+      "goal": "One secure sign-in. A workspace for your devices.",
+      "intro": "Let\u2019s get you connected. Your fleet is the workspace where you\u2019ll organize devices and manage their updates.",
+      "outro": "You\u2019re signed in and your fleet is selected. Next, let\u2019s check how many devices you can manage.",
+      "result": "You\u2019re connected.",
+      "next": "Device capacity",
+      "source_sha256": "2479925e24535704d454310e7130b6a87e0df4d5f85d592be1f249b7bb304ad5",
+      "actions": [
+        {
+          "label": "Start in the console",
+          "text": "Open Get started. This gives you a clear view of what to do next.",
+          "wait": false
+        },
+        {
+          "label": "Choose how to sign in",
+          "text": "Choose your wallet, or another sign-in method offered by your console.",
+          "wait": false
+        },
+        {
+          "label": "Approve the connection",
+          "text": "This walkthrough uses a demo account. Approve the connection in your own wallet; your private key stays there.",
+          "wait": false
+        },
+        {
+          "label": "Check your account",
+          "text": "Check that the console shows the account you intended to connect.",
+          "wait": false
+        },
+        {
+          "label": "Create your first fleet",
+          "text": "On your first visit, create your default fleet and approve the request.",
+          "wait": false
+        },
+        {
+          "label": "Choose your workspace",
+          "text": "Select your fleet. You can now manage its devices from this workspace.",
+          "wait": false
+        }
+      ],
+      "recap": "Your fleet is selected. Check capacity before adding devices."
+    },
+    {
+      "step": "capacity-plan",
+      "title": "Choose your device capacity",
+      "goal": "Know how many devices your plan can include.",
+      "intro": "Before adding devices, check your capacity. Your subscription sets the device limit; operating funds are managed separately.",
+      "outro": "Capacity is active in this example. Next, add the operating funds your devices will use.",
+      "result": "Capacity is active.",
+      "next": "Fund device activity",
+      "source_sha256": "46e0f9c3046704c6bbc67e1fc34e0e2b631cb255374060a61b94c1492d74f333",
+      "actions": [
+        {
+          "label": "Check the device limit",
+          "text": "Open Device capacity and check how many devices your organization can manage.",
+          "wait": false
+        },
+        {
+          "label": "Review the plan",
+          "text": "This demonstration uses a test plan. Review the device allowance and price shown in your own console.",
+          "wait": false
+        },
+        {
+          "label": "Review before approving",
+          "text": "Check the amount and recipient before approving prepayment. This is separate from device operating funds.",
+          "wait": false
+        },
+        {
+          "label": "Activate the capacity",
+          "text": "Apply the payment when it is due. Check the wallet request before approving; a network fee may still apply.",
+          "wait": false
+        },
+        {
+          "label": "Confirm the allowance",
+          "text": "Check the updated device allowance. Adding operating funds later will not change this limit.",
+          "wait": false
+        }
+      ],
+      "recap": "Operating funds are separate from your device allowance."
+    },
+    {
+      "step": "fund",
+      "title": "Fund device activity",
+      "goal": "Keep operating funds separate from device capacity.",
+      "intro": "Your devices need operating funds to send reports and carry out network activity. Let\u2019s add those funds to your fleet.",
+      "outro": "The deposit is confirmed. Device health is checked separately. Next, register your first device.",
+      "result": "Budget funded.",
+      "next": "Register a device",
+      "source_sha256": "1796c9b751b6b021c1b14c0825b411c45c7dbb4b177e890a09f35473dac0ee8c",
+      "actions": [
+        {
+          "label": "Open Network budget",
+          "text": "Choose Network budget. This balance covers device activity, rather than your subscription allowance.",
+          "wait": false
+        },
+        {
+          "label": "Choose an amount",
+          "text": "Enter the amount to add. File and log storage have separate funding controls.",
+          "wait": false
+        },
+        {
+          "label": "Approve the deposit",
+          "text": "Review the deposit in your wallet, then approve it.",
+          "wait": false
+        },
+        {
+          "label": "Check the balance",
+          "text": "Look for the confirmed deposit under Keep devices reporting. Funding alone does not mean a device is online.",
+          "wait": false
+        }
+      ],
+      "recap": "A funded budget is separate from device readiness and health."
+    },
+    {
+      "step": "register-device",
+      "title": "Register your first device",
+      "goal": "Connect a device\u2019s identity to a name you recognize.",
+      "intro": "Registration connects a device to your fleet, so updates and reports belong to the right machine. Let\u2019s start with one device.",
+      "outro": "Your device is registered. Start its configured client and check for a report before treating it as online.",
+      "result": "Device registered.",
+      "next": "Batch enrollment",
+      "source_sha256": "4954e5bd72028e77fd3cd9fed0e17638174eaf9a5af2778c1775f9c0397e40a6",
+      "actions": [
+        {
+          "label": "Open Devices",
+          "text": "Choose Devices. For a small pilot, register the identity created by the installed device client.",
+          "wait": false
+        },
+        {
+          "label": "Use the public identity",
+          "text": "Choose Register by address. Copy the public identity from device setup; keep its private key on the device.",
+          "wait": false
+        },
+        {
+          "label": "Approve registration",
+          "text": "Register the device and approve the request in your wallet.",
+          "wait": false
+        },
+        {
+          "label": "Check the device entry",
+          "text": "The new device appears in your fleet. Registration and online status are different: the client still needs to report.",
+          "wait": false
+        }
+      ],
+      "recap": "Start the configured client and wait for its report."
+    },
+    {
+      "step": "enroll-batch",
+      "title": "Prepare a batch of devices",
+      "goal": "Set up many devices without registering them one by one.",
+      "intro": "For larger fleets, prepare devices in a batch. Each device receives its own single-use setup credential before first boot.",
+      "outro": "The batch is prepared. Each device still needs its own credential and the configured client to enroll at first boot.",
+      "result": "Batch prepared.",
+      "next": "Publish a release",
+      "source_sha256": "7a5e70eb5cbe58c3fda77cefe501cba0c379f0747eb1240096aa72ff4ef5508f",
+      "actions": [
+        {
+          "label": "Open Enrollment",
+          "text": "Choose Enrollment to prepare devices during manufacturing or provisioning.",
+          "wait": false
+        },
+        {
+          "label": "Set the batch limits",
+          "text": "Set a device limit and expiry before creating a policy. This example reuses an existing policy.",
+          "wait": false
+        },
+        {
+          "label": "Check the device list",
+          "text": "Paste a roster with names and serial numbers, then check it before continuing.",
+          "wait": false
+        },
+        {
+          "label": "Keep credentials secure",
+          "text": "Download the credentials and store them securely. This is the only download of these one-use setup keys.",
+          "wait": false
+        },
+        {
+          "label": "Register the reserved devices",
+          "text": "Register the reserved devices and approve the request. Give each device only its own credential.",
+          "wait": false
+        },
+        {
+          "label": "Wait for first boot",
+          "text": "The reservations are ready. Devices complete enrollment when their configured clients start with those credentials.",
+          "wait": false
+        }
+      ],
+      "recap": "Keep each device\u2019s credential secure until first boot."
+    },
+    {
+      "step": "publish-version",
+      "title": "Publish a software release",
+      "goal": "Prepare a version once, then deploy it where needed.",
+      "intro": "Your software library keeps releases ready for deployment. Let\u2019s publish a version; publishing alone won\u2019t install it on any device.",
+      "outro": "Your release is in the library. You\u2019re ready to choose the devices or groups that should receive it.",
+      "result": "Release published.",
+      "next": "Deploy to a group",
+      "source_sha256": "a317bbd6ef3ae25ba8a30f51404a8c51a06efecf9815128a3a0a0150914f23f2",
+      "actions": [
+        {
+          "label": "Open Components",
+          "text": "Choose Components to add a release to your software library.",
+          "wait": false
+        },
+        {
+          "label": "Name the release",
+          "text": "Name the component and give this release a version number.",
+          "wait": false
+        },
+        {
+          "label": "Add the software",
+          "text": "Choose the target platform and attach the matching software file.",
+          "wait": false
+        },
+        {
+          "label": "Choose who can read it",
+          "text": "Use Confidential for proprietary software. This demonstration uses a public file.",
+          "wait": false
+        },
+        {
+          "label": "Upload and approve",
+          "text": "Review the release, upload it, and approve the request in your wallet. Keep the page open until publication finishes.",
+          "wait": true
+        },
+        {
+          "label": "Check the library",
+          "text": "Look for the published version in your library. It is available to deploy, but is not installed yet.",
+          "wait": false
+        }
+      ],
+      "recap": "Publishing makes the version available; installation comes later."
+    },
+    {
+      "step": "deploy-group",
+      "title": "Deploy to a device group",
+      "goal": "Send one release to the devices that belong together.",
+      "intro": "Groups let you update related devices together. We\u2019ll choose a release, send it to a group, and check the device\u2019s result.",
+      "outro": "Applied confirms the device completed its installer. Check device health separately before expanding your deployment.",
+      "result": "Verify the device result.",
+      "next": "Roll out in stages",
+      "source_sha256": "b0f13e9f5aadf89397b3c0750a3440263af8ea7e162576b54360b9b1dab46919",
+      "actions": [
+        {
+          "label": "Create a device group",
+          "text": "In Devices, open Device groups. Create a group for the devices you want to manage together.",
+          "wait": false
+        },
+        {
+          "label": "Add the devices",
+          "text": "Use Manage to add devices. This example reuses a group that is already available.",
+          "wait": false
+        },
+        {
+          "label": "Choose a published version",
+          "text": "In the library, choose Deploy this version for the release you want to send.",
+          "wait": false
+        },
+        {
+          "label": "Choose the target group",
+          "text": "Select the group. Desired state keeps this version requested for its members.",
+          "wait": false
+        },
+        {
+          "label": "Approve the deployment",
+          "text": "Review and approve the deployment. Device clients will process it when they are ready.",
+          "wait": true
+        },
+        {
+          "label": "A request is not a result",
+          "text": "The deployment is created. That confirms your request, rather than a completed installation.",
+          "wait": false
+        },
+        {
+          "label": "Check device results",
+          "text": "Open Deployments after the client has processed the update. Check the result reported by the device.",
+          "wait": false
+        },
+        {
+          "label": "Read Applied correctly",
+          "text": "Applied means the device completed its configured installer. It does not establish that a long-running service is healthy.",
+          "wait": false
+        }
+      ],
+      "recap": "Installation results and current health are separate checks."
+    },
+    {
+      "step": "staged-rollout",
+      "title": "Roll out in stages",
+      "goal": "Start with a small batch and control what happens next.",
+      "intro": "A gradual rollout lets you check a small batch before expanding. We\u2019ll prepare a plan and leave it paused until reporting is ready.",
+      "outro": "This plan is saved and paused, with devices still waiting. Check current reporting before approving the next step.",
+      "result": "Plan saved and paused.",
+      "next": "Control private access",
+      "source_sha256": "ae5ccfbdd61a61b59a9f3483846bb2612c6f4212c87216214a7d21da4906abbe",
+      "actions": [
+        {
+          "label": "Open Rollouts",
+          "text": "Choose Rollouts to plan a release in stages.",
+          "wait": false
+        },
+        {
+          "label": "Choose the release",
+          "text": "Create a gradual rollout. Choose the release and the matching device platform.",
+          "wait": false
+        },
+        {
+          "label": "Build your first batch",
+          "text": "A cohort is simply a batch. Add devices or groups; a device belongs to only one batch.",
+          "wait": false
+        },
+        {
+          "label": "Set the pace",
+          "text": "Choose the pacing, observation period and failure threshold. Creating the plan does not start devices.",
+          "wait": false
+        },
+        {
+          "label": "Check before admitting devices",
+          "text": "Select the rollout. Check current device health before allowing the first devices to start.",
+          "wait": false
+        },
+        {
+          "label": "Recognize the waiting state",
+          "text": "Devices are still waiting in this example. Current reporting must be available before admission.",
+          "wait": false
+        },
+        {
+          "label": "Understand Pause",
+          "text": "Pause stops new admissions. It does not undo an update already allowed to start; this example admits no devices.",
+          "wait": false
+        },
+        {
+          "label": "Continue when ready",
+          "text": "The plan is paused. Return when reporting is ready and explicitly approve further progress.",
+          "wait": false
+        }
+      ],
+      "recap": "No devices were admitted in this paused example."
+    },
+    {
+      "step": "access-policy",
+      "title": "Control private release access",
+      "goal": "Choose which devices can open confidential software.",
+      "intro": "Private software needs an access policy. This controls who can open encrypted files, without giving them permission to administer your fleet.",
+      "outro": "The access rule is saved. Use it when publishing a confidential release, and review membership as your fleet changes.",
+      "result": "Access configured.",
+      "next": "Choose fleet settings",
+      "source_sha256": "90fa26999eaf993bfb4556a1c5b8d49185eb30a85aea7ce55236aeb147171e43",
+      "actions": [
+        {
+          "label": "Open Access policies",
+          "text": "Open Access policies before publishing confidential software. These rules control decryption, not fleet administration.",
+          "wait": false
+        },
+        {
+          "label": "Choose the allowed group",
+          "text": "Choose Group and select the intended group. Its membership determines which devices may request access keys.",
+          "wait": false
+        },
+        {
+          "label": "Understand revocation",
+          "text": "The grant is saved. Removing access stops future key requests; it cannot erase files that were already decrypted.",
+          "wait": false
+        }
+      ],
+      "recap": "Removing access cannot recall already decrypted files."
+    },
+    {
+      "step": "fleet-settings",
+      "title": "Choose your fleet\u2019s rhythm",
+      "goal": "Balance how fresh reports need to be with operating cost.",
+      "intro": "Choose how often devices check for updates and send reports. The right cadence depends on your needs and the cost of device activity.",
+      "outro": "Your settings are saved for the next device check. Keep the operating budget funded separately as you continue managing the fleet.",
+      "result": "Settings saved.",
+      "next": "Your next software update",
+      "source_sha256": "916be169b6afc568b18535a14d4483fd26b4201f3eb48e1c3c9b996f5637f9cb",
+      "actions": [
+        {
+          "label": "Choose the reporting cadence",
+          "text": "Open Fleet settings. Choose update and report intervals; daily reporting is not live monitoring.",
+          "wait": false
+        },
+        {
+          "label": "Review before saving",
+          "text": "Review the estimate, then save your settings. Saving does not deposit operating funds.",
+          "wait": false
+        },
+        {
+          "label": "Recognize the budget warning",
+          "text": "This example shows a budget warning. Saving records the settings only; add funds separately before they are needed.",
+          "wait": false
+        },
+        {
+          "label": "Allow devices to pick them up",
+          "text": "Devices apply the settings at their next check. Their operating funds remain in Network budget.",
+          "wait": false
+        }
+      ],
+      "recap": "Devices pick up saved settings at their next check."
+    }
+  ]
+}

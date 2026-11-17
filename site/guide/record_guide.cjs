@@ -240,9 +240,9 @@ const STEPS = {
   },
 
   async fund(page, h) {
-    await h.caption("Choose Network budget in the sidebar.");
-    await h.click(h.sidebar("Network budget"));
-    await page.getByRole("heading", { name: "Network budget", exact: true }).waitFor();
+    await h.caption("Choose Device and storage budgets in the sidebar.");
+    await h.click(h.sidebar("Device and storage budgets"));
+    await page.getByRole("heading", { name: "Device and storage budgets", exact: true }).waitFor();
     await h.pause(1500);
     const amount = page.getByLabel(/^(Initial deposit|Deposit) \(SUI\)/);
     await h.caption("Enter a deposit in SUI. Devices draw report and storage fees from this budget, within your limits.");
@@ -474,8 +474,8 @@ const STEPS = {
     }
     await transactions(page, before, 1);
     await page.getByRole("status").filter({ hasText: "Settings saved. Devices apply them at their next check." }).waitFor({ timeout: 90000 });
-    await h.caption("Devices apply settings at their next check. Network budget holds their funds separately.");
-    await h.click(h.sidebar("Network budget"));
+    await h.caption("Devices apply settings at their next check. The Device and storage budgets page holds their funds separately.");
+    await h.click(h.sidebar("Device and storage budgets"));
     await h.pause(3000);
   },
 

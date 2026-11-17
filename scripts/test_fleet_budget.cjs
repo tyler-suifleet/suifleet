@@ -295,6 +295,8 @@ async function reads() {
   // Storage alerts: no space, no WAL, expiring and expired pool.
   const sv = { id: "0x7", version: BigInt(1), poolSize: BigInt(0), startEpoch: 3, endEpoch: 5, walBalance: BigInt(0), defaultQuota: budget.DEFAULT_QUOTA,
     blobCount: BigInt(0), totalEncodedBytes: BigInt(0), totalWriteFees: BigInt(0) };
+  assert.match(budget.storageAlerts(sv, 4)[0].text, /^Storage budget holds no prepaid space/);
+  assert.match(budget.storageAlerts(sv, 4)[1].text, /^Storage budget holds no WAL/);
   assert.deepEqual(budget.storageAlerts(sv, 4).map((a) => a.severity), ["warning", "warning", "critical"]);
   assert.deepEqual(budget.storageAlerts({ ...sv, poolSize: BigInt(1), walBalance: BigInt(1) }, 2), []);
   assert.match(budget.storageAlerts({ ...sv, poolSize: BigInt(1), walBalance: BigInt(1) }, 5)[0].text, /expired.*refill the pool/);
