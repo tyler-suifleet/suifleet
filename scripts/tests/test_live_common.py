@@ -1024,6 +1024,36 @@ class ShardedReceiptViewTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
 
 
+class LegacyInboxTests(unittest.TestCase):
+    def fixture(self):
+        run = Mock()
+        manifest = {"type_origins": {"fleet_inbox::InboxKey": "0x1"}}
+        inbox = live_upgrade_security.dm.inbox_id("0x2", "0x1", "0x3")
+        run.created.return_value = [inbox]
+        objects = {
+            "0x4": {"content": {"device_ids": []}},
+            inbox: {"content": {"device_id": "0x3", "groups": [live_common.dm.object_id("0x4")]}}
+        }
+        run.object.side_effect = objects.__getitem__
+        return run, manifest, inbox, objects
+
+    def test_migrated_legacy_group_is_discoverable_at_derived_inbox(self):
+        run, manifest, _, _ = self.fixture()
+        live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
+        run.created.assert_called_once_with("effects", "::fleet_inbox::DeviceInbox")
+
+    def test_missing_migration_wrong_derivation_or_foreign_inbox_fails(self):
+        for defect in ("unindexed", "unfollowed", "foreign", "wrong_address"):
+            with self.subTest(defect=defect):
+                run, manifest, inbox, objects = self.fixture()
+                if defect == "unindexed": objects["0x4"]["content"]["device_ids"] = ["0x3"]
+                if defect == "unfollowed": objects[inbox]["content"]["groups"] = []
+                if defect == "foreign": objects[inbox]["content"]["device_id"] = "0x5"
+                if defect == "wrong_address": run.created.return_value = ["0x6"]
+                with self.assertRaises(AssertionError):
+                    live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
+
+
 class CatalogDesiredStateTests(unittest.TestCase):
     def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
         run = Mock()
