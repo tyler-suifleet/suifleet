@@ -945,6 +945,34 @@ class TeardownTests(unittest.TestCase):
         self.assertEqual((failure, chain.calls, kept, run.ledger.used), (None, [], False, 0))
 
 
+class SecurityDaemonDiagnosticsTests(unittest.TestCase):
+    def test_exit_evidence_contains_only_allowlisted_progress(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state-legacy"
+            state.mkdir()
+            (state / "state.json").write_text(json.dumps({
+                "initialized": True, "secret": "PRIVATE-CANARY",
+                "deployments": {"0x1": {"status": 1, "reported": False,
+                                         "error": "PRIVATE-CANARY"}}}))
+            (root / "daemon-legacy.log").write_text("transport error PRIVATE-CANARY")
+            live = Mock(evidence={"daemon_phase": "v3 receipt retry"})
+            live_upgrade_security.capture_daemon_progress(live, root, Mock(returncode=1))
+            self.assertEqual(live.evidence["daemon_exit_code"], 1)
+            self.assertEqual(live.evidence["daemon_progress"]["log_counts"]["transport error"], 1)
+            self.assertFalse(next(iter(live.evidence["daemon_progress"]["outcomes"].values()))["reported"])
+            self.assertNotIn("PRIVATE-CANARY", json.dumps(live.evidence))
+
+    def test_missing_runtime_and_diagnostic_failure_do_not_block_cleanup(self):
+        live = Mock(evidence={})
+        live_upgrade_security.capture_daemon_progress(live, Path("/nonexistent/runtime"), None)
+        self.assertFalse(live.evidence["daemon_progress"]["initialized"])
+        with patch.object(live_upgrade_security, "daemon_progress", side_effect=ValueError("PRIVATE-CANARY")):
+            live_upgrade_security.capture_daemon_progress(live, Path("/nonexistent/runtime"), None)
+        self.assertTrue(live.evidence["daemon_progress_unavailable"])
+        self.assertNotIn("PRIVATE-CANARY", json.dumps(live.evidence))
+
+
 class DaemonStartupTests(unittest.TestCase):
     """A daemon whose startup fails is killed and reaped before the error
     reaches the caller, which never receives its handle."""
