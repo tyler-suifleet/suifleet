@@ -55,7 +55,7 @@ from types import SimpleNamespace
 import deployment_manifest as dm
 from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, key_wallet,
                          plain, pending_key, recover_key, stage, start_daemon, stop_daemon, sweep, wait_for)
-from live_package_upgrade import contracts_digest, fixture_key, load_state, save_state
+from live_package_upgrade import activation_plan, contracts_digest, daemon_progress, fixture_key, load_state, save_state
 import subprocess
 
 DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no identities.
@@ -76,8 +76,35 @@ def desired_state(live, group):
     return states[0]
 
 
+def verify_legacy_inbox(live, manifest, activated, registry, device, group):
+    """Fail acceptance if migrated membership cannot be discovered by inbox."""
+    inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device)
+    assert live.created(activated, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
+    assert plain(live.object(group)["content"])["device_ids"] == [], "legacy membership was not indexed"
+    fields = plain(live.object(inbox)["content"])
+    assert dm.object_id(fields["device_id"]) == dm.object_id(device), "inbox belongs to another device"
+    assert fields["groups"] == [dm.object_id(group)], "legacy group is not followed by the inbox"
+
+
 DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
 CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
+
+
+def capture_daemon_progress(live, root, daemon):
+    """Retain fixed diagnostic labels before the private runtime is deleted.
+
+    Never publish raw logs, keys, configuration or arbitrary provider errors.
+    Capture after stopping the child, before cleanup changes chain state.
+    """
+    try:
+        live.evidence["daemon_progress"] = daemon_progress(
+            root / "state-legacy" / "state.json", root / "daemon-legacy.log")
+    except Exception:
+        # Diagnostics must never prevent cleanup or replace the original
+        # failure. Exception text can contain private runtime data.
+        live.evidence["daemon_progress_unavailable"] = True
+    if daemon is not None:
+        live.evidence["daemon_exit_code"] = daemon.returncode
 
 
 def fixture_valid(live, fixture):
@@ -223,11 +250,20 @@ def run(args):
             live.check("old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written")
 
             # 4. Activation, the real daemon (paying from the device's charged funding), revocation.
-            activated = transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
-                                         f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}")
+            # Preserve the base-created membership, then migrate its discovery
+            # hints through the verified head APIs. Current daemons discover
+            # groups from the inbox after their combined event cursor exists;
+            # legacy add_device alone does not populate that inbox.
+            label, _, activation, inboxes = activation_plan(
+                new, registry, device, group, live.operator, manifest["type_origins"])
+            activated = transaction(label, *activation)
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
             made["owner_cap"] = owner_cap
+            if inboxes:
+                verify_legacy_inbox(live, manifest, activated, registry, device, group)
+                live.check("legacy group indexed and followed by the device's derived inbox")
             live.readable(owner_cap)
+            live.evidence["daemon_phase"] = "activated OTA"
             daemon, components = start_daemon(root, "legacy", manifest, f'[device]\nkeypair_path = "{key}"\n'
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
             d2 = live.created(transaction("deployment via head (after activation)",
@@ -272,6 +308,7 @@ def run(args):
             journal = json.loads(journal_path.read_text())
             journal["deployments"][d2]["reported"] = False
             journal_path.write_text(json.dumps(journal))
+            live.evidence["daemon_phase"] = "v3 receipt retry"
             with (root / "daemon-legacy.log").open("a") as log:
                 daemon = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release-legacy" / "config.toml")}, stdout=log, stderr=log)
             wait_for(v3_reported, "daemon did not retry through the immutable-deployment v3 report API", daemon)
@@ -304,6 +341,7 @@ def run(args):
                 desired = desired_state(live, group)
                 assert int(desired["revision"]) == len(made["catalog_records"])
                 assert desired["components"]["contents"] == [{"key": json.loads(name), "value": record}], desired
+            live.evidence["daemon_phase"] = "catalog desired convergence"
             with (root / "daemon-legacy.log").open("a") as log:
                 daemon = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release-legacy" / "config.toml")}, stdout=log, stderr=log)
             wait_for(lambda: live.receipts(record) == {dm.object_id(device): 1},
@@ -331,6 +369,7 @@ def run(args):
         finally:
             if daemon:
                 stop_daemon(daemon)
+            capture_daemon_progress(live, root, daemon)
             # 5. Cleanup, after a failure too: storage rebates on the run's
             # objects, then the device's unspent funding back to the operator.
             failure = teardown(live, made)

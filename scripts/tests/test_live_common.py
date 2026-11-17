@@ -945,6 +945,34 @@ class TeardownTests(unittest.TestCase):
         self.assertEqual((failure, chain.calls, kept, run.ledger.used), (None, [], False, 0))
 
 
+class SecurityDaemonDiagnosticsTests(unittest.TestCase):
+    def test_exit_evidence_contains_only_allowlisted_progress(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state-legacy"
+            state.mkdir()
+            (state / "state.json").write_text(json.dumps({
+                "initialized": True, "secret": "PRIVATE-CANARY",
+                "deployments": {"0x1": {"status": 1, "reported": False,
+                                         "error": "PRIVATE-CANARY"}}}))
+            (root / "daemon-legacy.log").write_text("transport error PRIVATE-CANARY")
+            live = Mock(evidence={"daemon_phase": "v3 receipt retry"})
+            live_upgrade_security.capture_daemon_progress(live, root, Mock(returncode=1))
+            self.assertEqual(live.evidence["daemon_exit_code"], 1)
+            self.assertEqual(live.evidence["daemon_progress"]["log_counts"]["transport error"], 1)
+            self.assertFalse(next(iter(live.evidence["daemon_progress"]["outcomes"].values()))["reported"])
+            self.assertNotIn("PRIVATE-CANARY", json.dumps(live.evidence))
+
+    def test_missing_runtime_and_diagnostic_failure_do_not_block_cleanup(self):
+        live = Mock(evidence={})
+        live_upgrade_security.capture_daemon_progress(live, Path("/nonexistent/runtime"), None)
+        self.assertFalse(live.evidence["daemon_progress"]["initialized"])
+        with patch.object(live_upgrade_security, "daemon_progress", side_effect=ValueError("PRIVATE-CANARY")):
+            live_upgrade_security.capture_daemon_progress(live, Path("/nonexistent/runtime"), None)
+        self.assertTrue(live.evidence["daemon_progress_unavailable"])
+        self.assertNotIn("PRIVATE-CANARY", json.dumps(live.evidence))
+
+
 class DaemonStartupTests(unittest.TestCase):
     """A daemon whose startup fails is killed and reaped before the error
     reaches the caller, which never receives its handle."""
@@ -1022,6 +1050,36 @@ class ShardedReceiptViewTests(unittest.TestCase):
         objects[roots[0]]['content']['deployment'] = '0xd'
         objects[roots[0]]['content']['count'] = 2
         with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
+
+
+class LegacyInboxTests(unittest.TestCase):
+    def fixture(self):
+        run = Mock()
+        manifest = {"type_origins": {"fleet_inbox::InboxKey": "0x1"}}
+        inbox = live_upgrade_security.dm.inbox_id("0x2", "0x1", "0x3")
+        run.created.return_value = [inbox]
+        objects = {
+            "0x4": {"content": {"device_ids": []}},
+            inbox: {"content": {"device_id": "0x3", "groups": [live_common.dm.object_id("0x4")]}}
+        }
+        run.object.side_effect = objects.__getitem__
+        return run, manifest, inbox, objects
+
+    def test_migrated_legacy_group_is_discoverable_at_derived_inbox(self):
+        run, manifest, _, _ = self.fixture()
+        live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
+        run.created.assert_called_once_with("effects", "::fleet_inbox::DeviceInbox")
+
+    def test_missing_migration_wrong_derivation_or_foreign_inbox_fails(self):
+        for defect in ("unindexed", "unfollowed", "foreign", "wrong_address"):
+            with self.subTest(defect=defect):
+                run, manifest, inbox, objects = self.fixture()
+                if defect == "unindexed": objects["0x4"]["content"]["device_ids"] = ["0x3"]
+                if defect == "unfollowed": objects[inbox]["content"]["groups"] = []
+                if defect == "foreign": objects[inbox]["content"]["device_id"] = "0x5"
+                if defect == "wrong_address": run.created.return_value = ["0x6"]
+                with self.assertRaises(AssertionError):
+                    live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
 
 
 class CatalogDesiredStateTests(unittest.TestCase):
