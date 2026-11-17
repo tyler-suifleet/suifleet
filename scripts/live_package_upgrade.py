@@ -456,8 +456,9 @@ def owner_of(client, object_id):
     return owner.get("AddressOwner") or ("custodied" if "ObjectOwner" in owner else ("shared" if "Shared" in owner else None))
 
 
-def fixture_alive(fixture, operator, client):
+def fixture_alive(fixture, operator, client, diagnostics=None):
     """Free reads: every cached object still exists with the expected owner."""
+    diagnostics = diagnostics if diagnostics is not None else []
     expected = {fixture["upgrade_cap"]: operator, fixture["device"]: "custodied",
                 fixture["owner_cap"]: operator,
                 fixture["device_cap"]: fixture["device_address"], fixture["group"]: "shared",
@@ -465,10 +466,12 @@ def fixture_alive(fixture, operator, client):
     for object_id, owner in expected.items():
         actual = owner_of(client, object_id)
         if actual is None or (owner in ("shared", "custodied") and actual != owner) or (owner not in ("shared", "custodied") and dm.object_id(actual) != dm.object_id(owner)):
+            diagnostics.append(dict(object_id=object_id, expected_owner=owner, actual_owner=actual))
             return False
     try:
         client("object", fixture["head_package"])  # Packages are immutable: existence is enough.
     except RuntimeError:
+        diagnostics.append(dict(object_id=fixture["head_package"], error="package read failed"))
         return False
     return True
 
@@ -801,7 +804,11 @@ def run(args):
                 state, base_tree, head_tree, tools, evidence["toolchain"]["framework"])
             if fixture and args.fresh:
                 raise RuntimeError("verified bytecode already exists; fresh package republication is refused")
-            if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client)):
+            fixture_diagnostics = []
+            if fixture and not fixture.get("owner_cap"):
+                fixture_diagnostics.append(dict(error="cached fixture has no owner_cap"))
+            if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client, fixture_diagnostics)):
+                evidence["fixture_reconciliation"] = fixture_diagnostics
                 raise RuntimeError("cached fixture needs object reconciliation; immutable code is not republished")
             if fixture:
                 verify_publication(fixture, rpc_url, operator, client)
