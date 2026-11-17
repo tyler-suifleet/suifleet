@@ -36,9 +36,6 @@ class SiteTest(unittest.TestCase):
 
     def test_lesson_production_rejects_unreviewed_spoken_text(self):
         manifest=build.load_json(SITE/'media/guide/videos.json')
-        source_names=['site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile']
-        asset_names=['site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png']
-        manifest['tutorial_production']={field:{name:build.sha256(build.ROOT/name) for name in names} for field,names in [('source_sha256',source_names),('assets_sha256',asset_names)]}
         manifest['videos'][0]['narration']['cues'][0]['text']='Unreviewed narration.'
         original=build.load_json
         with mock.patch.object(build,'load_json',side_effect=lambda path:manifest if path==build.MEDIA/'guide/videos.json' else original(path)):

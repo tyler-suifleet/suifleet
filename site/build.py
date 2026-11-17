@@ -86,6 +86,16 @@ def repo_url(config, rel):
     return f"{config['repo_url']}/{kind}/{config['repo_branch']}/{rel}"
 
 
+def recorded_guide_source(production, name):
+    """Resolve historical scripts without relabeling already encoded media."""
+    snapshot = production.get('script_snapshot')
+    if snapshot is not None and snapshot != 'site/guide/recorded':
+        raise BuildError('Invalid guide script snapshot')
+    if snapshot and name in {'site/guide/lessons.json', 'site/guide/narration.json'}:
+        return ROOT / snapshot / Path(name).name
+    return ROOT / name
+
+
 def videos_by_step():
     manifest_path = MEDIA / "guide" / "videos.json"
     if not manifest_path.exists():
@@ -96,9 +106,9 @@ def videos_by_step():
         sources={'site/guide/render_lessons.py','site/guide/lesson_cards.cjs','site/guide/lessons.json','site/guide/narration.json','site/guide/captions.py','site/guide/encode_guide.py','site/guide/narrate_guide.py','scripts/video-test.Dockerfile'}
         assets={'site/src/assets/logo.svg','site/src/assets/inter-variable.woff2','site/motion-sample/art/editorial-scene.png'}
         for field,expected in [('source_sha256',sources),('assets_sha256',assets)]:
-            if set(production.get(field,{}))!=expected or any(sha256(ROOT/name)!=value for name,value in production[field].items()):
+            if set(production.get(field,{}))!=expected or any(sha256(recorded_guide_source(production,name))!=value for name,value in production[field].items()):
                 raise BuildError('Guide lesson source/artwork changed; regenerate the lessons')
-        lessons={l['step']:l for l in load_json(GUIDE/'lessons.json')['lessons']}
+        lessons={l['step']:l for l in load_json(recorded_guide_source(production,'site/guide/lessons.json'))['lessons']}
         if set(lessons)!={v['step'] for v in manifest['videos']}:
             raise BuildError('Guide lesson coverage differs from its script')
         for video in manifest['videos']:

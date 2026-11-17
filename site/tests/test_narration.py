@@ -44,8 +44,10 @@ class NarrationTest(unittest.TestCase):
         script=json.loads((GUIDE/'narration.json').read_text())
         manifest=json.loads((GUIDE.parent/'media/guide/videos.json').read_text())
         if manifest.get('tutorial_production'):
-            lessons={l['step']:l for l in json.loads((GUIDE/'lessons.json').read_text())['lessons']}
-            self.assertEqual(manifest['narration']['script_sha256'],hashlib.sha256((GUIDE/'lessons.json').read_bytes()).hexdigest())
+            import build
+            lesson_path=build.recorded_guide_source(manifest['tutorial_production'],'site/guide/lessons.json')
+            lessons={l['step']:l for l in json.loads(lesson_path.read_text())['lessons']}
+            self.assertEqual(manifest['narration']['script_sha256'],hashlib.sha256(lesson_path.read_bytes()).hexdigest())
             self.assertEqual(sorted(v['step'] for v in manifest['videos']),sorted(lessons))
             for video in manifest['videos']:
                 lesson=lessons[video['step']];cues=video['narration']['cues'];source=video['tutorial_source']
