@@ -200,5 +200,54 @@ class PendingReviewPublication(unittest.TestCase):
         self.assertEqual(c.publication_failure(ValueError('private-detail')), 'ValueError')
 
 
+    def test_done_mirror_is_published_before_collection_without_new_completion(self):
+        with tempfile.TemporaryDirectory() as d:
+            pr, owner = self.pending(status='done', token=None)
+            engine, state, calls, launched = self.scan(d, [pr], [owner])
+            def collected(project, owners):
+                self.assertFalse(owners[0]['publish_pending'])
+                self.assertEqual(owners[0]['status'], 'done')
+            engine.collect = collected
+            engine.tick(True)
+            self.assertEqual(calls, [('show', 'T1'), ('publish', 'T1'), ('show', 'T1')])
+            self.assertEqual(launched, [])
+            self.assertEqual(state['T1']['status'], 'done')
+
+    def test_done_failure_keeps_completion_and_bounded_backoff(self):
+        with tempfile.TemporaryDirectory() as d:
+            pr, owner = self.pending(status='done', token=None)
+            def broken(value): raise failure('HTTP 401')
+            engine, state, calls, launched = self.scan(d, [pr], [owner], publish=broken)
+            with patch.object(c.time, 'time', return_value=1000.0): engine.tick(True)
+            self.assertEqual(state['T1']['status'], 'done')
+            self.assertTrue(state['T1']['publish_pending'])
+            self.assertEqual(launched, [])
+            row = engine.store.db.execute('SELECT * FROM ownership_publication').fetchone()
+            self.assertEqual((row['attempts'], row['retry_after']), (1, 1060.0))
+            calls.clear()
+            with patch.object(c.time, 'time', return_value=1059.0): engine.tick(True)
+            self.assertNotIn(('publish', 'T1'), calls)
+
+    def test_changed_done_revision_or_spec_is_not_published(self):
+        for change in ({'revision': 12}, {'status': 'review'}, {'token': 'other'}, {'spec': {'changed': True}}):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as d:
+                pr, owner = self.pending(status='done', token=None)
+                engine, state, calls, launched = self.scan(d, [pr], [owner])
+                listed = copy.deepcopy(owner)
+                engine.owners = lambda project: [copy.deepcopy(listed)]
+                state['T1'].update(change)
+                engine.tick(True)
+                self.assertNotIn(('publish', 'T1'), calls)
+                self.assertEqual(launched, [])
+
+    def test_done_publication_is_not_performed_in_dry_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            pr, owner = self.pending(status='done', token=None)
+            engine, state, calls, launched = self.scan(d, [pr], [owner])
+            engine.tick(False)
+            self.assertEqual(calls, [])
+            self.assertTrue(state['T1']['publish_pending'])
+
+
 if __name__ == '__main__':
     unittest.main()

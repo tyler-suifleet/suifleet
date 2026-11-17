@@ -606,6 +606,22 @@ framework, fixture keys, verify-before-sign, effects and spend checks remain
 unchanged. Automatic exact-head/current-base testnet execution is still required;
 a successful read or pin update does not establish transaction compatibility.
 
+**PR #716 protocol-142 repair (2026-11-16).**
+[Run 43958804251](https://github.com/tyler-suifleet/suifleet/actions/runs/43958804251)
+stopped at read-only preflight: protocol 142 exceeded the 1.83.0 CLI's maximum
+140. No transaction was submitted by that failing preflight. The transaction
+pin now uses [testnet-v1.84.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.84.0);
+its [protocol source](https://github.com/MystenLabs/sui/blob/testnet-v1.84.0/crates/sui-protocol-config/src/lib.rs)
+declares maximum 142. The downloaded Linux x86_64 archive matches GitHub's
+published SHA-256 `0f006fb4408bb2f867698a193d5f22f166acb9b89e0eb027c1e1b445b3b62127`;
+the extracted executable reports `sui 1.84.0-9dc25070cf2e` and SHA-256
+`ac657ec16feafe3e1a6db93b09ae922f6e5e601cf41ea35ff9b7905781d35ab0`.
+The release compiler, locked framework, byte verification, wallet authority and
+spending controls remain unchanged. Regression coverage reproduces the old
+pin's refusal at 142, accepts the new pin at 142 and rejects 143. These checks
+establish tool identity and preflight compatibility; successful exact-head
+hosted testnet execution remains required and is not claimed by this repair.
+
 **SF-196 protocol-140 repair (2026-10-31).** The former 1.82.1 pin supports only
 139 and correctly refused current testnet before signing. The replacement is
 [testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0).
