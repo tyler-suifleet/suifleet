@@ -315,27 +315,36 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         .contains("pruned"));
     assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
 
-    // Regression for run 43993156905: the package is present but its
-    // publication transaction has aged out. Expose HistoryPruned so the
-    // existing inbox-only recovery path can run; do not advance any cursor.
-    sui.poll.lock().unwrap().membership_birth = None;
+    // A long-lived immutable package can remain after its publication tx is
+    // pruned. Reproduce the public-testnet fixture failure with a fresh client
+    // (no cached birth). Only this missing history enters explicit head recovery.
     *node.publication_error.lock().unwrap() = Some(tonic::Code::NotFound);
-    let error = sui.memberships(&None).await.err().unwrap();
-    assert!(error.downcast_ref::<HistoryPruned>().is_some());
-    assert_eq!(node.starts.lock().unwrap().len(), 2);
-    assert!(sui.transaction_checkpoint(&sui_sdk_types::Digest::new([7; 32]).to_string())
-        .await.err().unwrap().downcast_ref::<HistoryPruned>().is_none());
-    // A retained existing cursor requires no publication lookup at all.
-    sui.memberships(&Some(json!({"checkpoint": 12}))).await.unwrap();
+    let fresh = client(&sui.manifest().rpc_url);
+    let error = fresh.memberships(&None).await.err().unwrap();
+    let pruned = error.downcast_ref::<HistoryPruned>().unwrap();
+    assert_eq!((pruned.position, pruned.lowest), (0, 11));
+    assert!(fresh.poll.lock().unwrap().membership_birth.is_none());
+    // Existing cursors still require their actual position; they do not consult
+    // the missing publication or jump to the retention floor.
+    fresh.memberships(&Some(json!({"checkpoint": 12}))).await.unwrap();
     assert_eq!(*node.starts.lock().unwrap(), [10, 10, 12]);
-    // Other RPC failures are not evidence of pruning.
-    *node.publication_error.lock().unwrap() = Some(tonic::Code::PermissionDenied);
-    assert!(sui.memberships(&None).await.err().unwrap()
-        .downcast_ref::<HistoryPruned>().is_none());
-    // An archival node's missing transaction is not a pruned-history claim.
+    for code in [tonic::Code::PermissionDenied, tonic::Code::Unavailable,
+                 tonic::Code::InvalidArgument] {
+        *node.publication_error.lock().unwrap() = Some(code);
+        let error = client(&sui.manifest().rpc_url).memberships(&None).await.err().unwrap();
+        assert!(error.downcast_ref::<HistoryPruned>().is_none());
+        assert_eq!(error.downcast_ref::<tonic::Status>().unwrap().code(), code);
+    }
+    assert_eq!(*node.starts.lock().unwrap(), [10, 10, 12]);
+    // General transaction reads must not claim membership-history recovery.
+    *node.publication_error.lock().unwrap() = Some(tonic::Code::NotFound);
+    let error = fresh.transaction_checkpoint(&sui_sdk_types::Digest::new([7; 32]).to_string())
+        .await.err().unwrap();
+    assert!(error.downcast_ref::<HistoryPruned>().is_none());
+    assert_eq!(error.downcast_ref::<tonic::Status>().unwrap().code(), tonic::Code::NotFound);
+    // Archival nodes still start at genesis without publication lookup.
     node.floor.store(0, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(sui.membership_start().await.unwrap(), 0);
-
+    assert_eq!(client(&sui.manifest().rpc_url).membership_start().await.unwrap(), 0);
 }
 
 #[tokio::test]

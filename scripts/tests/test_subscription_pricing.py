@@ -452,6 +452,28 @@ class PublicPricingTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'stale'):
                         self.site.generate(check=True)
 
+    def test_examples_include_minimum_and_separate_activation(self):
+        page = self.site.generated()
+        self.assertIn('50 × $0.08 = $4.00</td><td>$49.00</td><td>$5.00', page)
+        self.assertIn('1,000 × $0.08 = $80.00</td><td>$80.00</td><td>$100.00', page)
+        self.assertIn('do not add the same network estimate to that bill again', page)
+        self.assertIn('Those rates alone are not an all-in total', page)
+        self.assertIn('href="/contact/"', page)
+
+    def test_examples_follow_changed_tier_boundaries(self):
+        prices = copy.deepcopy(self.prices)
+        prices['base']['tiers'][0]['upToDevices'] = 500
+        page = self.site.render(prices, self.policy, 'digest')
+        self.assertIn('500 × $0.08 + 500 × $0.05 = $65.00</td><td>$65.00</td><td>$100.00', page)
+        self.assertIn('50 × $0.08 = $4.00</td><td>$49.00', page)
+        self.assertIn('Above 1,000,000</td><td>Custom', page)
+
+    def test_examples_require_quote_beyond_published_tiers(self):
+        prices = copy.deepcopy(self.prices)
+        prices['base']['tiers'] = [dict(upToDevices=500, usdPerDeviceMonth=0.08)]
+        with self.assertRaisesRegex(ValueError, 'custom quote'):
+            self.site.render(prices, self.policy, 'digest')
+
     def test_model_changes_invalidate_page(self):
         from unittest.mock import patch
         original = self.site.generated()
