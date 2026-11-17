@@ -489,6 +489,7 @@ async fn main() -> anyhow::Result<()> {
         let mut fleet_settings = fleet_settings::Applied::new("checks");
         loop {
             cadence.begin_poll(telemetry::now_ms());
+            let poll_stage = sync_diagnostics::PollStage::default();
             let cycle = poll(
                 &cfg,
                 &sui,
@@ -498,6 +499,7 @@ async fn main() -> anyhow::Result<()> {
                 &configs,
                 &mut supervisor,
                 &mut journal,
+                &poll_stage,
             );
             tokio::select! {
                 result = cycle => match result {
@@ -519,7 +521,7 @@ async fn main() -> anyhow::Result<()> {
                         cadence.record(result.is_ok());
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result {
-                            let (stage, categories) = sync_diagnostics::classify(&error);
+                            let (stage, categories) = sync_diagnostics::classify(&error, poll_stage.get());
                             // Only fixed vocabulary crosses the public diagnostic boundary.
                             warn!("SUIFLEET_SYNC_V1 stage={} categories={}", stage, categories.join(","));
                             warn!(%error, "Sync failed; retrying without advancing cursor");
@@ -828,12 +830,13 @@ async fn poll(
     configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
+    poll_stage: &sync_diagnostics::PollStage,
 ) -> anyhow::Result<()> {
     walrus.begin_poll();
     if cfg.budget.is_some() {
         journal.state.funding = Some(sui.funding.lock().await.clone());
     }
-    supervisor.recover_broken(runner, |name| journal.state.components.get(name).is_some_and(|c| c.confirmed)).await.poll_stage(sync_diagnostics::Stage::Recovery)?;
+    supervisor.recover_broken(runner, |name| journal.state.components.get(name).is_some_and(|c| c.confirmed)).await.poll_stage(poll_stage, sync_diagnostics::Stage::Recovery)?;
     // A recovery receipt and the retained identity reconcile even when the
     // daemon stopped between supervisor commit and journal save.
     for (name, deployment) in supervisor.recovered() {
@@ -851,7 +854,7 @@ async fn poll(
         let next = std::mem::replace(&mut journal.state.services, old_services);
         services::commit(cfg, journal, next, None).await.map_err(|error| services::RecoveryRequired(format!("service reconciliation failed: {error:#}")))?;
     }
-    journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
+    journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
     // Local completion is independent of chain versions and event discovery.
     if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
         collect_firmware_results(cfg, journal)?;
@@ -862,7 +865,7 @@ async fn poll(
     let prior_receipts = journal.state.deployments.iter()
         .filter(|(_, o)| (!o.reported || o.rollout_health_pending) && o.status.is_some())
         .map(|(id, _)| id.clone()).collect::<std::collections::BTreeSet<_>>();
-    flush_funded_reports(cfg, sui, journal, false, &Default::default()).await.poll_stage(sync_diagnostics::Stage::Reports)?;
+    flush_funded_reports(cfg, sui, journal, false, &Default::default()).await.poll_stage(poll_stage, sync_diagnostics::Stage::Reports)?;
     let mut watch_roots = vec![
         sui.manifest().upgrade_cap_id.clone(),
         sui.manifest().shared_objects.registry.id.clone(),
@@ -904,7 +907,7 @@ async fn poll(
                     (!journal.state.deployments.contains_key(id)).then_some(d)),
                 telemetry::now_ms(), journal.state.check_window),
         )
-        .await.poll_stage(sync_diagnostics::Stage::Watch)?;
+        .await.poll_stage(poll_stage, sync_diagnostics::Stage::Watch)?;
     let pending_work = !journal.state.initialized
         || journal.state.deferred.iter().any(|(id, d)| {
             if d.terminal || journal.state.deployments.contains_key(id) {
@@ -925,30 +928,30 @@ async fn poll(
         return Ok(());
     }
     sui.begin_full_poll();
-    sui.validate_deployment().await.poll_stage(sync_diagnostics::Stage::Manifest)?;
+    sui.validate_deployment().await.poll_stage(poll_stage, sync_diagnostics::Stage::Manifest)?;
     sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
-        .await.poll_stage(sync_diagnostics::Stage::Authority)?;
+        .await.poll_stage(poll_stage, sync_diagnostics::Stage::Authority)?;
     if !journal.state.initialized {
         if !cfg.runtime.replay_history {
-            journal.state.cursor = sui.latest_cursor().await.poll_stage(sync_diagnostics::Stage::Discovery)?;
+            journal.state.cursor = sui.latest_cursor().await.poll_stage(poll_stage, sync_diagnostics::Stage::Discovery)?;
         }
         if objects {
             // The same baseline for announced deployments as for events.
-            let since_ms = if cfg.runtime.replay_history { 0 } else { sui.chain_time_ms().await.poll_stage(sync_diagnostics::Stage::Baseline)? };
+            let since_ms = if cfg.runtime.replay_history { 0 } else { sui.chain_time_ms().await.poll_stage(poll_stage, sync_diagnostics::Stage::Baseline)? };
             journal.state.heads = Some(heads::Heads { since_ms, ..Default::default() });
         }
         journal.state.initialized = true;
-        journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
+        journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
     }
     if journal.state.discovery_cursor.is_none()
         && journal.state.discovery_merge_checkpoint.is_none()
     {
         let baseline = sui
             .latest_cursor()
-            .await.poll_stage(sync_diagnostics::Stage::Discovery)?
+            .await.poll_stage(poll_stage, sync_diagnostics::Stage::Discovery)?
             .ok_or_else(|| anyhow::anyhow!("missing discovery fence"))?;
         journal.state.discovery_merge_checkpoint = baseline["checkpoint"].as_u64();
-        journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
+        journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
     }
     sui.set_event_limit(if journal.state.discovery_cursor.is_none() {
         journal.state.discovery_merge_checkpoint
@@ -961,10 +964,10 @@ async fn poll(
         // A journal from before inboxes (an older daemon or package): heads
         // start where its event path stopped, so records created while the
         // device was offline still apply after the upgrade.
-        heads_baseline(cfg, sui, walrus, runner, store, configs, supervisor, journal).await.poll_stage(sync_diagnostics::Stage::Baseline)?;
+        heads_baseline(cfg, sui, walrus, runner, store, configs, supervisor, journal).await.poll_stage(poll_stage, sync_diagnostics::Stage::Baseline)?;
     }
     if objects {
-        announced(cfg, sui, walrus, runner, store, configs, supervisor, journal).await.poll_stage(sync_diagnostics::Stage::Announcements)?;
+        announced(cfg, sui, walrus, runner, store, configs, supervisor, journal).await.poll_stage(poll_stage, sync_diagnostics::Stage::Announcements)?;
     }
     // With inboxes the version batch already covers announced work, so the
     // event scan runs only at the bounded discovery cadence (SF-122), and
@@ -975,11 +978,11 @@ async fn poll(
             Err(error) if objects && error.downcast_ref::<sui_client::HistoryPruned>().is_some() => {
                 warn!(%error, "Event history is pruned; resynchronized from the inbox and group heads, \
                     unannounced deployments in the pruned range are not applied");
-                let tip = sui.latest_cursor().await.poll_stage(sync_diagnostics::Stage::Discovery)?;
+                let tip = sui.latest_cursor().await.poll_stage(poll_stage, sync_diagnostics::Stage::Discovery)?;
                 heads::skip_pruned_deployments(&mut journal.state, tip);
-                journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
+                journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
             }
-            result => result.poll_stage(sync_diagnostics::Stage::Events)?,
+            result => result.poll_stage(poll_stage, sync_diagnostics::Stage::Events)?,
         }
     }
     // Deferred one-shot events survive cursor advancement and restarts.
@@ -989,32 +992,32 @@ async fn poll(
             // Reconciliation owns managed notices, including their durable timer.
             continue;
         }
-        let Some((event, record)) = sui.deployment(&id).await.poll_stage(sync_diagnostics::Stage::Deferred)? else {
+        let Some((event, record)) = sui.deployment(&id).await.poll_stage(poll_stage, sync_diagnostics::Stage::Deferred)? else {
             journal.state.deferred.remove(&id);
-            journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
+            journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
             continue;
         };
-        if sui.is_managed(&id).await.poll_stage(sync_diagnostics::Stage::Deferred)? {
+        if sui.is_managed(&id).await.poll_stage(poll_stage, sync_diagnostics::Stage::Deferred)? {
             journal.state.deferred.remove(&id);
-            journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
-        } else if sui.authorized_target(&event, &cfg.device.device_object_id).await.poll_stage(sync_diagnostics::Stage::Deferred)? {
-            execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await.poll_stage(sync_diagnostics::Stage::Deferred)?;
+            journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
+        } else if sui.authorized_target(&event, &cfg.device.device_object_id).await.poll_stage(poll_stage, sync_diagnostics::Stage::Deferred)? {
+            execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await.poll_stage(poll_stage, sync_diagnostics::Stage::Deferred)?;
         }
     }
     reconcile(
         cfg, sui, walrus, runner, store, configs, supervisor, journal,
     )
-    .await.poll_stage(sync_diagnostics::Stage::Reconcile)?;
+    .await.poll_stage(poll_stage, sync_diagnostics::Stage::Reconcile)?;
     if journal.state.discovery_cursor.is_none() {
         journal.state.discovery_cursor = Some(
             serde_json::json!({"checkpoint": journal.state.discovery_merge_checkpoint.take().ok_or_else(|| anyhow::anyhow!("missing discovery merge fence"))?}),
         );
-        journal.save().poll_stage(sync_diagnostics::Stage::Journal)?;
+        journal.save().poll_stage(poll_stage, sync_diagnostics::Stage::Journal)?;
         sui.set_event_limit(None);
     }
     sui.finish_full_poll(scan);
     // Report new outcomes before the long normal sleep.
-    flush_funded_reports(cfg, sui, journal, true, &prior_receipts).await.poll_stage(sync_diagnostics::Stage::Reports)
+    flush_funded_reports(cfg, sui, journal, true, &prior_receipts).await.poll_stage(poll_stage, sync_diagnostics::Stage::Reports)
 }
 
 /// Apply what the device inbox and its groups' heads newly announce. Each

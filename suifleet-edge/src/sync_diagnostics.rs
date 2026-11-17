@@ -32,32 +32,19 @@ impl Stage {
         }
     }
 }
-// Keep the original outer Display unchanged for local logs and health state.
-// The private text is never used as a public label.
-#[derive(Debug)]
-struct Context {
-    stage: Stage,
-    private_message: String,
-}
-impl std::fmt::Display for Context {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.private_message)
-    }
-}
-impl std::error::Error for Context {}
+// Stage metadata stays beside the error so Display, Debug, chains and typed
+// control errors retain their original behavior, including bounded health text.
+pub type PollStage = std::cell::Cell<Option<Stage>>;
 
 pub trait PollContext<T> {
-    fn poll_stage(self, stage: Stage) -> anyhow::Result<T>;
+    fn poll_stage(self, context: &PollStage, stage: Stage) -> anyhow::Result<T>;
 }
 impl<T> PollContext<T> for anyhow::Result<T> {
-    fn poll_stage(self, stage: Stage) -> anyhow::Result<T> {
-        self.map_err(|error| {
-            let private_message = error.to_string();
-            error.context(Context {
-                stage,
-                private_message,
-            })
-        })
+    fn poll_stage(self, context: &PollStage, stage: Stage) -> anyhow::Result<T> {
+        if self.is_err() {
+            context.set(Some(stage));
+        }
+        self
     }
 }
 
@@ -140,10 +127,8 @@ const MARKERS: &[(&str, &[&str])] = &[
     ),
 ];
 
-pub fn classify(error: &anyhow::Error) -> (&'static str, Vec<&'static str>) {
-    let stage = error
-        .downcast_ref::<Context>()
-        .map_or("poll", |s| s.stage.label());
+pub fn classify(error: &anyhow::Error, stage: Option<Stage>) -> (&'static str, Vec<&'static str>) {
+    let stage = stage.map_or("poll", Stage::label);
     let causes: Vec<_> = error
         .chain()
         .map(|cause| cause.to_string().to_ascii_lowercase())
@@ -172,27 +157,41 @@ mod tests {
             "Unavailable: PRIVATE-KEY token=https://secret.invalid/0xdead cursor=private timeout"
         )
         .context("object 0xdead private configuration");
-        let error = Err::<(), _>(error)
-            .poll_stage(Stage::Announcements)
+        let display = error.to_string();
+        let alternate = format!("{error:#}");
+        let debug = format!("{error:?}");
+        let mut expected_health = crate::telemetry::SyncHealth::default();
+        let original = Err::<(), _>(error);
+        expected_health.record(&original);
+        let context = PollStage::default();
+        let error = original
+            .poll_stage(&context, Stage::Announcements)
             .unwrap_err();
-        let (stage, categories) = classify(&error);
+        let (stage, categories) = classify(&error, context.get());
         assert_eq!(stage, "announcements");
         assert_eq!(categories, ["timeout", "unavailable"]);
         assert!(!format!("{stage} {categories:?}").contains("private"));
-        assert_eq!(error.chain().count(), 3);
-        assert_eq!(error.to_string(), "object 0xdead private configuration");
+        assert_eq!(error.chain().count(), 2);
+        assert_eq!(error.to_string(), display);
+        assert_eq!(format!("{error:#}"), alternate);
+        assert_eq!(format!("{error:?}"), debug);
+        let mut health = crate::telemetry::SyncHealth::default();
+        health.record(&Err(error));
+        assert_eq!(health, expected_health);
+        assert!(health.last_error.unwrap().ends_with("timeout"));
     }
     #[test]
     fn unknown_and_duplicate_causes_stay_bounded() {
         assert_eq!(
-            classify(&anyhow::anyhow!("secret 0xdead")),
+            classify(&anyhow::anyhow!("secret 0xdead"), None),
             ("poll", vec!["other"])
         );
+        let context = PollStage::default();
         let error =
             Err::<(), _>(anyhow::anyhow!("RPC request timeout secret").context("timeout secret"))
-                .poll_stage(Stage::Watch)
+                .poll_stage(&context, Stage::Watch)
                 .unwrap_err();
-        assert_eq!(classify(&error), ("watch", vec!["timeout"]));
+        assert_eq!(classify(&error, context.get()), ("watch", vec!["timeout"]));
     }
     #[test]
     fn context_preserves_typed_control_errors() {
@@ -204,8 +203,9 @@ mod tests {
             }
         }
         impl std::error::Error for Control {}
+        let context = PollStage::default();
         let error = Err::<(), _>(anyhow::Error::new(Control))
-            .poll_stage(Stage::Reconcile)
+            .poll_stage(&context, Stage::Reconcile)
             .unwrap_err();
         assert!(error.downcast_ref::<Control>().is_some());
     }
