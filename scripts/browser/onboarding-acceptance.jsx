@@ -9,6 +9,9 @@ import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 import { normalizeSuiAddress, toBase58 } from "@mysten/sui/utils";
 import { dAppKit as kit } from "@/lib/dapp-kit";
+import { selectionKey } from "@/lib/customer-fleets";
+import { FleetSelectionProvider, FleetScope, onboardingRoute } from "@/hooks/useFleetSelection";
+import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { FirstRun } from "@/components/FirstRun";
 import { DeviceBcs } from "@/lib/move-bcs";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
@@ -70,6 +73,7 @@ client.waitForTransaction = (async () => ({ $kind: "Transaction", Transaction: {
 window.addEventListener("wallet-standard:app-ready", (event) => event.detail.register(wallet));
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
 Object.assign(window, { acceptance: {
+  staleFleet: (stale) => { if (stale) localStorage.setItem(selectionKey(address), "0xdead"); else localStorage.removeItem(selectionKey(address)); window.dispatchEvent(new Event("storage")); },
   fund: () => { gasBalance = "1000000000"; }, expire: () => { expired = true; }, advanceEpoch: () => { epoch = 2n; }, reject: () => { reject = true; }, effectsFail: () => { reject = false; failEffects = true; },
   budgetRace: () => { budgetRace = true; },
   reset: () => { budgetRace = false; reject = false; failEffects = false; chain = m.chain_identifier; expired = false; epoch = 1n; balanceFail = false; inventoryFail = false; },
@@ -81,5 +85,5 @@ Object.assign(window, { acceptance: {
   unsupportedChain: () => { account.chains = ["sui:mainnet"]; listeners.forEach((fn) => fn({ accounts: [account] })); },
   wallets: () => kit.stores.$wallets.get().map((w) => w.name), signCalls: () => signCalls, disconnect: () => kit.disconnectWallet(),
 } });
-function App() { return <FirstRun connect={<ConnectButton />} />; }
+function App() { return COLD_START ? <FleetSelectionProvider><FleetSwitcher /><FleetScope allowWithoutFleet={onboardingRoute("/get-started/")}><FirstRun connect={<ConnectButton />} /></FleetScope><FleetScope><p>Restricted fleet content</p></FleetScope></FleetSelectionProvider> : <FirstRun connect={<ConnectButton />} />; }
 createRoot(document.getElementById("root")).render(<QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><App /></DAppKitProvider></QueryClientProvider>);
