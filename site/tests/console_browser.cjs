@@ -24,6 +24,17 @@ const path = require('node:path');
     });
     await page.goto('https://app.suifleet.io/', {waitUntil:'networkidle'});
     await page.getByRole('link', {name:'Get started',exact:true}).first().waitFor();
+    // Compare the guide's entry points with the current real console export.
+    // Signed-out navigation only: this establishes no wallet or transaction flow.
+    const steps = JSON.parse(fs.readFileSync(path.join(__dirname, '../guide/steps.json'))).steps;
+    for (const step of steps) {
+      await page.goto('https://app.suifleet.io/' + step.console_route, {waitUntil:'networkidle'});
+      await page.getByRole('navigation', {name:'Main', exact:true})
+        .getByRole('link', {name:step.console_label, exact:true}).filter({visible:true}).waitFor();
+      if (['publish-version', 'deploy-group'].includes(step.id)) {
+        await page.getByRole('heading', {name:step.console_label, exact:true}).waitFor();
+      }
+    }
     // Probe every explicit connect source through the browser's actual CSP.
     // Responses are offline fixtures; this establishes no provider availability.
     const policy = headers['Content-Security-Policy'];

@@ -54,6 +54,14 @@ class TrustTests(unittest.TestCase):
             self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             log.write_text('Deployment schema rejected PRIVATE-CANARY')
             self.assertEqual(daemon_progress(journal, log)['log_counts']['Deployment schema rejected'], 1)
+            log.write_text('watch read failed for PRIVATE-CANARY: upstream connect error or disconnect/reset before headers\n'
+                           'Sync failed PRIVATE-CANARY: transport error\n')
+            diagnostic = daemon_progress(journal, log)
+            self.assertEqual(diagnostic['log_counts']['watch read failed for'], 1)
+            self.assertEqual(diagnostic['log_counts']['upstream connect error or disconnect/reset before headers'], 1)
+            self.assertEqual(diagnostic['log_counts']['transport error'], 1)
+            self.assertEqual(diagnostic['log_counts']['Connection refused'], 0)
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             # Reproduce the failed CI's pre-discovery sync failure shape.
             # Export the fixed cause, never the provider message or log line.
             for marker in ('watch read failed', 'watch read failed for',
