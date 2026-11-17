@@ -1048,6 +1048,41 @@ class ShardedReceiptViewTests(unittest.TestCase):
 
 
 class CatalogDesiredStateTests(unittest.TestCase):
+    def migration(self, *, remaining=(), inbox_device="0xd", groups=None):
+        run = Mock()
+        run.evidence = {}
+        run.created.return_value = ["0x123"]
+        run.object.side_effect = [
+            {"content": {"device_ids": list(remaining)}},
+            {"content": {"device_id": inbox_device,
+                         "groups": [live_common.dm.object_id("0xa")] if groups is None else groups}},
+        ]
+        transaction = Mock(return_value={"effects": "verified by Live.transaction"})
+        return run, transaction
+
+    def test_legacy_membership_migration_is_read_back_before_acceptance(self):
+        run, transaction = self.migration()
+        live_upgrade_security.migrate_membership(transaction, run, "0xp", "0xr", "0xc", "0xd", "0xa")
+        args = transaction.call_args.args
+        calls = [args[i + 1] for i, arg in enumerate(args) if arg == "--move-call"]
+        self.assertEqual(calls, ["0xp::device_group::index_members", "0xp::fleet_inbox::new_inbox",
+                                 "0xp::fleet_inbox::follow_group", "0xp::fleet_inbox::share_inbox"])
+        run.readable.assert_called_once_with("0x123")
+        self.assertEqual(run.object.call_args_list, [unittest.mock.call("0xa"), unittest.mock.call("0x123")])
+        self.assertEqual(run.evidence["membership_migration"], {"inbox": "0x123", "device": "0xd", "group": "0xa"})
+        run.check.assert_called_once()
+
+    def test_unmigrated_or_foreign_membership_never_reports_success(self):
+        for kwargs, message in [({"remaining": ["0xd"]}, "not fully indexed"),
+                                ({"inbox_device": "0xe"}, "another device"),
+                                ({"groups": []}, "missing from the device inbox")]:
+            with self.subTest(kwargs=kwargs):
+                run, transaction = self.migration(**kwargs)
+                with self.assertRaisesRegex(AssertionError, message):
+                    live_upgrade_security.migrate_membership(transaction, run, "0xp", "0xr", "0xc", "0xd", "0xa")
+                self.assertEqual(run.evidence, {})
+                run.check.assert_not_called()
+
     def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
         run = Mock()
         run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}
