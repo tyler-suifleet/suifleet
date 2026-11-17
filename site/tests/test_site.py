@@ -5,6 +5,7 @@
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -27,6 +28,17 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_guide_console_routes_and_labels_match_navigation(self):
+        navigation = (SITE.parent / 'dapp/src/components/ConsoleNavigation.tsx').read_text()
+        labels = dict(re.findall(r'href:\s*"([^"]+)"\s*,\s*label:\s*"([^"]+)"', navigation))
+        self.assertIn('/components', labels)
+        self.assertIn('/firmware', labels)
+        for step in build.load_json(SITE / 'guide/steps.json')['steps']:
+            route = '/' + step['console_route'].strip('/')
+            with self.subTest(step=step['id']):
+                self.assertIn(route, labels)
+                self.assertEqual(step['console_label'], labels[route])
+
     def test_lesson_production_requires_reviewed_source_hashes(self):
         manifest=build.load_json(SITE/'media/guide/videos.json')
         manifest['tutorial_production']={'source_sha256':{'site/guide/lessons.json':'0'*64},'assets_sha256':{}}

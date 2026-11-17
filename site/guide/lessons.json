@@ -231,8 +231,8 @@
       "source_sha256": "a317bbd6ef3ae25ba8a30f51404a8c51a06efecf9815128a3a0a0150914f23f2",
       "actions": [
         {
-          "label": "Open Components",
-          "text": "Choose Components to add a release to your software library.",
+          "label": "Open Software library",
+          "text": "Choose Software library to add a release. This older recording shows its previous name, Components; the publishing controls are the same.",
           "wait": false
         },
         {
@@ -285,7 +285,7 @@
         },
         {
           "label": "Choose a published version",
-          "text": "In the library, choose Deploy this version for the release you want to send.",
+          "text": "In Software library, choose Deploy this version. The older recording calls the library Components and the next page Deploy component; it is now Deploy software.",
           "wait": false
         },
         {

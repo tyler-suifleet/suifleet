@@ -1,9 +1,46 @@
 # SF-274 guide workflow audit
 
-The ten written lessons and produced scripts were compared with this branch’s
-console source at `b9bb2ef6210624d732ab2de2075ea1826e5300c1` (application
-source is unchanged by SF-274). The guide is an edited demonstration, not a
-manual Slush test.
+## Navigation compatibility repair (PR #777 review)
+
+The original audit below predates PR #715 and alone does not establish current
+compatibility. Reverification uses the exact integration base
+`9ede9cce7aac0d9903d0364153562d62ac69b6db`, now included in this source branch.
+The guide is an edited demonstration, not a manual Slush test.
+
+The current sidebar and page titles are **Software library** (`/components`)
+and **Deploy software** (`/firmware`). The written instructions and future
+recorder selectors now use those names. Choosing Deploy software without a
+library version opens a library-first page: choose **Choose or publish a
+version**, then **Deploy this version**. The direct-file form is optional under
+**Advanced: deploy a file directly**; it is not the route used by the group clip.
+
+The publish and deploy lessons are regenerated with current action cards,
+female narration and optional VTT captions. Their speech explicitly identifies
+**Components** and **Deploy component** as the names visible in the older
+recording and maps them to today's names. This is a documented compatible
+historical capture, not a relabelled fresh recording. Original `console_commit`,
+transaction provenance and footage hashes remain intact in `videos.json`.
+
+Compatibility was checked against the actual source delta from the prior source
+head `3c30a7b2` to the pinned base: the library page changes its title; Publish
+version, Set up publishing, ComponentPublisher and Deploy this version remain.
+The deployment page changes its title and adds the library-first entry and
+Advanced wrapper. A selected catalog version still opens target review; group
+selection, desired-state controls and the deployment builder are unchanged by
+PR #715. No direct-file Artifact/Recipe footage is being presented as the new
+library-first entry flow.
+
+New regression coverage compares every guide route/console label with NAV in
+`ConsoleNavigation.tsx`. The real exported-console browser check visits all ten
+guide entry routes and checks their visible navigation labels, plus the two
+renamed page headings. It is signed-out and uses blocked/offline external
+responses; it does not establish connected-wallet or chain behavior.
+
+## Original ten-stage source audit
+
+The original comparison used console source
+`b9bb2ef6210624d732ab2de2075ea1826e5300c1`. Historical command results below
+are retained as historical evidence, not rerun results for this repair.
 
 | Lesson | Customer behavior and source checked | Media decision |
 |---|---|---|
@@ -13,8 +50,8 @@ manual Slush test.
 | Register | Public address only; install/configure client separately and wait for a signed report (`dapp/src/app/devices`, `docs/INSTALL_DEVICE_CLIENT.md`). | Update next-step narration to make optional branches explicit. |
 | Batch enrollment | Optional alternative to individual registration; credentials remain secret, single-use and device-specific (`dapp/src/app/enrollment`, `docs/ENROLLMENT.md`). | Update optional introduction and next-step card. |
 | Private access | Create group and membership first; grant decryption before confidential publication (`dapp/src/app/access/page.tsx`). Policy can also grant accounts/devices; the lesson deliberately demonstrates a group. | Move before publication; update prerequisite speech and next card. Existing capture reuses its group/policy. |
-| Publish | Confidential encrypts artifact and recipe; Public explicitly acknowledges unencrypted content. Policy and configured encryption service precede private upload (`ComponentPublisher.tsx`, `DeliveryFields.tsx`). Publication installs nothing. | Update policy prerequisite speech and lesson number. Existing public-file capture remains compatible. |
-| Deploy | Library and direct-upload flows both support group desired state. Individual devices require clearing desired state (`dapp/src/app/firmware/page.tsx`, `buildCatalogDeploymentTx`). Applied is installer completion, not ongoing health. | Update individual-device/desired-state speech and lesson number. Group capture remains compatible. |
+| Publish | Confidential encrypts artifact and recipe; Public explicitly acknowledges unencrypted content. Policy and configured encryption service precede private upload (`ComponentPublisher.tsx`, `DeliveryFields.tsx`). Publication installs nothing. | Update policy prerequisite speech and lesson number. Public-file capture is retained with the explicit historical/current label mapping above. |
+| Deploy | Library and direct-upload flows both support group desired state. Individual devices require clearing desired state (`dapp/src/app/firmware/page.tsx`, `buildCatalogDeploymentTx`). Applied is installer completion, not ongoing health. | Update individual-device/desired-state speech and lesson number. Library group capture is retained with the explicit label mapping above. |
 | Staged rollout | Explicit creator-signed Check device health and continue; on-chain gates run on each check. No background signer or automatic batch advancement. Admission is not a liveness attestation (`dapp/src/app/rollouts/page.tsx`, `docs/STAGED_ROLLOUTS.md`). | Update narration and next card. Retain create/pause footage; no admission/completion claimed. |
 | Fleet settings | Save cadence/estimates, with budget funding separate; devices pick up at next check (`dapp/src/app/settings`, `docs/FLEET_SETTINGS.md`). | Retain. |
 
@@ -97,3 +134,48 @@ Slush/extension-wallet acceptance, physical mobile/Safari, Pi or Mainnet results
 Hosted CI and independent review are pending after push and remain merge gates.
 No contract, daemon, transaction-builder or dependency source changed, so no
 additional local-chain or machine-wallet mutation was needed for this guide fix.
+
+## PR #777 navigation compatibility repair (2026-11-17)
+
+Reverified against exact integration base `9ede9cce7aac0d9903d0364153562d62ac69b6db`,
+which includes PR #715. The source branch incorporates that exact base; it is
+not a fresh capture. Publish/deploy speech and optional captions now explicitly
+translate the old on-screen names to **Software library** and **Deploy software**.
+Written instructions use current labels and explain the library chooser versus
+**Advanced: deploy a file directly**. The two clips were regenerated with local
+`af_heart` speech; their original action intervals, console revisions and signed
+transaction provenance remain intact. Eight other lessons retain their exact
+media hashes. `videos.json` records the checked console-source hashes and this
+compatibility decision. No video frame was relabelled to imply a current capture.
+
+Checks run for this repair (host Python 3.10.12, Node 24.21.0, Chrome 153.0.8010.36):
+
+- `node dapp/node_modules/typescript/bin/tsc --noEmit -p dapp/tsconfig.json`: passed.
+- `(cd dapp && NEXT_TELEMETRY_DISABLED=1 node node_modules/next/dist/bin/next build)`: passed, static export generated; existing module-type warning remains.
+- `PYTHONPATH=/tmp/sf274-python OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 python3 site/guide/render_lessons.py --source-media /tmp/sf274-source/site/media/guide --runtime /tmp/sf274-nav-render --output /tmp/sf274-nav-produced --steps publish-version,deploy-group`: passed. Both MP4/WebM formats fully decoded; female speech, optional VTT and 1280×800 dimensions checked. Durations 55.20 and 80.04 seconds; largest file 3,655,881 bytes, below 15,000,000. Sampled actual encoded action frames were visually inspected.
+- `python3 -m unittest discover -s site/tests`: 70 passed, including all ten route/label comparisons against NAV.
+- `python3 site/build.py --out /tmp/sf274-nav-site` and `python3 site/check.py /tmp/sf274-nav-site --require-videos`: passed, 77 files.
+- `python3 site/prepare_hosted.py console /tmp/sf274-nav-export /tmp/sf274-nav-console --revision 9ede9cce7aac0d9903d0364153562d62ac69b6db`, then `CHROME_EXECUTABLE=/usr/bin/google-chrome node site/tests/console_browser.cjs /tmp/sf274-nav-console`: passed. Input was this branch's real static export plus the reviewed testnet profile manifest for offline CSP generation. All ten visible entry labels and both renamed headings passed. External responses are offline fixtures, with no wallet connection or provider availability claim.
+- `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml`: 477 passed, zero failed, four ignored (93.72 seconds).
+- `make RUN= test-testnet`: passed; Python groups 5/7/4/4/32/27/221/83, one existing installed-container identity skip; authenticated-cache and receipt-effects Node checks passed. Transactions printed by these tests are offline fixtures.
+
+The recorder's read-only preflight was attempted on the host but refused before
+any network/write operation because the release `sui` executable is absent from
+PATH. No fixture/chain preflight success, new capture, faucet, signature or chain
+spending is claimed. This compatibility repair instead verifies source behavior
+and the current signed-out export, retaining historical signed-flow provenance.
+Automatic exact-candidate public-testnet validation, security CI and fresh
+independent review remain required. Deferred checks in #32/#159 remain unrun.
+
+Current real-player checks also passed:
+
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node site/tests/guide_browser.cjs /tmp/sf274-nav-site /tmp/sf274-nav-browser-shots`: all 79 instructions at seven desktop/mobile/landscape sizes; no overflow, keyboard/history/deep links, disabled/blocked-JavaScript fallback, native captions, playback/pause and MP4/error fallback passed.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node site/tests/guide_captions_browser.cjs /tmp/sf274-nav-site`: all ten players and every native caption cue/timing at 390px and 1440px, off/on/off behavior, dimensions, versioned media and intro/action/outcome frames passed.
+- Host build checks: `node dapp/node_modules/typescript/bin/tsc --noEmit -p dapp/tsconfig.json` and `(cd dapp && NEXT_TELEMETRY_DISABLED=1 node node_modules/next/dist/bin/next build)` passed on Node 24.21.0. Existing module-type warning remains. No dependency or lockfile changes. Chrome 153.0.8010.36 and Python 3.10.12 were used for these checks.
+
+Initial player invocations ran before the built-site directory existed and
+failed with missing `_headers`; the completed-build reruns above passed. This
+was test setup ordering, with no fallback or assertion weakened. This repair
+uses compatibility reverification and explicit spoken historical/current label
+mapping rather than claiming a fresh testnet capture. Independent review must
+assess this documented compatibility boundary.

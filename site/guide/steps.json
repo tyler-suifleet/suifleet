@@ -151,7 +151,7 @@
       "id": "publish-version",
       "title": "Publish a version",
       "console_route": "components/",
-      "console_label": "Components",
+      "console_label": "Software library",
       "summary": "A version is a named component with one artifact per platform and a recipe describing how to install and run it. Confidential delivery encrypts both before Walrus upload; Public delivery uploads unencrypted files. Both record authenticated digests on chain. Publishing does not install software.",
       "before": [
         "The artifact file for each platform.",
@@ -159,7 +159,7 @@
         "Confidential delivery also requires the build’s encryption service configuration. If unavailable, ask your administrator; do not switch proprietary software to Public."
       ],
       "actions": [
-        "Choose Components in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
+        "Choose Software library in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
         "Click Publish version, enter the Component name and Semantic version, and continue.",
         "For each platform choose the Operating system and Architecture, attach the Artifact and, if needed, an Install command.",
         "Under Delivery keep Confidential and choose the Access policy for proprietary software. The recorded example chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
@@ -181,7 +181,7 @@
       "id": "deploy-group",
       "title": "Deploy to a device or group",
       "console_route": "firmware/",
-      "console_label": "Deploy component",
+      "console_label": "Deploy software",
       "summary": "For one device, select it directly and clear desired state for a one-shot deployment. Groups let one deployment reach many devices, with membership checked at apply time. A group can also keep a desired version for continuing convergence. The deployment records the version, targets and authorizing wallet.",
       "before": [
         "A published version.",
@@ -190,7 +190,7 @@
       "actions": [
         "For group delivery, on Devices open Device groups and Create group with a Group name, or reuse the group prepared for private access. Skip group setup for a one-device deployment.",
         "For a group, use Manage to Add its intended devices if they are not already members.",
-        "In the component library click Deploy this version, or choose Deploy component in the sidebar.",
+        "In Software library click Deploy this version. Alternatively, choose Deploy software in the sidebar, then Choose or publish a version to open the library. The optional Advanced: deploy a file directly section is for a one-off file without a library entry.",
         "Under Select targets & review select groups or individual devices. Library versions support Make this the groups’ desired version: keep it selected for continuing group convergence, or clear it for a one-shot deployment. Desired state supports groups only; clear individual devices before using it. Review the target count and click Deploy.",
         "Approve the transaction, then open View deployments to follow each device's signed result."
       ],

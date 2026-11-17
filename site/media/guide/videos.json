@@ -821,14 +821,14 @@
     {
       "step": "publish-version",
       "file": "publish-version.webm",
-      "file_sha256": "15b212b2053b3c797bf7a1d634fb3800f3b3d33e2ba2e8cd47b0e1d37b3131aa",
+      "file_sha256": "52fd41cf436839c44598fa57d94f3038c9d9f1ef375f35d1cbb93dff11f40749",
       "fallback": "publish-version.mp4",
-      "fallback_sha256": "b23aebc194fd0e4240233d3633f6a17f018abc065b7cd95918c7175b4d3d2385",
+      "fallback_sha256": "e62a76505eab5590639cf5dfdf2c1d2193904e0c7c71461a17583c433b998a35",
       "poster": "publish-version.jpg",
       "poster_sha256": "2df1aa3393ffdf02b884a8dbfcf4654980f8ab60cd3e861a2bb30ed866e32638",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 49.84,
+      "duration_seconds": 55.2,
       "caption": "Screencast: Publish a version.",
       "console_commit": "ac6c608b715315d6cd0366244f5641bb52a418ea",
       "transactions": [
@@ -851,76 +851,76 @@
           },
           {
             "kind": "action-0",
-            "text": "Choose Components to add a release to your software library.",
+            "text": "Choose Software library to add a release. This older recording shows its previous name, Components; the publishing controls are the same.",
             "start": 8.719999999999999,
-            "duration": 4.0,
+            "duration": 9.36,
             "speech_start": 9.169999999999998,
-            "speech_end": 12.220666666666665,
+            "speech_end": 17.618,
             "source_start": 0,
             "source_end": 12.6
           },
           {
             "kind": "action-1",
             "text": "Name the component and give this release a version number.",
-            "start": 12.399999999999999,
+            "start": 17.759999999999998,
             "duration": 4.0,
-            "speech_start": 12.849999999999998,
-            "speech_end": 15.857999999999997,
+            "speech_start": 18.209999999999997,
+            "speech_end": 21.217999999999996,
             "source_start": 12.6,
             "source_end": 17.28
           },
           {
             "kind": "action-2",
             "text": "Choose the target platform and attach the matching software file.",
-            "start": 16.08,
+            "start": 21.439999999999998,
             "duration": 4.48,
-            "speech_start": 16.529999999999998,
-            "speech_end": 20.092666666666666,
+            "speech_start": 21.889999999999997,
+            "speech_end": 25.452666666666666,
             "source_start": 17.28,
             "source_end": 21.12
           },
           {
             "kind": "action-3",
             "text": "Use Confidential for proprietary software and select the policy you created first. This demonstration uses a public, unencrypted file.",
-            "start": 20.24,
+            "start": 25.599999999999998,
             "duration": 9.72,
-            "speech_start": 20.689999999999998,
-            "speech_end": 29.500666666666664,
+            "speech_start": 26.049999999999997,
+            "speech_end": 34.86066666666666,
             "source_start": 21.12,
             "source_end": 28.76
           },
           {
             "kind": "action-4",
             "text": "Review the release, upload it, and approve the request in your wallet. Keep the page open until publication finishes.",
-            "start": 29.64,
+            "start": 35.0,
             "duration": 8,
-            "speech_start": 30.09,
-            "speech_end": 36.89533333333333,
+            "speech_start": 35.45,
+            "speech_end": 42.25533333333334,
             "source_start": 28.76,
             "source_end": 74.04
           },
           {
             "kind": "action-5",
             "text": "Look for the published version in your library. It is available to deploy, but is not installed yet.",
-            "start": 37.32,
+            "start": 42.68,
             "duration": 6.6,
-            "speech_start": 37.77,
-            "speech_end": 43.44466666666667,
+            "speech_start": 43.13,
+            "speech_end": 48.80466666666667,
             "source_start": 74.04,
             "source_end": 78.48
           },
           {
             "kind": "outro",
             "text": "Your release is in the library. You\u2019re ready to choose the devices or groups that should receive it.",
-            "start": 43.6,
+            "start": 48.96,
             "duration": 6.24,
-            "speech_start": 44.050000000000004,
-            "speech_end": 49.38333333333334
+            "speech_start": 49.410000000000004,
+            "speech_end": 54.74333333333334
           }
         ]
       },
       "captions": "publish-version.en.vtt",
-      "captions_sha256": "340f2cb707bcf9e8b5f0676c691aa2200a329dd32f766bfbb086426713df39bf",
+      "captions_sha256": "578328bf0403009ec6c589a2a78cf85b201c756dddf41c3e9dc863529ac73f0e",
       "tutorial_source": {
         "file_sha256": "a317bbd6ef3ae25ba8a30f51404a8c51a06efecf9815128a3a0a0150914f23f2",
         "width": 1280,
@@ -1003,14 +1003,14 @@
     {
       "step": "deploy-group",
       "file": "deploy-group.webm",
-      "file_sha256": "2f6963dfe4e09d5335fda437d681b57f903a5607f4cfa0cffb3d9fe8139eb532",
+      "file_sha256": "270dbc0bc62b85cb7514e9099d2db336a5c25e3f57dc13db2c3e717782f50714",
       "fallback": "deploy-group.mp4",
-      "fallback_sha256": "f68aeed0f962383b6cd57a8b9d69f5ca0ac93f8891179463d46aaab9d7013696",
+      "fallback_sha256": "f14a1e8a662756312cba6c39af03b550f1e26e43ee33a0bcb7f4153145810d3f",
       "poster": "deploy-group.jpg",
       "poster_sha256": "252cd68c5856903e81813d1353b5f324b1b74f4866009efd95e48aaaba1491b5",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 74.0,
+      "duration_seconds": 80.04,
       "caption": "Screencast: Deploy to a group.",
       "console_commit": "88d2364047a358f0a99bb1c1cb4f98744d5cf017",
       "transactions": [
@@ -1054,76 +1054,76 @@
           },
           {
             "kind": "action-2",
-            "text": "In the library, choose Deploy this version for the release you want to send.",
+            "text": "In Software library, choose Deploy this version. The older recording calls the library Components and the next page Deploy component; it is now Deploy software.",
             "start": 22.0,
-            "duration": 4.96,
+            "duration": 11.0,
             "speech_start": 22.45,
-            "speech_end": 26.482,
+            "speech_end": 32.519333333333336,
             "source_start": 25.88,
             "source_end": 31.16
           },
           {
             "kind": "action-3",
             "text": "Select the group. Library releases support desired state for continuing group convergence. For an individual device, clear desired state and select that device instead.",
-            "start": 26.64,
+            "start": 32.68,
             "duration": 11.88,
-            "speech_start": 27.09,
-            "speech_end": 38.05533333333334,
+            "speech_start": 33.13,
+            "speech_end": 44.095333333333336,
             "source_start": 31.16,
             "source_end": 39.68
           },
           {
             "kind": "action-4",
             "text": "Review and approve the deployment. Device clients will process it when they are ready.",
-            "start": 38.2,
+            "start": 44.24,
             "duration": 8,
-            "speech_start": 38.650000000000006,
-            "speech_end": 43.47133333333334,
+            "speech_start": 44.690000000000005,
+            "speech_end": 49.51133333333334,
             "source_start": 39.68,
             "source_end": 59.28
           },
           {
             "kind": "action-5",
             "text": "The deployment is created. That confirms your request, rather than a completed installation.",
-            "start": 45.88,
+            "start": 51.92,
             "duration": 6.24,
-            "speech_start": 46.330000000000005,
-            "speech_end": 51.66333333333334,
+            "speech_start": 52.370000000000005,
+            "speech_end": 57.70333333333334,
             "source_start": 59.28,
             "source_end": 64.24
           },
           {
             "kind": "action-6",
             "text": "Open Deployments after the client has processed the update. Check the result reported by the device.",
-            "start": 51.800000000000004,
+            "start": 57.84,
             "duration": 6.84,
-            "speech_start": 52.25000000000001,
-            "speech_end": 58.15933333333334,
+            "speech_start": 58.290000000000006,
+            "speech_end": 64.19933333333334,
             "source_start": 64.24,
             "source_end": 75.47999999999999
           },
           {
             "kind": "action-7",
             "text": "Applied means the device completed its configured installer. It does not establish that a long-running service is healthy.",
-            "start": 58.32,
+            "start": 64.36000000000001,
             "duration": 8.12,
-            "speech_start": 58.77,
-            "speech_end": 65.95933333333333,
+            "speech_start": 64.81000000000002,
+            "speech_end": 71.99933333333335,
             "source_start": 75.47999999999999,
             "source_end": 90.96
           },
           {
             "kind": "outro",
             "text": "Applied confirms the device completed its installer. Check device health separately before expanding your deployment.",
-            "start": 66.12,
+            "start": 72.16000000000003,
             "duration": 7.88,
-            "speech_start": 66.57000000000001,
-            "speech_end": 73.546
+            "speech_start": 72.61000000000003,
+            "speech_end": 79.58600000000003
           }
         ]
       },
       "captions": "deploy-group.en.vtt",
-      "captions_sha256": "92ba70b2249d6f7b7db7a77002e0d09a600deba89c3763eb0b8c46790092903c",
+      "captions_sha256": "fd97e5efb343a7ac52ad1624dfc1c25b761f6125c8dbd008528001380f411892",
       "tutorial_source": {
         "file_sha256": "b0f13e9f5aadf89397b3c0750a3440263af8ea7e162576b54360b9b1dab46919",
         "width": 1280,
@@ -1717,7 +1717,7 @@
     "voice_description": "Female, American English; synthetic Kokoro Heart voice",
     "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
     "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
-    "script_sha256": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61"
+    "script_sha256": "7ded6ab876532c0a808e9de4a45b293d8af18c9dbce4511934967e5b1454e6c2"
   },
   "limitations": [
     "Scripted test wallet, not manual Slush acceptance.",
@@ -1746,7 +1746,7 @@
     "source_sha256": {
       "site/guide/render_lessons.py": "c5405429a8c3716f3e4cec2ed7e6eb6f4069fdb8d6fe5933e69dd98c04cf224a",
       "site/guide/lesson_cards.cjs": "8e39fafc953f2b6ae55d2244f5ad929a44ae1da9e3035e20a9e2d10a038302e5",
-      "site/guide/lessons.json": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61",
+      "site/guide/lessons.json": "7ded6ab876532c0a808e9de4a45b293d8af18c9dbce4511934967e5b1454e6c2",
       "site/guide/narration.json": "b30853526c00920afc0db049649a9a8b8a9f71769a0a07aa0a7e92c6e62c4dea",
       "site/guide/captions.py": "1b24a06c78849eb39038c65621dbca5079559d6eb628d16d01932e5794a7c119",
       "site/guide/encode_guide.py": "5f6e40b75e738ed22d17a2887cd054a30a30c59456cf647ce9553807777effc8",
@@ -1765,12 +1765,12 @@
     "ticket": "SF-274",
     "method": "Regenerated changed lesson scripts/cards using verified caption-free historical action intervals; retained other media bytes. Not fresh console capture.",
     "prior": {
-      "manifest_sha256": "b934c7ff3306cb28833b6229101036d766dedd5813e8d93a0de750a57eae46ee",
+      "manifest_sha256": "fdbbba22167759542129888538cfd83124f161e76394e2f2facdb5b7112f6d86",
       "production": {
         "source_sha256": {
           "site/guide/render_lessons.py": "c5405429a8c3716f3e4cec2ed7e6eb6f4069fdb8d6fe5933e69dd98c04cf224a",
           "site/guide/lesson_cards.cjs": "8e39fafc953f2b6ae55d2244f5ad929a44ae1da9e3035e20a9e2d10a038302e5",
-          "site/guide/lessons.json": "c27b4167ca7f7a125a0fd84699af34665105c8d2b0c41588bda42cdfd8b218b8",
+          "site/guide/lessons.json": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61",
           "site/guide/narration.json": "b30853526c00920afc0db049649a9a8b8a9f71769a0a07aa0a7e92c6e62c4dea",
           "site/guide/captions.py": "1b24a06c78849eb39038c65621dbca5079559d6eb628d16d01932e5794a7c119",
           "site/guide/encode_guide.py": "5f6e40b75e738ed22d17a2887cd054a30a30c59456cf647ce9553807777effc8",
@@ -1792,16 +1792,12 @@
         "voice_description": "Female, American English; synthetic Kokoro Heart voice",
         "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
         "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
-        "script_sha256": "c27b4167ca7f7a125a0fd84699af34665105c8d2b0c41588bda42cdfd8b218b8"
+        "script_sha256": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61"
       }
     },
     "regenerated": [
-      "register-device",
-      "enroll-batch",
-      "access-policy",
       "publish-version",
-      "deploy-group",
-      "staged-rollout"
+      "deploy-group"
     ],
     "retained_sha256": {
       "sign-in": {
@@ -1822,6 +1818,30 @@
         "captions": "4131fc096b6e794e67a55f64dda7dc459c7967f3e9f26130a6f38b433e1044ee",
         "poster": "411e3e031d64e6b2d9a8ced4738d8d101036a41a33a7964be46c38bf95362a13"
       },
+      "register-device": {
+        "file": "36a751aeef8a4bc52557a42d7678c365aac7759ae01a03cb7009d26c3859064c",
+        "fallback": "ec9125e52e4dcb1d4e05605c51122c5f2c9a38cf6e4c35e6d35c2dc5331848e9",
+        "captions": "5d64bf01d04ad6bc1d5934d0778e418c589e4ef9fe19bf7cbfdc1f9ad5644f81",
+        "poster": "d031c85e1ce17af4bf46078e912259fbd5d118704bf8113500c756a14060c003"
+      },
+      "enroll-batch": {
+        "file": "5fd4c4e1c5c137ca7f6443968ce944067d6a25d0fc025f25aa61dcf884d463a7",
+        "fallback": "3bfc45cc8556a64e0729bd6eeb14fe7a683e5e8635320ac05907114f2c720e19",
+        "captions": "75b06ce72d4bad143167abd7113231dc5a5f7767728d9fec3376c1ff4aa5e4cd",
+        "poster": "61dcca86fec3ba60e61806866b8c2a2499312b4bd1efc54a846ad37737b2eac0"
+      },
+      "access-policy": {
+        "file": "61c60bf45c8989241e6e6e4a1e11ee87abdf901667b6b0dd63fbdfd6bb257e69",
+        "fallback": "bb8a870e7ce353056572ccf307eef13e5ced1d98b6e2af7bc9ba98ce8f8c8633",
+        "captions": "d26305d4941900eb78fc3b4374a2ccd56b8bcf6c0c2553467dbf8842525819cd",
+        "poster": "142d434e9dcf43642d2cbf6f0be6369be53311b557152bd17dbd0ed75fc8347b"
+      },
+      "staged-rollout": {
+        "file": "2117e6c00581aa546cb7e37de7112713cb6b9cf50e529a6977c1bbd8d96606a6",
+        "fallback": "a8834ceec303eec0436cfdf8dc1e15e591b39093b26d5327bf86da8ca7643845",
+        "captions": "793a491cfaa6a03011f2db88e01801bcc7006001f9bdacb797c91bf715cb2234",
+        "poster": "4536b7e1647edad34986e4738b5fc42ec92a6bac5fee2439a55dd0eedc1dba31"
+      },
       "fleet-settings": {
         "file": "6cd70a8b424cda40cd4a6f6165e6689f0a78fdd89200ac9ac0bca2ca79e8d1e8",
         "fallback": "f707d4818fafc822110c015768322d010489fcdc1e4639709b94b9ac88888c9d",
@@ -1829,5 +1849,19 @@
         "poster": "eb13930212915fb30fef9e394f1c4c5e0ebb3534bfc3d591e9ce547be87683c2"
       }
     }
+  },
+  "navigation_compatibility": {
+    "ticket": "SF-274",
+    "reviewed_console_commit": "9ede9cce7aac0d9903d0364153562d62ac69b6db",
+    "method": "Reverified historical publish/deploy action intervals against PR #715 console sources and signed-out current-export navigation. New female narration, cards and captions explain Components -> Software library and Deploy component -> Deploy software. Original console_commit and transaction provenance retained; not fresh capture or wallet acceptance.",
+    "sources_sha256": {
+      "dapp/src/components/ConsoleNavigation.tsx": "ef6176d39f281434d1f6aeb12a932973140d1f603799511eab7a59b18cc897b9",
+      "dapp/src/app/components/page.tsx": "aa5f4d39c4e99e3eff4c423182099638f1f89cdbf4cef100d4d4eb3db42724b4",
+      "dapp/src/app/firmware/page.tsx": "161f7c33cc11d1b963ad1c18059b6819a0fa0db1afe3b6c4c99bf69d738ccbeb"
+    },
+    "lessons": [
+      "publish-version",
+      "deploy-group"
+    ]
   }
 }

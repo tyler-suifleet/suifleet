@@ -17,37 +17,38 @@ Use Manage to add devices. This example reuses a group that is
 already available.
 
 4
-00:00:22.450 --> 00:00:26.482
-In the library, choose Deploy this version for the release you
-want to send.
+00:00:22.450 --> 00:00:32.519
+In Software library, choose Deploy this version. The older
+recording calls the library Components and the next page Deploy
+component; it is now Deploy software.
 
 5
-00:00:27.090 --> 00:00:38.055
+00:00:33.130 --> 00:00:44.095
 Select the group. Library releases support desired state for
 continuing group convergence. For an individual device, clear
 desired state and select that device instead.
 
 6
-00:00:38.650 --> 00:00:43.471
+00:00:44.690 --> 00:00:49.511
 Review and approve the deployment. Device clients will process
 it when they are ready.
 
 7
-00:00:46.330 --> 00:00:51.663
+00:00:52.370 --> 00:00:57.703
 The deployment is created. That confirms your request, rather
 than a completed installation.
 
 8
-00:00:52.250 --> 00:00:58.159
+00:00:58.290 --> 00:01:04.199
 Open Deployments after the client has processed the update.
 Check the result reported by the device.
 
 9
-00:00:58.770 --> 00:01:05.959
+00:01:04.810 --> 00:01:11.999
 Applied means the device completed its configured installer. It
 does not establish that a long-running service is healthy.
 
 10
-00:01:06.570 --> 00:01:13.546
+00:01:12.610 --> 00:01:19.586
 Applied confirms the device completed its installer. Check
 device health separately before expanding your deployment.
