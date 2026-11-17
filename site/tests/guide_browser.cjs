@@ -1,5 +1,6 @@
 // Full guide navigation against the built site, real CSP, recordings and responsive layout.
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),http=require('node:http'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
+const captionText=require('./caption_text.cjs');
 const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/node_modules/playwright');
 (async()=>{
  const repo=path.resolve(__dirname,'../..'),temporary=process.argv[2]?null:await fs.mkdtemp(path.join(os.tmpdir(),'suifleet-guide-'));
@@ -127,7 +128,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
     const spoken=recording.narration.cues[i];
     assert.ok(Math.abs(cue.start-spoken.speech_start)<0.0011);
     assert.ok(Math.abs(cue.end-spoken.speech_end)<0.0011);
-    assert.equal(cue.text.replace(/\s+/g,' ').trim(),spoken.text);
+    assert.equal(captionText(cue.text),spoken.text);
    });
   }
   await player.focus();await captionsPage.keyboard.press('Space');

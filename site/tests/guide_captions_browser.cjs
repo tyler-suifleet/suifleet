@@ -1,7 +1,10 @@
 // Read-only acceptance of every published guide player. No wallet or chain calls.
 const fs=require('node:fs/promises'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
+const captionText=require('./caption_text.cjs');
 const {appRequire}=require('../../scripts/frontend_test_utils.cjs'),{chromium}=appRequire('playwright');
 (async()=>{
+ assert.equal(captionText('post-\napply health'),'post-apply health');
+ assert.notEqual(captionText('post- apply health'),'post-apply health');
  let origin=process.argv[2],server;assert.ok(origin,'Supply the actual HTTPS origin or a built-site directory');
  if(!origin.startsWith('https://')){
   const root=path.resolve(origin),policy=(await fs.readFile(path.join(root,'_headers'),'utf8')).split('Content-Security-Policy: ')[1].split('\n')[0];
@@ -24,9 +27,16 @@ const {appRequire}=require('../../scripts/frontend_test_utils.cjs'),{chromium}=a
    await page.waitForFunction(id=>{const v=document.querySelector(`#${id} video`);return v.currentTime>.1&&v.textTracks[0].cues?.length>0},clip.step);
    assert.deepEqual(await v.evaluate(v=>[v.videoWidth,v.videoHeight]),[clip.width,clip.height]);
    const source=new URL(await v.evaluate(v=>v.currentSrc));const key=source.pathname.endsWith('.mp4')?'fallback':'file';assert.equal(source.searchParams.get('v'),clip[key+'_sha256'].slice(0,16));
-   const cues=await v.evaluate(v=>[...v.textTracks[0].cues].map(c=>c.text.replace(/\s+/g,' ').trim()));assert.deepEqual(cues,clip.narration.cues.map(c=>c.text));
-   await v.evaluate(v=>{v.textTracks[0].mode='showing';v.currentTime=v.textTracks[0].cues[0].startTime+.1});
-   await page.waitForFunction(id=>document.querySelector(`#${id} video`).textTracks[0].activeCues?.length===1,clip.step);
+   const cues=await v.evaluate(v=>[...v.textTracks[0].cues].map(c=>c.text));assert.deepEqual(cues.map(captionText),clip.narration.cues.map(c=>c.text));
+   // Seek every actual encoded cue, not just the first; verify native timing and text.
+   await v.evaluate(v=>{v.pause();v.textTracks[0].mode='showing'});
+   for(const [index,cue] of clip.narration.cues.entries()){
+    const time=(cue.speech_start+cue.speech_end)/2;
+    await v.evaluate(async(v,time)=>{await new Promise(resolve=>{v.addEventListener('seeked',resolve,{once:true});v.currentTime=time})},time);
+    await page.waitForFunction(({id,index})=>{const t=document.querySelector(`#${id} video`).textTracks[0];return t.activeCues?.length===1&&t.activeCues[0]===t.cues[index]}, {id:clip.step,index});
+    const actual=await v.evaluate((v,index)=>{const c=v.textTracks[0].cues[index];return [c.startTime,c.endTime]},index);
+    assert.ok(Math.abs(actual[0]-cue.speech_start)<.002&&Math.abs(actual[1]-cue.speech_end)<.002,clip.step+' cue '+index);
+   }
    await v.evaluate(v=>{v.textTracks[0].mode='disabled';v.pause()});assert.equal(await v.evaluate(v=>v.textTracks[0].mode),'disabled');
    if(manifest.tutorial_production){
     const cues=clip.narration.cues,action=cues.find(c=>c.kind.startsWith('action-'));
