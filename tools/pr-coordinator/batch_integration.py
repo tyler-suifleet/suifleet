@@ -54,6 +54,7 @@ class BatchController:
         self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
         self.installed = Path(installed) if installed is not None else Path(__file__).with_name('installed.json')
         self._installed_proofs = set()
+        self.obsolete_ci = ObsoleteBatchCI(coordinator, clock)
         self.db.execute('''CREATE TABLE IF NOT EXISTS shared_harness_incidents (
             project TEXT,batch_id TEXT,owner_ticket TEXT,manifest TEXT,error_hash TEXT,
             receipt TEXT,created REAL,PRIMARY KEY(project,batch_id))''')
@@ -1689,6 +1690,8 @@ class BatchController:
             for terminal in self.rows(project):
                 if terminal['status'] in TERMINAL:
                     self.cleanup_terminal(project, terminal)
+        if execute:
+            self.obsolete_ci.tick(project, self.rows(project))
         # Retry accepted-but-unfinished closures even after GitHub stops listing
         # the closed source. The durable receipt never manufactures merge state.
         self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
@@ -2399,3 +2402,113 @@ class SharedAcceptanceRepair:
         except Exception:
             self.record(project,episode,key,head,batch['base'],None,'launch_uncertain','inspect retained launch; no automatic replay')
             raise
+
+
+# These workflows were audited as offline. A filename alone does not establish
+# that property in a different repository; adding one needs an explicit audit.
+OBSOLETE_OFFLINE = {'tyler-suifleet/suifleet': frozenset((
+    '.github/workflows/ci.yml', '.github/workflows/move-security.yml'))}
+OBSOLETE_ACTIVE = frozenset(('queued', 'in_progress', 'waiting', 'pending', 'requested'))
+
+
+class ObsoleteBatchCI:
+    def __init__(self, coordinator, clock):
+        self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
+        self.db.execute('''CREATE TABLE IF NOT EXISTS obsolete_batch_ci (
+            project TEXT,batch_id TEXT,head TEXT,checked REAL,status TEXT,receipt TEXT,
+            PRIMARY KEY(project,batch_id))''')
+
+    def read(self, project, path):
+        return json.loads(self.c.gh(project, ['api', path]))
+
+    @staticmethod
+    def closed(project, batch, pr):
+        return (pr.get('number') == batch['pr'] and pr.get('state') == 'closed'
+                and not pr.get('merged_at')
+                and pr.get('head', {}).get('sha') == batch['head']
+                and pr.get('head', {}).get('ref') == batch['branch']
+                and pr.get('head', {}).get('repo', {}).get('full_name') == project['repository']
+                and pr.get('base', {}).get('repo', {}).get('full_name') == project['repository'])
+
+    @staticmethod
+    def obsolete(project, batch, run):
+        return (type(run.get('id')) is int and run['id'] > 0
+                and run.get('event') == 'pull_request'
+                and run.get('head_branch') == batch['branch']
+                and run.get('head_sha') == batch['head']
+                and run.get('repository', {}).get('full_name') == project['repository']
+                and run.get('head_repository', {}).get('full_name') == project['repository']
+                and run.get('path') in OBSOLETE_OFFLINE.get(project['repository'], ()))
+
+    def save(self, project, batch, status, receipt):
+        previous = self.db.execute('SELECT receipt FROM obsolete_batch_ci WHERE project=? AND batch_id=?',
+            (project['id'], batch['id'])).fetchone()
+        if previous:
+            old = json.loads(previous[0])
+            history = {r['run']: r for r in old.get('runs', [])}
+            for run in receipt.get('runs', []):
+                history[run['run']] = dict(history.get(run['run'], {}), **run)
+            receipt = dict(receipt, runs=list(history.values()))
+        self.db.execute('INSERT OR REPLACE INTO obsolete_batch_ci VALUES(?,?,?,?,?,?)',
+            (project['id'], batch['id'], batch['head'], self.clock(), status,
+             json.dumps(receipt, sort_keys=True)))
+
+    def tick(self, project, batches):
+        if project.get('repository') not in OBSOLETE_OFFLINE:
+            return
+        due = []
+        for batch in batches:
+            if (batch.get('status') != 'invalidated' or not batch.get('pr')
+                    or not re.fullmatch('[0-9a-f]{40}', batch.get('head') or '')
+                    or batch.get('branch') != 'integration/batch/' + batch['id']):
+                continue
+            row = self.db.execute('SELECT head,checked,status FROM obsolete_batch_ci '
+                'WHERE project=? AND batch_id=?', (project['id'], batch['id'])).fetchone()
+            if row and (row[0] != batch['head'] or row[2] == 'settled' or self.clock()-row[1] < 60):
+                continue
+            due.append((row[1] if row else 0, -batch.get('updated', 0), batch))
+        # Bound API work per pass and rotate retries behind uninspected batches.
+        for _, _, batch in sorted(due, key=lambda x: x[:2])[:4]:
+            try:
+                self.retire(project, batch)
+            except Exception as error:
+                self.save(project, batch, 'retry', {'error_type': type(error).__name__})
+                print(f"{project['id']} batch {batch['id']}: obsolete offline CI cleanup deferred "
+                      f"({type(error).__name__})", flush=True)
+
+    def retire(self, project, batch):
+        prefix = 'repos/' + project['repository']
+        pull = prefix + '/pulls/' + str(batch['pr'])
+        if not self.closed(project, batch, self.read(project, pull)):
+            # Do not settle a reopened/changed candidate: recheck on a later scan.
+            self.save(project, batch, 'retained', {'reason': 'candidate identity/state changed'})
+            return
+        path = prefix + '/actions/runs?branch=' + quote(batch['branch'], safe='') + '&event=pull_request&per_page=100'
+        pages = json.loads(self.c.gh(project, ['api', '--paginate', '--slurp', path]))
+        if not isinstance(pages, list) or any(not isinstance(p.get('workflow_runs'), list) for p in pages):
+            raise ValueError('invalid workflow run listing')
+        receipts, pending = [], False
+        for run in (r for page in pages for r in page['workflow_runs']):
+            if not self.obsolete(project, batch, run) or run.get('status') not in OBSOLETE_ACTIVE:
+                continue
+            endpoint = prefix + '/actions/runs/' + str(run['id'])
+            try:
+                fresh = self.read(project, endpoint)
+                if (fresh.get('id') != run['id'] or not self.obsolete(project, batch, fresh)
+                        or fresh.get('status') not in OBSOLETE_ACTIVE):
+                    continue
+                if not self.closed(project, batch, self.read(project, pull)):
+                    self.save(project, batch, 'retained', {'reason': 'candidate changed before cancellation'})
+                    return
+                self.c.gh(project, ['api', endpoint + '/cancel', '--method', 'POST'])
+                # A cancellation request is not completed cancellation. Re-read on
+                # later ticks until GitHub confirms a terminal run state.
+                pending = True
+                receipts.append({'run': run['id'], 'cancel_requested': True})
+            except Exception as error:
+                pending = True
+                receipts.append({'run': run['id'], 'error_type': type(error).__name__})
+        # Allow delayed workflow delivery for ten minutes after invalidation.
+        # Settled batches require no more API reads; manual reruns are operator work.
+        quiet = self.clock() - batch.get('updated', self.clock()) >= 600
+        self.save(project, batch, 'settled' if quiet and not pending else 'retry', {'runs': receipts})
