@@ -606,6 +606,11 @@ framework, fixture keys, verify-before-sign, effects and spend checks remain
 unchanged. Automatic exact-head/current-base testnet execution is still required;
 a successful read or pin update does not establish transaction compatibility.
 
+The same preflight refusal also affected PR #716 in
+[run 43958804251](https://github.com/tyler-suifleet/suifleet/actions/runs/43958804251);
+its independently integrated SF-279 repair uses the same verified pins. Neither
+failed preflight submitted a transaction.
+
 **SF-196 protocol-140 repair (2026-10-31).** The former 1.82.1 pin supports only
 139 and correctly refused current testnet before signing. The replacement is
 [testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0).
