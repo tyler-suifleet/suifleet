@@ -33,8 +33,13 @@ function audit() {
   try {
     let manifest = JSON.parse(fsSync.readFileSync(path.resolve(__dirname, "../manifests/fixture.localnet.json")));
     if (process.env.FLEET_TEST_NETWORK === "testnet") manifest = { ...manifest, network: "testnet", chain_identifier: "4c78adac" };
+    const cold = process.env.FLEET_TEST_COLD_START === "1";
+    if (cold) {
+      const catalog = JSON.parse(await fs.readFile("interfaces/fleet-v1.json", "utf8"));
+      for (const type of catalog.optional_type_origins.customer) manifest.type_origins[type] = manifest.call_package_id;
+    }
     const bundle = path.join(dir, "app.js");
-    await build({ entryPoints: [path.resolve(__dirname, "browser/onboarding-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") }, define: { "process.env": "{}", "process.env.NEXT_PUBLIC_ENOKI_API_KEY": JSON.stringify("enoki_public_fixture"), "process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID": JSON.stringify("fixture.apps.googleusercontent.com"), "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)), ACCEPTANCE_MANIFEST: JSON.stringify(manifest) }, logLevel: "warning" });
+    await build({ entryPoints: [path.resolve(__dirname, "browser/onboarding-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") }, define: { "process.env": "{}", "process.env.NEXT_PUBLIC_ENOKI_API_KEY": JSON.stringify("enoki_public_fixture"), "process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID": JSON.stringify("fixture.apps.googleusercontent.com"), "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)), COLD_START: JSON.stringify(cold), ACCEPTANCE_MANIFEST: JSON.stringify(manifest) }, logLevel: "warning" });
     // The application's real Tailwind stylesheet, so layout/contrast checks see production styles.
     const cssPath = path.resolve(__dirname, "../dapp/src/app/globals.css");
     const css = (await appRequire("postcss")([appRequire("@tailwindcss/postcss")({ base: path.resolve(__dirname, "../dapp") })]).process(await fs.readFile(cssPath, "utf8"), { from: cssPath })).css;
@@ -78,6 +83,46 @@ function audit() {
     if (manifest.network === "testnet") await page.waitForFunction(() => window.acceptance.wallets().includes("Sign in with Google"));
     else assert.equal(await page.evaluate(() => window.acceptance.wallets().includes("Sign in with Google")), false);
 
+    if (cold) {
+      assert.equal(await page.evaluate(() => window.acceptance.wallets().includes("Sign in with Google")), false);
+      await page.getByText("Public testnet evaluation:", { exact: false }).waitFor();
+      await layout("cold-signed-out");
+      await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
+      await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
+      await page.getByRole("button", { name: "Create default fleet", exact: true }).waitFor();
+      await page.getByText("Create your first fleet", { exact: true }).waitFor();
+      await page.getByText("No fleets yet", { exact: true }).waitFor({ state: "attached" });
+      assert.equal(await page.getByText("Restricted fleet content", { exact: true }).count(), 0);
+      await page.getByText("How to fund this address", { exact: true }).click();
+      await page.getByRole("link", { name: "official testnet faucet" }).waitFor();
+      await page.evaluate(() => window.acceptance.fund());
+      await page.getByRole("button", { name: "Refresh account and inventory" }).click();
+      await progress.getByText("Funds available", { exact: true }).waitFor();
+      await progress.getByText("Create a fleet", { exact: true }).waitFor();
+      await next.filter({ hasText: "Create a fleet using Create default fleet above" }).waitFor();
+      assert.equal(await progress.getByText("Checking inventory…", { exact: true }).count(), 0);
+      assert.equal(await page.getByText("Add funds to this account to enable registration.", { exact: true }).count(), 0);
+      assert.equal(await register.isDisabled(), true);
+      await page.getByRole("button", { name: "Create default fleet", exact: true }).click();
+      await page.getByRole("heading", { name: "Review fleet creation" }).waitFor();
+      assert.match(await page.locator("body").innerText(), /zero device capacity/);
+      assert.match(await page.locator("body").innerText(), /checkout is unavailable/);
+      assert.equal(await page.evaluate(() => window.acceptance.signCalls()), 0);
+      await layout("cold-connected-preview");
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      assert.equal(await page.evaluate(() => window.acceptance.signCalls()), 0);
+      await page.evaluate(() => window.acceptance.staleFleet(true));
+      await progress.getByText("Choose a fleet", { exact: true }).waitFor();
+      await next.filter({ hasText: "Choose an accessible fleet" }).waitFor();
+      assert.equal(await page.getByText("Create your first fleet", { exact: true }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "Create default fleet", exact: true }).count(), 0);
+      assert.equal(await register.isDisabled(), true);
+      await page.evaluate(() => window.acceptance.staleFleet(false));
+      await page.getByText("Create your first fleet", { exact: true }).waitFor();
+      assert.deepEqual(errors, []);
+      console.log("PASS: cold-start desktop/mobile signed-out, optional sign-in unavailable, connected-no-fleet funding/faucet, preview/cancel, capacity/reporting disclosures and restricted content gate; no signing");
+      return;
+    }
     // Disconnected: one clear next action, later steps honestly waiting, no advanced operations.
     await progress.getByText("Not connected", { exact: true }).waitFor();
     await next.filter({ hasText: manifest.network === "testnet" ? "Sign in with Google" : "Connect Slush" }).waitFor();
