@@ -112,4 +112,3 @@ class ObsoleteBatchCITests(unittest.TestCase):
             if args[1].endswith('/43'):return json.dumps(dict(self.run,id=43))
             return old(project,args)
         self.engine.c.gh=paged;self.tick();self.assertEqual([a[1] for a in self.canceled()],['repos/tyler-suifleet/suifleet/actions/runs/43/cancel'])
-
