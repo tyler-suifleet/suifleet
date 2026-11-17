@@ -50,6 +50,7 @@ Usage (make live-gate-package-upgrade sets these from the environment):
                           [--max-spend-mist N] [--evidence FILE]
 """
 import argparse
+from contextlib import ExitStack
 import copy
 import hashlib
 import json
@@ -552,6 +553,16 @@ def plain(value):
     return value
 
 
+# Public vocabulary mirrors sync_diagnostics.rs. Unknown labels are discarded.
+SYNC_STAGES = ('poll', 'recovery', 'reports', 'watch', 'manifest', 'authority',
+               'baseline', 'discovery', 'announcements', 'events', 'reconcile', 'journal', 'deferred')
+SYNC_CATEGORIES = ('timeout', 'rate-limited', 'unavailable', 'unauthorized',
+                   'not-found', 'invalid-argument', 'unimplemented', 'internal',
+                   'decode', 'missing-data', 'watch-batch', 'chain-mismatch',
+                   'authority', 'schema', 'history-pruned', 'event-stream',
+                   'integrity', 'tls', 'storage', 'other')
+
+
 def daemon_progress(journal, log):
     """Bounded public diagnostics: no raw log, configuration, cursor or error text."""
     try:
@@ -580,7 +591,8 @@ def daemon_progress(journal, log):
                        '429', 'SHA-256 mismatch')
             categories = [marker for marker in markers
                           if isinstance(error, str) and marker in error]
-            public[id] = dict(error_categories=categories, status=status if type(status) is int and status in (0, 1, 2) else None,
+            # Anonymous slots preserve bounded outcomes without exporting object IDs.
+            public[str(len(public))] = dict(error_categories=categories, status=status if type(status) is int and status in (0, 1, 2) else None,
                               reported=outcome.get('reported') is True, has_error=bool(outcome.get('error')))
     try:
         with log.open('rb') as stream:
@@ -593,7 +605,20 @@ def daemon_progress(journal, log):
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
                   'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
+    # Exact fixed tokens only; never copy a suffix or an unknown provider value.
+    import re
+    stages = {label: 0 for label in SYNC_STAGES}
+    errors = {label: 0 for label in SYNC_CATEGORIES}
+    for match in re.finditer(r'SUIFLEET_SYNC_V1 stage=([a-z-]+) categories=([a-z,-]+)(?=\s|$)', text):
+        stage, labels = match.groups()
+        if stage not in stages:
+            continue
+        stages[stage] += 1
+        for label in set(labels.split(',')):
+            if label in errors:
+                errors[label] += 1
     return dict(initialized=state.get('initialized') is True, outcomes=public,
+                sync_stages=stages, sync_error_categories=errors,
                 log_counts={name: text.count(name) for name in categories})
 
 
@@ -778,7 +803,7 @@ def run(args):
     cleanup = []
     cleanup_package = None
     try:
-        with tempfile.TemporaryDirectory(prefix="suifleet-live-upgrade-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="suifleet-live-upgrade-") as temporary, ExitStack() as diagnostics:
             root = Path(temporary)
             package_dir, pubfile = root / "package", root / "Pub.live.toml"
             staging = root / "base"; staging.mkdir()
@@ -1068,6 +1093,9 @@ def run(args):
             process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release/config.toml")},
                                        stdout=log, stderr=log)
             journal = root / "state" / "state.json"
+            # Run before TemporaryDirectory removes private files, on success or failure.
+            diagnostics.callback(lambda: evidence.__setitem__('daemon_progress',
+                daemon_progress(journal, root / 'daemon.log')))
             wait_for(lambda: journal.exists() and json.loads(journal.read_text()).get("initialized"), "daemon did not enroll", process)
             run_id = "live-" + uuid.uuid4().hex[:10]
 
