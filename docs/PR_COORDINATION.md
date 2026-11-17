@@ -1822,3 +1822,37 @@ A missing or damaged managed implementation receipt never uses this fallback.
 This provides process provenance only: independent exact-source/current-base
 acceptance and authenticated CI/security/testnet evidence are still required.
 Missing proof keeps ownership reserved; do not manufacture a process receipt.
+
+### Completed-source recovery and obsolete review notices
+
+A ticket can be locally Done while its GitHub/Project mirror is pending. The
+coordinator retries that exact completed owner/revision with the same bounded
+publication backoff used for Review, before retrying included-source closure.
+Completion retires the active claim token; retries bind the retained owner identity
+and revision, never resume the implementation or create a second completion.
+
+A newer current-main CI run can still block a previously accepted included source.
+If its macOS job never acquired a hosted runner, recovery may retry only that job
+using the existing exact runner-capacity annotations, empty steps/runner identity,
+per-head budget and durable POST intent. This path additionally requires the
+retained independently approved included-source receipt/snapshot, unchanged source
+and completed owner, and a fresh current-main reference before submission. Ordinary
+test failures, arbitrary cancellations and testnet runs are not retried by this path.
+
+Stopped failed review retries for closed terminal integration PRs are superseded
+only after matching wrapper/exit receipts, no runnable session helpers, two fresh
+matching remote reads, and an unchanged terminal batch record. A durable retirement
+proof is retained. Missing identities, timeout/signal outcomes, active workers,
+changed/reopened PRs and uncertain launch/publication state remain reserved. This
+cleanup changes no ticket, implementation claim, approval or acceptance result.
+
+Once an included source is already Done, unfinished PR/issue closure is metadata
+continuation rather than another implementation acceptance. The coordinator binds
+that continuation to the original retained accepted receipt, published independent
+review, original successful CI/testnet attempts and effects digest, retired claim
+and completion events, and unchanged owner/spec/source/feedback. Its accepted main
+and source must remain ancestors of current main. New same-byte CI producer IDs or
+later independently integrated main commits do not require another completion or
+approval. Fresh source/security/change-request guards still apply; unknown evidence
+fails closed. This path only closes the redundant source PR and linked issue. It
+cannot merge code, accept a changed source, resume a claim or waive release checks.

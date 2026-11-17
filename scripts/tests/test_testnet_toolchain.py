@@ -116,7 +116,7 @@ class ProtocolPreflight(unittest.TestCase):
         self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 140)
 
     def test_protocol142_refuses_old_pin_and_accepts_new_pin(self):
-        # Run 43974014003 stopped at this gate before any faucet/write.
+        # Runs 43974014003 (PR714) and 43958804251 (PR716) stopped before writes.
         facts = {'chain_identifier': '4c78adac', 'protocol_version': 142}
         old = dict(tc.NETWORK, version='sui 1.83.0-16d2dc1e05ed', max_protocol=140)
         with self.assertRaisesRegex(tc.Incompatible, r'142 exceeds.*support \(140\)'):
@@ -125,6 +125,7 @@ class ProtocolPreflight(unittest.TestCase):
         self.assertEqual(result['protocol_version'], 142)
         self.assertEqual(result['network_cli_max_protocol'], 142)
         self.assertEqual(result['build_cli_max_protocol'], 138)
+        self.assertTrue(result['build_cli_offline'])
 
     def test_newer_protocol_refused_before_writes(self):
         with self.assertRaisesRegex(tc.Incompatible, '143 exceeds'):
