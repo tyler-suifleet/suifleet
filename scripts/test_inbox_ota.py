@@ -194,7 +194,20 @@ def run(binary):
             # 3. Indexed group membership listed only by the inbox: no
             #    DeviceAddedToGroup event and no vector entry.
             sim.members[GROUP] = {DEVICE}
+            # SF-278 CI regression: legacy membership without its inbox
+            # migration cannot reveal group desired state when no membership
+            # events are retained. Indexing alone does not list the group.
+            sim.now_ms += 1000
+            sim.deploy("0x70c", groups=[GROUP], direct=False, announce=False)
+            sim.managed.add("0x70c")
+            sim.desired[GROUP] = (1, {"app-0x70c": "0x70c"})
+            settle()
+            assert GROUP not in state().get("groups", []), state()
+            assert outcome("0x70c") is None, state()
             sim.inbox["groups"] = [GROUP]
+            wait_for(lambda: outcome("0x70c") == 1,
+                     "migrated inbox membership did not reveal group desired state", process)
+            print("PASS: legacy group desired state is undiscoverable until membership is listed in the inbox")
             settle()
             sim.now_ms += 1000
             sim.deploy("0x702", groups=[GROUP], direct=False)
@@ -324,11 +337,11 @@ def run(binary):
             sim.now_ms += 1000
             sim.deploy("0x705", announce=False)
             wait_for(lambda: outcome("0x705") == 1, "unannounced deployment was not found by the event scan", process)
-            wait_for(lambda: len(sim.reports) == 8, "reports were not all delivered", process)
+            wait_for(lambda: len(sim.reports) == 9, "reports were not all delivered", process)
             stop()
             applied_runs = applied.read_text().splitlines()
-            assert len(applied_runs) == 8, applied_runs
-            assert {id for id, _ in sim.reports} == {"0x701", "0x702", "0x703", "0x704", "0x705", "0x707", "0x708", "0x709"}, sim.reports
+            assert len(applied_runs) == 9, applied_runs
+            assert {id for id, _ in sim.reports} == {"0x701", "0x702", "0x703", "0x704", "0x705", "0x707", "0x708", "0x709", "0x70c"}, sim.reports
             assert not sim.errors, sim.errors
             print("PASS: the event scan remains a safety net for unannounced deployments; each applied once")
     finally:

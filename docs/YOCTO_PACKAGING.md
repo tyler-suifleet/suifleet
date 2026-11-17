@@ -36,21 +36,19 @@ Other hosts/architectures need a deliberate profile change and validation.
 The local SuiFleet layer comes from this checkout. Archive its commit ID and
 any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
-`2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`: merged main with SF-082 encrypted
-fleet archives and SF-084 dashboard telemetry, on top of the SF-026
-launcher/daemon-update integration, the SF-053 device signing service and
-SF-022 Seal sessions, so the packaged `suifleet-signer` units, `signer.toml`,
-the provisioning script's `--key-holder` call and the archive codec match the
-binary. The SF-120 image built from it is recorded in
-[PI_IMAGE_REFRESH.md](PI_IMAGE_REFRESH.md); the SF-066 image used the earlier
-pin `d616fa16`, and older pins are described in
-[the SF-053 package rebuild](#sf053-package-rebuild). `nobranch=1` selects this exact immutable revision, never AUTOREV.
-The daemon crate version is `0.2.1`. It requires indexed gRPC `ListEvents`
-(Sui ≥ 1.81 in SF-004 tests). Packaging/offline checks do not establish
-real-chain OTA acceptance. The Cargo.lock SHA-256 is
-`310102d73d7644815fe05df24917c332136836d64dcff5f7ca35b44c63b2d937`.
+`b9bb2ef6210624d732ab2de2075ea1826e5300c1`: reviewed merged main, including
+client 0.2.3 required by the current Seal testnet evaluation manifest. The codec
+is rebuilt from that same revision. `nobranch=1` selects this immutable revision,
+never AUTOREV. Runtime manifest version rejection and signer separation remain
+enabled. The Cargo.lock SHA-256 is
+`c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6`.
 
-`suifleet-crates.inc` declares all 349 registry packages/versions and SHA-256 from
+See [SF-278 build evidence](validation/SF278.md) for this pin. Earlier SF-120,
+SF-066 and QEMU/image results below apply only to their recorded older sources;
+updating the recipe does not update an existing SD image or establish physical
+Pi acceptance.
+
+`suifleet-crates.inc` declares all 350 registry packages/versions and SHA-256 from
 that revision's Cargo.lock. BitBake fetches/unpacks them before compilation;
 Yocto's cargo class vendors them locally and passes `--frozen`. The recipe also
 sets `CARGO_NET_OFFLINE=true` and checks the lockfile digest before configure.
@@ -58,7 +56,7 @@ There is no compile-time crate download or `AUTOREV`.
 
 The bootable SD image profile, access provisioning and flashing instructions are
 in [PI_IMAGE.md](PI_IMAGE.md). Historical validation below remains tied to its
-recorded older sources; use the SF-066 image evidence for the current pin.
+recorded older sources; use the per-source evidence rather than attributing an older image to the current pin.
 
 To update: select a reviewed source revision, update `SRCREV`, run
 `bitbake -c update_crates suifleet`, and update `SUIFLEET_LOCK_SHA256` from that
@@ -194,7 +192,7 @@ checkout and refuses tracked modifications or another revision. It copies
 the license file of every npm package that esbuild compiled into the bundle
 into `THIRD_PARTY_LICENSES.txt`. It refuses any package without license
 metadata unless a reviewed license inventory covers it (below). Two builds of
-the pinned revision `2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f` produced
+the historical revision `2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f` produced
 byte-identical artifacts. Their bundle, WASM and manifest are byte-identical
 to those built from the earlier published SF-082 revision `ca002d39`. The
 bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and
@@ -267,7 +265,7 @@ requires the codec's provenance revision to equal the daemon's `build-info`.
 
 ### Updating the source pin
 
-The current pin is merged main after SF-082 and SF-084. To move it:
+The current pin is reviewed merged main with client 0.2.3. To move it:
 
 1. Select a reviewed main revision, and set `SRCREV` and
    `SUIFLEET_CRATE_VERSION` (checked against `suifleet-edge/Cargo.toml`).
@@ -278,7 +276,12 @@ The current pin is merged main after SF-082 and SF-084. To move it:
    `SUIFLEET_CODEC_SOURCE_REV`, the five SHA-256 values, `LICENSE` (printed
    by the packager) and the license `md5`. If `@mysten/walrus-wasm` changed,
    regenerate and review its license inventory first.
-4. Build the image in a build directory whose `bblayers.conf` names this
+4. Run `make test-yocto-packaging`. Its `check_yocto_profiles.py` guard checks
+   the recipe's packaged release against every `profiles/*/deployment.json`
+   edge range, including both inclusive minimum and exclusive maximum. New
+   evaluation profiles are picked up automatically. This complements the
+   recipe's source-version/lock verification; it does not replace a rebuild.
+5. Build the image in a build directory whose `bblayers.conf` names this
    reviewed checkout's `meta-suifleet`. Then run `inspect_pi_image.py`,
    `test_pi_binary.py`, `test_pi_codec.py` and `test_pi_archive.py`.
 
