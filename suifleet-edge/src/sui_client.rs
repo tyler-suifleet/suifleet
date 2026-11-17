@@ -1269,7 +1269,7 @@ impl SuiClient {
             async move { rpc.ledger_client().get_transaction(request).await }
         })
         .await
-        .map_err(status)?
+        .map_err(anyhow::Error::new)?
         .into_inner()
         .transaction
         .and_then(|t| t.checkpoint)
@@ -1375,7 +1375,21 @@ impl SuiClient {
                     .get(origin)
                     .cloned()
                     .ok_or_else(|| anyhow::anyhow!("membership origin publication unavailable"))?;
-                let checkpoint = self.transaction_checkpoint(&digest).await?;
+                let checkpoint = match self.transaction_checkpoint(&digest).await {
+                    Ok(checkpoint) => checkpoint,
+                    // Immutable packages outlive their publication transactions on
+                    // pruned nodes. Only the initial history scan may classify a
+                    // missing publication as pruned; the caller either resyncs
+                    // from inbox heads or fails closed. Never guess a checkpoint.
+                    Err(error) if error.downcast_ref::<tonic::Status>()
+                        .is_some_and(|s| s.code() == tonic::Code::NotFound) => {
+                        return Err(anyhow::Error::new(HistoryPruned {
+                            position: 0,
+                            lowest: info.lowest_available_checkpoint.unwrap_or(0),
+                        }));
+                    }
+                    Err(error) => return Err(error),
+                };
                 self.poll.lock().unwrap().membership_birth = Some(checkpoint);
                 checkpoint
             }
