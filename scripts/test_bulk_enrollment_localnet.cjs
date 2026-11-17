@@ -315,6 +315,8 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
       throw new Error(`status counts never showed ${expected.join(", ")}: ${await counts()}`);
     };
     const downloadFrom = async (button) => {
+      // SF-277: each credential download requires acknowledging it is the only copy.
+      if ((await button.textContent()).startsWith("Download credentials")) await page.getByRole("checkbox", { name: "I understand this download is the only copy of these credentials" }).check();
       const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
       return fs.readFile(await download.path());
     };
@@ -364,7 +366,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     const callsBefore = await page.evaluate(() => window.enrollment.calls()); // policy creation
     await page.evaluate(() => window.enrollment.reject(true));
     await page.getByRole("button", { name: "Run 1 pending transaction" }).click();
-    await page.getByRole("alert").filter({ hasText: "User rejected" }).waitFor();
+    await page.getByRole("alert").filter({ hasText: "Register and fund claims 1/1 was cancelled in your wallet." }).waitFor();
     await waitCounts(["Reserved: 4"]);
     assert.equal(await page.evaluate(() => window.enrollment.calls()), callsBefore + 1);
     await page.evaluate(() => window.enrollment.reject(false));
@@ -400,7 +402,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     stage = "browser: interrupted bind then resume";
     await page.evaluate(() => window.enrollment.reject(true));
     await page.getByRole("button", { name: "Run 1 pending transaction" }).click();
-    await page.getByRole("alert").filter({ hasText: "Name and group devices 1/1: User rejected" }).waitFor();
+    await page.getByRole("alert").filter({ hasText: "Name and group devices 1/1 was cancelled in your wallet." }).waitFor();
     await waitCounts(["Enrolled, naming: 3"]);
     await page.evaluate(() => window.enrollment.reject(false));
     await page.getByRole("button", { name: "Run 1 pending transaction" }).click();
