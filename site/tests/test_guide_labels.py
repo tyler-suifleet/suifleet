@@ -44,6 +44,18 @@ class GuideLabelsTest(unittest.TestCase):
             for obsolete in ('network budget', 'fleet budget'):
                 self.assertNotIn(obsolete, text.casefold(), name)
 
+    def test_current_dapp_surfaces_have_no_obsolete_budget_terms(self):
+        for directory in ('app', 'components'):
+            for path in sorted((ROOT / 'dapp/src' / directory).rglob('*')):
+                if path.suffix not in ('.ts', '.tsx'):
+                    continue
+                for number, line in enumerate(path.read_text().splitlines(), 1):
+                    # Developer comments are not customer-facing copy.
+                    if line.lstrip().startswith(('//', '/*', '*', '{/*')):
+                        continue
+                    with self.subTest(path=str(path.relative_to(ROOT)), line=number):
+                        self.assertNotRegex(line.casefold(), r'\b(?:network|fleet) budget\b')
+
     def test_recorded_snapshot_remains_digest_checked(self):
         manifest = build.load_json(ROOT / 'site/media/guide/videos.json')
         original = build.sha256
