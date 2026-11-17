@@ -8,8 +8,11 @@ from pathlib import Path
 import re
 import tempfile
 import unittest
+import sys
 
 ROOT = Path(__file__).parents[2]
+sys.path.insert(0, str(ROOT/'scripts'))
+import check_yocto_profiles as profiles
 LAYER = ROOT/'suifleet-edge/meta-suifleet'
 spec = importlib.util.spec_from_file_location('package_walrus_codec', ROOT/'scripts/package_walrus_codec.py')
 codec = importlib.util.module_from_spec(spec)
@@ -43,6 +46,39 @@ def fake_package(modules, store, name, version, license=None, files=()):
     for f in files:
         (root/f).write_text(f'{name} {f} text\n')
     return f'// dapp/node_modules/.pnpm/{store}/node_modules/{name}/dist/index.js\n'
+
+
+class ProfileCompatibilityTests(unittest.TestCase):
+    def test_all_shipping_profiles_accept_packaged_version(self):
+        profiles.check()
+
+    def test_original_drift_and_upper_boundary_are_rejected(self):
+        bounds = {'min': '0.2.3', 'max_exclusive': '0.3.0'}
+        for value in ['0.2.1', '0.2.2', '0.3.0', '1.0.0']:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                profiles.compatible(value, bounds)
+        for value in ['0.2.3', '0.2.10']:
+            profiles.compatible(value, bounds)
+
+    def test_prerelease_and_malformed_versions_fail_closed(self):
+        for value in ['0.2.3-rc.1', '0.2', '00.2.3', None]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                profiles.version(value)
+
+    def test_new_profile_is_checked_and_missing_bounds_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recipe = root/'suifleet-edge/meta-suifleet/recipes-edge/suifleet/suifleet_1.0.bb'
+            recipe.parent.mkdir(parents=True)
+            recipe.write_text('SUIFLEET_CRATE_VERSION = "0.2.3"\n')
+            with self.assertRaisesRegex(ValueError, 'no evaluation'):
+                profiles.check(root)
+            profile = root/'profiles/new-evaluation/deployment.json'
+            profile.parent.mkdir(parents=True)
+            for data in [{}, {'supported_clients': {'edge': {'min': '0.2.4', 'max_exclusive': '0.3.0'}}}]:
+                profile.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, 'new-evaluation'):
+                    profiles.check(root)
 
 
 class BundledLicenseTests(unittest.TestCase):
