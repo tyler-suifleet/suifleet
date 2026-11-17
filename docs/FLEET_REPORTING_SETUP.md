@@ -69,7 +69,7 @@ make edge-test
 make test-ota
 make dapp-typecheck
 make dapp-build
-# Disposable network-none chain with pinned 1.83.0 transaction/node CLI:
+# Disposable network-none chain with pinned 1.84.0 transaction/node CLI:
 SF247_REPORTING=1 make test-fleet-data-upgrade-localnet
 ```
 

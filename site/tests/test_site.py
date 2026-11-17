@@ -5,6 +5,7 @@
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -27,6 +28,32 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_guide_console_routes_and_labels_match_navigation(self):
+        navigation = (SITE.parent / 'dapp/src/components/ConsoleNavigation.tsx').read_text()
+        labels = dict(re.findall(r'href:\s*"([^"]+)"\s*,\s*label:\s*"([^"]+)"', navigation))
+        self.assertIn('/components', labels)
+        self.assertIn('/firmware', labels)
+        for step in build.load_json(SITE / 'guide/steps.json')['steps']:
+            route = '/' + step['console_route'].strip('/')
+            with self.subTest(step=step['id']):
+                self.assertIn(route, labels)
+                self.assertEqual(step['console_label'], labels[route])
+
+    def test_batch_enrollment_explains_download_gate_and_historical_footage(self):
+        step = next(s for s in build.load_json(SITE / 'guide/steps.json')['steps']
+                    if s['id'] == 'enroll-batch')
+        action = step['actions'][2]
+        acknowledgment = 'I understand this download is the only copy of these credentials'
+        self.assertIn(acknowledgment, action)
+        self.assertLess(action.index(acknowledgment), action.index('click Download credentials'))
+        self.assertIn('Tick', action)
+        notice = next(s for s in step['before'] if 'retained video' in s)
+        self.assertIn('before the download acknowledgment checkbox was added', notice)
+        self.assertIn('Follow the written checkbox step', notice)
+        guide = (self.out / 'guide/index.html').read_text()
+        self.assertIn(acknowledgment, guide)
+        self.assertIn(notice, guide)
+
     def test_lesson_production_requires_reviewed_source_hashes(self):
         manifest=build.load_json(SITE/'media/guide/videos.json')
         manifest['tutorial_production']={'source_sha256':{'site/guide/lessons.json':'0'*64},'assets_sha256':{}}
@@ -115,6 +142,23 @@ class SiteTest(unittest.TestCase):
                 summary = by_id[step_id]["summary"]
                 self.assertTrue(summary.startswith("Optional "), summary)
                 self.assertIn(summary, guide)
+
+    def test_first_device_route_and_private_prerequisite_order(self):
+        steps = build.load_json(SITE / 'guide/steps.json')['steps']
+        ids = [s['id'] for s in steps]
+        self.assertLess(ids.index('access-policy'), ids.index('publish-version'))
+        by_id = {s['id']: s for s in steps}
+        self.assertIn('First device:', by_id['sign-in']['summary'])
+        self.assertIn('Skip batch enrollment and staged rollout', by_id['sign-in']['summary'])
+        self.assertIn('unencrypted', by_id['publish-version']['summary'])
+        self.assertNotIn('A catalog version deploys once', ' '.join(by_id['deploy-group']['actions']))
+        self.assertIn('Library versions support', ' '.join(by_id['deploy-group']['actions']))
+        self.assertIn('Desired state supports groups only', ' '.join(by_id['deploy-group']['actions']))
+        self.assertIn('no unattended advancement', by_id['staged-rollout']['summary'])
+        self.assertIn('closing the browser stops coordination', ' '.join(by_id['staged-rollout']['actions']))
+        # Published lesson cards use the same sequence, including the moved policy.
+        lessons = build.load_json(SITE / 'guide/lessons.json')['lessons']
+        self.assertEqual([l['step'] for l in lessons], ids)
 
     def test_logo_download_preserves_transparency(self):
         for page in json.loads((SITE / "src" / "site.json").read_text())["pages"]:

@@ -968,6 +968,34 @@ class TeardownTests(unittest.TestCase):
         self.assertEqual((failure, chain.calls, kept, run.ledger.used), (None, [], False, 0))
 
 
+class SecurityDaemonDiagnosticsTests(unittest.TestCase):
+    def test_exit_evidence_contains_only_allowlisted_progress(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state-legacy"
+            state.mkdir()
+            (state / "state.json").write_text(json.dumps({
+                "initialized": True, "secret": "PRIVATE-CANARY",
+                "deployments": {"0x1": {"status": 1, "reported": False,
+                                         "error": "PRIVATE-CANARY"}}}))
+            (root / "daemon-legacy.log").write_text("transport error PRIVATE-CANARY")
+            live = Mock(evidence={"daemon_phase": "v3 receipt retry"})
+            live_upgrade_security.capture_daemon_progress(live, root, Mock(returncode=1))
+            self.assertEqual(live.evidence["daemon_exit_code"], 1)
+            self.assertEqual(live.evidence["daemon_progress"]["log_counts"]["transport error"], 1)
+            self.assertFalse(next(iter(live.evidence["daemon_progress"]["outcomes"].values()))["reported"])
+            self.assertNotIn("PRIVATE-CANARY", json.dumps(live.evidence))
+
+    def test_missing_runtime_and_diagnostic_failure_do_not_block_cleanup(self):
+        live = Mock(evidence={})
+        live_upgrade_security.capture_daemon_progress(live, Path("/nonexistent/runtime"), None)
+        self.assertFalse(live.evidence["daemon_progress"]["initialized"])
+        with patch.object(live_upgrade_security, "daemon_progress", side_effect=ValueError("PRIVATE-CANARY")):
+            live_upgrade_security.capture_daemon_progress(live, Path("/nonexistent/runtime"), None)
+        self.assertTrue(live.evidence["daemon_progress_unavailable"])
+        self.assertNotIn("PRIVATE-CANARY", json.dumps(live.evidence))
+
+
 class DaemonStartupTests(unittest.TestCase):
     """A daemon whose startup fails is killed and reaped before the error
     reaches the caller, which never receives its handle."""
@@ -1047,42 +1075,37 @@ class ShardedReceiptViewTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
 
 
-class CatalogDesiredStateTests(unittest.TestCase):
-    def migration(self, *, remaining=(), inbox_device="0xd", groups=None):
+class LegacyInboxTests(unittest.TestCase):
+    def fixture(self):
         run = Mock()
-        run.evidence = {}
-        run.created.return_value = ["0x123"]
-        run.object.side_effect = [
-            {"content": {"device_ids": list(remaining)}},
-            {"content": {"device_id": inbox_device,
-                         "groups": [live_common.dm.object_id("0xa")] if groups is None else groups}},
-        ]
-        transaction = Mock(return_value={"effects": "verified by Live.transaction"})
-        return run, transaction
+        manifest = {"type_origins": {"fleet_inbox::InboxKey": "0x1"}}
+        inbox = live_upgrade_security.dm.inbox_id("0x2", "0x1", "0x3")
+        run.created.return_value = [inbox]
+        objects = {
+            "0x4": {"content": {"device_ids": []}},
+            inbox: {"content": {"device_id": "0x3", "groups": [live_common.dm.object_id("0x4")]}}
+        }
+        run.object.side_effect = objects.__getitem__
+        return run, manifest, inbox, objects
 
-    def test_legacy_membership_migration_is_read_back_before_acceptance(self):
-        run, transaction = self.migration()
-        live_upgrade_security.migrate_membership(transaction, run, "0xp", "0xr", "0xc", "0xd", "0xa")
-        args = transaction.call_args.args
-        calls = [args[i + 1] for i, arg in enumerate(args) if arg == "--move-call"]
-        self.assertEqual(calls, ["0xp::device_group::index_members", "0xp::fleet_inbox::new_inbox",
-                                 "0xp::fleet_inbox::follow_group", "0xp::fleet_inbox::share_inbox"])
-        run.readable.assert_called_once_with("0x123")
-        self.assertEqual(run.object.call_args_list, [unittest.mock.call("0xa"), unittest.mock.call("0x123")])
-        self.assertEqual(run.evidence["membership_migration"], {"inbox": "0x123", "device": "0xd", "group": "0xa"})
-        run.check.assert_called_once()
+    def test_migrated_legacy_group_is_discoverable_at_derived_inbox(self):
+        run, manifest, _, _ = self.fixture()
+        live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
+        run.created.assert_called_once_with("effects", "::fleet_inbox::DeviceInbox")
 
-    def test_unmigrated_or_foreign_membership_never_reports_success(self):
-        for kwargs, message in [({"remaining": ["0xd"]}, "not fully indexed"),
-                                ({"inbox_device": "0xe"}, "another device"),
-                                ({"groups": []}, "missing from the device inbox")]:
-            with self.subTest(kwargs=kwargs):
-                run, transaction = self.migration(**kwargs)
-                with self.assertRaisesRegex(AssertionError, message):
-                    live_upgrade_security.migrate_membership(transaction, run, "0xp", "0xr", "0xc", "0xd", "0xa")
-                self.assertEqual(run.evidence, {})
-                run.check.assert_not_called()
+    def test_missing_migration_wrong_derivation_or_foreign_inbox_fails(self):
+        for defect in ("unindexed", "unfollowed", "foreign", "wrong_address"):
+            with self.subTest(defect=defect):
+                run, manifest, inbox, objects = self.fixture()
+                if defect == "unindexed": objects["0x4"]["content"]["device_ids"] = ["0x3"]
+                if defect == "unfollowed": objects[inbox]["content"]["groups"] = []
+                if defect == "foreign": objects[inbox]["content"]["device_id"] = "0x5"
+                if defect == "wrong_address": run.created.return_value = ["0x6"]
+                with self.assertRaises(AssertionError):
+                    live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
 
+
+class CatalogDesiredStateTests(unittest.TestCase):
     def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
         run = Mock()
         run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}

@@ -1,51 +1,54 @@
 WEBVTT
 
 1
-00:00:00.450 --> 00:00:07.490
-Groups let you update related devices together. We’ll choose a
-release, send it to a group, and check the device’s result.
+00:00:00.450 --> 00:00:10.050
+Deploy to your first device, or use a group for related devices.
+Individual devices need a one-shot deployment; groups can also
+keep a desired version.
 
 2
-00:00:08.090 --> 00:00:13.509
+00:00:10.650 --> 00:00:16.069
 In Devices, open Device groups. Create a group for the devices
 you want to manage together.
 
 3
-00:00:14.090 --> 00:00:19.274
+00:00:16.650 --> 00:00:21.834
 Use Manage to add devices. This example reuses a group that is
 already available.
 
 4
-00:00:19.890 --> 00:00:23.922
-In the library, choose Deploy this version for the release you
-want to send.
+00:00:22.450 --> 00:00:32.519
+In Software library, choose Deploy this version. The older
+recording calls the library Components and the next page Deploy
+component; it is now Deploy software.
 
 5
-00:00:24.530 --> 00:00:28.925
-Select the group. Desired state keeps this version requested for
-its members.
+00:00:33.130 --> 00:00:44.095
+Select the group. Library releases support desired state for
+continuing group convergence. For an individual device, clear
+desired state and select that device instead.
 
 6
-00:00:29.530 --> 00:00:34.351
+00:00:44.690 --> 00:00:49.511
 Review and approve the deployment. Device clients will process
 it when they are ready.
 
 7
-00:00:37.210 --> 00:00:42.543
+00:00:52.370 --> 00:00:57.703
 The deployment is created. That confirms your request, rather
 than a completed installation.
 
 8
-00:00:43.130 --> 00:00:49.039
+00:00:58.290 --> 00:01:04.199
 Open Deployments after the client has processed the update.
 Check the result reported by the device.
 
 9
-00:00:49.650 --> 00:00:56.839
+00:01:04.810 --> 00:01:11.999
 Applied means the device completed its configured installer. It
 does not establish that a long-running service is healthy.
 
 10
-00:00:57.450 --> 00:01:04.426
+00:01:12.610 --> 00:01:19.586
 Applied confirms the device completed its installer. Check
 device health separately before expanding your deployment.
