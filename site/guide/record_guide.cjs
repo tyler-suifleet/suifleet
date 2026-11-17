@@ -240,9 +240,9 @@ const STEPS = {
   },
 
   async fund(page, h) {
-    await h.caption("Choose Network budget in the sidebar.");
-    await h.click(h.sidebar("Network budget"));
-    await page.getByRole("heading", { name: "Network budget", exact: true }).waitFor();
+    await h.caption("Choose Device and storage budgets in the sidebar.");
+    await h.click(h.sidebar("Device and storage budgets"));
+    await page.getByRole("heading", { name: "Device and storage budgets", exact: true }).waitFor();
     await h.pause(1500);
     const amount = page.getByLabel(/^(Initial deposit|Deposit) \(SUI\)/);
     await h.caption("Enter a deposit in SUI. Devices draw report and storage fees from this budget, within your limits.");
@@ -329,9 +329,9 @@ const STEPS = {
   },
 
   async "publish-version"(page, h) {
-    await h.caption("Choose Components in the sidebar to publish software.");
-    await h.click(h.sidebar("Components"));
-    await page.getByRole("heading", { name: "Components", exact: true }).waitFor();
+    await h.caption("Choose Software library in the sidebar to publish software.");
+    await h.click(h.sidebar("Software library"));
+    await page.getByRole("heading", { name: "Software library", exact: true }).waitFor();
     await h.pause(1200);
     const setup = page.getByRole("button", { name: "Set up publishing", exact: true });
     const start = page.locator("#publish-heading");
@@ -410,9 +410,9 @@ const STEPS = {
     await h.pause(2000);
     await h.click(dialog.getByRole("button", { name: "×", exact: true }));
     await h.caption("In the component library, choose Deploy this version.");
-    await h.click(h.sidebar("Components"));
+    await h.click(h.sidebar("Software library"));
     await h.click(page.getByRole("heading", { name: `Version ${VERSION}`, exact: true }).locator("..").getByRole("link", { name: "Deploy this version" }));
-    await page.getByRole("heading", { name: "Deploy component", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Deploy software", exact: true }).waitFor();
     await h.caption("Select the group as the target. The desired-state option keeps this version requested for group members.");
     await h.click(page.getByRole("checkbox", { name: /^guide-pilot [1-9][0-9]* devices?$/ }));
     before = evidence.transactions.length;
@@ -475,8 +475,8 @@ const STEPS = {
     }
     await transactions(page, before, 1);
     await page.getByRole("status").filter({ hasText: "Settings saved. Devices apply them at their next check." }).waitFor({ timeout: 90000 });
-    await h.caption("Devices apply settings at their next check. Network budget holds their funds separately.");
-    await h.click(h.sidebar("Network budget"));
+    await h.caption("Devices apply settings at their next check. The Device and storage budgets page holds their funds separately.");
+    await h.click(h.sidebar("Device and storage budgets"));
     await h.pause(3000);
   },
 

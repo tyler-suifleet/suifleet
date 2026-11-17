@@ -1,6 +1,6 @@
 // SF-131: saving fleet settings on chain through SF-130's owner-only
 // fleet_settings::set. Saving is offered only when this deployment's manifest
-// records the settings type origins and the wallet holds a fleet budget's
+// records the settings type origins and the wallet holds a device operating budget's
 // owner cap; otherwise the page explains why and still prices the choices.
 import type { Transaction } from "@mysten/sui/transactions";
 import type { BudgetView } from "@/lib/fleet-budget";
@@ -17,6 +17,6 @@ export function settingsSaver(budget: Pick<BudgetView, "id" | "capId"> | undefin
   if (!settingsSupported(manifest)) {
     return { reason: "Saving settings is not available in this fleet configuration. Ask your administrator to enable it. You can still explore choices and estimates without changing devices." };
   }
-  if (!budget) return { reason: "Settings are stored on your fleet budget: create one on the Network budget page first." };
+  if (!budget) return { reason: "Settings are stored on your device operating budget: create one on the Device and storage budgets page first." };
   return { build: (settings) => buildSetFleetSettingsTx(budget.id, budget.capId, settings) };
 }

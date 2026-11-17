@@ -185,7 +185,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       assert.ok(await page.locator("#archiveRetentionDays-365").isDisabled());
       assert.match((await cells("archiveRetentionDays-365"))[1], /Not available on this network\. Choose a retention period of 53 days or less\./);
       // Network cost and the SuiFleet price are shown apart.
-      assert.match(await text("network-cost"), /paid from your fleet budget/);
+      assert.match(await text("network-cost"), /paid from your device operating budget/);
       assert.doesNotMatch(await text("network-cost"), /\$80\.00/);
       assert.match(await text("suifleet-price"), /Base \$80\.00; add-ons \$0/);
       assert.match(await text("suifleet-price"), /Activation \$100\.00 one-time/);
@@ -208,7 +208,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       await waitText("add-ons $120.00");
       const hourlyDeposit = await depositSui();
       assert.ok(hourlyDeposit > daily * 2, `hourly health needs a much larger deposit: ${daily} → ${hourlyDeposit}`);
-      assert.match(await text("deposit"), /Your fleet budget holds 0\.01 SUI; fleet storage holds 0 WAL/);
+      assert.match(await text("deposit"), /Your device operating budget holds 0\.01 SUI; your storage budget holds 0 WAL/);
       assert.match(await text("deposit"), /Short by [\d.]+ SUI and [\d.]+ WAL/);
       // Saving warns first and signs nothing.
       await page.getByRole("button", { name: "Save settings" }).click();
@@ -216,7 +216,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       assert.match(await page.getByRole("alert").first().textContent(), /You have not approved any changes yet/);
       assert.equal((await control()).signed.length, 0);
       assert.match(await text("saved"), /No settings saved yet/);
-      assert.deepEqual((await control()).settingsReads.slice(0, 1), [BUDGET], "the saved record is read from the fleet budget");
+      assert.deepEqual((await control()).settingsReads.slice(0, 1), [BUDGET], "the saved record is read from the device operating budget");
       // Changing a choice withdraws the warning; it must be checked again.
       await page.locator("#archiveIntervalMs-86400000").check();
       await page.waitForFunction(() => !document.body.textContent.includes("Not enough deposit for these settings"));

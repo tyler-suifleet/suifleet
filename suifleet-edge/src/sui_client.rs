@@ -1358,7 +1358,8 @@ impl SuiClient {
     /// Never replace an existing cursor or skip a pruned part of that history.
     async fn membership_start(&self) -> anyhow::Result<u64> {
         let info = self.service_info().await.map_err(status)?.into_inner();
-        if info.lowest_available_checkpoint.unwrap_or(0) == 0 {
+        let lowest = info.lowest_available_checkpoint.unwrap_or(0);
+        if lowest == 0 {
             return Ok(0);
         }
         let cached = self.poll.lock().unwrap().membership_birth;
@@ -1377,15 +1378,16 @@ impl SuiClient {
                     .ok_or_else(|| anyhow::anyhow!("membership origin publication unavailable"))?;
                 let checkpoint = match self.transaction_checkpoint(&digest).await {
                     Ok(checkpoint) => checkpoint,
-                    // Immutable packages outlive their publication transactions on
-                    // pruned nodes. Only the initial history scan may classify a
-                    // missing publication as pruned; the caller either resyncs
-                    // from inbox heads or fails closed. Never guess a checkpoint.
+                    // Immutable packages outlive their publication transactions.
+                    // On a pruned node that missing transaction leaves the full
+                    // membership history unavailable. Let the caller explicitly
+                    // recover from inbox/group heads, or fail closed without them.
+                    // Never reinterpret transport/auth/schema errors as pruning.
                     Err(error) if error.downcast_ref::<tonic::Status>()
-                        .is_some_and(|s| s.code() == tonic::Code::NotFound) => {
+                        .is_some_and(|status| status.code() == tonic::Code::NotFound) => {
                         return Err(anyhow::Error::new(HistoryPruned {
                             position: 0,
-                            lowest: info.lowest_available_checkpoint.unwrap_or(0),
+                            lowest,
                         }));
                     }
                     Err(error) => return Err(error),
