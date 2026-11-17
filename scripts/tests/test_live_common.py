@@ -1024,31 +1024,37 @@ class ShardedReceiptViewTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
 
 
-class CatalogDesiredStateTests(unittest.TestCase):
-    def test_legacy_group_discovery_is_verified_without_event_history(self):
-        device, group, inbox = (live_upgrade_security.dm.object_id(x) for x in ("0x11", "0x22", "0x33"))
-        manifest = {"call_package_id": "0x44", "type_origins": {"fleet_inbox::InboxKey": "0x55"}}
-        for fault in (None, "address", "device", "membership"):
-            with self.subTest(fault=fault):
-                run = Mock()
-                run.evidence = {}
-                run.created.return_value = [inbox if fault != "address" else "0x99"]
-                run.object.return_value = {"content": {"device_id": device if fault != "device" else "0x99",
-                                                       "groups": [group] if fault != "membership" else []}}
-                with patch.object(live_upgrade_security.dm, "inbox_id", return_value=inbox):
-                    if fault:
-                        with self.assertRaises(AssertionError):
-                            live_upgrade_security.prepare_group_discovery(run, manifest, "0x66", "0x77", device, group)
-                        self.assertNotIn("legacy_inbox", run.evidence)
-                        run.check.assert_not_called()
-                    else:
-                        live_upgrade_security.prepare_group_discovery(run, manifest, "0x66", "0x77", device, group)
-                        self.assertEqual(run.evidence["legacy_inbox"], inbox)
-                        calls = run.transaction.call_args.args
-                        self.assertLess(calls.index("0x44::fleet_inbox::new_inbox"), calls.index("0x44::fleet_inbox::follow_group"))
-                        self.assertLess(calls.index("0x44::fleet_inbox::follow_group"), calls.index("0x44::fleet_inbox::share_inbox"))
-                run.client.assert_not_called()  # No event-history lookup or replay.
+class LegacyInboxTests(unittest.TestCase):
+    def fixture(self):
+        run = Mock()
+        manifest = {"type_origins": {"fleet_inbox::InboxKey": "0x1"}}
+        inbox = live_upgrade_security.dm.inbox_id("0x2", "0x1", "0x3")
+        run.created.return_value = [inbox]
+        objects = {
+            "0x4": {"content": {"device_ids": []}},
+            inbox: {"content": {"device_id": "0x3", "groups": [live_common.dm.object_id("0x4")]}}
+        }
+        run.object.side_effect = objects.__getitem__
+        return run, manifest, inbox, objects
 
+    def test_migrated_legacy_group_is_discoverable_at_derived_inbox(self):
+        run, manifest, _, _ = self.fixture()
+        live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
+        run.created.assert_called_once_with("effects", "::fleet_inbox::DeviceInbox")
+
+    def test_missing_migration_wrong_derivation_or_foreign_inbox_fails(self):
+        for defect in ("unindexed", "unfollowed", "foreign", "wrong_address"):
+            with self.subTest(defect=defect):
+                run, manifest, inbox, objects = self.fixture()
+                if defect == "unindexed": objects["0x4"]["content"]["device_ids"] = ["0x3"]
+                if defect == "unfollowed": objects[inbox]["content"]["groups"] = []
+                if defect == "foreign": objects[inbox]["content"]["device_id"] = "0x5"
+                if defect == "wrong_address": run.created.return_value = ["0x6"]
+                with self.assertRaises(AssertionError):
+                    live_upgrade_security.verify_legacy_inbox(run, manifest, "effects", "0x2", "0x3", "0x4")
+
+
+class CatalogDesiredStateTests(unittest.TestCase):
     def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
         run = Mock()
         run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}

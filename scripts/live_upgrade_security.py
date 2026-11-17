@@ -55,31 +55,10 @@ from types import SimpleNamespace
 import deployment_manifest as dm
 from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, key_wallet,
                          plain, pending_key, recover_key, stage, start_daemon, stop_daemon, sweep, wait_for)
-from live_package_upgrade import contracts_digest, fixture_key, load_state, save_state
+from live_package_upgrade import activation_plan, contracts_digest, fixture_key, load_state, save_state
 import subprocess
 
 DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no identities.
-
-
-def prepare_group_discovery(live, manifest, registry, owner_cap, device, group):
-    """Migrate legacy membership to the inbox before pruned-history recovery.
-
-    Old-package add_device emits an event but cannot populate the new inbox.
-    A retained event stream is not a prerequisite for this fixture's catalog
-    acceptance: follow_group verifies current membership on chain instead.
-    """
-    package = manifest["call_package_id"]
-    inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device)
-    result = live.transaction("create legacy device inbox and follow group", "--move-call",
-        f"{package}::fleet_inbox::new_inbox", f"@{registry}", f"@{owner_cap}", "--assign", "inbox",
-        "--move-call", f"{package}::fleet_inbox::follow_group", "inbox", f"@{group}",
-        "--move-call", f"{package}::fleet_inbox::share_inbox", "inbox")
-    assert live.created(result, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
-    content = plain(live.object(inbox)["content"])
-    assert dm.object_id(content["device_id"]) == dm.object_id(device), "wrong inbox device"
-    assert content["groups"] == [dm.object_id(group)], "legacy group is missing from the inbox"
-    live.evidence["legacy_inbox"] = inbox
-    live.check("legacy group listed in the verified device inbox; discovery does not depend on retained membership events")
 
 
 def desired_state(live, group):
@@ -95,6 +74,16 @@ def desired_state(live, group):
             states.append(plain(value["content"])["value"])
     assert len(states) == 1, f"expected one DesiredKey field for {group}, found {len(states)}"
     return states[0]
+
+
+def verify_legacy_inbox(live, manifest, activated, registry, device, group):
+    """Fail acceptance if migrated membership cannot be discovered by inbox."""
+    inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device)
+    assert live.created(activated, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
+    assert plain(live.object(group)["content"])["device_ids"] == [], "legacy membership was not indexed"
+    fields = plain(live.object(inbox)["content"])
+    assert dm.object_id(fields["device_id"]) == dm.object_id(device), "inbox belongs to another device"
+    assert fields["groups"] == [dm.object_id(group)], "legacy group is not followed by the inbox"
 
 
 DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
@@ -244,12 +233,19 @@ def run(args):
             live.check("old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written")
 
             # 4. Activation, the real daemon (paying from the device's charged funding), revocation.
-            activated = transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
-                                         f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}")
+            # Preserve the base-created membership, then migrate its discovery
+            # hints through the verified head APIs. Current daemons discover
+            # groups from the inbox after their combined event cursor exists;
+            # legacy add_device alone does not populate that inbox.
+            label, _, activation, inboxes = activation_plan(
+                new, registry, device, group, live.operator, manifest["type_origins"])
+            activated = transaction(label, *activation)
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
             made["owner_cap"] = owner_cap
+            if inboxes:
+                verify_legacy_inbox(live, manifest, activated, registry, device, group)
+                live.check("legacy group indexed and followed by the device's derived inbox")
             live.readable(owner_cap)
-            prepare_group_discovery(live, manifest, registry, owner_cap, device, group)
             daemon, components = start_daemon(root, "legacy", manifest, f'[device]\nkeypair_path = "{key}"\n'
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
             d2 = live.created(transaction("deployment via head (after activation)",
