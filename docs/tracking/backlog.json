@@ -5166,8 +5166,8 @@
       "kind": "type:bug",
       "depends_on": [],
       "paths": [
-        "tools/pr-coordinator",
-        "docs/PR_COORDINATION.md"
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
       ],
       "resources": [],
       "description": "Invalidating an integration batch currently closes its PR but leaves queued/running offline GitHub Actions consuming runner capacity. Repeated base changes accumulate superseded CI and delay current candidates. Add durable bounded retry cleanup after invalidation and on later scans; authenticate the coordinator-owned closed same-repository PR, exact branch/head, workflow identity and run provenance before cancellation. Isolate per-run and per-batch transport failures. Never cancel live-wallet, release, hardware, mainnet, current source, reopened or unknown runs.",
