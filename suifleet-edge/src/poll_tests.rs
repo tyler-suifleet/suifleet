@@ -189,6 +189,7 @@ struct HistoryNode {
     starts: Arc<Mutex<Vec<u64>>>,
     package_reads: Arc<Mutex<u64>>,
     publication_reads: Arc<Mutex<u64>>,
+    publication_error: Arc<Mutex<Option<tonic::Code>>>,
 }
 #[tonic::async_trait]
 impl proto::ledger_service_server::LedgerService for HistoryNode {
@@ -239,6 +240,9 @@ impl proto::ledger_service_server::LedgerService for HistoryNode {
             sui_sdk_types::Digest::new([7; 32]).to_string()
         );
         *self.publication_reads.lock().unwrap() += 1;
+        if let Some(code) = *self.publication_error.lock().unwrap() {
+            return Err(tonic::Status::new(code, "publication unavailable"));
+        }
         let mut transaction = proto::ExecutedTransaction::default();
         transaction.checkpoint = Some(10);
         let mut response = proto::GetTransactionResponse::default();
@@ -275,6 +279,7 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         starts: Default::default(),
         package_reads: Default::default(),
         publication_reads: Default::default(),
+        publication_error: Default::default(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let sui = client(&format!("http://{}", listener.local_addr().unwrap()));
@@ -309,6 +314,28 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         .to_string()
         .contains("pruned"));
     assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
+
+    // Regression for run 43993156905: the package is present but its
+    // publication transaction has aged out. Expose HistoryPruned so the
+    // existing inbox-only recovery path can run; do not advance any cursor.
+    sui.poll.lock().unwrap().membership_birth = None;
+    *node.publication_error.lock().unwrap() = Some(tonic::Code::NotFound);
+    let error = sui.memberships(&None).await.err().unwrap();
+    assert!(error.downcast_ref::<HistoryPruned>().is_some());
+    assert_eq!(node.starts.lock().unwrap().len(), 2);
+    assert!(sui.transaction_checkpoint(&sui_sdk_types::Digest::new([7; 32]).to_string())
+        .await.err().unwrap().downcast_ref::<HistoryPruned>().is_none());
+    // A retained existing cursor requires no publication lookup at all.
+    sui.memberships(&Some(json!({"checkpoint": 12}))).await.unwrap();
+    assert_eq!(*node.starts.lock().unwrap(), [10, 10, 12]);
+    // Other RPC failures are not evidence of pruning.
+    *node.publication_error.lock().unwrap() = Some(tonic::Code::PermissionDenied);
+    assert!(sui.memberships(&None).await.err().unwrap()
+        .downcast_ref::<HistoryPruned>().is_none());
+    // An archival node's missing transaction is not a pruned-history claim.
+    node.floor.store(0, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(sui.membership_start().await.unwrap(), 0);
+
 }
 
 #[tokio::test]
