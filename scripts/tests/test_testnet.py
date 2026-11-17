@@ -66,10 +66,13 @@ class TrustTests(unittest.TestCase):
             log.write_text('SUIFLEET_SYNC_V1 stage=announcements categories=timeout,unavailable\n'
                            'SUIFLEET_SYNC_V1 stage=watch categories=other,PRIVATE-CANARY\n'
                            'SUIFLEET_SYNC_V1 stage=secret categories=timeout\n'
-                           'provider PRIVATE-CANARY 0xdead cursor password timeout\n')
+                           'provider PRIVATE-CANARY 0xdead cursor password timeout\n'
+                           'watch read failed for PRIVATE-CANARY: transport error\n')
             with log.open('a') as stream:
                 stream.write('SUIFLEET_SYNC_V1 stage=announcements categories=timeout,unavailable\n' * 49)
             diagnostic = daemon_progress(journal, log)
+            self.assertEqual(diagnostic['log_counts']['watch read failed for'], 1)
+            self.assertEqual(diagnostic['log_counts']['transport error'], 1)
             self.assertEqual(diagnostic['sync_stages']['announcements'], 50)
             self.assertEqual(diagnostic['sync_error_categories']['timeout'], 50)
             self.assertEqual(diagnostic['sync_error_categories']['unavailable'], 50)
