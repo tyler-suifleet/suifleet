@@ -1,0 +1,101 @@
+{
+  "source_check": {
+    "source": "b9bb2ef6210624d732ab2de2075ea1826e5300c1",
+    "lock_sha256": "c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6",
+    "registry_crates": 350,
+    "crate_version": "0.2.3"
+  },
+  "inspection": {
+    "build_info": {
+      "source_revision": "b9bb2ef6210624d732ab2de2075ea1826e5300c1",
+      "lock_sha256": "c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6",
+      "crate_version": "0.2.3"
+    },
+    "packaged_daemon_sha256": "8f05bb03fec63b214b09533488dc75c6c8f7111172d480cbac88e312862d2b56",
+    "binary_file": "ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /usr/lib/ld-linux-aarch64.so.1, BuildID[sha1]=64c3ef5d0638218eb43a96d2dd0320bd9a5781c0, for GNU/Linux 5.15.0, stripped",
+    "package_inputs_identical": true,
+    "no_baked_identity_enrollment_journal": true,
+    "no_dynamic_openssl": true
+  },
+  "binary_smoke": {
+    "binary_sha256": "8f05bb03fec63b214b09533488dc75c6c8f7111172d480cbac88e312862d2b56",
+    "fresh_identities_unique": true,
+    "build_info": {
+      "source_revision": "b9bb2ef6210624d732ab2de2075ea1826e5300c1",
+      "lock_sha256": "c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6",
+      "crate_version": "0.2.3"
+    },
+    "evaluation_manifests": [
+      "profiles/seal-testnet/deployment.json"
+    ],
+    "existing_identity_preserved": true,
+    "derived_address_matches": true,
+    "corrupt_identity_refused": true,
+    "private_keys_discarded": true,
+    "offline_manifest_client_compatibility": true,
+    "service_signer_key_holder": true,
+    "service_signer_self_update_refused": true,
+    "physical_boot_tested": false
+  },
+  "codec_smoke": {
+    "node": {
+      "path": "/usr/lib/suifleet/node/bin/node",
+      "version": "v22.22.2",
+      "sha256": "3159f9115ab4be7d318b7c28e946837a4dceb7f2b3c43232aa2f2e3852550b90"
+    },
+    "codec_manifest": {
+      "schema": 1,
+      "node": "22.22.2",
+      "sui": "2.36.0",
+      "walrus": "1.2.35",
+      "esbuild": "0.28.2",
+      "files": {
+        "walrus-device-codec.cjs": {
+          "bytes": 903131,
+          "sha256": "4bdf599f13185393ca20d89a8c8ba6330e96fe596fa4028d91ae9de76972d423"
+        },
+        "walrus_wasm_bg.wasm": {
+          "bytes": 358530,
+          "sha256": "649f85e5306ebb14e5d36b1edfdb03be5deef4b5e21c9ed06ca030b03b41335a"
+        }
+      }
+    },
+    "codec_source_revision": "b9bb2ef6210624d732ab2de2075ea1826e5300c1",
+    "checks": {
+      "malformed_request": {
+        "exit": 1,
+        "stderr": "Walrus codec operation failed"
+      },
+      "foreign_chain": {
+        "exit": 1,
+        "stderr": "Walrus codec operation failed"
+      },
+      "missing_wasm": {
+        "exit": 1
+      },
+      "corrupt_wasm": {
+        "exit": 1
+      }
+    },
+    "user_mode_qemu": true,
+    "physical_boot_tested": false,
+    "storage_node_write_tested": false
+  },
+  "schema_version": 1,
+  "profile": "kas/packaging.yml",
+  "build_result": {
+    "exit_code": 0,
+    "tasks": 2062,
+    "reused": 2004,
+    "package_qa": "passed"
+  },
+  "toolchain": {
+    "rustc": "1.98.1",
+    "cargo": "1.98.0",
+    "gcc": "13.4.0",
+    "qemu_user": "8.2.7"
+  },
+  "image_built": false,
+  "physical_tested": false,
+  "public_network_tested": false
+}
