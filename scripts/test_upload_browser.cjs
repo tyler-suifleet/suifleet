@@ -139,6 +139,8 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await restarted.addInitScript((entries) => { for (const [k, v] of entries) localStorage.setItem(k, v); }, storage);
     const reloaded = await restarted.newPage();
     await reloaded.goto(page.url());
+    // The direct-file panel starts collapsed on a fresh page; open it through the real UI.
+    await reloaded.getByText('Advanced: deploy a file directly', { exact: true }).click();
     await reloaded.getByRole('status').filter({ hasText: 'was submitted but never confirmed. Deploying again is paused' }).waitFor();
     assert.equal(await reloaded.getByRole('button', { name: 'I checked: it is not listed, allow deploying again' }).count(), 1);
     await restarted.close();
