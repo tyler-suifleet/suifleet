@@ -21,17 +21,32 @@ export interface LostCredentialPlan {
   unknown: string[];
 }
 
+/** Serials match case-insensitively, as in the planner below. */
+const serialKey = (serial: string) => serial.trim().toLowerCase();
+
+/** Split pasted serials, keeping the first spelling of each case-insensitive serial. */
 export function parseSerials(text: string): string[] {
-  return [...new Set(text.split(/[\s,;]+/).map((serial) => serial.trim()).filter(Boolean))];
+  const seen = new Map<string, string>();
+  for (const serial of text.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean)) {
+    if (!seen.has(serialKey(serial))) seen.set(serialKey(serial), serial);
+  }
+  return [...seen.values()];
 }
 
 export function planLostCredentials(views: EntryView[], serials: string[]): LostCredentialPlan {
   const plan: LostCredentialPlan = { revoke: [], release: [], enrolled: [], wait: [], blocked: [], unknown: [] };
-  const key = (serial: string) => serial.trim().toLowerCase();
+  // Each claim appears at most once: a repeated revoke_claim aborts the whole
+  // transaction, leaving every lost credential in it live.
+  const planned = new Set<string>();
+  const requested = new Set<string>();
   for (const serial of serials) {
-    const matches = views.filter((view) => key(view.entry.serial) === key(serial));
+    if (requested.has(serialKey(serial))) continue;
+    requested.add(serialKey(serial));
+    const matches = views.filter((view) => serialKey(view.entry.serial) === serialKey(serial));
     if (!matches.length) { plan.unknown.push(serial); continue; }
     for (const view of matches) {
+      if (planned.has(view.entry.claim)) continue;
+      planned.add(view.entry.claim);
       switch (view.status) {
         case "awaiting-device": case "unfunded": plan.revoke.push(view); break;
         case "unregistered": case "revoked": case "withdrawn": plan.release.push(view); break;

@@ -130,5 +130,14 @@ async function run(options) {
   assert.deepEqual(plan.wait.map((v) => v.entry.serial), ["SN-4"]);
   assert.deepEqual(plan.blocked.map((v) => v.entry.serial), ["SN-6"]);
   assert.deepEqual(plan.unknown, ["SN-9"]);
-  console.log("PASS: transaction stages (rejected, not submitted, executed failure, unconfirmed), definite-failure callbacks (including a pre-submission managed-fleet read failure), customer guidance without invented success, and lost-credential revoke/reissue planning");
+  // Mixed-case repeats of one serial yield one revoke per claim: a duplicate
+  // revoke_claim would abort the transaction and leave the claim live.
+  assert.deepEqual(recovery.parseSerials("SN-1 sn-1\nSn-1, SN-5 sn-5"), ["SN-1", "SN-5"]);
+  const repeated = recovery.planLostCredentials(views, recovery.parseSerials("SN-1 sn-1 SN-1"));
+  assert.deepEqual(repeated.revoke.map((v) => v.entry.claim), [views[0].entry.claim]);
+  // The planner deduplicates even when given unnormalized serial lists directly.
+  const direct = recovery.planLostCredentials(views, ["SN-1", "sn-1", " SN-1 ", "SN-9", "sn-9"]);
+  assert.equal(direct.revoke.length, 1); assert.deepEqual(direct.unknown, ["SN-9"]);
+  assert.equal(new Set(direct.revoke.map((v) => v.entry.claim)).size, direct.revoke.length);
+  console.log("PASS: transaction stages (rejected, not submitted, executed failure, unconfirmed), definite-failure callbacks (including a pre-submission managed-fleet read failure), customer guidance without invented success, and lost-credential revoke/reissue planning (including mixed-case repeat deduplication)");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
