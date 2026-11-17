@@ -628,7 +628,13 @@ def daemon_progress(journal, log):
                   'Unavailable', 'Unimplemented', 'ResourceExhausted',
                   'Invalid argument', 'Failed precondition', 'Out of range',
                   'Service was not ready', 'Operation is not implemented',
-                  'Resource exhausted')
+                  'Resource exhausted',
+                  'watch read failed for',
+                  'device has no registry identity', 'DeviceOwnerCap has no operator owner',
+                  'custody field has no fleet owner',
+                  'upstream connect error or disconnect/reset before headers',
+                  'transport error', 'Connection refused', 'connection reset',
+                  'Service Unavailable', 'Deadline expired')
     # Exact fixed tokens only; never copy a suffix or an unknown provider value.
     import re
     stages = {label: 0 for label in SYNC_STAGES}
