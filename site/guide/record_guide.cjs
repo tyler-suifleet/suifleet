@@ -310,6 +310,7 @@ const STEPS = {
     await h.click(page.getByRole("button", { name: "Check", exact: true }));
     await page.getByTestId("reservation-check").waitFor();
     await h.caption("Download the credentials: the only copy of the claim keys, for your factory provisioning media.");
+    await h.click(page.getByRole("checkbox", { name: "I understand this download is the only copy of these credentials" }));
     const download = page.waitForEvent("download");
     await h.click(page.getByRole("button", { name: /^Download credentials for 2 devices$/ }));
     const file = await download;
