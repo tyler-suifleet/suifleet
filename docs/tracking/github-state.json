@@ -1514,6 +1514,20 @@
       "id": 6429891898,
       "node_id": "I_kwDOSXKBE88AAAABf0BdOg",
       "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhJR-Wk"
+    },
+    "SF-270": {
+      "number": 703,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/703",
+      "id": 6429602353,
+      "node_id": "I_kwDOSXKBE88AAAABfzvyMQ",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhJRvkI"
+    },
+    "SF-279": {
+      "number": 734,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/734",
+      "id": 6433214380,
+      "node_id": "I_kwDOSXKBE88AAAABf3MPrA",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhJUv30"
     }
   }
 }
