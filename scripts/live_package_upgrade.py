@@ -604,7 +604,19 @@ def daemon_progress(journal, log):
     categories = ('Sync failed', 'Deployment schema rejected', 'Deployment finished', 'Apply admitted',
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
-                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
+                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded',
+                  # Fixed source diagnostics only. Never export arbitrary error,
+                  # provider response, object contents or surrounding log text.
+                  'watch read failed for', 'incomplete watch batch',
+                  'missing discovery fence', 'undecodable DeploymentCreated event',
+                  'undecodable DeviceAddedToGroup event',
+                  'event stream returned an unusable resume cursor',
+                  'combined discovery requires a migrated cursor',
+                  'device has no registry identity', 'DeviceOwnerCap has no operator owner',
+                  'custody field has no fleet owner',
+                  'upstream connect error or disconnect/reset before headers',
+                  'transport error', 'Connection refused', 'connection reset',
+                  'Service Unavailable', 'Deadline expired')
     # Exact fixed tokens only; never copy a suffix or an unknown provider value.
     import re
     stages = {label: 0 for label in SYNC_STAGES}
