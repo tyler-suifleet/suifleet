@@ -5156,6 +5156,29 @@
         "Preserve honest hosted-CI state; after merge, relevant CI/testnet runs use the upgraded verified transaction CLI and remaining failures receive bounded targeted repair."
       ],
       "validation": "Run scripts/tests/test_testnet_toolchain.py plus tracking validation/diff checks; verify SHA256/version of the actual pinned binary and read-only live-network compatibility. Record precise local versus hosted evidence. No mainnet, account transfers, secret changes or approval fabrication."
+    },
+    {
+      "key": "SF-280",
+      "title": "Automatically retire obsolete offline CI for invalidated integration batches",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Invalidating an integration batch currently closes its PR but leaves queued/running offline GitHub Actions consuming runner capacity. Repeated base changes accumulate superseded CI and delay current candidates. Add durable bounded retry cleanup after invalidation and on later scans; authenticate the coordinator-owned closed same-repository PR, exact branch/head, workflow identity and run provenance before cancellation. Isolate per-run and per-batch transport failures. Never cancel live-wallet, release, hardware, mainnet, current source, reopened or unknown runs.",
+      "evidence": "On 2026-11-16 five offline CI/Move-security runs for closed invalidated batch PRs730-733 remained in progress while current main CI queued; operator canceled them only after exact remote/database checks.",
+      "acceptance": [
+        "Invalidated batches automatically cancel only positively identified obsolete offline candidate runs, including queued runs.",
+        "Cleanup retries transient cancellation/read failures and reconciles interrupted outcomes without repeatedly scanning successfully retired batches.",
+        "Open/reopened, merged, foreign-repository, changed-head, live-wallet/release and unrecognized workflows remain untouched.",
+        "A cleanup error never prevents independent source review or integration progression; regression tests cover failure and race paths."
+      ],
+      "validation": "Run targeted cancellation/queue regression tests and full coordinator suite on actual combined main; tracking dry-run and diff checks. Merge under explicit local-test infrastructure policy, activate merged runtime and verify live retry/cancellation evidence without claiming hosted CI passed."
     }
   ]
 }
