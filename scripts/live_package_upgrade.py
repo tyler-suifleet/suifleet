@@ -457,8 +457,9 @@ def owner_of(client, object_id):
     return owner.get("AddressOwner") or ("custodied" if "ObjectOwner" in owner else ("shared" if "Shared" in owner else None))
 
 
-def fixture_alive(fixture, operator, client):
+def fixture_alive(fixture, operator, client, diagnostics=None):
     """Free reads: every cached object still exists with the expected owner."""
+    diagnostics = diagnostics if diagnostics is not None else []
     expected = {fixture["upgrade_cap"]: operator, fixture["device"]: "custodied",
                 fixture["owner_cap"]: operator,
                 fixture["device_cap"]: fixture["device_address"], fixture["group"]: "shared",
@@ -466,10 +467,12 @@ def fixture_alive(fixture, operator, client):
     for object_id, owner in expected.items():
         actual = owner_of(client, object_id)
         if actual is None or (owner in ("shared", "custodied") and actual != owner) or (owner not in ("shared", "custodied") and dm.object_id(actual) != dm.object_id(owner)):
+            diagnostics.append(dict(object_id=object_id, expected_owner=owner, actual_owner=actual))
             return False
     try:
         client("object", fixture["head_package"])  # Packages are immutable: existence is enough.
     except RuntimeError:
+        diagnostics.append(dict(object_id=fixture["head_package"], error="package read failed"))
         return False
     return True
 
@@ -605,18 +608,32 @@ def daemon_progress(journal, log):
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
                   'SHA-256 mismatch', 'Downloading blob', 'Downloaded',
-                  # Fixed source diagnostics only. Never export arbitrary error,
-                  # provider response, object contents or surrounding log text.
-                  'watch read failed for', 'incomplete watch batch',
-                  'missing discovery fence', 'undecodable DeploymentCreated event',
-                  'undecodable DeviceAddedToGroup event',
-                  'event stream returned an unusable resume cursor',
+                  # Fixed markers only: provider errors can contain private
+                  # configuration or response bodies. Keep enough structure to
+                  # diagnose a pre-discovery failure without exporting them.
+                  'incomplete watch batch', 'watch read failed',
+                  'missing discovery fence', 'missing discovery merge fence',
                   'combined discovery requires a migrated cursor',
+                  'event frame without watermark', 'event outside requested type',
+                  'unknown event query completion reason',
+                  'event index has not reached the cursor-merge checkpoint fence',
+                  'event stream ended without completion',
+                  'event stream frame without a resume cursor',
+                  'event stream returned an unusable resume cursor',
+                  'undecodable DeviceAddedToGroup event',
+                  'undecodable DeploymentCreated event',
+                  'undecodable head components', 'undecodable head component',
+                  'announced records have no baseline',
+                  'InvalidArgument', 'FailedPrecondition', 'OutOfRange',
+                  'Unavailable', 'Unimplemented', 'ResourceExhausted',
+                  'Invalid argument', 'Failed precondition', 'Out of range',
+                  'Service was not ready', 'Operation is not implemented',
+                  'Resource exhausted',
                   'device has no registry identity', 'DeviceOwnerCap has no operator owner',
                   'custody field has no fleet owner',
                   'upstream connect error or disconnect/reset before headers',
                   'transport error', 'Connection refused', 'connection reset',
-                  'Service Unavailable', 'Deadline expired')
+                  'Service Unavailable', 'Deadline expired', 'watch read failed for')
     # Exact fixed tokens only; never copy a suffix or an unknown provider value.
     import re
     stages = {label: 0 for label in SYNC_STAGES}
@@ -838,7 +855,11 @@ def run(args):
                 state, base_tree, head_tree, tools, evidence["toolchain"]["framework"])
             if fixture and args.fresh:
                 raise RuntimeError("verified bytecode already exists; fresh package republication is refused")
-            if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client)):
+            fixture_diagnostics = []
+            if fixture and not fixture.get("owner_cap"):
+                fixture_diagnostics.append(dict(error="cached fixture has no owner_cap"))
+            if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client, fixture_diagnostics)):
+                evidence["fixture_reconciliation"] = fixture_diagnostics
                 raise RuntimeError("cached fixture needs object reconciliation; immutable code is not republished")
             if fixture:
                 verify_publication(fixture, rpc_url, operator, client)

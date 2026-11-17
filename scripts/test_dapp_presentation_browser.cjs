@@ -72,7 +72,7 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
       return route.abort();
     });
     const base = `http://127.0.0.1:${server.address().port}`;
-    for (const width of [1440,390]) {
+    for (const width of [1440,390,320]) {
       await page.setViewportSize({width,height:1000});
       for (const route of routes) {
         await page.goto(base+route,{waitUntil:'networkidle'});
@@ -107,6 +107,22 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         assert.doesNotMatch(await renderedAttributes(page), INTERNAL, `${route}: no internal references in labels, titles or placeholders`);
         assert.equal(await page.locator('h1').count(),1,`${route}: one page title`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${route}: no page overflow at ${width}`);
+        if (width < 768) {
+          const menu = page.locator('details').filter({has: page.locator('summary', {hasText: 'All sections ·'})});
+          assert.equal(await menu.getAttribute('open'), null, 'mobile menu starts collapsed');
+          await menu.locator('summary').focus();
+          await page.keyboard.press('Enter');
+          assert.notEqual(await menu.getAttribute('open'), null, 'keyboard opens all sections');
+          const links = menu.locator('nav a');
+          assert.equal(await links.count(), 16, 'all console sections discoverable');
+          for (const link of await links.all()) {
+            assert.equal(await link.isVisible(), true);
+            assert.ok((await link.locator('span').last().textContent()).length > 20, 'each task explains its purpose');
+            assert.equal(await link.evaluate(el => el.getBoundingClientRect().right <= innerWidth), true, 'no horizontal scrolling to discover a section');
+          }
+        } else {
+          for (const link of await page.locator('nav[aria-label="Main"]:visible a').all()) assert.ok((await link.getAttribute('title')).length > 20);
+        }
         const current=page.locator('nav[aria-label="Main"]:visible [aria-current="page"]');
         assert.equal(await current.count(),1,`${route}: current navigation announced`);
         // Signed out, every fleet page names itself and asks for sign-in rather
@@ -120,7 +136,7 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         } else if (route !== '/get-started/') {
           const main = page.locator('main');
           await main.getByRole('heading',{name:'Sign in to continue',exact:true}).waitFor();
-          assert.equal((await page.locator('h1').textContent()).trim(),(await current.textContent()).trim(),`${route}: prompt titled for the page`);
+          assert.equal((await page.locator('h1').textContent()).trim(),(await current.evaluate(el => el.querySelector("span.font-semibold")?.textContent ?? el.textContent)).trim(),`${route}: prompt titled for the page`);
           assert.ok((await main.locator('header p').textContent()).trim().length>20,`${route}: one-line page description`);
           assert.doesNotMatch(await main.textContent(),/this account|this wallet|fleet configuration|unavailable|not loaded|Connect a wallet|Choose a fleet to continue/i,`${route}: no account or configuration wording while signed out`);
         } else {
@@ -169,7 +185,11 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
       assert.equal(await page.locator('footer [role="alert"]').count(),0);
       assert.equal(await page.getByRole('button',{name:'Unavailable action'}).isDisabled(),true);
       assert.equal(await page.getByText('Healthy',{exact:true}).isVisible(),true);
-      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      for (const picker of await page.locator('input[type="file"]').all()) {
+        assert.equal(await picker.evaluate(el => getComputedStyle(el).maxWidth), '100%', 'native file picker constrained across platform fonts');
+        assert.equal(await picker.evaluate(el => el.getBoundingClientRect().right <= innerWidth), true, `file picker fits at ${width}px`);
+      }
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false, `populated fixture: no overflow at ${width}px`);
       await page.getByRole('button',{name:'Clear diagnostic'}).click(); assert.equal(await page.locator('footer').count(),0);
     }
     assert.deepEqual(errors,[]);
