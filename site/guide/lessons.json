@@ -121,9 +121,9 @@
       "title": "Register your first device",
       "goal": "Connect a device\u2019s identity to a name you recognize.",
       "intro": "Registration connects a device to your fleet, so updates and reports belong to the right machine. Let\u2019s start with one device.",
-      "outro": "Your device is registered. Start its configured client and check for a report before treating it as online.",
+      "outro": "Your device is registered. Start its configured client and check for a report. For one device, skip batch enrollment; configure private access only if you need confidential delivery.",
       "result": "Device registered.",
-      "next": "Batch enrollment",
+      "next": "Optional setup or publish a version",
       "source_sha256": "4954e5bd72028e77fd3cd9fed0e17638174eaf9a5af2778c1775f9c0397e40a6",
       "actions": [
         {
@@ -153,10 +153,10 @@
       "step": "enroll-batch",
       "title": "Prepare a batch of devices",
       "goal": "Set up many devices without registering them one by one.",
-      "intro": "For larger fleets, prepare devices in a batch. Each device receives its own single-use setup credential before first boot.",
+      "intro": "Batch enrollment is optional for larger fleets. For one device, skip this lesson after registration. Each batch device receives its own single-use setup credential.",
       "outro": "The batch is prepared. Each device still needs its own credential and the configured client to enroll at first boot.",
       "result": "Batch prepared.",
-      "next": "Publish a release",
+      "next": "Optional private access",
       "source_sha256": "7a5e70eb5cbe58c3fda77cefe501cba0c379f0747eb1240096aa72ff4ef5508f",
       "actions": [
         {
@@ -193,6 +193,34 @@
       "recap": "Keep each device\u2019s credential secure until first boot."
     },
     {
+      "step": "access-policy",
+      "title": "Control private release access",
+      "goal": "Choose which devices can open confidential software.",
+      "intro": "For confidential software, set up private access before publishing. First create a group in Devices and add its members. Skip this lesson for the public example.",
+      "outro": "The access rule is saved. Use it when publishing a confidential release, and review membership as your fleet changes.",
+      "result": "Access configured.",
+      "next": "Publish a version",
+      "source_sha256": "90fa26999eaf993bfb4556a1c5b8d49185eb30a85aea7ce55236aeb147171e43",
+      "actions": [
+        {
+          "label": "Open Access policies",
+          "text": "Open Access policies before publishing confidential software. These rules control decryption, not fleet administration.",
+          "wait": false
+        },
+        {
+          "label": "Choose the allowed group",
+          "text": "Choose Group and select the intended group. Its membership determines which devices may request access keys.",
+          "wait": false
+        },
+        {
+          "label": "Understand revocation",
+          "text": "The grant is saved. Removing access stops future key requests; it cannot erase files that were already decrypted.",
+          "wait": false
+        }
+      ],
+      "recap": "Removing access cannot recall already decrypted files."
+    },
+    {
       "step": "publish-version",
       "title": "Publish a software release",
       "goal": "Prepare a version once, then deploy it where needed.",
@@ -203,8 +231,8 @@
       "source_sha256": "a317bbd6ef3ae25ba8a30f51404a8c51a06efecf9815128a3a0a0150914f23f2",
       "actions": [
         {
-          "label": "Open Components",
-          "text": "Choose Components to add a release to your software library.",
+          "label": "Open Software library",
+          "text": "Choose Software library to add a release. This older recording shows its previous name, Components; the publishing controls are the same.",
           "wait": false
         },
         {
@@ -219,7 +247,7 @@
         },
         {
           "label": "Choose who can read it",
-          "text": "Use Confidential for proprietary software. This demonstration uses a public file.",
+          "text": "Use Confidential for proprietary software and select the policy you created first. This demonstration uses a public, unencrypted file.",
           "wait": false
         },
         {
@@ -239,7 +267,7 @@
       "step": "deploy-group",
       "title": "Deploy to a device group",
       "goal": "Send one release to the devices that belong together.",
-      "intro": "Groups let you update related devices together. We\u2019ll choose a release, send it to a group, and check the device\u2019s result.",
+      "intro": "Deploy to your first device, or use a group for related devices. Individual devices need a one-shot deployment; groups can also keep a desired version.",
       "outro": "Applied confirms the device completed its installer. Check device health separately before expanding your deployment.",
       "result": "Verify the device result.",
       "next": "Roll out in stages",
@@ -257,12 +285,12 @@
         },
         {
           "label": "Choose a published version",
-          "text": "In the library, choose Deploy this version for the release you want to send.",
+          "text": "In Software library, choose Deploy this version. The older recording calls the library Components and the next page Deploy component; it is now Deploy software.",
           "wait": false
         },
         {
           "label": "Choose the target group",
-          "text": "Select the group. Desired state keeps this version requested for its members.",
+          "text": "Select the group. Library releases support desired state for continuing group convergence. For an individual device, clear desired state and select that device instead.",
           "wait": false
         },
         {
@@ -292,10 +320,10 @@
       "step": "staged-rollout",
       "title": "Roll out in stages",
       "goal": "Start with a small batch and control what happens next.",
-      "intro": "A gradual rollout lets you check a small batch before expanding. We\u2019ll prepare a plan and leave it paused until reporting is ready.",
-      "outro": "This plan is saved and paused, with devices still waiting. Check current reporting before approving the next step.",
+      "intro": "A gradual rollout is optional for larger fleets. Health gates run when you approve checks; each batch needs explicit operator advancement. This example leaves the plan paused.",
+      "outro": "This plan is saved and paused; no devices were admitted. Automatic health gates do not replace your explicit approvals for further progress.",
       "result": "Plan saved and paused.",
-      "next": "Control private access",
+      "next": "Choose fleet settings",
       "source_sha256": "ae5ccfbdd61a61b59a9f3483846bb2612c6f4212c87216214a7d21da4906abbe",
       "actions": [
         {
@@ -320,12 +348,12 @@
         },
         {
           "label": "Check before admitting devices",
-          "text": "Select the rollout. Check current device health before allowing the first devices to start.",
+          "text": "Select the rollout and waiting devices. Check device health and continue requires wallet approval. Admission does not prove a device is online.",
           "wait": false
         },
         {
           "label": "Recognize the waiting state",
-          "text": "Devices are still waiting in this example. Current reporting must be available before admission.",
+          "text": "Devices are still waiting here. After admission, signed post-apply health and observation gates control progression when you approve further checks.",
           "wait": false
         },
         {
@@ -335,39 +363,11 @@
         },
         {
           "label": "Continue when ready",
-          "text": "The plan is paused. Return when reporting is ready and explicitly approve further progress.",
+          "text": "The plan is paused. Resume when ready, then explicitly approve checks and each later batch. Closing the browser stops coordination.",
           "wait": false
         }
       ],
       "recap": "No devices were admitted in this paused example."
-    },
-    {
-      "step": "access-policy",
-      "title": "Control private release access",
-      "goal": "Choose which devices can open confidential software.",
-      "intro": "Private software needs an access policy. This controls who can open encrypted files, without giving them permission to administer your fleet.",
-      "outro": "The access rule is saved. Use it when publishing a confidential release, and review membership as your fleet changes.",
-      "result": "Access configured.",
-      "next": "Choose fleet settings",
-      "source_sha256": "90fa26999eaf993bfb4556a1c5b8d49185eb30a85aea7ce55236aeb147171e43",
-      "actions": [
-        {
-          "label": "Open Access policies",
-          "text": "Open Access policies before publishing confidential software. These rules control decryption, not fleet administration.",
-          "wait": false
-        },
-        {
-          "label": "Choose the allowed group",
-          "text": "Choose Group and select the intended group. Its membership determines which devices may request access keys.",
-          "wait": false
-        },
-        {
-          "label": "Understand revocation",
-          "text": "The grant is saved. Removing access stops future key requests; it cannot erase files that were already decrypted.",
-          "wait": false
-        }
-      ],
-      "recap": "Removing access cannot recall already decrypted files."
     },
     {
       "step": "fleet-settings",

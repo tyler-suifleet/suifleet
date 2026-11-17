@@ -26,6 +26,7 @@ The new device appears in your fleet. Registration and online
 status are different: the client still needs to report.
 
 6
-00:00:33.930 --> 00:00:40.266
+00:00:33.930 --> 00:00:45.429
 Your device is registered. Start its configured client and check
-for a report before treating it as online.
+for a report. For one device, skip batch enrollment; configure
+private access only if you need confidential delivery.
