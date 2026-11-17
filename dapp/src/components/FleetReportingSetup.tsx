@@ -50,7 +50,7 @@ export function FleetReportingSetup() {
   }
   return <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-5" aria-label="Reporting setup">
     <h3 className="font-semibold">Set up reporting and storage</h3>
-    <p>Each fleet has its own reporting and storage settings. Your administrator account approves setup once, and your wallet shows the network fee before approval. Storage starts empty; add storage funds in Network budget before uploading logs.</p>
+    <p>Each fleet has its own reporting and storage settings. Your administrator account approves setup once, and your wallet shows the network fee before approval. Storage starts empty; add storage funds in Device and storage budgets before uploading logs.</p>
     <p role="status">{query.isPending ? "Pending: checking reporting readiness…" : query.isError ? "Failed: readiness could not be verified." : query.data ? "Verified: this fleet’s reporting and storage settings." : "Not set up: this fleet has no verified reporting configuration."}</p>
     {query.error && <p role="alert">We could not verify reporting settings. Refresh to try again.</p>}
     <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching}>Refresh readiness</button>

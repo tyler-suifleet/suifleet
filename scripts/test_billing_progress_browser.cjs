@@ -4,8 +4,9 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
 (async () => {
   const root = path.resolve(__dirname, '..'), entry = path.join(__dirname, 'browser/billing-progress.jsx');
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'manifests/fixture.localnet.json')));
+  manifest.network = 'testnet'; manifest.chain_identifier = '4c78adac';
   manifest.treasury_payee = '0x' + '9'.repeat(64);
-  manifest.subscription_coins = { USDC: { coin_type: '0x' + '8'.repeat(64) + '::usdc::USDC', decimals: 6 }, SUI: { coin_type: '0x' + '0'.repeat(63) + '2::sui::SUI', decimals: 9 } };
+  manifest.subscription_coins = { USDC: { coin_type: '0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC', decimals: 6 }, SUI: { coin_type: '0x' + '0'.repeat(63) + '2::sui::SUI', decimals: 9 } };
   const result = await build({ entryPoints: [entry], bundle: true, write: false, platform: 'browser', jsx: 'automatic', nodePaths: [path.join(root, 'dapp/node_modules')], alias: { '@': path.join(root, 'dapp/src') }, plugins: [{ name: 'billing-fixture', setup(b) {
     b.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useCurrentAccount|useFleetSelection|useFleetTransaction)|@\/lib\/subscription)$/ }, () => ({ path: entry }));
   } }], define: { 'process.env': '{}', 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST': JSON.stringify(JSON.stringify(manifest)) } });
@@ -18,6 +19,15 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     const css = (await appRequire('postcss')([appRequire('@tailwindcss/postcss')({ base: path.join(root, 'dapp') })]).process(await fs.readFile(cssPath, 'utf8'), { from: cssPath })).css;
     await page.route('http://fleet.test/**', r => r.fulfill({ contentType: 'text/html', body: '<meta name="viewport" content="width=device-width, initial-scale=1"><style>' + css + '</style><body class="p-4"><div id="root"></div></body>' }));
     await page.goto('http://fleet.test'); await page.addScriptTag({ content: result.outputFiles[0].text });
+    for (const width of [1440, 375]) {
+      await page.setViewportSize({ width, height: 667 });
+      assert.match(await page.getByRole('note').innerText(), /Your device operating budget is separate/);
+      assert.doesNotMatch(await page.getByRole('note').innerText(), /device device/);
+      const capacity = page.getByRole('heading', { name: 'Capacity plans' }).locator('..');
+      assert.match(await capacity.innerText(), /checkout and settings tariffs do not establish the all-in commercial offer/);
+      assert.equal(await capacity.getByRole('link', { name: 'Contact', exact: true }).getAttribute('href'), 'https://suifleet.io/contact/');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
     await page.getByLabel('Plan and payment coin').selectOption('0x' + '1'.repeat(64));
     async function visible(button, text) {
       const status = page.getByRole('status').filter({ hasText: text });

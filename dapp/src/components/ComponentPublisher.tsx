@@ -68,7 +68,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
         // Reject the delivery choice here, not after review starts uploading.
         if (delivery.mode === "confidential" && policies.isLoading) throw new Error("Access policies are still loading. Try again in a moment.");
         checkDelivery(delivery, policies.data ?? []);
-        if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+        if (fleetPaid && !fleet.store) throw new Error(`Storage budget is unavailable: ${fleet.reason ?? "unknown reason"}`);
       }
       setStep(next);
     } catch (e) { setError(String(e)); }
@@ -89,7 +89,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
       for (const row of rows) assertComponentRecipe(recipeFor(row, "pending", "0".repeat(64)));
       const protection = releaseProtection(client, delivery, policies.data ?? []);
       // Fleet-paid storage is never silently replaced by the publisher.
-      if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+      if (fleetPaid && !fleet.store) throw new Error(`Storage budget is unavailable: ${fleet.reason ?? "unknown reason"}`);
       if (period.error || !period.epochs || period.loading || period.price === undefined) throw Error(period.error ?? "Wait for the storage period and price");
       const store = fleetPaid ? period.fleetStore : period.publisherStore;
       const manifests = [], warnings: string[] = [], blobs: StorageInfo[] = [];
