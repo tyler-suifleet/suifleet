@@ -61,6 +61,27 @@ import subprocess
 DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no identities.
 
 
+def prepare_group_discovery(live, manifest, registry, owner_cap, device, group):
+    """Migrate legacy membership to the inbox before pruned-history recovery.
+
+    Old-package add_device emits an event but cannot populate the new inbox.
+    A retained event stream is not a prerequisite for this fixture's catalog
+    acceptance: follow_group verifies current membership on chain instead.
+    """
+    package = manifest["call_package_id"]
+    inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device)
+    result = live.transaction("create legacy device inbox and follow group", "--move-call",
+        f"{package}::fleet_inbox::new_inbox", f"@{registry}", f"@{owner_cap}", "--assign", "inbox",
+        "--move-call", f"{package}::fleet_inbox::follow_group", "inbox", f"@{group}",
+        "--move-call", f"{package}::fleet_inbox::share_inbox", "inbox")
+    assert live.created(result, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
+    content = plain(live.object(inbox)["content"])
+    assert dm.object_id(content["device_id"]) == dm.object_id(device), "wrong inbox device"
+    assert content["groups"] == [dm.object_id(group)], "legacy group is missing from the inbox"
+    live.evidence["legacy_inbox"] = inbox
+    live.check("legacy group listed in the verified device inbox; discovery does not depend on retained membership events")
+
+
 def desired_state(live, group):
     """Read the fixture's desired state through the supported CLI transport.
 
@@ -228,6 +249,7 @@ def run(args):
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
             made["owner_cap"] = owner_cap
             live.readable(owner_cap)
+            prepare_group_discovery(live, manifest, registry, owner_cap, device, group)
             daemon, components = start_daemon(root, "legacy", manifest, f'[device]\nkeypair_path = "{key}"\n'
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
             d2 = live.created(transaction("deployment via head (after activation)",
