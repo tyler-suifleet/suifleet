@@ -16,9 +16,32 @@ import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { fleet_handover_ProposedBcs } from "@/lib/fleet-protocol";
 import { MANIFEST, moveType } from "@/lib/deployment-manifest";
 import type { Transaction } from "@mysten/sui/transactions";
+import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
 
 const KINDS = ["Device administration", "Device group", "Update administration", "Remove delegated access", "Close enrollment policy"];
 const STATES = ["Awaiting recipient confirmation", "Confirmed; transfer in progress", "Cancelled", "Finished"];
+/** What a completed transfer step does, per resource kind (fleet_handover.move). */
+const EFFECTS = [
+  "Device control moves to the new administrator. You can no longer manage this device.",
+  "Group administration moves to the new administrator.",
+  "Update administration moves to the new administrator.",
+  "This delegated access is revoked permanently.",
+  "This enrollment policy is closed permanently; no more devices can enroll under it.",
+];
+type ReviewAction = "confirm" | "transfer" | "finish" | "cancel";
+type Review = { action: ReviewAction; handover: string; items: HandoverItem[] };
+const REVIEW_TITLES: Record<ReviewAction, string> = {
+  confirm: "Review before accepting",
+  transfer: "Review before transferring",
+  finish: "Review before finishing",
+  cancel: "Review before cancelling",
+};
+const APPROVE_LABELS: Record<ReviewAction, string> = {
+  confirm: "Accept in wallet",
+  transfer: "Approve transfer in wallet",
+  finish: "Finish in wallet",
+  cancel: "Cancel remaining work in wallet",
+};
 
 export default function HandoverPage() {
   const { supported } = useFleetSelection();
@@ -44,15 +67,18 @@ function LegacyHandoverPage() {
   const [error, setError] = useState("");
   const [digest, setDigest] = useState("");
   const [verifiedProposal, setVerifiedProposal] = useState("");
+  const [review, setReview] = useState<Review | null>(null);
+  const failure = useTransactionFeedback();
   const query = useQuery({ queryKey: ["handover", lookup], queryFn: () => readHandover(client, lookup), enabled: !!lookup });
   const h = query.data;
   const source = account?.address === h?.source;
   const recipient = account?.address === h?.recipient;
-  function submit(build: () => Transaction, proposedRecipient?: string) {
+  function submit(build: () => Transaction, proposedRecipient?: string, action = "The transfer request") {
     if (submitting.current) return;
     submitting.current = true;
     setVerifiedProposal("");
     setError("");
+    failure.clear();
     try {
       mutation.mutate({ transaction: build() }, {
         onSuccess: result => {
@@ -74,10 +100,22 @@ function LegacyHandoverPage() {
             setError("The request was recorded, but its transfer reference could not be verified. Do not create another request; ask your administrator to inspect the confirmation details.");
           } else if (lookup) void query.refetch();
         },
-        onError: failure => setError(failure.message),
-        onSettled: () => { submitting.current = false; },
+        onError: error => failure.report(error, action),
+        onSettled: () => { submitting.current = false; setReview(null); },
       });
-    } catch (failure) { submitting.current = false; setError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (error) { submitting.current = false; setReview(null); failure.report(error, action); }
+  }
+  const labelOf = (objectId: string) => resources.find(resource => normalizeSuiAddress(resource.objectId) === normalizeSuiAddress(objectId))?.label ?? `Reference ${objectId.slice(0, 10)}…`;
+  /** Approve exactly the reviewed snapshot, never a list refreshed after review. */
+  function approve(r: Review) {
+    const builders: Record<ReviewAction, [() => Transaction, string]> = {
+      confirm: [() => buildHandoverActionTx(r.handover, "confirm"), "Accepting the transfer"],
+      transfer: [() => buildHandoverStepsTx(r.handover, r.items), "The transfer"],
+      finish: [() => buildHandoverActionTx(r.handover, "finish"), "Finishing the transfer"],
+      cancel: [() => buildHandoverActionTx(r.handover, "cancel"), "Cancelling the transfer"],
+    };
+    const [build, action] = builders[r.action];
+    submit(build, undefined, action);
   }
   const pending: HandoverItem[] = h ? h.objects.flatMap((objectId, index) => h.completed[index] ? [] : [{ objectId, kind: Number(h.kinds[index]) }]) : [];
   return <div className="max-w-4xl space-y-6">
@@ -111,22 +149,49 @@ function LegacyHandoverPage() {
       {digest && <details className="text-xs"><summary>Confirmation details</summary><p className="break-all">Confirmed transaction: {digest}</p></details>}
       {verifiedProposal && <div className="rounded-lg bg-blue-50 p-3 text-sm"><p className="font-medium">Share this transfer reference with the new administrator</p><p className="mt-1 break-all font-mono text-xs">{verifiedProposal}</p><p className="mt-2 text-slate-600">They can connect their account and enter it below to review the request.</p></div>}
     </form>
-    <form className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-5" onSubmit={event => { event.preventDefault(); setLookup(id.trim()); }}>
+    <form className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-5" onSubmit={event => { event.preventDefault(); setReview(null); setLookup(id.trim()); }}>
       <input required aria-label="Transfer reference" className="border rounded p-2 flex-1" value={id} onChange={event => setId(event.target.value)} placeholder="Transfer reference" />
       <button disabled={!transferSupported} className="border rounded px-3">Review transfer</button>
     </form>
     {(error || query.error) && <p role="alert" className="text-red-700">{error || query.error?.message}</p>}
+    <TransactionFeedback feedback={failure.feedback} onDismiss={failure.clear} />
     {h && <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
       <h2 className="font-semibold">Review and complete the transfer</h2>
       <p>{STATES[h.state]} · Expires {new Date(Number(h.expires_ms)).toLocaleString()}</p>
       <p className="break-all">Current administrator: {h.source}<br />New administrator: {h.recipient}</p>
       <table className="w-full text-sm"><thead><tr><th>Resource type</th><th>Resource</th><th>Progress</th></tr></thead><tbody>{h.objects.map((object, index) => <tr key={object}><td>{KINDS[Number(h.kinds[index])]}</td><td><details><summary>{resources.find(resource => normalizeSuiAddress(resource.objectId) === normalizeSuiAddress(object))?.label ?? `Reference ${object.slice(0, 10)}…`}</summary><p className="break-all text-xs">{object}</p></details></td><td>{h.completed[index] ? "Completed" : "Pending"}</td></tr>)}</tbody></table>
-      <div className="flex flex-wrap gap-2">
-        <button disabled={!recipient || h.state !== 0 || mutation.isPending} className="border rounded px-3 py-2" onClick={() => submit(() => buildHandoverActionTx(lookup, "confirm"))}>Accept as new administrator</button>
-        <button disabled={!source || h.state !== 1 || !pending.length || mutation.isPending} className="border rounded px-3 py-2" onClick={() => submit(() => buildHandoverStepsTx(lookup, pending.slice(0, 16)))}>Transfer next {Math.min(pending.length, 16)} resources</button>
-        <button disabled={!(source || recipient) || h.state !== 1 || !!pending.length || mutation.isPending} className="border rounded px-3 py-2" onClick={() => submit(() => buildHandoverActionTx(lookup, "finish"))}>Finish transfer</button>
-        <button disabled={!(source || recipient) || h.state > 1 || mutation.isPending} className="border rounded px-3 py-2" onClick={() => submit(() => buildHandoverActionTx(lookup, "cancel"))}>Cancel remaining work</button>
-      </div>
+      {!review && <div className="flex flex-wrap gap-2">
+        <button disabled={!recipient || h.state !== 0 || mutation.isPending} className="border rounded px-3 py-2" onClick={() => { failure.clear(); setReview({ action: "confirm", handover: lookup, items: pending }); }}>Accept as new administrator</button>
+        <button disabled={!source || h.state !== 1 || !pending.length || mutation.isPending} className="border rounded px-3 py-2" onClick={() => { failure.clear(); setReview({ action: "transfer", handover: lookup, items: pending.slice(0, 16) }); }}>Transfer next {Math.min(pending.length, 16)} resources</button>
+        <button disabled={!(source || recipient) || h.state !== 1 || !!pending.length || mutation.isPending} className="border rounded px-3 py-2" onClick={() => { failure.clear(); setReview({ action: "finish", handover: lookup, items: [] }); }}>Finish transfer</button>
+        <button disabled={!(source || recipient) || h.state > 1 || mutation.isPending} className="border rounded px-3 py-2" onClick={() => { failure.clear(); setReview({ action: "cancel", handover: lookup, items: pending }); }}>Cancel remaining work</button>
+      </div>}
+      {review && review.handover === lookup && <div role="region" aria-label={REVIEW_TITLES[review.action]} className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3 text-sm">
+        <h3 className="font-semibold">{REVIEW_TITLES[review.action]}</h3>
+        <dl className="grid gap-1 sm:grid-cols-[max-content_1fr] sm:gap-x-3">
+          <dt className="font-medium">From</dt><dd className="break-all font-mono text-xs">{h.source}</dd>
+          <dt className="font-medium">To (new administrator)</dt><dd className="break-all font-mono text-xs">{h.recipient}</dd>
+        </dl>
+        {review.action === "transfer" && <>
+          <p className="font-medium">These {review.items.length} resources move now. This cannot be undone here, and cancelling later does not return them:</p>
+          <ul className="list-disc space-y-1 pl-5">{review.items.map(item => <li key={item.objectId}><span className="font-medium">{labelOf(item.objectId)}</span> ({KINDS[item.kind]}): {EFFECTS[item.kind]}<span className="block break-all font-mono text-xs text-slate-500">{item.objectId}</span></li>)}</ul>
+          <p>{pending.length - review.items.length > 0 ? `${pending.length - review.items.length} resources remain for later batches.` : "No resources remain after this batch."} Only the new administrator can return transferred resources.</p>
+        </>}
+        {review.action === "finish" && <>
+          <p className="font-medium">All {h.objects.length} listed resources have been transferred to the new administrator. Finishing closes this request permanently.</p>
+          <p>Authority outside this list stays where it is. Check delegated access, unused enrollment permissions, software publishing, storage renewal and external credentials separately; moving device control does not rotate passwords or remove access to content already downloaded.</p>
+        </>}
+        {review.action === "confirm" && <>
+          <p className="font-medium">Accepting lets the current administrator transfer these {review.items.length} resources to your account:</p>
+          <ul className="list-disc space-y-1 pl-5">{review.items.map(item => <li key={item.objectId}>{labelOf(item.objectId)} ({KINDS[item.kind]})<span className="block break-all font-mono text-xs text-slate-500">{item.objectId}</span></li>)}</ul>
+          <p>Only accept a request you expected from this administrator.</p>
+        </>}
+        {review.action === "cancel" && <p>Cancelling stops the {review.items.length} unfinished transfers permanently. Resources already transferred stay with the new administrator; start a new request to move more.</p>}
+        <div className="flex flex-wrap gap-2">
+          <button disabled={mutation.isPending} className="rounded bg-blue-700 px-3 py-2 text-white hover:bg-blue-800 disabled:opacity-50" onClick={() => approve(review)}>{mutation.isPending ? "Waiting for wallet…" : APPROVE_LABELS[review.action]}</button>
+          <button disabled={mutation.isPending} className="rounded border px-3 py-2" onClick={() => setReview(null)}>Back</button>
+        </div>
+      </div>}
     </section>}
   </div>;
 }
