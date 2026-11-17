@@ -47,7 +47,19 @@ def main():
                   '[apply]\ncommand = "/usr/bin/false"\n'
                   f'[runtime]\nstate_dir = "{root / "state"}"\n')
         config.write_text(legacy)
-        assert '0.2.1 accepts' in run('--self-check', config).stdout
+        build_info = dict(line.split('=', 1) for line in
+                          (args.rootfs/'usr/share/suifleet/build-info').read_text().splitlines())
+        output = run('--self-check', config).stdout
+        assert f'suifleet {build_info["crate_version"]} ' in output and ' accepts this configuration' in output
+        # Check the actual packaged executable against every shipping profile,
+        # independently of the recipe/profile string guard.
+        checked_profiles = []
+        for profile in sorted((Path(__file__).parents[1]/'profiles').glob('*/deployment.json')):
+            manifest_path.write_text(profile.read_text())
+            assert ' accepts this configuration' in run('--self-check', config).stdout
+            checked_profiles.append(str(profile.relative_to(Path(__file__).parents[1])))
+        assert checked_profiles, 'no evaluation manifests checked'
+        manifest_path.write_text(json.dumps(manifest))
         assert run('--key-holder', config).stdout.strip() == 'suifleet'
         service = legacy.replace(f'keypair_path = "{keys[0]}"\n', '')
         service += '\n[device.signer]\nkind = "service"\nsocket = "/run/suifleet-signer/sign.sock"\n'
@@ -72,6 +84,7 @@ def main():
         assert corrupt.read_text() == 'invalid', 'corrupt key was silently replaced'
     assert hashlib.sha256(binary.read_bytes()).hexdigest() == before
     result = dict(binary_sha256=before, fresh_identities_unique=True,
+                  build_info=build_info, evaluation_manifests=checked_profiles,
                   existing_identity_preserved=True, derived_address_matches=True,
                   corrupt_identity_refused=True, private_keys_discarded=True,
                   offline_manifest_client_compatibility=True, service_signer_key_holder=True,

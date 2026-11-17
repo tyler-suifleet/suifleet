@@ -296,6 +296,7 @@ class IncludedSourcesTests(unittest.TestCase):
         f = self.f
         pr = self.prepare_acceptance()
         original_ticket = f.ticket
+        original_token = f.owners[0]['token']
         completions = []
         def ticket(project, command, key, *args):
             if command == 'complete':
@@ -322,6 +323,11 @@ class IncludedSourcesTests(unittest.TestCase):
                 f.controller.included_source(f.project, pr, f.owners[0])
             receipt = json.loads(f.db.execute('SELECT receipt FROM batch_included_sources').fetchone()[0])
             self.assertEqual(receipt['status'], 'included-source-accepted')
+            # A real Store retains the immutable accepted job and retired claim
+            # events required by the completed-metadata continuation.
+            from test_completed_checkpoints import retain_fixture_checkpoint
+            retain_fixture_checkpoint(f, original_token)
+            f.controller.included_checkpoint_evidence = lambda project, head, base, proof: proof
             self.assertEqual(f.controller.tick(f.project, [], f.owners, True), set())
         self.assertEqual(completions, ['T-1'])
         self.assertEqual(len(issue_attempts), 2)

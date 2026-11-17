@@ -25,6 +25,9 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    assert.equal(await page.getByRole('link', { name: 'Choose or publish a version' }).getAttribute('href'), '/components');
+    assert.equal(await page.getByPlaceholder('my-app', { exact: true }).isVisible(), false, 'direct file form is optional');
+    await page.getByText('Advanced: deploy a file directly', { exact: true }).click();
     // SF-194: after any validation alert the same file can be chosen again. A
     // browser only fires change for a different value, so each selection must
     // clear the input; re-selecting must then re-run validation.
@@ -69,6 +72,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.getByText(/same\.bin.*uploaded/).waitFor();
     // The main flow starts from a fresh page and fixture state.
     await page.reload();
+    await page.getByText("Advanced: deploy a file directly", { exact: true }).click();
     await page.getByPlaceholder('my-app', { exact: true }).fill('upload-test');
     await page.getByPlaceholder('1.0.0', { exact: true }).fill('1.0.0');
     await page.getByRole('radio').nth(1).check();

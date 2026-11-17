@@ -220,12 +220,12 @@ export default function FirmwarePage() {
     setter(next);
   }
 
-  if (!account) return <ConnectionRequired title="Deploy component" description="Choose software, select your devices and review an update before deploying." />;
+  if (!account) return <ConnectionRequired title="Deploy software" description="Choose software, select your devices and review an update before deploying." />;
 
   if (step === "done" && txDigest) {
     return (
       <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
-        <PageHeader title="Deploy component" />
+        <PageHeader title="Deploy software" />
         <div className="bg-white border border-gray-200 rounded p-8 text-center space-y-3">
           <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
             <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -261,17 +261,26 @@ export default function FirmwarePage() {
   }
 
   const steps: { key: Step; label: string }[] = catalogVersion ? [{ key: "deploy", label: "Targets & review" }] : [
-    { key: "artifact", label: "Artifact" },
-    { key: "recipe",   label: "Recipe" },
+    { key: "artifact", label: "Software file" },
+    { key: "recipe",   label: "Installation & runtime" },
     { key: "deploy",   label: "Target groups" },
   ];
 
   return (
     <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
-      <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Choose a software file, describe how to install or run it, and select the devices that should receive it."} />
+      <PageHeader title="Deploy software" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Choose a published version from your library, then select devices and review delivery."} />
 
+      {!catalogVersion && <section className="rounded border bg-white p-5 space-y-3" aria-label="Choose software">
+        <h2 className="font-semibold">Start with your software library</h2>
+        <p>Publish a version once, then choose Deploy on that version to select devices and review delivery. Publishing alone does not update devices.</p>
+        <Link href="/components" className="inline-block rounded bg-blue-600 px-4 py-2 text-white">Choose or publish a version</Link>
+        <p className="text-sm text-gray-600">Integrators can use the optional direct-file workflow below for a one-off deployment without a library entry.</p>
+      </section>}
       {catalogError && <p role="alert">{catalogError}</p>}
       {catalogVersion && <section aria-label="Published version review" className="rounded border bg-white p-4 space-y-2"><p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p><ol className="text-sm">{catalogVersion.manifests.map((m, i) => <li key={i}>{i + 1}. {m.os}/{m.arch}<ReleaseRecipeStorage recipeBlobId={m.recipeBlobId} recipeSha256={m.recipeSha256} /></li>)}</ol><p className="text-sm text-gray-500">Review targets below before submitting. Deployment requests delivery; installed and running state require device reports.</p><Link href="/components" className="text-sm text-blue-600">Back to software library</Link></section>}
+      <details open={catalogVersion ? true : undefined} key={catalogVersion?.objectId ?? "direct"}>
+      <summary className={catalogVersion ? "hidden" : "cursor-pointer rounded border p-4 font-semibold"}>Advanced: deploy a file directly</summary>
+      {!catalogVersion && <p className="my-3 text-sm">This workflow uploads a file and installation instructions for one deployment. It does not publish a reusable library version. Installer commands require explicit device configuration.</p>}
       {/* Step indicators */}
       <div className="flex items-center gap-2 text-sm">
         {steps.map((s, i) => (
@@ -325,10 +334,10 @@ export default function FirmwarePage() {
         </div>
         {selectedFile && step === "artifact" && <div className="text-sm"><p>Selected: {selectedFile.name}</p><button className="rounded border px-3 py-2" disabled={uploading || period.loading || !!period.error || period.price === undefined} onClick={() => handleFile(selectedFile)}>Upload selected artifact</button></div>}
         {artifact && (
-          <div className="bg-gray-50 border border-gray-200 rounded p-3 text-xs font-mono space-y-1">
+          <details className="bg-gray-50 border border-gray-200 rounded p-3 text-xs font-mono space-y-1"><summary>Uploaded file technical details</summary>
             <p><span className="text-gray-400">Artifact blob:</span> <span className="text-gray-700">{artifact.blobId}</span></p>
             <p><span className="text-gray-400">SHA-256:     </span> <span className="text-gray-700">{artifact.sha256}</span></p>
-          </div>
+          </details>
         )}
         {artifact && <StorageSummary label="Artifact storage" storage={artifact.storage} />}
       </Card>
@@ -387,7 +396,7 @@ export default function FirmwarePage() {
             </>
           )}
         </div>
-        <ConfigurationFields value={configuration} onChange={setConfiguration} disabled={step !== "recipe"} />
+        <details><summary>Advanced: configuration JSON and validation</summary><ConfigurationFields value={configuration} onChange={setConfiguration} disabled={step !== "recipe"} /></details>
         {step === "recipe" && (
           <button
             onClick={() => {
@@ -485,6 +494,7 @@ export default function FirmwarePage() {
           {deployPhase === "uploading" ? "Uploading recipe…" : deployPhase !== null || txPending ? "Deploying…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
         </button>
       </Card>
+      </details>
     </div>
   );
 }
