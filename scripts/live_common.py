@@ -119,10 +119,18 @@ def run_client_command(full, command):
     for attempt in range(5):
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
         diagnostic = result.stderr + result.stdout
-        if not (read_only and result.returncode and throttled(diagnostic) and attempt < 4):
+        if not (read_only and result.returncode and transient_read_failure(diagnostic) and attempt < 4):
             break
         time.sleep(5 * 2 ** attempt)
     return result
+
+
+def transient_read_failure(diagnostic):
+    """Known fullnode refusals/disconnects; only used for non-submitting calls."""
+    return throttled(diagnostic) or (
+        "the service is currently unavailable" in diagnostic.lower()
+        and "upstream connect error or disconnect/reset before headers" in diagnostic.lower()
+    )
 
 
 def throttled(diagnostic):

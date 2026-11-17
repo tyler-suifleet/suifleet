@@ -5107,6 +5107,78 @@
         "Meaningful offline regressions/full coordinator tests and normal PR handoff; install only reviewed merged code."
       ],
       "validation": "Run targeted provenance regressions and full offline coordinator suite; verify staged scope and Tyler authorship."
+    },
+    {
+      "key": "SF-270",
+      "title": "Recover completed-ticket publication and included-source CI waits",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Resolve verified coordinator gaps found during the owner-requested customer audit: SF-246 reached Done at revision12 with publication stuck at11, leaving approved included PR617/issue614 open; completed-source closure is then blocked by a newer same-head CI whose macOS job never acquired a hosted runner. Closed invalidated integration PR687/688 retain stopped retry jobs. Preserve current-main security/CI evidence and exact accepted-source authority. Retry pending Done mirrors before included-source closure, recognize narrowly authenticated current-main hosted-runner acquisition failures through existing bounded recovery, and retire only stopped obsolete closed review jobs with fresh remote and terminal-batch proof. Keep normal source/wallet/spending/release/hardware/mainnet protections unchanged.",
+      "evidence": "2026-11-16 actual SQLite/GitHub investigation: SF246 local12/published11, approved included acceptance job3968, CI43931104228 failed only job133523425081 cancelled before zero steps/no runner with exact GitHub hosted-capacity annotations. Supported publication retry and targeted runner rerun performed; no acceptance fabricated. Jobs3949/3950 reference closed invalidated PR687/688 and remain retry.",
+      "acceptance": [
+        "A completed ticket whose remote mirror fails is retried with bounded backoff and exact claim/revision checks before included-source closure; no duplicate completion or approval.",
+        "A current-main CI hosted-runner acquisition failure is eligible for the existing strict bounded job recovery only with authenticated current main/included-source evidence; test failures and arbitrary cancelled jobs remain blocked.",
+        "Closed/invalidated review retries are superseded only after exact process/helper stop and fresh matching remote/batch verification; uncertain workers remain reserved.",
+        "Regression tests reproduce all recovered failure modes and preserve failures for changed ownership, stale main, missing/altered acceptance and live processes.",
+        "Locally tested infrastructure is integrated under the user local-test policy with Tyler authorship, installed runtime provenance and verified issue/project reconciliation."
+      ],
+      "validation": "Coordinator regression suite on actual combined main candidate; offline tracking tests and dry run; exact receipt/source/CI/job proof and runtime/service checks. No hardware or chain writes required."
+    },
+    {
+      "key": "SF-279",
+      "title": "Restore testnet CI compatibility with protocol142",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "Dockerfile",
+        "scripts/sui_toolchain.py",
+        "scripts/tests/test_testnet_toolchain.py",
+        "docs/TESTNET.md"
+      ],
+      "resources": [],
+      "description": "Split the independently scoped protocol142 transaction-CLI repair from queue-recovery PR712 so the latter can use its local-test runtime integration lane. Public testnet advanced beyond the pinned1.83.0 transaction CLI max140, causing shared preflight failures on otherwise passing customer fixes. Preserve original repair commit9a5b7408, update only the transaction CLI pin/checksums/protocol limit to verified testnet-v1.84.0, and keep the release compiler/bytecode framework/wallet/spending protections unchanged. Integrate tested CI infrastructure under the existing user local-test policy, with exact main candidate evidence; do not invent hosted-CI success.",
+      "evidence": "Customer PR714 and related testnet/package-upgrade failures share protocol142 versus transaction CLI1.83.0 max140. Original repair9a5b7408 is preserved in PR712 history; its file changes are separated from runtime-core repair to avoid a scope-routing deadlock.",
+      "acceptance": [
+        "Dockerfile transaction CLI and NETWORK metadata agree with official release1.84.0, SHA256 identities and supported protocol142; unsupported143 still fails closed.",
+        "Release compiler/toolchain and all account/network/upgrade/spend verification remain unchanged.",
+        "Meaningful offline toolchain tests, binary identity validation and read-only protocol preflight pass on the actual combined main candidate; no testnet write is required to verify the pin itself.",
+        "Preserve honest hosted-CI state; after merge, relevant CI/testnet runs use the upgraded verified transaction CLI and remaining failures receive bounded targeted repair."
+      ],
+      "validation": "Run scripts/tests/test_testnet_toolchain.py plus tracking validation/diff checks; verify SHA256/version of the actual pinned binary and read-only live-network compatibility. Record precise local versus hosted evidence. No mainnet, account transfers, secret changes or approval fabrication."
+    },
+    {
+      "key": "SF-280",
+      "title": "Automatically retire obsolete offline CI for invalidated integration batches",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Invalidating an integration batch currently closes its PR but leaves queued/running offline GitHub Actions consuming runner capacity. Repeated base changes accumulate superseded CI and delay current candidates. Add durable bounded retry cleanup after invalidation and on later scans; authenticate the coordinator-owned closed same-repository PR, exact branch/head, workflow identity and run provenance before cancellation. Isolate per-run and per-batch transport failures. Never cancel live-wallet, release, hardware, mainnet, current source, reopened or unknown runs.",
+      "evidence": "On 2026-11-16 five offline CI/Move-security runs for closed invalidated batch PRs730-733 remained in progress while current main CI queued; operator canceled them only after exact remote/database checks.",
+      "acceptance": [
+        "Invalidated batches automatically cancel only positively identified obsolete offline candidate runs, including queued runs.",
+        "Cleanup retries transient cancellation/read failures and reconciles interrupted outcomes without repeatedly scanning successfully retired batches.",
+        "Open/reopened, merged, foreign-repository, changed-head, live-wallet/release and unrecognized workflows remain untouched.",
+        "A cleanup error never prevents independent source review or integration progression; regression tests cover failure and race paths."
+      ],
+      "validation": "Run targeted cancellation/queue regression tests and full coordinator suite on actual combined main; tracking dry-run and diff checks. Merge under explicit local-test infrastructure policy, activate merged runtime and verify live retry/cancellation evidence without claiming hosted CI passed."
     }
   ]
 }
