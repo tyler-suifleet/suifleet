@@ -1534,3 +1534,33 @@ testnet success, installed-runtime recovery or independent approval is claimed.
 The coordinator must obtain exact-head/base checks and fresh independent review.
 Deferred physical, manual-wallet, production-provider and mainnet acceptance
 remains unrun in SF-031/#32 and SF-087/#159 (production hosting in SF-042/#62).
+
+### Fixed daemon sync diagnostics (SF-281)
+
+On a failed poll the daemon emits `SUIFLEET_SYNC_V1` with a fixed `stage` and
+comma-separated fixed `categories`. The classifier inspects every anyhow cause,
+including causes hidden by an outer object-read context. Stage contexts preserve
+typed recovery/handoff errors. Labels are diagnostic hints, not a behavioral
+repair, proof of a provider fault or permission to replay a transaction.
+
+The package-upgrade harness exports `daemon_progress.sync_stages` and
+`sync_error_categories` counts from the last 64 KiB of its private daemon log.
+Both dictionaries have a fixed vocabulary; unknown tokens and all free-form
+messages are discarded. Outcome diagnostics use anonymous slots rather than
+object IDs. No cursor, configuration, key, endpoint or provider message is copied
+into these diagnostics. Counts describe only that bounded log tail, not a
+lifetime total; `other` and `poll` explicitly retain uncategorized failures.
+Raw logs and journals remain private. Existing allowance, authority, independent
+effects, fixture verification, cleanup and acceptance gates remain unchanged.
+One bounded instrumented testnet run must identify/reproduce the observed failure
+before proposing a behavioral fix; preserve a failed outcome rather than retrying
+blindly or treating labels as successful acceptance. Physical/manual-wallet,
+production-provider and actual-mainnet acceptance remains unrun in SF-031/#32
+and SF-087/#159.
+
+[SF-281 verification and instrumented run](validation/SF281.md) records the
+successful bounded current-source run and its limits: no sync failures occurred,
+so the historical PR716 convergence failure was not reproduced and no cause or
+behavioral repair is claimed. The linked sanitized evidence omits object IDs,
+provider messages and runtime configuration while retaining transaction digests,
+effects, gas and fixed-label counts.

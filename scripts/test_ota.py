@@ -589,6 +589,8 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 sim.identity = dict(sim.identity, revoked=True)
                 wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > failures,
                          "daemon did not reject the revoked identity", process)
+                assert 'SUIFLEET_SYNC_V1 stage=authority categories=' in (root / "daemon.log").read_text(), \
+                    "failed authority poll did not emit fixed diagnostics"
                 sim.add("0x10e")
                 polls = completed_polls(root / "daemon.log")
                 wait_for(lambda: completed_polls(root / "daemon.log") >= polls + 4,
