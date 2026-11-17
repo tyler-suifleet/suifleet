@@ -39,6 +39,21 @@ class SiteTest(unittest.TestCase):
                 self.assertIn(route, labels)
                 self.assertEqual(step['console_label'], labels[route])
 
+    def test_batch_enrollment_explains_download_gate_and_historical_footage(self):
+        step = next(s for s in build.load_json(SITE / 'guide/steps.json')['steps']
+                    if s['id'] == 'enroll-batch')
+        action = step['actions'][2]
+        acknowledgment = 'I understand this download is the only copy of these credentials'
+        self.assertIn(acknowledgment, action)
+        self.assertLess(action.index(acknowledgment), action.index('click Download credentials'))
+        self.assertIn('Tick', action)
+        notice = next(s for s in step['before'] if 'retained video' in s)
+        self.assertIn('before the download acknowledgment checkbox was added', notice)
+        self.assertIn('Follow the written checkbox step', notice)
+        guide = (self.out / 'guide/index.html').read_text()
+        self.assertIn(acknowledgment, guide)
+        self.assertIn(notice, guide)
+
     def test_lesson_production_requires_reviewed_source_hashes(self):
         manifest=build.load_json(SITE/'media/guide/videos.json')
         manifest['tutorial_production']={'source_sha256':{'site/guide/lessons.json':'0'*64},'assets_sha256':{}}

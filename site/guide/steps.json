@@ -109,12 +109,13 @@
       "console_label": "Enrollment",
       "summary": "Optional for larger fleets: enroll devices in batches instead of copying each public device address. Each device receives its own enrollment credential. Start with single-device registration for your first pilot.",
       "before": [
-        "A roster (CSV of names and serial numbers), or a single device to pair."
+        "A roster (CSV of names and serial numbers), or a single device to pair.",
+        "The retained video was captured before the download acknowledgment checkbox was added. Follow the written checkbox step below before downloading credentials in the current app."
       ],
       "actions": [
         "Choose Enrollment in the sidebar. Under 1. Enrollment batch policy, set a Quota and Valid for days, then click Create policy.",
         "Under 2. Reserve names and serial numbers, paste a roster CSV (or use Pair one device), optionally pick a Default group, and click Check.",
-        "Click Download credentials. This archive is the only copy of the claim keys. Keep it offline, put only each device’s own credential on its private provisioning media, and never include credentials in source control or a shared image. Delete the archive once devices have enrolled.",
+        "Tick “I understand this download is the only copy of these credentials”, then click Download credentials. This archive is the only copy of the claim keys. Keep it offline, put only each device’s own credential on its private provisioning media, and never include credentials in source control or a shared image. Delete the archive once devices have enrolled.",
         "Under 3. Register claims, click Run pending transactions and approve each transaction. Devices then enroll themselves with suifleet --enroll."
       ],
       "result": "Entries move from Reserved to Waiting for device, and to Enrolled when each device claims its record.",

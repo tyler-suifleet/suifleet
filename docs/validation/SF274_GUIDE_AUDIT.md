@@ -36,6 +36,16 @@ guide entry routes and checks their visible navigation labels, plus the two
 renamed page headings. It is signed-out and uses blocked/offline external
 responses; it does not establish connected-wallet or chain behavior.
 
+## Enrollment acknowledgment repair (PR #784 review)
+
+SF-277 adds a required **I understand this download is the only copy of these
+credentials** checkbox before **Download credentials** becomes enabled. The
+written batch-enrollment action now includes that acknowledgment before download.
+The retained batch-enrollment footage, narration and captions were captured before
+this checkbox existed; they do not demonstrate the acknowledgment. The published
+lesson prerequisites explicitly disclose this difference and direct viewers to
+the current written step. No media was re-recorded or relabelled as current.
+
 ## Original ten-stage source audit
 
 The original comparison used console source
@@ -48,7 +58,7 @@ are retained as historical evidence, not rerun results for this repair.
 | Capacity | Device allowance is separate from operating funds; review offer, prepay, apply due payment (`dapp/src/app/billing`, `docs/SUBSCRIPTIONS.md`). | Retain. Test tariff remains explicitly illustrative. |
 | Budget | Deposit pays device activity, not capacity or proof of online status (`dapp/src/app/budget`, `docs/FLEET_BUDGET.md`). | Retain. |
 | Register | Public address only; install/configure client separately and wait for a signed report (`dapp/src/app/devices`, `docs/INSTALL_DEVICE_CLIENT.md`). | Update next-step narration to make optional branches explicit. |
-| Batch enrollment | Optional alternative to individual registration; credentials remain secret, single-use and device-specific (`dapp/src/app/enrollment`, `docs/ENROLLMENT.md`). | Update optional introduction and next-step card. |
+| Batch enrollment | Optional alternative to individual registration; credentials remain secret, single-use and device-specific. Current download requires the only-copy acknowledgment checkbox (`dapp/src/app/enrollment`, `docs/ENROLLMENT.md`). | Update optional introduction and next-step card. Retained footage predates the checkbox; follow the current written acknowledgment step. |
 | Private access | Create group and membership first; grant decryption before confidential publication (`dapp/src/app/access/page.tsx`). Policy can also grant accounts/devices; the lesson deliberately demonstrates a group. | Move before publication; update prerequisite speech and next card. Existing capture reuses its group/policy. |
 | Publish | Confidential encrypts artifact and recipe; Public explicitly acknowledges unencrypted content. Policy and configured encryption service precede private upload (`ComponentPublisher.tsx`, `DeliveryFields.tsx`). Publication installs nothing. | Update policy prerequisite speech and lesson number. Public-file capture is retained with the explicit historical/current label mapping above. |
 | Deploy | Library and direct-upload flows both support group desired state. Individual devices require clearing desired state (`dapp/src/app/firmware/page.tsx`, `buildCatalogDeploymentTx`). Applied is installer completion, not ongoing health. | Update individual-device/desired-state speech and lesson number. Library group capture is retained with the explicit label mapping above. |
