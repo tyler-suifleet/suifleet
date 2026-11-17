@@ -115,8 +115,8 @@ class ProtocolPreflight(unittest.TestCase):
             tc.preflight(obsolete, facts, '4c78adac')
         self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 140)
 
-    def test_protocol142_refuses_old_pin_and_accepts_new_pin(self):
-        # Runs 43974014003 (PR714) and 43958804251 (PR716) stopped before writes.
+    def test_protocol142_refuses_previous_cli_and_accepts_pinned_cli(self):
+        # Runs 43958467064 (SF-278) and 43958804251 (SF-279), before writes.
         facts = {'chain_identifier': '4c78adac', 'protocol_version': 142}
         old = dict(tc.NETWORK, version='sui 1.83.0-16d2dc1e05ed', max_protocol=140)
         with self.assertRaisesRegex(tc.Incompatible, r'142 exceeds.*support \(140\)'):

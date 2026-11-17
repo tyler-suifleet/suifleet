@@ -588,21 +588,28 @@ The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/sr
 
 **Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
 
-**PR #716 protocol-142 repair (2026-11-16).**
-[Run 43958804251](https://github.com/tyler-suifleet/suifleet/actions/runs/43958804251)
-stopped at read-only preflight: protocol 142 exceeded the 1.83.0 CLI's maximum
-140. No transaction was submitted by that failing preflight. The transaction
-pin now uses [testnet-v1.84.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.84.0);
-its [protocol source](https://github.com/MystenLabs/sui/blob/testnet-v1.84.0/crates/sui-protocol-config/src/lib.rs)
-declares maximum 142. The downloaded Linux x86_64 archive matches GitHub's
-published SHA-256 `0f006fb4408bb2f867698a193d5f22f166acb9b89e0eb027c1e1b445b3b62127`;
-the extracted executable reports `sui 1.84.0-9dc25070cf2e` and SHA-256
-`ac657ec16feafe3e1a6db93b09ae922f6e5e601cf41ea35ff9b7905781d35ab0`.
-The release compiler, locked framework, byte verification, wallet authority and
-spending controls remain unchanged. Regression coverage reproduces the old
-pin's refusal at 142, accepts the new pin at 142 and rejects 143. These checks
-establish tool identity and preflight compatibility; successful exact-head
-hosted testnet execution remains required and is not claimed by this repair.
+**SF-278 protocol-142 CI repair (2026-11-16).**
+[Run 43958467064](https://github.com/tyler-suifleet/suifleet/actions/runs/43958467064)
+stopped at read-only preflight: protocol 142 exceeds the former transaction CLI's
+maximum 140. No signing, faucet or transaction was reached. The replacement
+[testnet-v1.84.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.84.0)
+has [maximum protocol 142](https://github.com/MystenLabs/sui/blob/9dc25070cf2ed18bcda1ebb095f39708638195a8/crates/sui-protocol-config/src/lib.rs).
+The downloaded Linux archive SHA-256 is
+`0f006fb4408bb2f867698a193d5f22f166acb9b89e0eb027c1e1b445b3b62127`
+and the extracted binary SHA-256 is
+`ac657ec16feafe3e1a6db93b09ae922f6e5e601cf41ea35ff9b7905781d35ab0`;
+its reported version is `sui 1.84.0-9dc25070cf2e`. A read-only query with that
+binary and the dedicated agent client configuration returned chain `4c78adac`.
+Dockerfile and Python pins change together. The regression reproduces the old
+CLI's refusal at 142, accepts 142 with the new pin and rejects 143. Compiler,
+framework, fixture keys, verify-before-sign, effects and spend checks remain
+unchanged. Automatic exact-head/current-base testnet execution is still required;
+a successful read or pin update does not establish transaction compatibility.
+
+The same preflight refusal also affected PR #716 in
+[run 43958804251](https://github.com/tyler-suifleet/suifleet/actions/runs/43958804251);
+its independently integrated SF-279 repair uses the same verified pins. Neither
+failed preflight submitted a transaction.
 
 The same preflight refusal affected SF-275 / PR #714 in
 [run 43974014003](https://github.com/tyler-suifleet/suifleet/actions/runs/43974014003),

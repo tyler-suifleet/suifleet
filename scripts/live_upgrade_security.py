@@ -76,26 +76,30 @@ def desired_state(live, group):
     return states[0]
 
 
-DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
-CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
+def migrate_membership(transaction, live, package, registry, owner_cap, device, group):
+    """Make legacy membership discoverable without retained publication events.
 
-
-def follow_legacy_group(live, transaction, package, registry, owner_cap, device, group):
-    """Make the old-package membership discoverable without retained events.
-
-    The fixture is new on every run: its base-package add_device cannot
-    populate an inbox. Do this after legacy/receipt acceptance, before testing
-    catalog reconciliation, which must work on a pruned public fullnode too.
+    The old package cannot populate the inbox. Perform the supported migration
+    before starting the daemon, then independently read back both objects.
     """
-    result = transaction("follow legacy group in device inbox (head)",
-        "--move-call", f"{package}::fleet_inbox::new_inbox", f"@{registry}", f"@{owner_cap}",
-        "--assign", "inbox", "--move-call", f"{package}::fleet_inbox::follow_group", "inbox", f"@{group}",
+    result = transaction("index legacy group + create device inbox (head)",
+        "--move-call", f"{package}::device_group::index_members", f"@{group}", "10",
+        "--move-call", f"{package}::fleet_inbox::new_inbox", f"@{registry}", f"@{owner_cap}", "--assign", "inbox",
+        "--move-call", f"{package}::fleet_inbox::follow_group", "inbox", f"@{group}",
         "--move-call", f"{package}::fleet_inbox::share_inbox", "inbox")
     inbox, = live.created(result, "::fleet_inbox::DeviceInbox")
-    fields = plain(live.object(inbox)["content"])
-    assert dm.object_id(fields["device_id"]) == dm.object_id(device), "inbox belongs to another device"
-    assert [dm.object_id(value) for value in fields["groups"]] == [dm.object_id(group)], "legacy group absent from inbox"
-    live.evidence["catalog_group_inbox"] = inbox
+    live.readable(inbox)
+    indexed = plain(live.object(group)["content"])
+    content = plain(live.object(inbox)["content"])
+    assert indexed["device_ids"] == [], "legacy membership was not fully indexed"
+    assert dm.object_id(content["device_id"]) == dm.object_id(device), "inbox belongs to another device"
+    assert content["groups"] == [dm.object_id(group)], "legacy group is missing from the device inbox"
+    live.evidence["membership_migration"] = {"inbox": inbox, "device": device, "group": group}
+    live.check("legacy membership indexed and listed in the device inbox before daemon startup")
+
+
+DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
+CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
 
 
 def fixture_valid(live, fixture):
@@ -246,6 +250,7 @@ def run(args):
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
             made["owner_cap"] = owner_cap
             live.readable(owner_cap)
+            migrate_membership(transaction, live, new, registry, owner_cap, device, group)
             daemon, components = start_daemon(root, "legacy", manifest, f'[device]\nkeypair_path = "{key}"\n'
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
             d2 = live.created(transaction("deployment via head (after activation)",
@@ -302,7 +307,6 @@ def run(args):
                 f"{new}::component_catalog::create_catalog"), "::component_catalog::ComponentCatalog")[0]
             stop_daemon(daemon)
             daemon = None
-            follow_legacy_group(live, transaction, new, registry, owner_cap, device, group)
             for version in ("3.0.0", "4.0.0"):
                 name, _, blob, artifact_hash, recipe_hash = deployment_args(walrus, version, run_id)
                 # Only the second manifest matches this x86_64 daemon.
