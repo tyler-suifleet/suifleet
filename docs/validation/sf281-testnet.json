@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-281",
+  "model": "gpt-6.1-sol",
+  "source_head": "4971be68d0d887b80ee948a9c9299cd060a6a9fe",
+  "base": "529076d7b10994b4e6b8d782d8520363ee8d6a52",
+  "preparation": {
+    "outcome": "not_submitted",
+    "cause": "stale external SDK dependency; fixed by frozen-lockfile installation",
+    "signed_or_submitted_transactions": 0,
+    "allowance_used_mist": 0
+  },
+  "run": {
+    "success": true,
+    "started": "2026-11-17T03:36:36Z",
+    "finished": "2026-11-17T03:37:44Z",
+    "network": "testnet",
+    "chain": "4c78adac",
+    "protocol_version": 142,
+    "max_spend_mist": 2000000000,
+    "allowance_used_mist": 861140958,
+    "operator_net_balance_decrease_mist": 847082622,
+    "preexisting_device_grant_mist": 14058336,
+    "clamped_operator_transaction_gas_mist": 847082622,
+    "operator_transactions": [
+      {
+        "digest": "4dQRfsEQxNEFumXmtYGnX54LCDvk1a3XFD96NkubzQ4m",
+        "status": "success",
+        "gas_budget_mist": 850000000,
+        "gas_mist": 789579200,
+        "allowance_used_mist": 789579200
+      },
+      {
+        "digest": "4qiTfL7DXC71Yx4HrhkEKDYjhis985TGKkJiAuUfrt19",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 8425378,
+        "allowance_used_mist": 798004578
+      },
+      {
+        "digest": "GzrBvAAFEgA1iZVCMHaTTRxmpr7C4WNsCeshTzWnVebR",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 1243578,
+        "allowance_used_mist": 799248156
+      },
+      {
+        "digest": "CBBGPT5BantZwt4UKptaojscfE6dcezhNwM7MgffT9ov",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 17325381,
+        "allowance_used_mist": 816573537
+      },
+      {
+        "digest": "6MqNDV7tWF7ikrXuaa8apSagc87EXUFhHU5YBzsRMFBH",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 13494400,
+        "allowance_used_mist": 844126273
+      },
+      {
+        "digest": "53hnDGSWb4gg32rgyjp8hqNq2mbXYxUHANfk2GyTXoB5",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 1374045,
+        "allowance_used_mist": 845500318
+      },
+      {
+        "digest": "F8xJyGhb1Bsckf1fdH9zxm1rGwepvJpM7krW12LcPSh6",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 3646268,
+        "allowance_used_mist": 849146586
+      },
+      {
+        "digest": "3tAuD6oJ26PQywedJNFezP7hCtRR7rpUBNnc2VhKgKhH",
+        "status": "success",
+        "gas_budget_mist": 200000000,
+        "gas_mist": 750908,
+        "allowance_used_mist": 849897494
+      },
+      {
+        "digest": "9ecZWY4fieMLFXmYcW2EaFoThx8cChBysDvcSaTAh6hp",
+        "status": "success",
+        "gas_budget_mist": 20000000,
+        "gas_mist": 6974875,
+        "allowance_used_mist": 856872369
+      },
+      {
+        "digest": "5AmsEKUYSYvyd12LgAoqVVxwkgLq7yHfeWz5cQuiJNsr",
+        "status": "success",
+        "gas_budget_mist": 20000000,
+        "gas_mist": 4268589,
+        "allowance_used_mist": 861140958
+      }
+    ],
+    "independent_effects": [
+      {
+        "digest": "4dQRfsEQxNEFumXmtYGnX54LCDvk1a3XFD96NkubzQ4m",
+        "status": "success",
+        "checkpoint": "407392394",
+        "gas_used": {
+          "computationCost": "7410000",
+          "storageCost": "782169200",
+          "storageRebate": "0",
+          "nonRefundableStorageFee": "0"
+        }
+      },
+      {
+        "digest": "4qiTfL7DXC71Yx4HrhkEKDYjhis985TGKkJiAuUfrt19",
+        "status": "success",
+        "checkpoint": "407392416",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "9203600",
+          "storageRebate": "1778222",
+          "nonRefundableStorageFee": "178"
+        }
+      },
+      {
+        "digest": "GzrBvAAFEgA1iZVCMHaTTRxmpr7C4WNsCeshTzWnVebR",
+        "status": "success",
+        "checkpoint": "407392423",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "4028000",
+          "storageRebate": "3784422",
+          "nonRefundableStorageFee": "378"
+        }
+      },
+      {
+        "digest": "CBBGPT5BantZwt4UKptaojscfE6dcezhNwM7MgffT9ov",
+        "status": "success",
+        "checkpoint": "407392441",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "22131200",
+          "storageRebate": "5805819",
+          "nonRefundableStorageFee": "581"
+        }
+      },
+      {
+        "digest": "6MqNDV7tWF7ikrXuaa8apSagc87EXUFhHU5YBzsRMFBH",
+        "status": "success",
+        "checkpoint": "407392463",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "12494400",
+          "storageRebate": "0",
+          "nonRefundableStorageFee": "0"
+        }
+      },
+      {
+        "digest": "53hnDGSWb4gg32rgyjp8hqNq2mbXYxUHANfk2GyTXoB5",
+        "status": "success",
+        "checkpoint": "407392505",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "16826400",
+          "storageRebate": "16452355",
+          "nonRefundableStorageFee": "1645"
+        }
+      },
+      {
+        "digest": "F8xJyGhb1Bsckf1fdH9zxm1rGwepvJpM7krW12LcPSh6",
+        "status": "success",
+        "checkpoint": "407392537",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "17328000",
+          "storageRebate": "14681732",
+          "nonRefundableStorageFee": "1468"
+        }
+      },
+      {
+        "digest": "3tAuD6oJ26PQywedJNFezP7hCtRR7rpUBNnc2VhKgKhH",
+        "status": "success",
+        "checkpoint": "407392571",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "16826400",
+          "storageRebate": "17075492",
+          "nonRefundableStorageFee": "1708"
+        }
+      },
+      {
+        "digest": "9ecZWY4fieMLFXmYcW2EaFoThx8cChBysDvcSaTAh6hp",
+        "status": "success",
+        "checkpoint": "407392613",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "18718800",
+          "storageRebate": "12743925",
+          "nonRefundableStorageFee": "1275"
+        }
+      },
+      {
+        "digest": "5AmsEKUYSYvyd12LgAoqVVxwkgLq7yHfeWz5cQuiJNsr",
+        "status": "success",
+        "checkpoint": "407392622",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "9158000",
+          "storageRebate": "5889411",
+          "nonRefundableStorageFee": "589"
+        }
+      },
+      {
+        "digest": "F7wPLbq4AaQQg5G8aVjafR1ADgknyE2My5dtZLZcY4a7",
+        "status": "success",
+        "checkpoint": "407392489",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7919200",
+          "storageRebate": "7667633",
+          "nonRefundableStorageFee": "767"
+        }
+      },
+      {
+        "digest": "HbTxygX5miLL4TWC6J3XCsF38eAyskRieKqDqGEAgQtq",
+        "status": "success",
+        "checkpoint": "407392522",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7919200",
+          "storageRebate": "7667633",
+          "nonRefundableStorageFee": "767"
+        }
+      },
+      {
+        "digest": "9ff6E2yzbnfyYWuswyzXyA9FLhCjzGtnoizPUWGAvZpJ",
+        "status": "success",
+        "checkpoint": "407392559",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7919200",
+          "storageRebate": "7667633",
+          "nonRefundableStorageFee": "767"
+        }
+      },
+      {
+        "digest": "HpqcLASWKsQ3p7CTqw7R2isXcBUNTsr4xvnSyZ8rSin5",
+        "status": "success",
+        "checkpoint": "407392593",
+        "gas_used": {
+          "computationCost": "1000000",
+          "storageCost": "7919200",
+          "storageRebate": "7667633",
+          "nonRefundableStorageFee": "767"
+        }
+      }
+    ],
+    "receipt_transactions_verified": 4,
+    "daemon_progress": {
+      "initialized": true,
+      "outcomes": {
+        "0": {
+          "error_categories": [],
+          "status": 1,
+          "reported": true,
+          "has_error": false
+        },
+        "1": {
+          "error_categories": [],
+          "status": 2,
+          "reported": true,
+          "has_error": true
+        },
+        "2": {
+          "error_categories": [],
+          "status": 1,
+          "reported": true,
+          "has_error": false
+        },
+        "3": {
+          "error_categories": [],
+          "status": 1,
+          "reported": true,
+          "has_error": false
+        }
+      },
+      "sync_stages": {
+        "poll": 0,
+        "recovery": 0,
+        "reports": 0,
+        "watch": 0,
+        "manifest": 0,
+        "authority": 0,
+        "baseline": 0,
+        "discovery": 0,
+        "announcements": 0,
+        "events": 0,
+        "reconcile": 0,
+        "journal": 0,
+        "deferred": 0
+      },
+      "sync_error_categories": {
+        "timeout": 0,
+        "rate-limited": 0,
+        "unavailable": 0,
+        "unauthorized": 0,
+        "not-found": 0,
+        "invalid-argument": 0,
+        "unimplemented": 0,
+        "internal": 0,
+        "decode": 0,
+        "missing-data": 0,
+        "watch-batch": 0,
+        "chain-mismatch": 0,
+        "authority": 0,
+        "schema": 0,
+        "history-pruned": 0,
+        "event-stream": 0,
+        "integrity": 0,
+        "tls": 0,
+        "storage": 0,
+        "other": 0
+      },
+      "log_counts": {
+        "Sync failed": 0,
+        "Deployment schema rejected": 0,
+        "Deployment finished": 4,
+        "Apply admitted": 4,
+        "Status report remains queued": 0,
+        "RPC request timeout": 0,
+        "RPC identity timeout": 0,
+        "chain identifier mismatch": 0,
+        "event stream": 0,
+        "not owned by device key": 0,
+        "SHA-256 mismatch": 0,
+        "Downloading blob": 4,
+        "Downloaded": 4
+      }
+    },
+    "checks": [
+      "verified fixture ownership, package versions, chain and per-type origins",
+      "base/head root bytecode identical; no compatible upgrade was necessary or claimed",
+      "all four deployment cases settled and receipted, including injected health failure",
+      "inbox and group announcements verified",
+      "all fourteen operator/report transaction effects independently reread successfully",
+      "transient deployment cleanup completed; retained package/device and scheduled audit fixtures preserved"
+    ],
+    "historical_failure_reproduced": false,
+    "behavioral_repair_performed": false,
+    "lease_released": true
+  },
+  "tool_versions": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.84.0-9dc25070cf2e"
+  },
+  "binaries_sha256": {
+    "daemon": "97cceb5419480091dd6e4521218ed4931f0b7fd816b2b03a8894396fdeea2d37",
+    "chain_facts": "cffc0992a8f5e9567621892b1d007ac7f6d2bceea1ace707cb194ee5c220ecf5",
+    "network_cli": "ac657ec16feafe3e1a6db93b09ae922f6e5e601cf41ea35ff9b7905781d35ab0"
+  },
+  "private_evidence_sha256": "6c2128b812c82081c7674fb8509a070044d529b9bd6ec7f86fb26317093efa1f",
+  "limits": [
+    "Historical PR716 convergence failure was not reproduced; this successful current-source run establishes no historical cause.",
+    "No speculative behavior fix or repeat acceptance run.",
+    "Exact final candidate hosted CI/security/testnet and independent review remain pending with the coordinator.",
+    "No compatible package upgrade was exercised because root bytecode was identical.",
+    "Scheduled rollout audit retention/pruning acceptance is outside this diagnostic run and remains pending.",
+    "Final physical/manual-wallet/production-provider/mainnet acceptance unrun in SF-031/#32 and SF-087/#159."
+  ]
+}
