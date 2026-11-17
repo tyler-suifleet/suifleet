@@ -94,8 +94,8 @@
       "source_sha256": "1796c9b751b6b021c1b14c0825b411c45c7dbb4b177e890a09f35473dac0ee8c",
       "actions": [
         {
-          "label": "Open Network budget",
-          "text": "Choose Network budget. This balance covers device activity, rather than your subscription allowance.",
+          "label": "Open Device and storage budgets",
+          "text": "Choose Device and storage budgets. This balance covers device activity, rather than your subscription allowance.",
           "wait": false
         },
         {
@@ -396,7 +396,7 @@
         },
         {
           "label": "Allow devices to pick them up",
-          "text": "Devices apply the settings at their next check. Their operating funds remain in Network budget.",
+          "text": "Devices apply the settings at their next check. Their operating funds remain in Device and storage budgets.",
           "wait": false
         }
       ],

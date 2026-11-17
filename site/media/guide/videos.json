@@ -1759,7 +1759,8 @@
       "site/motion-sample/art/editorial-scene.png": "681e178c457ddfeaade782bdd8ab62fd12533ac8f53cb18e2c4b8b559d09555f"
     },
     "source_manifest_sha256": "aeb33834aa08c1f7276d7df54bc11ca674a51c3582f6e486ac02c64b239cffca",
-    "note": "Edited historical app footage with branded graphics and new narration; waits may be sped up. Not fresh live acceptance."
+    "note": "Edited historical app footage with branded graphics and new narration; waits may be sped up. Not fresh live acceptance.",
+    "script_snapshot": "site/guide/recorded"
   },
   "selective_refresh": {
     "ticket": "SF-274",

@@ -189,3 +189,17 @@ was test setup ordering, with no fallback or assertion weakened. This repair
 uses compatibility reverification and explicit spoken historical/current label
 mapping rather than claiming a fresh testnet capture. Independent review must
 assess this documented compatibility boundary.
+
+## Pinned integration conflict repair (2026-11-17)
+
+Resolved the actual conflicts with candidate base
+`d8426ad8b3bdc233c4b3ee091191584895f2a436`, rather than rebasing for freshness.
+Current guide inputs retain the corrected public/confidential publishing and
+library desired-state instructions, and adopt the base's Device and storage
+budgets labels. Existing media keeps its recorded wording (including historical
+budget labels); no media was regenerated or relabeled as a current capture.
+The base's restricted `site/guide/recorded` snapshot mechanism now binds to the
+exact SF-274 lesson/narration bytes used by this branch's media, retaining their
+existing production hashes and selective-refresh provenance. The Rust conflict
+uses the pinned base's stronger NotFound and archival-client regression checks
+unchanged. No runtime behavior or migration is introduced by that resolution.

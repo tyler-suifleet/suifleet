@@ -38,7 +38,7 @@ export function DeviceEntitlements() {
   }
   return <section className="space-y-4">
     <h1 className="text-xl font-semibold">Device capacity</h1>
-    <p>Device capacity is the number of active devices your organization can manage across all its fleets. A new account may need capacity enabled before its first device can be registered. Adding funds to the network budget does not add device capacity.</p>
+    <p>Device capacity is the number of active devices your organization can manage across all its fleets. A new account may need capacity enabled before its first device can be registered. Adding funds to the device operating budget does not add device capacity.</p>
     {fleet && <p>Organization: {fleet.customerName}<br />Organization ID: <code>{fleet.customerId}</code><br />{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed.</p>}
     <p>{subscriptionSupport ? <>Open <Link className="text-blue-700 underline" href="/billing">Plans and billing</Link> to review available capacity offers and your subscription. If no suitable offer is listed, contact your service administrator.</> : <>Plan checkout is not enabled in this workspace. Share your organization ID with the service administrator—the person who manages this deployment—and ask them to enable or raise your device limit.</>}</p>
     {!account ? <p>Connect your wallet to verify grant authority.</p> : admin.isError ? <p role="alert">Administrator permissions could not be verified. Refresh before changing a limit.</p> : !isAdmin ? <p>{admin.isPending ? "Checking administrator permissions…" : "Your account can view capacity but cannot change it here. A service administrator must approve changes."}</p> :

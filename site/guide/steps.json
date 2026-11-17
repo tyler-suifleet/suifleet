@@ -31,7 +31,7 @@
       "title": "Enable device capacity",
       "console_route": "billing/",
       "console_label": "Plans and billing",
-      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the fleet budget for device activity. Check capacity before depositing operating funds. Review the capacity and price shown in the console before approving a purchase.",
+      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the device operating budget for device activity. Check capacity before depositing operating funds. Review the capacity and price shown in the console before approving a purchase.",
       "before": [
         "Connect and choose your fleet.",
         "Have funds for account fees on the network shown in the console. An organization administrator must choose the plan."
@@ -53,23 +53,23 @@
     },
     {
       "id": "fund",
-      "title": "Fund the network budget",
+      "title": "Fund device and storage budgets",
       "console_route": "budget/",
-      "console_label": "Network budget",
-      "summary": "The fleet budget pays the network fees for device reports. Storage funding pays for uploaded files and logs where enabled. These balances are separate from your subscription and device capacity. Depositing funds requires your approval.",
+      "console_label": "Device and storage budgets",
+      "summary": "The device operating budget pays the network fees for device reports. Storage funding pays for uploaded files and logs where enabled. These balances are separate from your subscription and device capacity. Depositing funds requires your approval.",
       "before": [
         "Funds for account fees on the network shown in the console. Confirm the account and selected network before funding."
       ],
       "actions": [
-        "Choose Network budget in the sidebar.",
+        "Choose Device and storage budgets in the sidebar.",
         "Enter Deposit (SUI) and click Deposit, then approve. If this build offers Create budget and deposit instead, enter the Initial deposit first.",
         "Later deposits use the Deposit button. Open Device balances, spending limits and withdrawals to cap or withdraw per-device funds.",
-        "Optionally create fleet storage under Storage funding to prepay Walrus storage for uploads and log archives."
+        "Optionally click Create storage budget under Storage funding to prepay Walrus storage for uploads and log archives."
       ],
       "result": "A Confirmed message with the transaction digest, and the new balance under Keep devices reporting.",
       "docs": [
         {
-          "label": "Fleet budget",
+          "label": "Device and storage budgets",
           "path": "docs/FLEET_BUDGET.md"
         }
       ]
@@ -81,7 +81,7 @@
       "console_label": "Devices",
       "summary": "Install the SuiFleet client on the device, then register the public address it supplies. The private device key stays on the device; never paste it into the console. Registration gives your account permission to manage that device.",
       "before": [
-        "Available device capacity for your organization. A funded network budget does not increase your device limit; check Device capacity or Plans and billing first.",
+        "Available device capacity for your organization. A funded device operating budget does not increase your device limit; check Device capacity or Plans and billing first.",
         "The device's address, printed by suifleet --derive-address /etc/suifleet/device.key on the device."
       ],
       "actions": [
@@ -239,12 +239,12 @@
       "console_label": "Fleet settings",
       "summary": "Choose how often devices check for updates and report health. Budget estimates are planning tools.",
       "before": [
-        "A selected fleet and its network budget."
+        "A selected fleet and its device operating budget."
       ],
       "actions": [
         "Open Fleet settings and choose a device reporting interval.",
         "Review the estimate, then click Save settings and approve.",
-        "Open Network budget to review the balance separately. Saving settings does not fund the budget."
+        "Open Device and storage budgets to review the balance separately. Saving settings does not fund the budget."
       ],
       "result": "Settings are saved on chain; devices apply them at their next check.",
       "docs": [

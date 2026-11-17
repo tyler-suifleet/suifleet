@@ -39,3 +39,13 @@ No site deployment, production bill, physical target, mainnet transaction or
 manual wallet acceptance is established here. Final external acceptance stays in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+SF-275 keeps canonical prices unchanged and generates 50/1,000-device examples
+with the monthly minimum and separate activation charge. Included all-in
+resources, optional settings and customer-funded volume arrangements are
+explained before optional token details. App evaluation checkout remains
+separate from a written commercial quote. Sales, pilot and privacy inquiries
+use the same email path, explicitly without verified delivery or response times.
+Mailbox delivery, payment-provider readiness and actual SLA/service availability
+remain unverified external acceptance in SF-031/#32 and SF-087/#159; no email
+was sent and no production credentials were provisioned.
