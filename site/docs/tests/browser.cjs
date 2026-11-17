@@ -1,5 +1,5 @@
 // Optional local browser QA: no server, external traffic, credentials or wallet.
-const { chromium } = require(process.cwd() + "/dapp/node_modules/playwright");
+const { chromium } = require(process.env.SUIFLEET_PLAYWRIGHT_MODULE || process.cwd() + "/dapp/node_modules/playwright");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const assert = require("node:assert/strict");
@@ -30,6 +30,22 @@ const assert = require("node:assert/strict");
       assert.ok(Math.abs(logo.width / logo.height - 180 / 110) < 0.02);
       const overflow = await page.evaluate(() => [...document.querySelectorAll("*")].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => [el.tagName, el.className, Math.round(el.getBoundingClientRect().right)]));
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), JSON.stringify({width, overflow}));
+      // Follow the actual setup flow and inspect every curated page at both widths.
+      await page.getByRole("link", { name: "device client setup", exact: false }).first().click();
+      await page.getByRole("heading", { name: "Configuration file", exact: true }).waitFor();
+      const setup = await page.locator("article").innerText();
+      for (const text of ["Download connection settings", "device_object_id", "device_cap_id", "signer.toml"])
+        assert.ok(setup.includes(text), text);
+      const catalog = JSON.parse(await fs.readFile(path.join(out, "search.json")));
+      for (const item of catalog) {
+        await page.goto("https://docs.suifleet.io" + item.path);
+        assert.equal(await page.locator("article h1").count(), 1, item.path);
+        const text = await page.locator("article").innerText();
+        assert.ok(!/SF-\d+/.test(text), item.path);
+        for (const label of ["Prerequisites", "Expected result", "Recovery", "Technical reference"])
+          assert.ok(text.includes(label), `${item.path}: ${label}`);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: ${item.path}`);
+      }
       await page.getByRole("searchbox").fill("provisioning media");
       await page.getByRole("status").filter({ hasText: "matching pages" }).waitFor();
       await page.locator("#search-results").getByRole("link", {name: "Enrollment and provisioning media"}).click();
