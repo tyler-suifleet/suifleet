@@ -9,7 +9,7 @@ Know device count, release sizes/frequency, health/log cadence, retention and th
 ## Steps
 
 1. Review the [pricing page](https://suifleet.io/pricing/) and request a written quote for the required availability and service scope.
-2. Enter realistic workload assumptions in **Fleet settings** and **Network budget**. Compare both per-device and fleet totals.
+2. Enter realistic workload assumptions in **Fleet settings** and **Device and storage budgets**. Compare both per-device and fleet totals.
 3. Confirm deposit amount, network and actual wallet transaction fee before approving. A settings save does not add funds or buy a subscription.
 4. Monitor actual balance, storage expiry and usage; revisit assumptions as fleet behavior changes.
 

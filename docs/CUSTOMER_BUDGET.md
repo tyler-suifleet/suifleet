@@ -1,4 +1,4 @@
-# Fund and monitor fleet network costs
+# Fund and monitor device and storage budgets
 
 Prepay bounded device transactions and storage. Depositing funds does not bypass device quotas or guarantee service availability.
 
@@ -8,11 +8,11 @@ Connect the budget owner on the intended network. Have SUI for transactions and 
 
 ## Steps
 
-1. Open **Network budget**, review workload estimates and create a budget with an initial deposit, or deposit into the selected existing budget. Confirm account, network, amount and fees in the wallet.
+1. Open **Device and storage budgets** and expand **Estimate a deposit before funding** to review workload estimates. Add SUI to create a device operating budget with an initial deposit, or deposit into the selected existing budget. Confirm account, network, amount and fees in the wallet.
 2. Enroll only the intended devices, with explicit float and reserve limits. Ongoing report gas is separate from single-use claim enrollment sponsorship.
-3. Supply the correct budget settings to the daemon and signer using the technical configuration reference. Both must refer to the same fleet budget when reporting and gas support are combined.
+3. Supply the correct budget settings to the daemon and signer using the technical configuration reference. Both must refer to the same device operating budget when reporting and gas support are combined.
 4. Review balance, runway, per-device usage and low/paused alerts. Refill or reclaim reserves deliberately; refresh after partial batch enrollment before resuming.
-5. Where **Prepaid Walrus storage** is available, fund WAL and refill the pool after reviewing live capacity, expiry and cost. Monitor storage separately from SUI report gas.
+5. Where storage is configured, open **Storage funding**, fund WAL and refill the pool after reviewing live capacity, expiry and cost. Monitor storage separately from SUI report gas.
 
 ## Expected result
 

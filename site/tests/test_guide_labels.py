@@ -44,6 +44,21 @@ class GuideLabelsTest(unittest.TestCase):
             for obsolete in ('network budget', 'fleet budget'):
                 self.assertNotIn(obsolete, text.casefold(), name)
 
+    def test_customer_docs_use_current_budget_labels(self):
+        paths = sorted((ROOT / 'docs').glob('CUSTOMER_*.md'))
+        paths += [ROOT / 'site/docs/pages.json', ROOT / 'site/src/pages/docs.html']
+        for path in paths:
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertNotRegex(path.read_text().casefold(), r'\b(?:network|fleet) budget\b')
+        layout = (ROOT / 'dapp/src/components/ConsoleNavigation.tsx').read_text()
+        nav = dict(re.findall(r'href: "([^"]+)",\s*label: "([^"]+)"', layout))
+        for name in ('CUSTOMER_BUDGET.md', 'CUSTOMER_FLEET_SETTINGS.md', 'CUSTOMER_PRICING.md'):
+            self.assertIn(f"**{nav['/budget']}**", (ROOT / 'docs' / name).read_text(), name)
+        pages = json.loads((ROOT / 'site/docs/pages.json').read_text())
+        budget_page = next(page for page in pages["pages"] if page["slug"] == "budget")
+        self.assertEqual(budget_page["title"], nav["/budget"])
+        self.assertIn(f'>{nav["/budget"]}</a>', (ROOT / 'site/src/pages/docs.html').read_text())
+
     def test_current_dapp_surfaces_have_no_obsolete_budget_terms(self):
         for directory in ('app', 'components'):
             for path in sorted((ROOT / 'dapp/src' / directory).rglob('*')):

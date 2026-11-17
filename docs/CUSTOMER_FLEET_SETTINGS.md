@@ -4,15 +4,15 @@ Balance update responsiveness, report frequency and storage retention against es
 
 ## Prerequisites
 
-Connect the fleet budget owner on the intended network. Configure a fleet budget and review workload assumptions. Price estimates are planning information, not a purchase or guaranteed invoice.
+Connect the device operating budget owner on the intended network. Configure a device operating budget and review workload assumptions. Price estimates are planning information, not a purchase or guaranteed invoice.
 
 ## Steps
 
 1. Open **Fleet settings**. Review the saved values and estimate inputs before selecting options.
 2. Choose update checks, rollout fast checks, health reports, log archives and retention. Read the per-device and fleet estimate for each option.
-3. Review the proposed values and wallet fee, then save. Saving does not buy a subscription or add money to the network budget.
+3. Review the proposed values and wallet fee, then save. Saving does not buy a subscription or add money to the device operating budget.
 4. Refresh the saved settings and let devices perform their next check. Device-local configuration may make checks slower, never faster than the fleet's configured floor.
-5. Monitor actual usage on **Network budget** and adjust deliberately.
+5. Monitor actual usage on **Device and storage budgets** and adjust deliberately.
 
 ## Expected result
 

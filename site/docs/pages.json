@@ -112,7 +112,7 @@
     {
       "source": "docs/CUSTOMER_BUDGET.md",
       "slug": "budget",
-      "title": "Fleet network budget",
+      "title": "Device and storage budgets",
       "group": "Administrators"
     },
     {

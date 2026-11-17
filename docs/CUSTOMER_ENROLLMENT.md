@@ -19,7 +19,7 @@ sudo suifleet --enroll /path/to/enroll.toml
 ```
 
 6. Read the Device object ID (`device_object_id`) and DeviceCap ID (`device_cap_id`) from successful enrollment output. Put the cap ID in Linux `signer.toml`, and both IDs in `config.toml`; install the manifest, signer file and daemon file in that order. See [setup](INSTALL_DEVICE_CLIENT.md#configuration-file).
-7. Run pending transactions again to bind enrolled devices to their reserved aliases, serials and groups. Use **Fund enrolled devices** or your configured fleet budget for ongoing reports.
+7. Run pending transactions again to bind enrolled devices to their reserved aliases, serials and groups. Use **Fund enrolled devices** or your configured device operating budget for ongoing reports.
 
 ## Expected result
 
