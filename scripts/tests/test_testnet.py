@@ -54,6 +54,17 @@ class TrustTests(unittest.TestCase):
             self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             log.write_text('Deployment schema rejected PRIVATE-CANARY')
             self.assertEqual(daemon_progress(journal, log)['log_counts']['Deployment schema rejected'], 1)
+            # Reproduce the failed CI's pre-discovery sync failure shape.
+            # Export the fixed cause, never the provider message or log line.
+            for marker in ('watch read failed', 'Invalid argument',
+                           'event frame without watermark',
+                           'event index has not reached the cursor-merge checkpoint fence',
+                           'undecodable DeviceAddedToGroup event'):
+                log.write_text(f'Sync failed; retrying: {marker}: PRIVATE-CANARY\n' * 50)
+                diagnostic = daemon_progress(journal, log)
+                self.assertEqual(diagnostic['log_counts']['Sync failed'], 50)
+                self.assertEqual(diagnostic['log_counts'][marker], 50)
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
@@ -693,7 +704,17 @@ class TrustTests(unittest.TestCase):
             reused = live.load_state(path, '4c78adac', '0xa')['fixtures']['content-hash']
             self.assertTrue(live.fixture_alive(reused, '0xa', client))
             owners['0x3'] = {'AddressOwner':'0xd'}
-            self.assertFalse(live.fixture_alive(reused, '0xa', client))
+            diagnostics = []
+            self.assertFalse(live.fixture_alive(reused, '0xa', client, diagnostics))
+            self.assertEqual(diagnostics, [dict(object_id='0x3', expected_owner='0xa', actual_owner='0xd')])
+            owners['0x3'] = {'AddressOwner':'0xa'}
+            def unreadable(command, object_id):
+                if object_id == '0x7':
+                    raise RuntimeError('untrusted provider text must not enter evidence')
+                return client(command, object_id)
+            diagnostics = []
+            self.assertFalse(live.fixture_alive(reused, '0xa', unreadable, diagnostics))
+            self.assertEqual(diagnostics, [dict(object_id='0x7', error='package read failed')])
             self.assertEqual(live.load_state(path, '4c78adac', '0xd')['fixtures'], {})
 
 class PublicEnvironmentTests(unittest.TestCase):

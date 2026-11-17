@@ -5,8 +5,9 @@ import AdministrationPage from '../../dapp/src/app/handover/page';
 import * as real from '../../dapp/src/lib/fleet-handover';
 import {fleet_handover_ProposedBcs} from '../../dapp/src/lib/fleet-protocol';
 import {moveType} from '../../dapp/src/lib/deployment-manifest';
+import {FleetTransactionError} from '../../dapp/src/lib/tx-feedback';
 const id=n=>'0x'+n.toString(16).padStart(64,'0');
-let state={account:id(10),pending:false,bad:false}, listeners=new Set(), request;
+let state={account:id(10),pending:false,bad:false,fail:null}, listeners=new Set(), request;
 window.admin={calls:[],update(changes){state={...state,...changes};listeners.forEach(f=>f());},release(){const finish=window.admin.finish;window.admin.finish=null;finish();},id};
 const useState=()=>useSyncExternalStore(f=>{listeners.add(f);return()=>listeners.delete(f)},()=>state);
 export const useCurrentAccount=()=>({address:useState().account});
@@ -23,6 +24,7 @@ export const readHandover=async()=>request;
 export function useFleetTransaction(){const f=useState();return {isPending:f.pending,mutate(tx,callbacks){
  window.admin.calls.push(tx.transaction.getData());window.admin.update({pending:true});
  window.admin.finish=()=>{try{
+ if(f.fail){const stage=f.fail;window.admin.update({fail:null});callbacks.onError(new FleetTransactionError(stage,stage==='rejected'?Object.assign(new Error('User rejected the request'),{code:4001}):new TypeError('Failed to fetch')));return;}
  const commands=tx.transaction.getData().commands; const operation=commands[0].MoveCall.function;
  if(operation==='propose'){
    request={source:id(10),recipient:id(11),objects:[id(31),id(40)],kinds:['0','1'],completed:[false,false],expires_ms:String(Date.now()+86400000),state:0};
