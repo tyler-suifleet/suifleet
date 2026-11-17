@@ -31,10 +31,11 @@ The user split issue #338 on 2026-10-27:
 - SF-175 owns testnet screencasts; no videos are claimed recorded here. See
   [guide/RECORDING.md](guide/RECORDING.md) for the media contract and screenshot reproduction.
 - SF-176 owns hosting, DNS, TLS and authorized production publication.
-- SF-177 supplies the rendered docs site under site/docs. The Docs page links
-  to that site and repository references, including device installers. SF-275
-  verified the public docs root returned HTTP 200 with the documentation title
-  on 2026-11-16; that read-only check does not verify every published page.
+- The rendered docs site under site/docs serves the curated customer guides.
+  Public Docs navigation uses the configured docs origin (docs.suifleet.io by default);
+  /docs/ remains a topic directory with explicit technical-reference links.
+  SF-275 verified the public docs root returned HTTP 200 with the documentation
+  title on 2026-11-16; that read-only check does not verify every published page.
 - SF-178 owns pricing generated from the canonical model. The present page is
   generated from the shared console price table and subscription policy, including
   Managed plan and entry offers. It mirrors the proposed terms in docs/BUSINESS_PLAN.md;

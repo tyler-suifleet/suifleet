@@ -305,15 +305,15 @@ def build(out, config=None):
         content = expand(source.read_text(encoding="utf-8"), config, page["source"])
         current = ' aria-current="page"'
         nav = "\n".join(
-            f'<li><a href="{item["path"]}"{current if item["path"] == page["path"] else ""}>{html.escape(item["label"])}</a></li>'
+            f'<li><a href="{config["docs_url"] if item["path"] == "/docs/" else item["path"]}"{current if item["path"] == page["path"] else ""}>{html.escape(item["label"])}</a></li>'
             for item in config["nav"])
         title = page["title"] if page["path"] == "/" else f'{page["title"]} · {config["name"]}'
         # The error page is served for many paths, so it names no canonical URL.
         canonical = "" if page["path"] == "/404.html" else f'<link rel="canonical" href="{config["origin"]}{page["path"]}">\n'
         values = {"page_title": html.escape(title), "description": html.escape(page["description"]),
                   "canonical": canonical, "nav": nav, "app_url": config["app_url"],
-                  "repo_url": config["repo_url"], "content": content.strip()}
-        rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|content)\}\}", lambda m: values[m.group(1)], layout)
+                  "repo_url": config["repo_url"], "docs_url": config["docs_url"], "content": content.strip()}
+        rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|docs_url|content)\}\}", lambda m: values[m.group(1)], layout)
         if page.get("noindex"):
             rendered=rendered.replace("</head>", '<meta name="robots" content="noindex, nofollow">\n</head>')
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
