@@ -1136,15 +1136,85 @@ class HostedRunnerRecovery:
     @staticmethod
     def run_matches(project, pr, run):
         repo = project['repository'].lower()
-        return (run.get('event') == 'pull_request'
+        main = pr.get('_included_main')
+        identity = ((run.get('event') in ('push', 'workflow_dispatch', 'schedule')
+                     and run.get('head_branch') == 'main' and main.get('main') == pr['headRefOid'])
+                    if main else (run.get('event') == 'pull_request' and any(
+                        p.get('number') == pr['number'] and (p.get('head') or {}).get('sha') == pr['headRefOid']
+                        for p in run.get('pull_requests', []))))
+        return (identity
                 and run.get('path') == '.github/workflows/ci.yml'
                 and run.get('head_sha') == pr['headRefOid']
                 and (run.get('repository') or {}).get('full_name', '').lower() == repo
                 and (run.get('head_repository') or {}).get('full_name', '').lower() == repo
-                and type(run.get('run_attempt')) is int and run['run_attempt'] >= 1
-                and any(p.get('number') == pr['number']
-                        and (p.get('head') or {}).get('sha') == pr['headRefOid']
-                        for p in run.get('pull_requests', [])))
+                and type(run.get('run_attempt')) is int and run['run_attempt'] >= 1)
+
+    def main_authority(self, project, pr):
+        """Authenticate retained included-source acceptance, not a caller label."""
+        proof = pr.get('_included_main')
+        if not proof or proof.get('main') != pr.get('headRefOid'):
+            return False
+        source = proof.get('source') or {}
+        row = self.db.execute('SELECT receipt FROM batch_included_sources WHERE project=? AND pr=? AND head=? AND base=?',
+            (project['id'], pr['number'], source.get('head'), proof['main'])).fetchone()
+        if not row:
+            return False
+        receipt = json.loads(row[0])
+        if (receipt.get('status') != 'included-source-accepted' or receipt.get('acceptance_complete') is not True
+                or receipt.get('identity') != source or receipt.get('main') != proof['main']
+                or hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest() != proof.get('receipt')):
+            return False
+        owner = json.loads(self.c.ticket(project, 'show', source['owner']['key']))
+        if (owner.get('status') != 'done' or owner.get('publish_pending') or owner.get('expired')
+                or {k:owner.get(k) for k in ('key','agent','model','session','branch')} != source['owner']):
+            return False
+        review = self.c.store.review(project['id'], pr['number'])
+        if not review or review['id'] != receipt.get('review') or review.get('publication_pending'):
+            return False
+        snapshot = json.loads((Path(review['directory'])/'snapshot.json').read_text())
+        if (snapshot.get('_included_source') != source or snapshot.get('baseRefOid') != proof['main']
+                or snapshot.get('_included_evidence') != receipt.get('check_evidence')
+                or snapshot.get('ticket', {}).get('spec') != owner.get('spec')):
+            return False
+        if gate(snapshot, {**owner, 'status':'review'}, review, included=True) is not None:
+            return False
+        fresh = self.c.pr(project, pr['number'])
+        reference = self.read(project, 'repos/'+project['repository']+'/git/ref/heads/main')
+        if (reference.get('object', {}).get('sha') != proof['main']
+                or fresh.get('state') != 'OPEN' or fresh.get('isDraft') or fresh.get('isCrossRepository')
+                or any(fresh.get(k) != source.get(v) for k,v in
+                    (('headRefOid','head'),('headRefName','branch'),('baseRefName','base_ref'),
+                     ('baseRefOid','base'),('comparisonBaseOid','comparison')))
+                or source_feedback(fresh) != source_feedback(snapshot)
+                or not self.c.source_receipt(project, fresh, owner)):
+            return False
+        self.c.batches.git(project, 'merge-base', '--is-ancestor', source['head'], proof['main'])
+        return True
+
+    def included_main(self, project, pr, owner, receipt):
+        """Retry only the never-started main CI job blocking accepted closure."""
+        main = receipt.get('main')
+        if (owner.get('status') != 'done' or receipt.get('status') != 'included-source-accepted'
+                or not re.fullmatch(r'[0-9a-f]{40}', main or '')):
+            return
+        synthetic = dict(number=pr['number'], state='OPEN', isDraft=False, isCrossRepository=False,
+            headRefOid=main, statusCheckRollup=[], _included_main=dict(main=main,
+                source=receipt['identity'], receipt=hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest()))
+        if not self.main_authority(project, synthetic):
+            return dict(state='included_main_authority_changed')
+        prefix = 'repos/'+project['repository']
+        runs = self.read(project, prefix+'/actions/workflows/ci.yml/runs?head_sha='+main+'&branch=main&per_page=1')['workflow_runs']
+        if not runs:
+            return
+        run = self.read(project, prefix+'/actions/runs/'+str(runs[0]['id']))
+        if not self.run_matches(project, synthetic, run):
+            return dict(state='included_main_run_changed')
+        jobs = self.read(project, prefix+'/actions/runs/'+str(run['id'])+'/attempts/'+str(run['run_attempt'])+'/jobs?per_page=100')
+        if jobs.get('total_count') != len(jobs['jobs']):
+            return dict(state='included_main_jobs_incomplete')
+        synthetic['statusCheckRollup'] = [dict(name=job.get('name'), status=str(job.get('status')).upper(),
+            conclusion=str(job.get('conclusion')).upper(), detailsUrl=job.get('html_url')) for job in jobs['jobs']]
+        return self.tick(project, synthetic)
 
     def update(self, project, job, state):
         self.db.execute('UPDATE hosted_runner_retries SET state=?,next_check=?,updated=? '
@@ -1231,18 +1301,23 @@ class HostedRunnerRecovery:
             if run.get('conclusion') != 'failure':
                 self.update(project, job_id, 'refused')
                 continue
-            used = self.db.execute("SELECT count(*) FROM hosted_runner_retries WHERE project=? AND pr=? AND head=? "
-                                   "AND state IN ('intent','submitted','observed','uncertain')",
-                                   (project['id'], pr['number'], pr['headRefOid'])).fetchone()[0]
+            scope = "project=? AND head=?" if pr.get('_included_main') else "project=? AND head=? AND pr=?"
+            parameters = (project['id'], pr['headRefOid']) + (() if pr.get('_included_main') else (pr['number'],))
+            used = self.db.execute("SELECT count(*) FROM hosted_runner_retries WHERE "+scope+
+                                   " AND state IN ('intent','submitted','observed','uncertain')", parameters).fetchone()[0]
             if used >= self.LIMIT:
                 self.update(project, job_id, 'exhausted')
                 return dict(state='exhausted', run=run_id, job=job_id, attempts=used)
             # Fresh authority and run state immediately before an irreversible
             # request. An unrelated branch/head or user cancellation is refused.
-            fresh = self.read(project, prefix + '/pulls/' + str(pr['number']))
-            if (fresh.get('state') != 'open' or fresh.get('draft') or fresh.get('head', {}).get('sha') != pr['headRefOid']
-                    or fresh.get('head', {}).get('repo', {}).get('full_name', '').lower() != project['repository'].lower()
-                    or self.read(project, run_path) != run):
+            if pr.get('_included_main'):
+                authority = self.main_authority(project, pr)
+            else:
+                fresh = self.read(project, prefix + '/pulls/' + str(pr['number']))
+                authority = (fresh.get('state') == 'open' and not fresh.get('draft')
+                    and fresh.get('head', {}).get('sha') == pr['headRefOid']
+                    and fresh.get('head', {}).get('repo', {}).get('full_name', '').lower() == project['repository'].lower())
+            if not authority or self.read(project, run_path) != run:
                 self.update(project, job_id, 'refused')
                 return dict(state='changed_before_retry', job=job_id)
             self.update(project, job_id, 'intent')  # durable autocommit BEFORE POST
@@ -1523,13 +1598,23 @@ class Coordinator:
         return run(['ticket', '--project', project['id'], *args], timeout=timeout)
 
     def retry_review_publication(self, project, owner):
-        """Retry a recoverable Project mirror failure for one listed Review claim.
+        return self.retry_ownership_publication(project, owner, 'review')
+
+    def retry_ownership_publication(self, project, owner, expected_status):
+        """Retry one exact listed Review or Done publication without new completion.
 
         Only the exact listed claim/revision is published, through the supported
         `ticket publish` path. Nothing is resumed, released or reassigned. Returns
         the freshly re-read, published owner, or None to defer this PR only.
         """
-        claim = hashlib.sha256(owner['token'].encode()).hexdigest()
+        if (expected_status not in ('review', 'done') or owner.get('status') != expected_status
+                or (expected_status == 'review' and not owner.get('token'))):
+            return None
+        # Completion retires the active token. Bind retries to its retained owner
+        # identity and revision instead of requiring a live implementation lease.
+        identity = owner.get('token') or json.dumps({k: owner.get(k) for k in
+            ('key', 'agent', 'model', 'session', 'branch')}, sort_keys=True)
+        claim = hashlib.sha256(identity.encode()).hexdigest()
         key, revision = owner['key'], owner.get('revision')
         row = self.store.db.execute('SELECT * FROM ownership_publication WHERE project=? AND ticket=?',
                                     (project['id'], key)).fetchone()
@@ -1538,10 +1623,10 @@ class Coordinator:
         if row and row['retry_after'] > time.time():
             return None
         def unchanged(current):
-            return (current.get('status') == 'review' and not current.get('expired')
+            return (current.get('status') == expected_status and not current.get('expired')
                     and current.get('revision') == revision
                     and all(current.get(name) == owner.get(name) for name in
-                            ('token', 'agent', 'model', 'session', 'branch', 'worktree')))
+                            ('token', 'agent', 'model', 'session', 'branch', 'worktree', 'spec')))
         current = json.loads(self.ticket(project, 'show', key))
         if not unchanged(current):
             print(f"{project['id']} {key}: ownership changed before publication retry; deferred to next scan", flush=True)
@@ -1570,7 +1655,7 @@ class Coordinator:
             print(f"{project['id']} {key}: ownership changed during publication retry; deferred to next scan", flush=True)
             return None
         self.store.db.execute('DELETE FROM ownership_publication WHERE project=? AND ticket=?', (project['id'], key))
-        print(f"{project['id']} {key}: pending Review ownership published at revision {revision}", flush=True)
+        print(f"{project['id']} {key}: pending {expected_status} ownership published at revision {revision}", flush=True)
         return current
 
     def development_blocker(self, project, owner):
@@ -2195,9 +2280,78 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         self.launch(project, pr, owner, 'review')
         return True
 
+    def retire_closed_review_retries(self, project):
+        """Retain uncertain work; retire stopped retries for terminal batch PRs."""
+        from batch_integration import TERMINAL
+        rows = self.store.db.execute("SELECT j.*,b.id AS batch_id,b.branch AS batch_branch,b.status AS batch_status "
+            "FROM jobs j JOIN integration_batches b ON b.project=j.project AND b.pr=j.pr AND b.head=j.head "
+            "WHERE j.project=? AND j.kind='review' AND j.status='retry' AND j.result IS NULL "
+            "AND j.launch_intent IS NULL AND j.repair_claim IS NULL AND j.publication_done=0", (project['id'],)).fetchall()
+        self.store.db.execute('CREATE TABLE IF NOT EXISTS review_retirements '
+            '(job INTEGER PRIMARY KEY,project TEXT,pr INTEGER,head TEXT,batch TEXT,proof TEXT,created REAL)')
+        for row in rows:
+            if row['batch_status'] not in TERMINAL or not worker_stopped(row['pid'], row['started']):
+                continue
+            try:
+                directory = Path(row['directory'])
+                if directory.is_symlink() or not directory.resolve().is_relative_to(self.state.resolve()):
+                    continue
+                process, exit_path = directory/'process.json', directory/'exit.json'
+                if (process.is_symlink() or exit_path.is_symlink()
+                        or process.stat().st_size > 1024 or exit_path.stat().st_size > 1024):
+                    continue
+                identity, stopped = json.loads(process.read_text()), json.loads(exit_path.read_text())
+                if (identity != dict(pid=row['pid'],started=row['started'])
+                        or type(stopped.get('returncode')) is not int or not 0 < stopped['returncode'] < 124):
+                    continue
+                endpoint = 'repos/'+project['repository']+'/pulls/'+str(row['pr'])
+                def remote_identity():
+                    remote = json.loads(self.gh(project, ['api', endpoint]))
+                    return dict(state=remote.get('state'), head=(remote.get('head') or {}).get('sha'),
+                        branch=(remote.get('head') or {}).get('ref'),
+                        repository=((remote.get('head') or {}).get('repo') or {}).get('full_name'))
+                remote = remote_identity()
+                if (remote != dict(state='closed',head=row['head'],branch=row['batch_branch'],repository=project['repository'])
+                        or remote_identity() != remote or not worker_stopped(row['pid'], row['started'])):
+                    continue
+                db = self.store.db
+                db.execute('BEGIN IMMEDIATE')
+                try:
+                    batch = db.execute('SELECT status,head,branch FROM integration_batches WHERE project=? AND id=?',
+                        (project['id'], row['batch_id'])).fetchone()
+                    if batch is None or tuple(batch) != (row['batch_status'],row['head'],row['batch_branch']):
+                        db.execute('ROLLBACK'); continue
+                    updated = db.execute("UPDATE jobs SET status='superseded',error=? WHERE id=? AND status='retry' "
+                        "AND pid=? AND started=? AND head=? AND result IS NULL AND launch_intent IS NULL AND repair_claim IS NULL AND publication_done=0",
+                        ('Verified stopped review superseded: closed remote PR and terminal integration batch',
+                         row['id'],row['pid'],row['started'],row['head']))
+                    if updated.rowcount:
+                        proof = json.dumps(dict(remote=remote,batch_status=row['batch_status']),sort_keys=True)
+                        db.execute('INSERT OR REPLACE INTO review_retirements VALUES(?,?,?,?,?,?,?)',
+                            (row['id'],project['id'],row['pr'],row['head'],row['batch_id'],proof,time.time()))
+                    db.execute('COMMIT')
+                except BaseException:
+                    db.execute('ROLLBACK'); raise
+            except Exception as error:
+                # Unknown remote/process state remains reserved; one failed read
+                # must not abort unrelated source/review scheduling.
+                print(f"{project['id']} PR#{row['pr']}: stopped review retirement held ({type(error).__name__})", flush=True)
+                continue
+
     def tick_project(self, project, execute):
         owners = self.owners(project)
-        if execute: self.collect(project,owners)
+        if execute:
+            # Completion can commit locally before its remote mirror fails.
+            # Publish that same immutable revision before included-source closure.
+            for index, owner in enumerate(owners):
+                if owner.get('status') == 'done' and owner.get('publish_pending'):
+                    try:
+                        current = self.retry_ownership_publication(project, owner, 'done')
+                        if current is not None:
+                            owners[index] = current
+                    except Exception as error:
+                        print(f"{project['id']} {owner['key']}: completed publication retained ({type(error).__name__})", flush=True)
+            self.collect(project,owners)
         if execute and project.get('shared_acceptance_repair'):
             try:
                 from batch_integration import SharedAcceptanceRepair
@@ -2213,6 +2367,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             prs = self.prs(project, on_snapshot, owners)
         else:
             prs = self.prs(project)
+        if execute:
+            self.retire_closed_review_retries(project)
         if execute and getattr(self, 'hosted_runner_recovery', None):
             for notice in self.hosted_runner_recovery.scan(project, prs):
                 print(json.dumps(dict(project=project['id'], hosted_runner_recovery=notice)), flush=True)

@@ -115,13 +115,16 @@ class ProtocolPreflight(unittest.TestCase):
             tc.preflight(obsolete, facts, '4c78adac')
         self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 140)
 
-    def test_protocol142_refuses_previous_cli_and_accepts_pinned_cli(self):
-        # Exact failure from automatic testnet run 43958467064, before writes.
+    def test_protocol142_refuses_previous_cli_and_accepts_new_pin(self):
+        # Reproduce PR716 run43958804251, before funding/signing/submission.
         facts = {'chain_identifier': '4c78adac', 'protocol_version': 142}
         old = dict(tc.NETWORK, version='sui 1.83.0-16d2dc1e05ed', max_protocol=140)
         with self.assertRaisesRegex(tc.Incompatible, r'142 exceeds.*support \(140\)'):
             tc.preflight({'build': dict(tc.BUILD), 'network': old}, facts, '4c78adac')
-        self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 142)
+        result = tc.preflight(self.TOOLS, facts, '4c78adac')
+        self.assertEqual(result['protocol_version'], 142)
+        self.assertEqual(result['build_cli_max_protocol'], 138)
+        self.assertTrue(result['build_cli_offline'])
 
     def test_newer_protocol_refused_before_writes(self):
         with self.assertRaisesRegex(tc.Incompatible, '143 exceeds'):
