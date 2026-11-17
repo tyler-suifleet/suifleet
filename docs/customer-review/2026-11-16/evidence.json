@@ -1,0 +1,67 @@
+{
+  "review_date": "2026-11-16",
+  "source_revision": "b9bb2ef6210624d732ab2de2075ea1826e5300c1",
+  "reviewers": [
+    {
+      "family": "Codex",
+      "model": "GPT-6"
+    },
+    {
+      "family": "Claude",
+      "model": "claude-opus-5-5"
+    }
+  ],
+  "public_browser_routes": {
+    "marketing": 8,
+    "documentation": 22,
+    "console": 16
+  },
+  "separate_claude_extra_routes": [
+    "https://suifleet.io/film-preview/",
+    "404"
+  ],
+  "read_only_connected_routes": 15,
+  "new_account_case": "Wallet Standard test wallet with no private key; every signing method throws; reproduced connected-no-fleet gate",
+  "demo_case": "Public guide demo account address used only for public reads with signing disabled; not proof of wallet authority",
+  "published_media": {
+    "guide_videos_sampled": 10,
+    "sample_seconds": [
+      3,
+      18
+    ],
+    "metadata_errors": 0,
+    "caption_acceptance": {
+      "command": "CHROME_EXECUTABLE=/opt/google/chrome/chrome node site/tests/guide_captions_browser.cjs https://suifleet.io",
+      "result": "PASS all10 guide captions off/on/off, complete cues, video dimensions and versioned media at390 and1440",
+      "dependency_lock_sha256": "8d18b20f3d13322c1be40021301e5ef97348113fae95596b350c0178c1cdcafb"
+    }
+  },
+  "slush_handoff": {
+    "host": "my.slush.app",
+    "observed": "451: page not available in your region",
+    "scope": "Only this test environment; no authenticated consent or reputation warning was reached"
+  },
+  "untested": [
+    "Real Slush or extension wallet authentication/signing",
+    "Actual wallet rejection/wrong-network/uncertain submission",
+    "Device installation and physical Pi boot/reboot",
+    "Production provider/mailbox/release custody",
+    "Mainnet"
+  ],
+  "queue_recovery": {
+    "published_completion_retry": "ticket --project suifleet publish SF-246",
+    "publication_confirmed": true,
+    "ci_job_retry": "gh run rerun 43931104228 --job 133523425081 -R tyler-suifleet/suifleet",
+    "ci_failure_class": "GitHub hosted macOS runner never acquired; zero executed steps",
+    "durable_fix": "SF-270 / PR712; regression suite858 passed; final runtime integration verified separately"
+  },
+  "report_and_image_sha256": {
+    "CLAUDE.md": "4cd095b865280c799740f2ce0ef77d25863d3e3057b2fbd4a05b831e7c454218",
+    "CLAUDE_ADDENDUM.md": "f57b1ceb5040af0574d8e64d2b713c97ba0751d2be19b6446ce9a6765756f38e",
+    "CODEX.md": "6ac8d6a2f16f076fcb56832dde79ccb84dd2774c17ddbe70bcb1e10c876f7a96",
+    "README.md": "f9a9ac250d1a52ac8ac26a7d71c453722ce567e709f81edec3a96e361e502b8e",
+    "images/first-fleet-blocker.png": "6220fe5a8765cf601038199b799404fbbf1851b7d179d097ad5f590fdc66c68c",
+    "images/mobile-navigation.png": "cb6283f15790e74cbab42386446a65dcfaacfda1c31f5524ff516b9626c5aab8",
+    "images/operator-docs-internals.png": "08ce901107b327d554be0849b1fc47cd144f9da889152b57f5681fdb83260e44"
+  }
+}
