@@ -71,6 +71,14 @@ add `suifleet-edge/meta-suifleet` to your layers and `suifleet` to the image's
 packages; [Yocto guide](CUSTOMER_YOCTO.md) lists the pinned inputs and
 package-only builds.
 
+The recipe now pins client 0.2.3, compatible with the committed Seal testnet
+profile. Older evaluation images contain client 0.2.1 and cannot use a manifest
+requiring 0.2.3; rebuild from the updated recipe. Do not lower the manifest's
+client range to use an old image. See [Yocto software build evidence](YOCTO_PACKAGING.md)
+for rebuilt package scope; a new bootable SD image and physical Pi acceptance
+must be recorded separately. `make test-yocto-packaging` checks profile/version
+drift before building or flashing.
+
 At first boot `suifleet-provision.service` generates the key, without
 networking, and prints the address (see
 [Find the device address](#find-the-device-address)). The image includes
