@@ -1025,6 +1025,30 @@ class ShardedReceiptViewTests(unittest.TestCase):
 
 
 class CatalogDesiredStateTests(unittest.TestCase):
+    def test_legacy_group_discovery_is_verified_without_event_history(self):
+        device, group, inbox = (live_upgrade_security.dm.object_id(x) for x in ("0x11", "0x22", "0x33"))
+        manifest = {"call_package_id": "0x44", "type_origins": {"fleet_inbox::InboxKey": "0x55"}}
+        for fault in (None, "address", "device", "membership"):
+            with self.subTest(fault=fault):
+                run = Mock()
+                run.evidence = {}
+                run.created.return_value = [inbox if fault != "address" else "0x99"]
+                run.object.return_value = {"content": {"device_id": device if fault != "device" else "0x99",
+                                                       "groups": [group] if fault != "membership" else []}}
+                with patch.object(live_upgrade_security.dm, "inbox_id", return_value=inbox):
+                    if fault:
+                        with self.assertRaises(AssertionError):
+                            live_upgrade_security.prepare_group_discovery(run, manifest, "0x66", "0x77", device, group)
+                        self.assertNotIn("legacy_inbox", run.evidence)
+                        run.check.assert_not_called()
+                    else:
+                        live_upgrade_security.prepare_group_discovery(run, manifest, "0x66", "0x77", device, group)
+                        self.assertEqual(run.evidence["legacy_inbox"], inbox)
+                        calls = run.transaction.call_args.args
+                        self.assertLess(calls.index("0x44::fleet_inbox::new_inbox"), calls.index("0x44::fleet_inbox::follow_group"))
+                        self.assertLess(calls.index("0x44::fleet_inbox::follow_group"), calls.index("0x44::fleet_inbox::share_inbox"))
+                run.client.assert_not_called()  # No event-history lookup or replay.
+
     def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
         run = Mock()
         run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}
