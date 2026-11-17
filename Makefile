@@ -48,8 +48,13 @@ dapp-build:
 edge-build:
 	$(RUN) bash -c "cd suifleet-edge && cargo build --locked --release"
 
+# These tests share process-wide subreaper state and exercise real child,
+# socket and readiness deadlines alongside fsync-heavy queue tests. Isolate
+# them by default to avoid intra-suite contention consuming those deadlines.
+# Keep an explicit override for intentional parallel stress runs.
+EDGE_TEST_THREADS ?= 1
 edge-test:
-	$(RUN) bash -c "cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11"
+	$(RUN) bash -c "cd suifleet-edge && cargo test --locked -- --test-threads=$(EDGE_TEST_THREADS) && cargo test --locked --features pkcs11 -- --test-threads=$(EDGE_TEST_THREADS)"
 
 .PHONY: test-ota test-component dapp-typecheck build-walrus-codec test-native-seal
 
