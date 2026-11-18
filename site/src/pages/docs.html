@@ -1,44 +1,37 @@
 <div class="page">
 <h1>Documentation</h1>
-<p class="lead">SuiFleet's documentation lives with its source code. Start with the guide, then the pages for your role. The public documentation domain is not live yet. The links below open the current written guides on GitHub; no repository checkout is needed to read them.</p>
-
-<h2>Start here</h2>
+<p class="lead">Find installation, fleet operation and administration guides at <a href="{{docs_url}}">the public documentation site</a>. Start with client installation, then connect your first device. Each guide explains prerequisites, expected results and recovery.</p>
+<p><a href="{{docs_url}}install/">Install and connect your first device</a> · <a href="/guide/">Console walkthrough</a></p>
+<h2>Operators</h2>
 <ul>
-<li><a href="/guide/">Narrated console walkthrough</a></li>
-<li><a href="{{repo:docs/INSTALL_DEVICE_CLIENT.md}}">Install and connect your first device</a></li>
-<li><a href="{{repo:docs/SERVERLESS_PRODUCT.md}}">Operating without application servers</a></li>
-<li><a href="{{repo:docs/WALLET_ONBOARDING.md}}">Signing in: wallets and Google</a></li>
+<li><a href="{{docs_url}}install/">Install the device client</a></li>
+<li><a href="{{docs_url}}device-client/">Device client setup and enrollment</a></li>
+<li><a href="{{docs_url}}enrollment/">Enrollment and provisioning media</a></li>
+<li><a href="{{docs_url}}components/">Publish and deploy components</a></li>
+<li><a href="{{docs_url}}greengrass/">Greengrass compatibility and migration</a></li>
+<li><a href="{{docs_url}}platform-installers/">Platform installers and recovery</a></li>
+<li><a href="{{docs_url}}wallet/">Connect an account</a></li>
 </ul>
-
-<h2>Fleet operators</h2>
+<h2>Device integrators</h2>
 <ul>
-<li><a href="{{repo:docs/ENROLLMENT.md}}">Enrollment of devices and batches</a></li>
-<li><a href="{{repo:docs/COMPONENT_CATALOG.md}}">Publishing components and versions</a></li>
-<li><a href="{{repo:docs/STAGED_ROLLOUTS.md}}">Staged rollouts</a></li>
-<li><a href="{{repo:docs/FLEET_BUDGET.md}}">Network budget</a> and <a href="{{repo:docs/FLEET_SETTINGS.md}}">fleet settings</a></li>
-<li><a href="{{repo:docs/DASHBOARD_VIEWS.md}}">Dashboard, health and alerts</a></li>
-<li><a href="{{repo:docs/ACCESS_POLICIES.md}}">Access policies</a> and <a href="{{repo:docs/FLEET_HANDOVER.md}}">fleet handover</a></li>
+<li><a href="{{docs_url}}yocto/">Yocto recipe and first boot</a></li>
+<li><a href="{{docs_url}}pi-image/">Raspberry Pi image</a></li>
+<li><a href="{{docs_url}}macos/">macOS installer and service</a></li>
+<li><a href="{{docs_url}}releases/">Release bundles and verification</a></li>
+<li><a href="{{docs_url}}deployment-manifest/">Deployment manifest</a></li>
+<li><a href="{{docs_url}}component-ipc/">Component IPC</a></li>
+<li><a href="{{docs_url}}key-isolation/">Device signing service</a></li>
 </ul>
-
-<h2>Device and platform engineers</h2>
+<h2>Administrators</h2>
 <ul>
-<li><a href="{{repo:docs/PLATFORM_INSTALLERS.md}}">Installing the device client</a></li>
-<li><a href="{{repo:docs/YOCTO_PACKAGING.md}}">Yocto layer and first boot</a></li>
-<li><a href="{{repo:docs/KEY_ISOLATION.md}}">Device key isolation</a></li>
-<li><a href="{{repo:docs/DAEMON_UPDATE.md}}">Updating the client itself</a></li>
-<li><a href="{{repo:suifleet-edge/config.example.toml}}">Client configuration reference</a></li>
-<li><a href="{{repo:docs/GREENGRASS_COMPATIBILITY.md}}">Moving from AWS IoT Greengrass</a></li>
+<li><a href="{{docs_url}}access/">Authority and encryption</a></li>
+<li><a href="{{docs_url}}access-policies/">Access policies</a></li>
+<li><a href="{{docs_url}}seal/">Seal confidential delivery</a></li>
+<li><a href="{{docs_url}}fleet-settings/">Fleet settings</a></li>
+<li><a href="{{docs_url}}budget/">Device and storage budgets</a></li>
+<li><a href="{{docs_url}}pricing/">Pricing policy</a></li>
+<li><a href="{{docs_url}}handover/">Fleet handover</a></li>
 </ul>
-
-<h2>Security reviewers</h2>
-<ul>
-<li><a href="/security/">Security and custody summary</a></li>
-<li><a href="{{repo:docs/ACCESS_AND_ENCRYPTION.md}}">Wallet delegation, device identity and encryption</a></li>
-<li><a href="{{repo:docs/CONFIDENTIAL_DELIVERY.md}}">Confidential delivery</a></li>
-<li><a href="{{repo:docs/MOVE_SECURITY.md}}">Smart contract security</a> and <a href="{{repo:docs/FRONTEND_SECURITY.md}}">console security</a></li>
-<li><a href="{{repo:docs/DEPLOYMENT_MANIFEST.md}}">Deployment manifests and package origins</a></li>
-</ul>
-
-<h2>Source</h2>
-<p>Contracts, console and client are open source under the MIT licence: <a href="{{repo_url}}">github.com/tyler-suifleet/suifleet</a>.</p>
+<h2>Technical reference</h2>
+<p>Customer guides link to detailed implementation and validation references for integrators and auditors. The <a href="{{repo:suifleet-edge/config.example.toml}}">runtime configuration reference</a> and <a href="{{repo_url}}">source repository</a> are also available. Reference history is not a claim of production or physical-device acceptance.</p>
 </div>

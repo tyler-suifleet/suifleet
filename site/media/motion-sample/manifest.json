@@ -1,0 +1,70 @@
+{
+  "renderer": "Remotion",
+  "version": "4.0.541",
+  "fps": 30,
+  "duration_seconds": 20,
+  "source_sha256": {
+    "site/motion-sample/src/index.tsx": "3241617bdd802505d7e60c05055af3feb32863e7ccdbe9b3d486b22e91092f40",
+    "site/motion-sample/render.mjs": "773179239631e63c8be9956d5155d2d32f73cb67c510edbac779ebdf3ebb94b4",
+    "site/motion-sample/prepare.py": "e80d9096912306d7cc3ac695e95828db6df521464092739e015a3910f38d91a7",
+    "site/motion-sample/script.json": "4b2a538fa8b9e4ff2fe732e726c35cc96fe800bf0c1b84defaf6607f3f49a3b0",
+    "site/motion-sample/package.json": "180f9b32736fef5e613def2c90f5bc97e970dddf6376b33c33f352770de24776",
+    "site/motion-sample/package-lock.json": "cfea27dffa0c1a16bc75f986b7f62db6d8c8136d8803d5ed94c41f7253856207"
+  },
+  "assets_sha256": {
+    "site/src/assets/inter-variable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+    "site/src/assets/logo.svg": "400d0317ed09a06ab9a6be1e5f985accc6058eb7926dd37f79bc32e5aa25e225",
+    "site/motion-sample/art/editorial-scene.png": "681e178c457ddfeaade782bdd8ab62fd12533ac8f53cb18e2c4b8b559d09555f"
+  },
+  "narration_sha256": "aaa090de9579746c87b2e51c0f47bcd8fbab5bb1acf9d10b35c07b1ce635adc3",
+  "timing": {
+    "duration": 20,
+    "cues": [
+      {
+        "text": "With SuiFleet, managing your devices is simple.",
+        "speech_start": 0.5,
+        "speech_end": 3.2946666666666666
+      },
+      {
+        "text": "You choose the update and approve it securely.",
+        "speech_start": 5,
+        "speech_end": 7.453333333333333
+      },
+      {
+        "text": "Sui saves your approval. Walrus stores your software.",
+        "speech_start": 9.3,
+        "speech_end": 12.222666666666667
+      },
+      {
+        "text": "Your devices download and verify it, ready to install.",
+        "speech_start": 14.5,
+        "speech_end": 17.849333333333334
+      }
+    ]
+  },
+  "videos": [
+    {
+      "name": "landscape",
+      "file": "landscape.mp4",
+      "sha256": "c9fde883276d04cccac280070a33a8275e147841d563a85c9ee297d7815df544",
+      "poster": "landscape.png",
+      "width": 1600,
+      "height": 900,
+      "poster_sha256": "5fa0fd4cbece09ccd9e0faa2f7ad4a9b8838cffd2abbf501fcf38a0e9f4b000b"
+    },
+    {
+      "name": "portrait",
+      "file": "portrait.mp4",
+      "sha256": "2feadbf899e645349046df3483e2499eeb4d3e173c3a480263600522e107b888",
+      "poster": "portrait.png",
+      "width": 900,
+      "height": 1600,
+      "poster_sha256": "9e370d7ddc0f935085323c80ec054bff30fc2fbe799950c507639664218f2baf"
+    }
+  ],
+  "kind": "visual-direction-sample",
+  "voice": "af_heart",
+  "synthetic_voice": true,
+  "captions": "sample.en.vtt",
+  "captions_sha256": "32358cd03b670a8e9ad3e9129c4245ec7422c79a9347cfcb4a65a46bb9f46485"
+}

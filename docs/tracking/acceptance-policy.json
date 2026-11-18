@@ -725,6 +725,21 @@
         "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
       ]
     },
+    "SF-183": {
+      "authorization": "User-authorized recovery scope (2026-11-04): deliver a contained provider-independent partial PR now: checkout state machine; wallet/quote/network/customer binding; on-chain USDC arrival observation with partial, late and abandoned purchases; clearly labelled Testnet transfer simulation continuing through SF-182 prepay. Keep the production adapter disabled. Provider choice, partner signup, provider-specific public URL integration and real-card acceptance remain unresolved; this partial delivery does not complete the full ticket. No production credentials, mainnet, physical testing or invented provider contracts.",
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/372",
+        "https://github.com/tyler-suifleet/suifleet/issues/159",
+        "https://github.com/tyler-suifleet/suifleet/issues/32"
+      ],
+      "deferred_checks": [
+        "Real production card/provider-account and manual extension-wallet acceptance remain unrun in SF-087/#159 and SF-031/#32. No mainnet, credentials or physical authorization."
+      ],
+      "retained_gates": [
+        "Partial PR: binding/state-machine/failure-path software regressions, frontend typecheck/build, actual bounded Testnet transfer/prepay evidence, normal exact-head/current-base CI and independent source/security review.",
+        "Full SF-183 is not Done: user provider choice/signup and the corresponding reviewed public-configuration adapter are still unresolved implementation scope. Do not infer approval, production API contracts or full acceptance from this partial PR."
+      ]
+    },
     "SF-247": {
       "acceptance_issues": [
         "https://github.com/tyler-suifleet/suifleet/issues/32",
@@ -763,12 +778,26 @@
         "https://github.com/tyler-suifleet/suifleet/issues/32"
       ],
       "deferred_checks": [
-        "Owner applies the exact provider-returned Cloudflare web DNS/ownership records; verify actual suifleet.io/www/app/docs ownership and TLS, rebuild configured owned-domain crosslinks and recheck served media/navigation. No DNS writes or owned-domain HTTPS success claimed.",
         "Manual Slush/real-wallet screening and signing, physical Pi, production-payment/provider and Mainnet acceptance remain in the existing final acceptance tickets."
       ],
       "retained_gates": [
         "Actual independent public hosted website/app/docs publication receipts and source/configuration hashes; anonymous phone/desktop navigation, actual overview playback/captions, exact DNS download and real read-only customer/reporting/health checks.",
         "Source/security findings, meaningful local/frontend/production build regressions, ordinary exact-head CI, applicable automatic public-Testnet and independent application review remain required. No secrets, fabricated wallet acceptance or weakened deployment protections."
+      ]
+    },
+    "SF-256": {
+      "authorization": "User explicitly chose owner-controlled Cloudflare hosting, completed the Pages OAuth login and manually applied web DNS. Reviewed software/source integration remains required; actual hosting/domain validation is now performed, not waived.",
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "deferred_checks": [
+        "Manual real-wallet/Slush signing and screening, physical Pi, actual Mainnet and production-payment/provider acceptance remain unrun in the existing final acceptance issues.",
+        "Existing protected CI release credential/reviewer setup and full CI/rollback rehearsal are not established by the machine OAuth publication."
+      ],
+      "retained_gates": [
+        "Source/security and ordinary current-head CI/application review; preserve account/zone/project checks, exact sealed source/configuration/asset hashes and static-only publication.",
+        "Actual owner-account Pages upload, custom-domain activation/TLS, real hosted browser/media/read-only customer checks and exact served-byte/response-header evidence."
       ]
     }
   },

@@ -1,0 +1,16 @@
+{
+  "name": "suifleet-motion-sample",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.541",
+    "@remotion/renderer": "4.0.541",
+    "remotion": "4.0.541",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

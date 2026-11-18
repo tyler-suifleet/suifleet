@@ -601,3 +601,40 @@ class RetainedPairKeysTests(unittest.TestCase):
                     target.cached_acceptance(live,root/'package.json',private)
                 native.assert_not_called()
             self.assertIn('old',json.loads(private.read_text())['journals'])
+
+
+class CachedPairTransitionCallerTests(unittest.TestCase):
+    def test_pending_and_completed_pairs_reach_reconciliation_before_mutation(self):
+        from live_package_upgrade import fixture_key
+        old_source, source = 'bytecode-v1:' + 'a' * 64, 'bytecode-v1:' + 'c' * 64
+        for checkpoint in ('pending', 'completed'):
+            with self.subTest(checkpoint=checkpoint), TemporaryDirectory() as directory:
+                root = Path(directory)
+                private = root / 'live-passkey-state.json'
+                live = SimpleNamespace(chain='chain', operator='operator', wallet=root / 'client.yaml',
+                                       transaction=Mock())
+                old = dict(base_package='old-base', head_package='old-head')
+                new = dict(base_package='new-base', head_package='new-head')
+                cache = {'fixtures': {fixture_key(old_source, old_source): old,
+                                      fixture_key(old_source, source): new}}
+                state = dict(active_fixture=target.fixture_identity(live, old),
+                             **{checkpoint: {'proof': 'retained'}})
+                original = json.dumps(state)
+                private.write_text(original)
+                private.with_suffix('.keys.json').write_text('retained-test-identity')
+                def stop_before_reconciliation(actual_live, actual_cache, actual_state, identity, save):
+                    self.assertEqual(actual_state, state)
+                    self.assertEqual(private.read_text(), original)
+                    self.assertEqual(identity, target.fixture_identity(live, new))
+                    raise RuntimeError('reconciliation reached')
+                with patch('live_package_upgrade.load_state', return_value=cache), \
+                     patch.object(target, 'contracts_digest', return_value=source), \
+                     patch.object(target, 'verify_cached_fixture'), \
+                     patch.object(target, 'native_fixture') as native, \
+                     patch.object(target, 'select_journal', side_effect=stop_before_reconciliation) as select:
+                    with self.assertRaisesRegex(RuntimeError, 'reconciliation reached'):
+                        target.cached_acceptance(live, root / 'package.json', private)
+                    select.assert_called_once()
+                    native.assert_called_once_with(live, private, operation='info', requireExistingKeys=True)
+                    live.transaction.assert_not_called()
+                self.assertEqual(private.read_text(), original)

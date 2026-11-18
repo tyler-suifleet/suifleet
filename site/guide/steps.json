@@ -1,21 +1,22 @@
 {
   "schema_version": 1,
-  "note": "Written steps follow the current console. Videos are dated scripted testnet demonstrations; their source commit is retained in videos.json and layouts may differ. Update recording scripts when UI labels change.",
+  "note": "Written steps follow the current console. Videos are dated scripted demonstrations; their source commit is retained in videos.json and layouts may differ. Update recording scripts when UI labels change.",
   "steps": [
     {
       "id": "sign-in",
       "title": "Sign in",
       "console_route": "get-started/",
       "console_label": "Get started",
-      "summary": "Open the console and connect an account. You can use the Slush web wallet with no extension, an installed Sui wallet extension, or Google sign-in where the build enables it. The first time, you create your fleet; that is the only transaction in this step.",
+      "summary": "First device: sign in, check capacity, fund the budget, register, publish and deploy. Skip batch enrollment and staged rollout. Configure private access before publishing confidential software. Open the console and connect an account. You can use the Slush web wallet with no extension, an installed Sui wallet extension, or Google sign-in where the build enables it. The first time, you create your fleet; that is the only transaction in this step.",
       "before": [
-        "A Sui wallet, or a Google account if Google sign-in is offered."
+        "A Sui wallet, or a Google account if Google sign-in is offered.",
+        "Funds for the first fleet transaction on the selected network. Connection alone does not require a transaction."
       ],
       "actions": [
         "Open the console and click Connect Wallet at the top right.",
         "Pick Slush, your extension wallet or Google, and approve the connection.",
         "On your first visit, choose Create default fleet in the fleet selector and approve the request. A fleet is your device workspace; choose it before continuing.",
-        "Choose Get started in the sidebar: it shows your account, short address, the network (Testnet in the preview) and the next onboarding step."
+        "Choose Get started in the sidebar: it shows your account, short address, the selected network and the next onboarding step."
       ],
       "result": "The console shows your connected address, your selected fleet and the next onboarding step.",
       "docs": [
@@ -30,10 +31,10 @@
       "title": "Enable device capacity",
       "console_route": "billing/",
       "console_label": "Plans and billing",
-      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the fleet budget for device activity. Check capacity before depositing operating funds. This preview uses a disposable test tariff and free test tokens, not real purchases.",
+      "summary": "A subscription provides places for devices. It is separate from the account fees for approvals and the device operating budget for device activity. Check capacity before depositing operating funds. Review the capacity and price shown in the console before approving a purchase.",
       "before": [
         "Connect and choose your fleet.",
-        "Obtain free test SUI for approvals. An organization administrator must choose the plan."
+        "Have funds for account fees on the network shown in the console. An organization administrator must choose the plan."
       ],
       "actions": [
         "Open Device capacity to check how many device places are available.",
@@ -42,7 +43,7 @@
         "Apply the due prepaid payment to activate capacity. This uses the existing subscription balance, with a separate network fee.",
         "Return to Device capacity and verify the new limit."
       ],
-      "result": "The organization\u2019s device limit increases. No device has been registered, connected or updated by buying capacity.",
+      "result": "The organization’s device limit increases. No device has been registered, connected or updated by buying capacity.",
       "docs": [
         {
           "label": "Subscription pricing",
@@ -52,23 +53,23 @@
     },
     {
       "id": "fund",
-      "title": "Fund the network budget",
+      "title": "Fund device and storage budgets",
       "console_route": "budget/",
-      "console_label": "Network budget",
-      "summary": "The fleet budget pays the network fees for device reports. Storage funding pays for uploaded files and logs where enabled. These balances are separate from your subscription and device capacity. Depositing funds requires your approval.",
+      "console_label": "Device and storage budgets",
+      "summary": "The device operating budget pays the network fees for device reports. Storage funding pays for uploaded files and logs where enabled. These balances are separate from your subscription and device capacity. Depositing funds requires your approval.",
       "before": [
-        "SUI in the connected account. On testnet, request it from the Sui faucet; the console shows the address to fund."
+        "Funds for account fees on the network shown in the console. Confirm the account and selected network before funding."
       ],
       "actions": [
-        "Choose Network budget in the sidebar.",
+        "Choose Device and storage budgets in the sidebar.",
         "Enter Deposit (SUI) and click Deposit, then approve. If this build offers Create budget and deposit instead, enter the Initial deposit first.",
         "Later deposits use the Deposit button. Open Device balances, spending limits and withdrawals to cap or withdraw per-device funds.",
-        "Optionally create fleet storage under Storage funding to prepay Walrus storage for uploads and log archives."
+        "Optionally click Create storage budget under Storage funding to prepay Walrus storage for uploads and log archives."
       ],
       "result": "A Confirmed message with the transaction digest, and the new balance under Keep devices reporting.",
       "docs": [
         {
-          "label": "Fleet budget",
+          "label": "Device and storage budgets",
           "path": "docs/FLEET_BUDGET.md"
         }
       ]
@@ -80,7 +81,7 @@
       "console_label": "Devices",
       "summary": "Install the SuiFleet client on the device, then register the public address it supplies. The private device key stays on the device; never paste it into the console. Registration gives your account permission to manage that device.",
       "before": [
-        "Available device capacity for your organization. A funded network budget does not increase your device limit; check Device capacity or Plans and billing first.",
+        "Available device capacity for your organization. A funded device operating budget does not increase your device limit; check Device capacity or Plans and billing first.",
         "The device's address, printed by suifleet --derive-address /etc/suifleet/device.key on the device."
       ],
       "actions": [
@@ -89,11 +90,11 @@
         "Click Register and approve the transaction.",
         "The device appears in the list. It shows as not yet reporting until its client starts and sends a signed report."
       ],
-      "result": "A new device row with its name, architecture and address.",
+      "result": "A new device row with its name, architecture and address. For one device, skip batch enrollment. Continue with private access only for confidential software, then publish and deploy.",
       "docs": [
         {
           "label": "Device client setup",
-          "path": "README.md"
+          "path": "docs/INSTALL_DEVICE_CLIENT.md"
         },
         {
           "label": "Identity lifecycle",
@@ -103,17 +104,18 @@
     },
     {
       "id": "enroll-batch",
-      "title": "Enroll a batch",
+      "title": "Enroll a batch (optional)",
       "console_route": "enrollment/",
       "console_label": "Enrollment",
       "summary": "Optional for larger fleets: enroll devices in batches instead of copying each public device address. Each device receives its own enrollment credential. Start with single-device registration for your first pilot.",
       "before": [
-        "A roster (CSV of names and serial numbers), or a single device to pair."
+        "A roster (CSV of names and serial numbers), or a single device to pair.",
+        "The retained video was captured before the download acknowledgment checkbox was added. Follow the written checkbox step below before downloading credentials in the current app."
       ],
       "actions": [
         "Choose Enrollment in the sidebar. Under 1. Enrollment batch policy, set a Quota and Valid for days, then click Create policy.",
         "Under 2. Reserve names and serial numbers, paste a roster CSV (or use Pair one device), optionally pick a Default group, and click Check.",
-        "Click Download credentials. This file is the only copy of the claim keys; store it with your factory image tooling, never in source control.",
+        "Tick “I understand this download is the only copy of these credentials”, then click Download credentials. This archive is the only copy of the claim keys. Keep it offline, put only each device’s own credential on its private provisioning media, and never include credentials in source control or a shared image. Delete the archive once devices have enrolled.",
         "Under 3. Register claims, click Run pending transactions and approve each transaction. Devices then enroll themselves with suifleet --enroll."
       ],
       "result": "Entries move from Reserved to Waiting for device, and to Enrolled when each device claims its record.",
@@ -125,20 +127,43 @@
       ]
     },
     {
+      "id": "access-policy",
+      "title": "Private-release access (optional)",
+      "console_route": "access/",
+      "console_label": "Access policies",
+      "summary": "Optional for private software: complete this before confidential publication. Create a group on Devices → Device groups, add your device with Manage, then grant it decryption access here. This controls file access; it does not deploy software. Skip for the public example.",
+      "before": [
+        "A group you administer, with the intended device members. Create it on Devices → Device groups before continuing."
+      ],
+      "actions": [
+        "Open Access policies and create a named policy.",
+        "Choose Group as the recipient type, select the demo group and click Grant decryption.",
+        "Approve the transaction. The group appears under granted recipients."
+      ],
+      "result": "The group may request keys according to current membership; already decrypted bytes cannot be recalled.",
+      "docs": [
+        {
+          "label": "Confidential delivery",
+          "path": "docs/CONFIDENTIAL_DELIVERY.md"
+        }
+      ]
+    },
+    {
       "id": "publish-version",
       "title": "Publish a version",
       "console_route": "components/",
-      "console_label": "Components",
-      "summary": "A version is a named component with one artifact per platform and a recipe describing how to install and run it. The browser encrypts both before uploading them to Walrus and records their digests on chain.",
+      "console_label": "Software library",
+      "summary": "A version is a named component with one artifact per platform and a recipe describing how to install and run it. Confidential delivery encrypts both before Walrus upload; Public delivery uploads unencrypted files. Both record authenticated digests on chain. Publishing does not install software.",
       "before": [
         "The artifact file for each platform.",
-        "An access policy (Access policies page) naming who may decrypt it, for confidential delivery."
+        "An access policy (Access policies page) naming who may decrypt it, for confidential delivery.",
+        "Confidential delivery also requires the build’s encryption service configuration. If unavailable, ask your administrator; do not switch proprietary software to Public."
       ],
       "actions": [
-        "Choose Components in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
+        "Choose Software library in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
         "Click Publish version, enter the Component name and Semantic version, and continue.",
         "For each platform choose the Operating system and Architecture, attach the Artifact and, if needed, an Install command.",
-        "Under Delivery keep Confidential and choose the Access policy for proprietary software. The scripted testnet demo chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
+        "Under Delivery keep Confidential and choose the Access policy for proprietary software. The recorded example chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
         "Click Review version, then Upload and publish version, and approve the transaction."
       ],
       "result": "Version published, with the confirmed transaction digest. The version appears in the component library.",
@@ -155,22 +180,22 @@
     },
     {
       "id": "deploy-group",
-      "title": "Deploy to a group",
+      "title": "Deploy to a device or group",
       "console_route": "firmware/",
-      "console_label": "Deploy component",
-      "summary": "Groups let one deployment reach many devices, and membership is checked by each device at apply time. A deployment records the version, the targets and the wallet that authorized it.",
+      "console_label": "Deploy software",
+      "summary": "For one device, select it directly and clear desired state for a one-shot deployment. Groups let one deployment reach many devices, with membership checked at apply time. A group can also keep a desired version for continuing convergence. The deployment records the version, targets and authorizing wallet.",
       "before": [
         "A published version.",
         "Registered or enrolled devices."
       ],
       "actions": [
-        "On Devices, open the Device groups tab, click Create group and give it a Group name.",
-        "Click Manage on the group and Add the devices that should receive the release.",
-        "In the component library click Deploy this version, or choose Deploy component in the sidebar.",
-        "Under Select targets & review tick the group (or individual devices) and click Deploy to 1 target. A catalog version deploys once; to make it a group's desired version, use the ad-hoc Deploy component flow.",
+        "For group delivery, on Devices open Device groups and Create group with a Group name, or reuse the group prepared for private access. Skip group setup for a one-device deployment.",
+        "For a group, use Manage to Add its intended devices if they are not already members.",
+        "In Software library click Deploy this version. Alternatively, choose Deploy software in the sidebar, then Choose or publish a version to open the library. The optional Advanced: deploy a file directly section is for a one-off file without a library entry.",
+        "Under Select targets & review select groups or individual devices. Library versions support Make this the groups’ desired version: keep it selected for continuing group convergence, or clear it for a one-shot deployment. Desired state supports groups only; clear individual devices before using it. Review the target count and click Deploy.",
         "Approve the transaction, then open View deployments to follow each device's signed result."
       ],
-      "result": "Deployment created. Each device in the group reports success or failure under Deployments.",
+      "result": "Deployment created confirms the request. Wait for device-signed results under Deployments. Applied records installer completion; check application health separately. A first-device pilot can target its individual device with desired state cleared; groups are optional.",
       "docs": [
         {
           "label": "Desired state",
@@ -184,19 +209,19 @@
     },
     {
       "id": "staged-rollout",
-      "title": "Run a staged rollout",
+      "title": "Run a staged rollout (optional)",
       "console_route": "rollouts/",
       "console_label": "Rollouts",
-      "summary": "Optional for larger fleets: a staged rollout releases to cohorts in order. Devices are admitted a few at a time; each cohort must report signed, healthy results for its bake period before the next one starts, and the rollout stops itself if failures pass your threshold.",
+      "summary": "Optional for larger fleets: release to cohorts in order. On-chain gates check signed post-apply health, observation time and failure limits when you explicitly approve Check device health and continue. There is no unattended advancement; return to approve each batch and later health checks.",
       "before": [
         "A published library version for the target device platform.",
-        "Named devices or groups to divide into batches. Configure device reporting and verify current health before admitting devices."
+        "Named devices or groups to divide into batches. Configure client reporting. Admission candidates are not proof a device is online; post-apply health gates progression."
       ],
       "actions": [
         "Choose Rollouts and open Create a gradual rollout.",
         "Choose Published library version and platform. Add named devices or groups to each cohort (batch); each device can appear in only one batch.",
         "Choose the pace, observation period, minimum reports and failure threshold. Select Review rollout, check the exact plan, then Confirm creation in wallet. Creation starts no devices.",
-        "Select the saved rollout. Once device reporting is configured and current health is available, choose waiting devices and Check device health and continue. Return to approve subsequent batches.",
+        "Select the saved rollout, choose waiting devices and approve Check device health and continue. Empty selection checks health without new grants. Return to approve later checks and subsequent batches; closing the browser stops coordination.",
         "Use Pause to stop new starts, Resume to allow further checks, or Abort permanently. Give an audit reason; updates already allowed to start may finish."
       ],
       "result": "Creation leaves devices waiting. The demonstration creates and pauses a plan without admitting devices; it does not claim healthy rollout completion. Actual progress requires admitted devices, verified update results and current health reports.",
@@ -208,40 +233,18 @@
       ]
     },
     {
-      "id": "access-policy",
-      "title": "Private-release access",
-      "console_route": "access/",
-      "console_label": "Access policies",
-      "summary": "Optional for private software: choose which devices may decrypt a release. You can complete this step earlier: create the device group first, then configure access before publishing private software. This controls access to files; it does not itself deploy them.",
-      "before": [
-        "A group you administer."
-      ],
-      "actions": [
-        "Open Access policies and create a named policy.",
-        "Choose Group as the recipient type, select the demo group and click Grant decryption.",
-        "Approve the transaction. The group appears under granted recipients."
-      ],
-      "result": "The group may request keys according to current membership; already decrypted bytes cannot be recalled.",
-      "docs": [
-        {
-          "label": "Confidential delivery",
-          "path": "docs/CONFIDENTIAL_DELIVERY.md"
-        }
-      ]
-    },
-    {
       "id": "fleet-settings",
       "title": "Choose fleet settings",
       "console_route": "settings/",
       "console_label": "Fleet settings",
       "summary": "Choose how often devices check for updates and report health. Budget estimates are planning tools.",
       "before": [
-        "A selected fleet and its network budget."
+        "A selected fleet and its device operating budget."
       ],
       "actions": [
         "Open Fleet settings and choose a device reporting interval.",
         "Review the estimate, then click Save settings and approve.",
-        "Open Network budget to review the balance separately. Saving settings does not fund the budget."
+        "Open Device and storage budgets to review the balance separately. Saving settings does not fund the budget."
       ],
       "result": "Settings are saved on chain; devices apply them at their next check.",
       "docs": [

@@ -1,7 +1,7 @@
 # Install the device client
 
 The SuiFleet device client is the `suifleet` daemon. It runs on each device,
-holds the device's own key, watches the network for deployments aimed at it and
+uses the device's own identity, watches the network for deployments aimed at it and
 reports results. The console links here from Get started, Devices and
 Enrollment. This guide is also published in the public installation hub;
 reading it does not require repository access.
@@ -19,19 +19,25 @@ Items 4 and 5 are written after the device is registered or enrolled, and
 installed in that order: `deployment.json`, then `signer.toml`, then
 `config.toml` last.
 
+## Prerequisites
+
+You need administrative access to the device, the correct fleet console/network,
+an operator account with registration authority, and funds for enrollment and reports.
+Keep the Device and DeviceCap IDs distinct from the device public address.
+
 ## Get the client
 
 The client is built from this repository's `suifleet-edge` crate. **No
 prebuilt download is published yet.** The repository can produce signed,
-reproducible release bundles ([RELEASES.md](RELEASES.md)), but none have been
+reproducible release bundles ([release verification](CUSTOMER_RELEASES.md)), but none have been
 released for operators to download. Ask your fleet operator for an authenticated
-release bundle or use the source-build paths below. Verify signed bundles using [release verification](RELEASES.md)
+release bundle or use the source-build paths below. Verify signed bundles using [release verification](CUSTOMER_RELEASES.md)
 and trust roots supplied through an authenticated channel before installation.
 Do not install unverified binaries.
 
 | Platform | How to get it | Status |
 |---|---|---|
-| Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending ([SF-031](https://github.com/tyler-suifleet/suifleet/issues/32)) |
+| Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
 | Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
@@ -59,11 +65,19 @@ export KAS_BUILD_DIR="$KAS_WORK_DIR/build-pi-image"
 kas build kas/pi-image.yml:/absolute/path/to/private-access.yml
 ```
 
-The private overlay adds your SSH public key; see [PI_IMAGE.md](PI_IMAGE.md)
+The private overlay adds your SSH public key; see [Pi image guide](CUSTOMER_PI_IMAGE.md)
 for it, flashing and first login. To add only the client to your own image,
 add `suifleet-edge/meta-suifleet` to your layers and `suifleet` to the image's
-packages; [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) lists the pinned inputs and
+packages; [Yocto guide](CUSTOMER_YOCTO.md) lists the pinned inputs and
 package-only builds.
+
+The recipe now pins client 0.2.3, compatible with the committed Seal testnet
+profile. Older evaluation images contain client 0.2.1 and cannot use a manifest
+requiring 0.2.3; rebuild from the updated recipe. Do not lower the manifest's
+client range to use an old image. See [Yocto software build evidence](YOCTO_PACKAGING.md)
+for rebuilt package scope; a new bootable SD image and physical Pi acceptance
+must be recorded separately. `make test-yocto-packaging` checks profile/version
+drift before building or flashing.
 
 At first boot `suifleet-provision.service` generates the key, without
 networking, and prints the address (see
@@ -92,7 +106,7 @@ configuration and starts nothing. After writing `deployment.json` and
 sudo launchctl bootstrap system /Library/LaunchDaemons/org.suifleet.daemon.plist
 ```
 
-Service control, logs and limits are in [MACOS_RUNTIME.md](MACOS_RUNTIME.md).
+Service control, logs and limits are in [macOS guide](CUSTOMER_MACOS.md).
 
 ## Debian and Ubuntu
 
@@ -141,7 +155,7 @@ sudo install -m 0640 -g suifleet "$F/config.toml.example" /etc/suifleet/config.t
 ```
 
 They keep the key in the separate signing service
-([KEY_ISOLATION.md](KEY_ISOLATION.md)); write `signer.toml` and then
+([signing service](CUSTOMER_KEY_ISOLATION.md)); write `signer.toml` and then
 `config.toml` from them as described below. The privileged firmware path is
 optional; see [OPERATIONS.md](OPERATIONS.md#execution-privileges) before
 enabling `suifleet-firmware.path`.
@@ -176,8 +190,9 @@ it.
 objects. The device refuses to start against a manifest for a different chain
 or a superseded release. Get it from your fleet's operator or publisher:
 
-- The console's **Download deployment.json** button saves the manifest this
-  console was built with.
+- The console's **Download connection settings** button saves `deployment.json`,
+  the manifest this console was built with. It does not include the device's
+  Device or DeviceCap IDs, signer configuration or daemon configuration.
 - Enrollment media downloaded from the Enrollment page already include it.
 - A publisher's release directory `deployments/ENV/current/` contains it
   ([DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md)).
@@ -189,7 +204,7 @@ group `suifleet`, mode 0640.
 
 On Linux the device key belongs to the signing service
 (`suifleet-signer.service`), not to the daemon, so components the daemon runs
-cannot read it ([KEY_ISOLATION.md](KEY_ISOLATION.md)). The daemon asks this
+cannot read it ([signing service](CUSTOMER_KEY_ISOLATION.md)). The daemon asks this
 service for the device address when it starts, so install
 `/etc/suifleet/signer.toml` **before** `config.toml`. Its appearance also
 hands the key file to the service's user. A minimal file:
@@ -212,7 +227,7 @@ sudo install -m 0640 -o root -g suifleet-signer signer.toml /etc/suifleet/signer
 ```
 
 macOS has no signing service: the daemon reads the key itself (see
-[MACOS_RUNTIME.md](MACOS_RUNTIME.md)), so skip this step there.
+[macOS guide](CUSTOMER_MACOS.md)), so skip this step there.
 
 ## Configuration file
 
@@ -277,7 +292,7 @@ sudo suifleet --enroll /path/to/enroll.toml
 It prints JSON with `device_address`, `device_object_id` and `device_cap_id`.
 Write the DeviceCap ID into `signer.toml` and both IDs into `config.toml`, then
 install them in that order. Details, claim funding and
-security are in [ENROLLMENT.md](ENROLLMENT.md#claim-enrollment-and-bulk-onboarding).
+security are in [Enrollment](CUSTOMER_ENROLLMENT.md).
 
 ## Register by address
 
@@ -295,7 +310,9 @@ Without Enrollment, register one device at a time:
 4. Give the device a little SUI for status reports, or enroll it in the fleet
    budget during registration.
 
-## Check that it is running
+<a id="check-that-it-is-running"></a>
+
+## Expected result: check that it is running
 
 On Linux:
 
@@ -315,14 +332,20 @@ its history, follow
 Never delete `device.key` or `/var/lib/suifleet` to fix a network or
 configuration problem.
 
-## Limits
+<a id="limits"></a>
+
+## Recovery and limits
 
 - No prebuilt binaries, packages or images are published for download yet.
 - Physical Raspberry Pi boot and recovery acceptance remain in
-  [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32).
+  separate physical-target acceptance.
 - The generic Linux steps reuse the Yocto recipe's files; they have not been
   tested as a distribution package.
 - Public docs hosting and distribution publication are separate from this guide
   build. An operator can configure the console’s `NEXT_PUBLIC_DEVICE_DOCS_BASE`
   to the deployed curated docs root (default `https://docs.suifleet.io/`).
   This setting is a documentation destination, never a package-download promise.
+
+## Technical reference
+
+Integrators can inspect the [runtime configuration reference](../suifleet-edge/config.example.toml) and [deployment manifest protocol](DEPLOYMENT_MANIFEST.md). Engineering references include historical validation; they do not establish physical or production acceptance.

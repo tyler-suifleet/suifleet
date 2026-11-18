@@ -6,9 +6,9 @@ ARG SUI_VERSION=testnet-v1.81.1
 ARG SUI_SHA256=d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4
 # Transaction CLI for live networks only (scripts/sui_toolchain.py). It must
 # support the network's protocol version; SUI_VERSION stays the compiler.
-ARG SUI_NETWORK_VERSION=testnet-v1.83.0
-ARG SUI_NETWORK_SHA256=e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8
-ARG SUI_NETWORK_BINARY_SHA256=29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa
+ARG SUI_NETWORK_VERSION=testnet-v1.84.0
+ARG SUI_NETWORK_SHA256=0f006fb4408bb2f867698a193d5f22f166acb9b89e0eb027c1e1b445b3b62127
+ARG SUI_NETWORK_BINARY_SHA256=ac657ec16feafe3e1a6db93b09ae922f6e5e601cf41ea35ff9b7905781d35ab0
 ARG NODE_MAJOR=22
 ARG NODE_VERSION=22.22.2-1nodesource1
 ARG PNPM_VERSION=11.0.8
@@ -36,8 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Retry transient release-host errors at most three times; each attempt is bounded.
+# Checksums below remain mandatory before extraction.
 # SUI CLI → /usr/local/bin (accessible to all users)
-RUN curl -fL -o /tmp/sui.tgz \
+RUN curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 600 -o /tmp/sui.tgz \
     "https://github.com/MystenLabs/sui/releases/download/${SUI_VERSION}/sui-${SUI_VERSION}-ubuntu-x86_64.tgz" \
     && echo "${SUI_SHA256}  /tmp/sui.tgz" | sha256sum -c - \
     && tar -xzf /tmp/sui.tgz -C /usr/local/bin \
@@ -45,7 +47,7 @@ RUN curl -fL -o /tmp/sui.tgz \
     && sui --version
 
 # Network transaction CLI → /opt/sui-network/sui, never on PATH
-RUN curl -fL -o /tmp/sui-network.tgz \
+RUN curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 600 -o /tmp/sui-network.tgz \
     "https://github.com/MystenLabs/sui/releases/download/${SUI_NETWORK_VERSION}/sui-${SUI_NETWORK_VERSION}-ubuntu-x86_64.tgz" \
     && echo "${SUI_NETWORK_SHA256}  /tmp/sui-network.tgz" | sha256sum -c - \
     && mkdir -p /opt/sui-network \

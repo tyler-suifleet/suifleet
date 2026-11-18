@@ -1,19 +1,27 @@
 WEBVTT
 
 1
-00:00:00.200 --> 00:00:17.181
-Access policies are optional controls for confidential software.
-Choose who can open encrypted files before publishing a private
-release. They do not give permission to administer the fleet.
-Open Access policies. A policy controls decryption for
-confidential releases.
+00:00:00.450 --> 00:00:10.391
+For confidential software, set up private access before
+publishing. First create a group in Devices and add its members.
+Skip this lesson for the public example.
 
 2
-00:00:17.920 --> 00:00:23.445
-Choose Group and select guide-pilot. Membership determines which
-devices may request keys.
+00:00:11.010 --> 00:00:18.583
+Open Access policies before publishing confidential software.
+These rules control decryption, not fleet administration.
 
 3
-00:00:24.160 --> 00:00:30.261
-The grant is recorded. Revocation stops future requests; it
-cannot recall bytes already decrypted.
+00:00:19.170 --> 00:00:25.634
+Choose Group and select the intended group. Its membership
+determines which devices may request access keys.
+
+4
+00:00:26.250 --> 00:00:33.247
+The grant is saved. Removing access stops future key requests;
+it cannot erase files that were already decrypted.
+
+5
+00:00:33.850 --> 00:00:40.783
+The access rule is saved. Use it when publishing a confidential
+release, and review membership as your fleet changes.

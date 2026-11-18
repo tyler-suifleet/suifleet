@@ -41,6 +41,7 @@ class TrustTests(unittest.TestCase):
             log.write_text('Sync failed PRIVATE-CANARY RPC request timeout\n')
             diagnostic = daemon_progress(journal, log)
             self.assertTrue(diagnostic['initialized'])
+            self.assertNotIn('0x', json.dumps(diagnostic))
             self.assertEqual(list(diagnostic['outcomes'].values()),
                              [dict(error_categories=[], status=1, reported=False, has_error=True)])
             self.assertEqual(diagnostic['log_counts']['RPC request timeout'], 1)
@@ -53,8 +54,52 @@ class TrustTests(unittest.TestCase):
             self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             log.write_text('Deployment schema rejected PRIVATE-CANARY')
             self.assertEqual(daemon_progress(journal, log)['log_counts']['Deployment schema rejected'], 1)
+            log.write_text('watch read failed for PRIVATE-CANARY: upstream connect error or disconnect/reset before headers\n'
+                           'Sync failed PRIVATE-CANARY: transport error\n')
+            diagnostic = daemon_progress(journal, log)
+            self.assertEqual(diagnostic['log_counts']['watch read failed for'], 1)
+            self.assertEqual(diagnostic['log_counts']['upstream connect error or disconnect/reset before headers'], 1)
+            self.assertEqual(diagnostic['log_counts']['transport error'], 1)
+            self.assertEqual(diagnostic['log_counts']['Connection refused'], 0)
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            # Reproduce the failed CI's pre-discovery sync failure shape.
+            # Export the fixed cause, never the provider message or log line.
+            for marker in ('watch read failed', 'watch read failed for',
+                           'custody field has no fleet owner', 'transport error',
+                           'Resource exhausted', 'Invalid argument',
+                           'event frame without watermark',
+                           'event index has not reached the cursor-merge checkpoint fence',
+                           'undecodable DeviceAddedToGroup event'):
+                log.write_text(f'Sync failed; retrying: {marker}: PRIVATE-CANARY\n' * 50)
+                diagnostic = daemon_progress(journal, log)
+                self.assertEqual(diagnostic['log_counts']['Sync failed'], 50)
+                self.assertEqual(diagnostic['log_counts'][marker], 50)
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
+
+    def test_sync_diagnostic_export_is_fixed_and_bounded(self):
+        import tempfile
+        from live_package_upgrade import daemon_progress
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); journal = root/'journal'; log = root/'log'
+            journal.write_text('{}')
+            log.write_text('SUIFLEET_SYNC_V1 stage=announcements categories=timeout,unavailable\n'
+                           'SUIFLEET_SYNC_V1 stage=watch categories=other,PRIVATE-CANARY\n'
+                           'SUIFLEET_SYNC_V1 stage=secret categories=timeout\n'
+                           'provider PRIVATE-CANARY 0xdead cursor password timeout\n'
+                           'watch read failed for PRIVATE-CANARY: transport error\n')
+            with log.open('a') as stream:
+                stream.write('SUIFLEET_SYNC_V1 stage=announcements categories=timeout,unavailable\n' * 49)
+            diagnostic = daemon_progress(journal, log)
+            self.assertEqual(diagnostic['log_counts']['watch read failed for'], 1)
+            self.assertEqual(diagnostic['log_counts']['transport error'], 1)
+            self.assertEqual(diagnostic['sync_stages']['announcements'], 50)
+            self.assertEqual(diagnostic['sync_error_categories']['timeout'], 50)
+            self.assertEqual(diagnostic['sync_error_categories']['unavailable'], 50)
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            self.assertNotIn('0xdead', json.dumps(diagnostic))
+            self.assertNotIn('secret', json.dumps(diagnostic))
 
     def test_fresh_sf127_package_costs_leave_room_without_replenishing_allowance(self):
         # Actual successful costs/funding from run 40125390496. Its 0.8-SUI
@@ -672,7 +717,17 @@ class TrustTests(unittest.TestCase):
             reused = live.load_state(path, '4c78adac', '0xa')['fixtures']['content-hash']
             self.assertTrue(live.fixture_alive(reused, '0xa', client))
             owners['0x3'] = {'AddressOwner':'0xd'}
-            self.assertFalse(live.fixture_alive(reused, '0xa', client))
+            diagnostics = []
+            self.assertFalse(live.fixture_alive(reused, '0xa', client, diagnostics))
+            self.assertEqual(diagnostics, [dict(object_id='0x3', expected_owner='0xa', actual_owner='0xd')])
+            owners['0x3'] = {'AddressOwner':'0xa'}
+            def unreadable(command, object_id):
+                if object_id == '0x7':
+                    raise RuntimeError('untrusted provider text must not enter evidence')
+                return client(command, object_id)
+            diagnostics = []
+            self.assertFalse(live.fixture_alive(reused, '0xa', unreadable, diagnostics))
+            self.assertEqual(diagnostics, [dict(object_id='0x7', error='package read failed')])
             self.assertEqual(live.load_state(path, '4c78adac', '0xd')['fixtures'], {})
 
 class PublicEnvironmentTests(unittest.TestCase):

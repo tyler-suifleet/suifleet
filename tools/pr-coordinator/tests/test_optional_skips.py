@@ -43,6 +43,43 @@ class OptionalSkips(unittest.TestCase):
             self.pr['baseRefOid'] = 'changed'
             self.assertIsNotNone(c.checks_blocker(self.pr))
 
+    def test_hosting_test_workflow_preserves_exact_applicability_proof(self):
+        hosting_blob = '9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0'
+        for name in c.OPTIONAL_DEPLOYMENT_JOBS:
+            with self.subTest(name=name):
+                self.setup_evidence(name)
+                self.tree['tree'][0]['sha'] = hosting_blob
+                self.annotate()
+                self.assertIsNone(c.checks_blocker(self.pr))
+                self.assertEqual(self.check['_optional_skip']['workflow_blob'], hosting_blob)
+                self.assertEqual(self.check['conclusion'], 'SKIPPED')
+                self.check['_optional_skip']['workflow_blob'] = 'unreviewed'
+                self.assertIsNotNone(c.checks_blocker(self.pr))
+                # New workflow recognition still requires fresh run provenance.
+                self.run['pull_requests'][0]['base']['sha'] = 'stale'
+                self.annotate()
+                self.assertNotIn('_optional_skip', self.check)
+                self.assertIsNotNone(c.checks_blocker(self.pr))
+
+    def test_included_stacked_source_uses_original_run_base_with_main_evidence(self):
+        self.setup_evidence()
+        original = self.pr['baseRefOid']
+        self.pr.update(baseRefName='main', baseRefOid='c'*40, baseIncluded=False,
+            _review_mode='included',
+            _included_source=dict(comparison=original, base_ref='work/old-parent'),
+            _included_evidence=dict(source=self.pr['headRefOid'], head='c'*40, effects_sha256='d'*64))
+        self.run['pull_requests'][0]['base']['ref'] = 'work/old-parent'
+        self.annotate()
+        self.assertIsNone(c.checks_blocker(self.pr))
+        self.assertEqual(self.check['_optional_skip']['base'], 'c'*40)
+        self.pr['_included_source']['comparison'] = 'changed'
+        self.annotate()
+        self.assertIsNotNone(c.checks_blocker(self.pr))
+        self.pr['_included_source']['comparison'] = original
+        self.pr['_included_evidence']['head'] = 'wrong'
+        self.annotate()
+        self.assertIsNotNone(c.checks_blocker(self.pr))
+
     def test_required_unknown_and_live_skips_block(self):
         for name in ('check','build','Security CodeQL (rust)','gate','unknown'):
             self.setup_evidence(name);self.annotate()

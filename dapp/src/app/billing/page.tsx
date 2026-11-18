@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useCurrentClient } from '@mysten/dapp-kit-react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import QRCode from 'qrcode';
+import { SubscriptionCard } from '@/components/SubscriptionCard';
 import { useCurrentAccount } from '@/hooks/useCurrentAccount';
 import { useFleetSelection } from '@/hooks/useFleetSelection';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
@@ -46,8 +47,8 @@ function Billing() {
   const target = useQuery({ queryKey: ['subscription-payment', linkPayment], queryFn: () => readAccount(client, linkPayment!.account, linkPayment!.symbol, linkPayment!.customer), enabled: !!linkPayment, retry: false, refetchInterval: 60000 });
   const receipts = useQuery({ queryKey: ['subscription-history', current.data?.account.id], queryFn: () => history(client, current.data!.account.id), enabled: !!current.data, retry: false, refetchInterval: 60000 });
   const price = loadPriceTable();
-  async function run(actionName: string, action: () => Promise<Transaction> | Transaction, payment?: Payment, plan?: Quote) {
-    if (inFlight.current) return;
+  async function run(actionName: string, action: () => Promise<Transaction> | Transaction, payment?: Payment, plan?: Quote, submitted?: (digest: string) => void) {
+    if (inFlight.current) return false;
     inFlight.current = true;
     setBusy(true);
     setActiveAction(actionName);
@@ -60,13 +61,14 @@ function Billing() {
       const result = await mutation.mutateAsync({ transaction: tx, subscriptionDeposit: payment, onProgress: phase => {
         if (latest.current !== captured) return;
         setMessage(phase === 'validating' ? 'Checking payment details and network…' : phase === 'wallet' ? 'Approve this billing action in your wallet…' : 'Submitted; checking the network result. Do not pay again while confirmation is uncertain.');
-      }, onSubmitted: d => { if (latest.current !== captured) return; setDigest(d); setMessage('Submitted; checking the network result. Do not pay again while confirmation is uncertain.'); } });
+      }, onSubmitted: d => { submitted?.(d); if (latest.current !== captured) return; setDigest(d); setMessage('Submitted; checking the network result. Do not pay again while confirmation is uncertain.'); } });
       if (plan && customerId) await verifyPlan(client, result.digest, customerId, plan);
       if (payment) await verifyDeposit(client, result.digest, payment);
-      if (latest.current !== captured) return;
+      if (latest.current !== captured) return false;
       setDigest(result.digest); setMessage('Confirmed. If a prepaid payment is due below, apply it to activate your device capacity.');
       if (customerId) { await current.refetch(); selection.refresh(); } if (linkPayment) await target.refetch(); if (current.data) await receipts.refetch();
-    } catch (e) { if (latest.current === captured) setMessage(`${e instanceof Error ? e.message : String(e)}. A digest alone is not payment confirmation. Check a submitted digest before retrying.`); } finally { inFlight.current = false; setBusy(false); }
+      return true;
+    } catch (e) { if (latest.current === captured) setMessage(`${e instanceof Error ? e.message : String(e)}. A digest alone is not payment confirmation. Check a submitted digest before retrying.`); return false; } finally { inFlight.current = false; setBusy(false); }
   }
   async function sharePayment() {
     setActiveAction('');
@@ -88,15 +90,15 @@ function Billing() {
   }
   const actionStatus = (name: string) => activeAction === name && message ? <p role="status" className="break-words text-sm" aria-live="polite">{message}{digest && <span className="block break-all">Submitted digest: {digest}</span>}</p> : null;
   return <>
-    {MANIFEST?.network === 'testnet' && <section role="note" className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950"><h2 className="font-semibold">Testnet checkout demonstration</h2><p>Use test tokens only. They have no monetary value. Any demonstration tariff and conversion shown here are for testing the payment flow, not a real purchase or commercial price. Your device network budget is separate.</p></section>}
-    <section className="rounded-xl border bg-white p-5 space-y-3"><h2 className="text-xl font-semibold">Capacity plans</h2><p>The platform subscription covers fleet management at the included reporting and retention settings. Device network fees, uploads and storage are paid separately from the <a href="/budget/" className="underline">network budget</a>. Extra reporting, data and encrypted delivery are priced in Fleet settings. Activation is separately quoted; this checkout buys only the base subscription.</p>
+    {MANIFEST?.network === 'testnet' && <section role="note" className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950"><h2 className="font-semibold">Testnet checkout demonstration</h2><p>Use test tokens only. They have no monetary value. Any demonstration tariff and conversion shown here are for testing the payment flow, not a real purchase or commercial price. Your device operating budget is separate.</p></section>}
+    <section className="rounded-xl border bg-white p-5 space-y-3"><h2 className="text-xl font-semibold">Capacity plans</h2><p>The platform subscription covers fleet management at the included reporting and retention settings. In this app, device reporting, uploads and storage require separately funded operating resources through the <a href="/budget/" className="underline">device operating budget</a> and storage budget. This deployment’s checkout and settings tariffs do not establish the all-in commercial offer. For a written commercial quote or private pilot, visit <a href="https://suifleet.io/contact/" className="underline">Contact</a>. Extra reporting, data and encrypted delivery are priced in Fleet settings. Activation is separately quoted; this checkout buys only the base subscription.</p>
       {price.error && <p role="alert">{price.error}</p>}
       {price.table && <><p className="text-sm">Pricing source: {price.table.source.replace(/docs\/[A-Za-z0-9_./-]+/g, 'SuiFleet')}</p><ul>{price.table.base.tiers.map(t => <li key={t.upToDevices}>Up to {t.upToDevices.toLocaleString('en-US')} devices: ${t.usdPerDeviceMonth} per device/month in this graduated tier; base term at full capacity ${planUsd(t.upToDevices, false).toFixed(2)} monthly or ${planUsd(t.upToDevices, true).toFixed(2)} annual.</li>)}</ul><p>Monthly minimum ${price.table.base.monthlyMinimumUsd}; annual prepay discount {price.table.base.annualPrepayDiscountPercent}%. Custom capacity needs a reviewed quote. Monthly terms are 30 days; annual terms are 365 days.</p></>}
       {config.isPending && <p>Loading subscription configuration…</p>}{config.error && <p role="alert">Subscription payments are not configured for this deployment. Contact your fleet administrator.</p>}
       {config.data && <><p className="break-all">Treasury payee: <code>{config.data.treasury}</code>{label.data && <span> ({label.data})</span>}</p><p className="text-sm">Payments use this manifest-pinned address. No SuiNS lookup chooses the recipient.</p>
       {!config.data.quotes.length ? <p>No reviewed subscription offers are configured for this deployment. No payment can be requested.</p> : <label>Plan and payment coin<select className={input} value={selected} onChange={e => { setSelected(e.target.value); setMessage(''); }}><option value="">Choose a reviewed offer</option>{config.data.quotes.map((q, i) => <option key={q.offerId} value={q.offerId} disabled={!choices[i].data}>{choices[i].data ? `${choices[i].data!.offer.device_limit} devices · ${choices[i].data!.annual ? 'Annual' : 'Monthly'} · ${formatToken(choices[i].data!.total, choices[i].data!.descriptor.decimals)} ${q.symbol}` : `${q.symbol} plan ${choices[i].error ? 'unavailable' : 'verifying…'}`}</option>)}</select></label>}</>}
       {offer.error && <p role="alert">{offer.error.message}</p>}
-      {offer.data && quote && <><p>Tier {offer.data.offer.tier} · {offer.data.offer.device_limit} devices · allowance {offer.data.offer.allowance} · {offer.data.annual ? 'Annual' : 'Monthly'}: ${offer.data.usd.toFixed(2)} USD / {formatToken(offer.data.total, offer.data.descriptor.decimals)} {quote.symbol}.</p><p>Conversion: {quote.source}, {new Date(quote.observedAt).toISOString()}, ${quote.usdPerCoin} USD per {quote.symbol}. Offer expires {time(offer.data.offer.expires_at_ms)}. Coin price is fixed for the purchased term.</p><button className={button} disabled={!wallet || !customerId || !selection.fleet?.administrator || (busy || mutation.isPending)} onClick={() => void run('prepay', () => preparePrepay(client, quote, customerId!, wallet!.address), undefined, quote)}>Prepay from connected wallet in one transaction</button>{actionStatus('prepay')}<p>Opening and renewal require a customer administrator. Configured organization protections still apply. This checkout cannot bypass protected-action requirements; use your organization’s approved signing process when additional factors are required. Renewal requires a 30-day-old published offer and a settled ended term.</p></>}
+      {offer.data && quote && <><p>Tier {offer.data.offer.tier} · {offer.data.offer.device_limit} devices · allowance {offer.data.offer.allowance} · {offer.data.annual ? 'Annual' : 'Monthly'}: ${offer.data.usd.toFixed(2)} USD / {formatToken(offer.data.total, offer.data.descriptor.decimals)} {quote.symbol}.</p><p>Conversion: {quote.source}, {new Date(quote.observedAt).toISOString()}, ${quote.usdPerCoin} USD per {quote.symbol}. Offer expires {time(offer.data.offer.expires_at_ms)}. Coin price is fixed for the purchased term.</p><button className={button} disabled={!wallet || !customerId || !selection.fleet?.administrator || (busy || mutation.isPending)} onClick={() => void run('prepay', () => preparePrepay(client, quote, customerId!, wallet!.address), undefined, quote)}>Prepay from connected wallet in one transaction</button>{actionStatus('prepay')}{quote.symbol === 'USDC' && wallet && customerId && <SubscriptionCard key={context} client={client} quote={quote} wallet={wallet.address} customer={customerId} disabled={!selection.fleet?.administrator || busy || mutation.isPending} prepay={submitted => run('prepay', () => preparePrepay(client, quote, customerId, wallet.address), undefined, quote, submitted)} />}<p>Opening and renewal require a customer administrator. Configured organization protections still apply. This checkout cannot bypass protected-action requirements; use your organization’s approved signing process when additional factors are required. Renewal requires a 30-day-old published offer and a settled ended term.</p></>}
       {!wallet && <p>Connect a wallet to prepay or review your subscription.</p>}
     </section>
     {linkError && <p role="alert">Payment link refused: {linkError}</p>}

@@ -1906,3 +1906,7 @@ td.num,th.num {
 .overview-portrait{display:none}.overview-caption{font-size:.88rem;color:#52677c}.overview-transcript{padding-left:1.4rem}.overview-transcript li{margin:1rem 0}.overview-intro details{margin:1rem 0}.guide-overview-link{display:inline-block;font-size:.8rem;font-weight:600;color:#1259a7}
 @media(max-width:700px){.overview-landscape{display:none}.overview-portrait{display:block;max-width:440px;margin:auto}.overview-intro{padding:14px;border-radius:16px}.guide-overview-link{font-size:.72rem}}
 @media(max-height:430px){.guide-toolbar h1{display:inline;margin:0;font-size:17px}.guide-overview-link{display:inline;margin-left:.5rem;font-size:10px}}
+
+/* Separate visual-direction sample; the current overview remains independent. */
+.motion-sample{margin:2rem 0}.motion-sample video{display:block;width:100%;height:auto;border:1px solid #e0e7f1;border-radius:18px;background:#f6f8fc;box-shadow:0 18px 50px #19345b12}.motion-sample .sample-portrait{display:none}.motion-sample .sample-note{margin:.9rem 0;font-size:.9rem;color:#52677c}.motion-sample details{margin:1.1rem 0}.sample-page h1{margin-bottom:.65rem}
+@media(max-width:700px){.motion-sample .sample-landscape{display:none}.motion-sample .sample-portrait{display:block;max-width:420px;margin:auto}.motion-sample{margin:1.2rem 0}}

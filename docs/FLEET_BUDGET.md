@@ -246,7 +246,7 @@ remains separately tracked, not established by local fixtures.
 
 ## dApp
 
-**Network budget page** (`/budget`):
+**Device and storage budgets page** (`/budget`):
 - the estimate;
 - optional card funding;
 - creating the budget with the first deposit, and further deposits;
@@ -326,7 +326,7 @@ saving:
   gas price and Walrus storage and write prices (Mainnet or Testnet) over
   gRPC. USD spot prices come from CoinGecko only when the owner asks. Each
   part shows its source and date; whatever is not read live keeps the
-  recorded Mainnet snapshot, labelled "recorded". The Network budget
+  recorded Mainnet snapshot, labelled "recorded". The Device and storage budgets
   estimate uses the same quote, and its defaults now follow the default
   settings: daily health and four receipts a month, with log uploads off
   as new fleets default. The Fleet settings page starts from the same
@@ -589,7 +589,7 @@ physical acceptance; exact-head CI and independent review remain separate gates.
 
 ## Batch enrollment (SF-132)
 
-On the Network budget page, **Enroll all unenrolled devices** enrolls activated
+On the Device and storage budgets page, **Enroll all unenrolled devices** enrolls activated
 owner-held devices in sequential PTBs of at most 200 calls. Every chunk builds
 and simulates before wallet approval, checks the resolved transaction is at most
 120,000 bytes and its estimated gas budget at most 2 SUI, and uses the normal

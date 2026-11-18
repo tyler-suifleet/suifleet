@@ -5,7 +5,7 @@
 // once they arrive in the wallet and the user's own deposit transaction is
 // confirmed on chain (see purchaseStatus).
 
-export type OnrampAsset = "WAL" | "SUI";
+export type OnrampAsset = "WAL" | "SUI" | "USDC";
 
 export interface OnrampProvider {
   id: "onramp-money";
@@ -28,6 +28,7 @@ export function onrampProvider(appId = process.env.NEXT_PUBLIC_ONRAMP_APP_ID): {
 
 /** The provider's hosted checkout URL; opened in a new tab, never embedded with credentials. */
 export function checkoutUrl(provider: OnrampProvider, walletAddress: string, asset: OnrampAsset, amount: string): string {
+  if (asset === "USDC") throw new Error("Subscription card provider selection and partner signup are pending; production USDC checkout is disabled");
   if (!/^0x[0-9a-f]{64}$/.test(walletAddress)) throw new Error("A full Sui wallet address is required");
   if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) throw new Error("Enter a positive amount");
   const url = new URL("https://onramp.money/main/buy/");

@@ -3998,7 +3998,7 @@
         "docs/BUSINESS_PLAN.md"
       ],
       "resources": [],
-      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Card path one: the card buys USDC on Sui into the customer's own wallet through a provider's hosted checkout, and the console then completes the same on-chain prepay as SF-182, so card payments also fund the prepaid account. The console already opens OnRamp.money's hosted checkout for SUI/WAL budget funding (dapp/src/lib/onramp.ts, SF-083). That path is disabled without a public app ID, and Coinbase was excluded because it needs a server-minted session. Sui's docs list USDC-on-Sui on-ramps from Banxa, Coinbase, OnRamp.money and Meld. OnRamp.money is operated by OMO LLC (Saint Vincent and the Grenadines) with an Indian affiliate registered with FIU-IND; its licensing for US/EU customers is unverified.",
+      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Card path one: the card buys USDC on Sui into the customer's own wallet through a provider's hosted checkout, and the console then completes the same on-chain prepay as SF-182, so card payments also fund the prepaid account. The console already opens OnRamp.money's hosted checkout for SUI/WAL budget funding (dapp/src/lib/onramp.ts, SF-083). That path is disabled without a public app ID, and Coinbase was excluded because it needs a server-minted session. Sui's docs list USDC-on-Sui on-ramps from Banxa, Coinbase, OnRamp.money and Meld. OnRamp.money is operated by OMO LLC (Saint Vincent and the Grenadines) with an Indian affiliate registered with FIU-IND; its licensing for US/EU customers is unverified.\n\nUser-authorized recovery scope (2026-11-04): deliver a contained provider-independent partial PR now: checkout state machine; wallet/quote/network/customer binding; on-chain USDC arrival observation with partial, late and abandoned purchases; clearly labelled Testnet transfer simulation continuing through SF-182 prepay. Keep the production adapter disabled. Provider choice, partner signup, provider-specific public URL integration and real-card acceptance remain unresolved; this partial delivery does not complete the full ticket. No production credentials, mainnet, physical testing or invented provider contracts.",
       "evidence": "dapp/src/lib/onramp.ts; https://docs.sui.io/onchain-finance/asset-custody/fiat-on-ramps; user question 2026-10-27 on OnRamp.money's legitimacy.",
       "acceptance": [
         "Provider due diligence is recorded for at least OnRamp.money and Banxa: operating entity, licensing in the target markets (US, EU), KYC inside the hosted flow, fees, regions, USDC-on-Sui support and the absence of secret keys or servers. The user selects the provider(s) and completes any partner signup; agents do neither.",
@@ -4876,9 +4876,9 @@
       "kind": "type:bug",
       "depends_on": [],
       "paths": [
+        "profiles/seal-testnet",
         "dapp",
         "docs/validation",
-        "profiles/seal-testnet",
         "scripts"
       ],
       "resources": [],
@@ -4936,6 +4936,50 @@
       "validation": "Meaningful browser/mobile/media/deployment verification, exact provenance and explicit remaining access/acceptance boundaries."
     },
     {
+      "key": "SF-256",
+      "title": "Move the customer website, app and docs to owner-controlled Cloudflare Pages",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "hosting",
+        "site",
+        "tools/static-hosting",
+        "docs",
+        ".github/workflows/static-site.yml"
+      ],
+      "resources": [],
+      "description": "User explicitly selected migration away from OpenAI Sites to conventional hosting in their own Cloudflare account. Implement the concrete migration for suifleet.io/www, app.suifleet.io and docs.suifleet.io using the existing pinned Wrangler/Cloudflare Pages release tooling. Preserve the latest animated overview, optional native captions, all ten narrated walkthroughs, verified Testnet app/config, curated docs, narrow security headers and public crosslinks. Verify the authenticated account actually owns the active suifleet.io zone. Discover existing projects before creation; retain actual returned project domains/IDs and never assume a desired pages.dev name was allocated. Build and seal all three static artifacts, verify source/config/file hashes, validate Pages file/count/header limits, deploy under the user's account and check real served HTTPS content/media. Prefer the owned domains once DNS/TLS is active; otherwise keep explicitly identified staging links. Connect domain bindings before pointing DNS, preserve Google Workspace mail/unrelated records and never import the obsolete OpenAI verification zone. Remove superseded Sites domain bindings only as needed during actual cutover; retain working provider previews until migration verification. OAuth stays only in private Wrangler config; no token in logs/source/issues/arguments. User authorized this migration and publication; normal application/source/CI gates remain for code, protected existing CI credential/release environments are not weakened. Record any DNS permission requirement accurately rather than inventing successful mutation. This is Testnet frontend hosting, not Mainnet, hardware programming or production-payment acceptance.",
+      "evidence": "User explicitly chose Cloudflare migration after rejecting OpenAI-specific domain verification; owner OAuth login and active zone/account ownership verified.",
+      "acceptance": [
+        "User explicitly selected migration away from OpenAI Sites to conventional hosting in their own Cloudflare account. Implement the concrete migration for suifleet.io/www, app.suifleet.io and docs.suifleet.io using the existing pinned Wrangler/Cloudflare Pages release tooling. Preserve the latest animated overview, optional native captions, all ten narrated walkthroughs, verified Testnet app/config, curated docs, narrow security headers and public crosslinks. Verify the authenticated account actually owns the active suifleet.io zone. Discover existing projects before creation; retain actual returned project domains/IDs and never assume a desired pages.dev name was allocated. Build and seal all three static artifacts, verify source/config/file hashes, validate Pages file/count/header limits, deploy under the user's account and check real served HTTPS content/media. Prefer the owned domains once DNS/TLS is active; otherwise keep explicitly identified staging links. Connect domain bindings before pointing DNS, preserve Google Workspace mail/unrelated records and never import the obsolete OpenAI verification zone. Remove superseded Sites domain bindings only as needed during actual cutover; retain working provider previews until migration verification. OAuth stays only in private Wrangler config; no token in logs/source/issues/arguments. User authorized this migration and publication; normal application/source/CI gates remain for code, protected existing CI credential/release environments are not weakened. Record any DNS permission requirement accurately rather than inventing successful mutation. This is Testnet frontend hosting, not Mainnet, hardware programming or production-payment acceptance."
+      ],
+      "validation": "Meaningful local static release tests, sealed three-origin builds, actual Pages deployment/domain/served-byte/media evidence and no credential disclosure."
+    },
+    {
+      "key": "SF-257",
+      "title": "Separate production website messaging from the app network environment",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "docs",
+        "hosting"
+      ],
+      "resources": [],
+      "description": "User direction: the public landing website should present SuiFleet as a production product independently of the app's current Testnet environment. Remove customer-facing Testnet/test-token/prelaunch environment banners and boilerplate from the marketing pages, shared footer, pricing/security/how-it-works and written product guide. Use neutral product language without inventing a mainnet launch, certified hardware safety, published third-party audit or live commercial billing. Keep app network labels and actual Testnet deployment/configuration entirely unchanged. Review public docs branding/header/footer for the same site-wide development status; preserve accurate technical network references and validation provenance rather than falsifying them. Update guide narration/captions where they unnecessarily brand the product by the demo network, preserving genuine recording provenance and truthful app indicators visible within the app footage. Retain female narration, cursor, optional captions and existing animated introduction. Add regression checks for production-facing marketing copy versus explicit app environment. Build/test and publish only the website/documentation changes to the existing owner Cloudflare projects with sealed source/file receipts and real served-byte/navigation/media checks. No contract, wallet, DNS or app-environment mutation; no mainnet claim. Preserve the user's commit identity, small commits and normal source/CI review.",
+      "evidence": "User explicitly distinguishes the production website from the app remaining on Testnet until its release.",
+      "acceptance": [
+        "User direction: the public landing website should present SuiFleet as a production product independently of the app's current Testnet environment. Remove customer-facing Testnet/test-token/prelaunch environment banners and boilerplate from the marketing pages, shared footer, pricing/security/how-it-works and written product guide. Use neutral product language without inventing a mainnet launch, certified hardware safety, published third-party audit or live commercial billing. Keep app network labels and actual Testnet deployment/configuration entirely unchanged. Review public docs branding/header/footer for the same site-wide development status; preserve accurate technical network references and validation provenance rather than falsifying them. Update guide narration/captions where they unnecessarily brand the product by the demo network, preserving genuine recording provenance and truthful app indicators visible within the app footage. Retain female narration, cursor, optional captions and existing animated introduction. Add regression checks for production-facing marketing copy versus explicit app environment. Build/test and publish only the website/documentation changes to the existing owner Cloudflare projects with sealed source/file receipts and real served-byte/navigation/media checks. No contract, wallet, DNS or app-environment mutation; no mainnet claim. Preserve the user's commit identity, small commits and normal source/CI review."
+      ],
+      "validation": "Meaningful local static release tests, sealed three-origin builds, actual Pages deployment/domain/served-byte/media evidence and no credential disclosure."
+    },
+    {
       "key": "SF-258",
       "title": "Permit stopped recovery past archived dependency wait receipts",
       "priority": "P1",
@@ -4955,6 +4999,389 @@
         "Meaningful offline regression tests cover refusal and allowed recovery; review and merged-only runtime installation remain required."
       ],
       "validation": "Offline recovery-control regression suite and dispatcher retirement/dependency tests. No wallet, deployment or hardware operations."
+    },
+    {
+      "key": "SF-261",
+      "title": "Reconcile merged integration members with stacked PR bases",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "After verified batch publication, a source PR whose exact head is included in main can remain OPEN because its base is a former stacked source branch. Reconciliation currently waits forever for GitHub merge recognition. Add a guarded coordinator-owned operational reconciliation route; preserve exact member/candidate/claim/manifest and independent acceptance gates.",
+      "evidence": "Recovery b6fc52a3: batch b47d4798d9514126a0893fd6a09e3acc PR681 merged ae9961ca200a820c7867737d16cf1f1f75098d2a contains PR667 head71fc48d1a124b8dc58aee38ace22e1e082e0ea7a as second parent. PR667 remains OPEN targeting work/suifleet/sf-256-47044c8b; installed batch reconcile waits awaiting verified member merge recognition.",
+      "acceptance": [
+        "Only sole coordinator may reconcile an exact reviewed member after verified candidate merge and main ancestry; changed head/claim/repository or missing acceptance proof fail closed.",
+        "Stacked-base recognition resumes without fabricating approval, forcing merge, weakening CI/testnet or personally marking ticket Done.",
+        "Regression tests cover stacked members and negative identity/proof/head cases; submit scoped PR with Closes and hand off to normal review; install only merged reviewed source."
+      ],
+      "validation": "Meaningful batch reconciliation offline regressions and full coordinator suite on current main."
+    },
+    {
+      "key": "SF-262",
+      "title": "Reconcile published batch contributions after their source PR advances",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "A verified merged batch retains an older member head while its owner legitimately advances the same PR. Recognize only the historical published contribution without closing or completing the newer source PR/claim, so unrelated candidates can proceed. Preserve sole coordinator authority and exact acceptance gates.",
+      "evidence": "Recovery run0dea457a: batch b47d4798 / PR681 published member PR667 head71fc48d1; PR667 now has newer owner commits d21a8757 and SF257 returned to Review. Current reconcile requires current head equal published head and otherwise never finishes; publish_intent holds unrelated candidates.",
+      "acceptance": [
+        "Historical recognition requires verified merged candidate/manifest, published member approval, main ancestry and unchanged retained claim/repository/branch. Changed or uncertain identities fail closed.",
+        "A newer descendant source head remains OPEN with its original claim and requires fresh exact-head/base review and actual CI/testnet. Historical reconciliation must never complete its ticket, retarget its PR or fabricate new approval.",
+        "Durable idempotent historical evidence allows the old batch to finish and releases unrelated candidates. Regression tests cover positive and negative identity/ancestry/proof cases."
+      ],
+      "validation": "Scoped offline batch regressions and complete coordinator suite against current main. Normal PR review and reviewed merged-only installation; no deployment or credential changes."
+    },
+    {
+      "key": "SF-263",
+      "title": "Stop empty integration batch churn for source heads already included in main",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests"
+      ],
+      "resources": [],
+      "description": "Recovery run c5e847fb verified PR617 exact source e28c80cb is already an ancestor of main a07e2de1, but the coordinator repeatedly collects and fails empty batches. Retarget to main returns422. Add a bounded read-only included-source route before collection, with explicit diagnostic/evidence and preserved claim/PR/acceptance. Never infer merged state or complete a ticket merely from ancestry.",
+      "evidence": "Live repeated no conflict-free eligible batch members receipts; retained PR617 stacked base; current supported recovery cannot resume completed repair.",
+      "acceptance": [
+        "An already included exact source is excluded from empty candidate creation after verified main ancestry; changed heads and unrelated PRs remain eligible.",
+        "Fail closed on unknown ancestry/read failures; preserve owner claim, independent exact-head/base review, CI/testnet gates and PR state. Do not close/retarget/complete or fabricate acceptance.",
+        "Regression tests use real Git ancestry and cover changed source, ancestry failures and unrelated candidate progression; durable or current explicit diagnostics expose pending reconciliation."
+      ],
+      "validation": "Scoped offline regressions and full coordinator suite; normal PR handoff, no installation before reviewed merge."
+    },
+    {
+      "key": "SF-265",
+      "title": "Reconcile published first batch members on retained stacked bases",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "description": "Published candidate 691 is merged but batch 48411097f0524e4789ff04917754b408 remains reconciling: first member PR667 exact head is in main but stays open against already integrated SF256 branch. Existing recognize_stacked_member only accepts preceding batch member branches, excluding the first member. Preserve sole coordinator writes, exact manifest/head/approval/claim/main-ancestry checks and no fabricated GitHub merge.",
+      "evidence": "Live 2026-11-09: batch reconciling awaiting verified member merge recognition; PR667 OPEN base work/suifleet/sf-256-47044c8b; candidate691 merged f20f492923aaf51d9b8cc7752c8f5e117fa83c91.",
+      "acceptance": [
+        "Sole coordinator safely recognizes exact published source on an already integrated stacked base, including first batch member; retain exact manifest, acceptance approval, owner and remote identity checks.",
+        "No arbitrary base retarget, fabricated merge, claim stealing, lost advanced work or bypass of review/CI/testnet gates.",
+        "Offline positive and negative tests cover first member and changed/unintegrated base; reviewed merged-only installation remains required."
+      ],
+      "validation": "Run scoped batch reconciliation tests and full offline coordinator tests; submit normal PR review and record installation pending."
+    },
+    {
+      "key": "SF-269",
+      "title": "Fence included-source closure for manual implementation origins",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "PR617/SF246 independent included-source approval job3962 passes exact pinned main CI/testnet evidence, but included_source calls LocalInfrastructure.fenced which requires implementations/<manual-session>/process.json. That path does not exist for manual origin operator-mobile-customer-readiness-20261104. Coordinator-owned stopped same-claim repair receipts exist (job3689). Add a supported fail-closed provenance route for manually originated claims using immutable same-claim repair launch/process/exit evidence; never fabricate original process receipts. Preserve worker/helper stop, ownership, resources and exact-head/base/feedback acceptance fences. Report precise safe operational blocker. No feature, credentials, DNS, chain or hardware changes.",
+      "evidence": "Installed80d8f459: batch_integration.py LocalInfrastructure.fenced unconditionally requires dispatcher original process path; manual SF246 lacks it, approved job3962 cannot reconcile.",
+      "acceptance": [
+        "Accept verified stopped same-claim repair provenance for manual origins, while rejecting wrong/missing claim/process/exit evidence and live helpers/workers or resource leases.",
+        "Preserve independent exact-source/current-main CI/security/testnet acceptance, sole coordinator authority and unrelated queues.",
+        "Meaningful offline regressions/full coordinator tests and normal PR handoff; install only reviewed merged code."
+      ],
+      "validation": "Run targeted provenance regressions and full offline coordinator suite; verify staged scope and Tyler authorship."
+    },
+    {
+      "key": "SF-271",
+      "title": "Record independent customer reviews and complete remediation coverage",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs/customer-review",
+        "docs/tracking"
+      ],
+      "resources": [],
+      "description": "Save the owner-requested independent Codex and actual Claude Opus5.5 customer-perspective reviews of the public landing website, every app route, all public guides and all ten narrated lessons. Consolidate specific reproducible findings and map them to focused implementation tickets. Preserve the user direction: production-oriented marketing without testnet jargon; app-side evaluation labels remain truthful. Include accurate evidence limits, positives and actual queue recovery. This is the audit record, not a claim that remediation or real wallet acceptance is finished.",
+      "evidence": "2026-11-16 independent public desktop/mobile browser crawls, Codex read-only Wallet Standard connection with signing disabled, current source b9bb2ef6, actual Claude reports and full-doc/source addendum. Evidence is retained privately under /tmp/suifleet-customer-audit-20261116.",
+      "acceptance": [
+        "Both independent reviewer reports and a consolidated actionable review are committed with explicit coverage and test limits.",
+        "Every material finding has severity, exact source/URL or reproduction, user consequence, recommendation and a published existing/new issue mapping.",
+        "User marketing constraints and deferred real-wallet/hardware/mainnet/provider evidence remain explicit; review completion does not mean fixes deployed."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-272",
+      "title": "Make a new wallet able to complete first-fleet onboarding",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "scripts/browser",
+        "scripts/tests",
+        "site/guide"
+      ],
+      "resources": [],
+      "description": "Fix the cold-start setup path for a non-crypto customer. Keep Get started usable after connection when no fleet exists, so account funding and first-fleet guidance remain reachable. Explain and preview fleet creation, device capacity and device reporting funds in order; keep the same identity/access isolation for every other fleet page. Use one account/sign-in vocabulary and actionable unsupported-wallet/network/rejection/funding guidance. Do not promise Google sign-in when this build does not provide it. Do not grant free device authority or silently sponsor fees.",
+      "evidence": "Codex live read-only empty test wallet reproduced Get started replaced by Choose a fleet, hiding funding/faucet instructions. Claude independently confirmed layout.tsx111/FleetScope gate and zero new-customer capacity. Slush handoff returned451 in the audit environment; do not assume all regions or real users share that outcome.",
+      "acceptance": [
+        "Connected account without a fleet can read account-fee funding and first-fleet next steps; restricted fleet data/actions stay gated.",
+        "The first update path explains capacity and fees before irreversible approvals, including new zero-capacity customers and absent checkout configuration.",
+        "Wallet connect/cancel/reject/wrong-network/insufficient-funds/pending states offer plain-language next steps without unsafe duplicate submission or hidden technical prerequisites.",
+        "Tests cover signed-out, connected-no-fleet, existing fleet, read-only/revoked access, optional sign-in unavailable and public app-side evaluation messaging."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-273",
+      "title": "Publish customer documentation instead of internal engineering notes",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site/docs",
+        "site/src/pages/docs.html",
+        "docs",
+        "dapp/src/lib/device-client.ts"
+      ],
+      "resources": [],
+      "description": "Repair the public documentation entry point and rewrite the curated operator, integrator and administrator pages for their actual audiences. The marketing Docs page currently says docs.suifleet.io is not live even though it is. Public docs contain internal SF ticket histories, raw Move CLI setup and stale feature-status statements. Lead with prerequisites, exact current console labels/commands, supported installation availability, expected results and troubleshooting. Keep deep contracts/ABI/provenance in clearly marked technical reference instead of deleting safety boundaries.",
+      "evidence": "Both live crawls confirm suifleet.io/docs falsely says the public docs domain is not live. Full read of21 published docs found Download deployment.json versus actual Download connection settings, missing first-device ID handoff, ticket-led pages and outdated Greengrass availability claims.",
+      "acceptance": [
+        "All public Docs navigation resolves to the live public docs host and removes the false unavailable-domain claim.",
+        "Every curated doc has customer purpose, prerequisites, executable/current steps, expected result and recovery path; operator pages do not open with internal ticket or Move API history.",
+        "Installation and registration consistently explain connection-settings download and how device IDs reach runtime config; release/package/layer availability is honest and does not invent downloads or claim unrun device acceptance.",
+        "Document feature support using current implemented behavior and tracked limitations; public page titles/copy contain no internal ticket IDs."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-274",
+      "title": "Align all narrated guide lessons with the current customer workflow",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site/guide",
+        "site/media/guide",
+        "site/src/assets/guide.js",
+        "site/tests",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Correct all ten written/video lessons against actual app behavior and make the first-device route explicit. Preserve optional native captions and female narration, clear why/what/result descriptions and the viewport-sized step interface. Private-policy prerequisites must appear before private publishing; optional bulk enrollment and gradual rollout should not look mandatory for one device. Distinguish automatic health gates from the current explicit per-batch approval flow. Regenerate only genuinely changed media with honest provenance and spending limits.",
+      "evidence": "Codex found the group-deployment written instruction says catalog/library versions are one-shot and desired state requires ad-hoc upload, while current firmware143/buildCatalogDeploymentTx accepts desiredTargets and the video says desired state persists. The guide orders policy creation at stage9 after publishing at6. All ten published captions passed live390/1440 checks.",
+      "acceptance": [
+        "Written instructions, visible labels, narration, captions and actual control behavior agree across all10 stages, including library desired state and manual rollout advancement.",
+        "Beginner path identifies required steps and optional bulk/staged/private branches, including policy prerequisites before confidential publication.",
+        "Changed lessons use a coherent current build or clearly documented compatible capture; video has optional CC on/off, readable cursor/UI and no permanently burned narration.",
+        "Live or locally served real player checks verify every caption cue and changed lesson; no mocked wallet is described as Slush acceptance."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-275",
+      "title": "Make pricing and pilot contact understandable without crypto knowledge",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site/src/pages",
+        "site/docs",
+        "dapp/src/app/billing",
+        "dapp/src/components/PilotReadiness.tsx",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Present the existing approved commercial pricing in plain language with honest worked examples and clearly separated included/optional/customer-funded resources. Resolve contradictory subscription-versus-network wording without inventing prices or changing business terms. Keep wallet/token mechanics under optional detail and app-side evaluation tariffs explicitly separate from commercial offers. Provide a consistent private pilot/contact path and remove stale contradictory mailbox/docs claims only with honest verification. Do not add testnet jargon/banners to marketing; explain evaluation status inside the app/CTA handoff.",
+      "evidence": "Both independent reviews found pricing hard to interpret for50 or1000 devices, including all-in proposal versus below0.07 customer-funded assumptions, four funds vocabularies and a contact email explicitly disclaimed while privacy uses it. Marketing content must remain production-oriented by explicit owner direction.",
+      "acceptance": [
+        "A non-crypto reader can calculate an example monthly platform bill and understand included reporting/storage versus optional/customer-funded costs using unchanged approved terms.",
+        "Commercial quote availability and current app evaluation are clearly distinguished without presenting test tariffs as purchasable production pricing.",
+        "Use consistent terms for device capacity, account approval fees, device operating budget and storage budget; token mechanics do not dominate the main purchase explanation.",
+        "Sales/contact/privacy links agree; no mailbox delivery, SLA availability or payment-provider readiness is claimed without evidence, and remaining provider/mailbox acceptance is tracked separately."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-276",
+      "title": "Simplify console navigation and software delivery tasks",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app",
+        "dapp/src/components",
+        "dapp/src/lib",
+        "scripts/browser",
+        "scripts/tests"
+      ],
+      "resources": [],
+      "description": "Reduce ambiguity across the16 console routes while preserving existing functions and authority. Make Software library/publish versus deploy-existing versus advanced direct-file delivery explicit; improve mobile discovery beyond an unlabelled16-item horizontal strip. Hide raw object identifiers, bytes, Walrus epochs and contract parameters behind useful technical details and explain optional reporting/log activation with a real next step rather than just intervals that do not enable logs. Keep actual technical controls available to integrators and do not misrepresent partial health as live.",
+      "evidence": "Signed-in read-only public demo browsing and both source reviews show two different publishing/deploy flows under Components and Deploy component; raw Artifact/Recipe terminology and JSON overlays at first upload;16 mobile tabs with only firstfew discoverable; log interval controls say they do not enable logging but provide no activation path.",
+      "acceptance": [
+        "Every primary navigation item has a customer task/purpose and mobile users can discover all sections without guessing horizontal scrolling.",
+        "The library-first first update path is coherent, while direct artifact deployment and JSON/installer controls are clearly optional advanced workflows.",
+        "Budget/settings/data views explain human units and prerequisites; users can find how logs are actually enabled and diagnose unreported versus unavailable health.",
+        "Technical identifiers and integrations remain inspectable without dominating normal tasks; meaningful responsive and existing-flow regressions pass."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-277",
+      "title": "Provide safe clear feedback for approvals and irreversible fleet actions",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/hooks/useFleetTransaction.ts",
+        "dapp/src/app",
+        "dapp/src/components",
+        "dapp/src/lib",
+        "scripts/browser",
+        "scripts/tests"
+      ],
+      "resources": [],
+      "description": "Give transaction failures, cancellation, pending approvals and uncertain submission consistent inline customer guidance. Preserve distinctions among rejected-before-submit, executed failure and submitted-but-unconfirmed so retries never create duplicate charges/actions. Enrollment credential downloads must explain single-copy handling before the download, and lost-credential recovery must point to revoke/reissue safely. Fleet transfer actions need clear human review of recipient/resources and irreversible effects before signing. Do not add authority, reset ownership or conceal wallet verification data.",
+      "evidence": "Claude source audit found raw network/Move/SDK strings reaching browser alerts across devices/deployments, generic archive errors, the single-copy enrollment warning after its download button, and handover Transfer/Finish actions without a customer summary confirmation. Codex confirmed source behavior and wallet bootstrap barriers; real wallet signing remains unrun.",
+      "acceptance": [
+        "Common rejected/wrong-network/insufficient-funds/pending/uncertain states show concise next actions and optional diagnostic details with no invented success or unsafe retry.",
+        "Enrollment warns before the only credential download and provides an explicit lost-file revoke/reissue path without regenerating already enrolled identities.",
+        "Irreversible handover steps display the intended recipient/resources and remaining authority effects before wallet approval; existing recipient consent and contract checks remain required.",
+        "Failure/restart/double-click tests demonstrate no duplicate transaction, overwritten ownership, hidden failed effect or loss of credential-recovery guidance."
+      ],
+      "validation": "Use meaningful desktop/mobile browser checks and exact changed-flow regressions. Frontend changes require typecheck and production build; documentation/media changes require content/link/player checks. Distinguish live public browsing, read-only simulated wallet, source inspection and unrun real-wallet/Pi/mainnet checks. Preserve authority, signing, spending and release protections. No invented tests, prices, product guarantees or customer data."
+    },
+    {
+      "key": "SF-278",
+      "title": "Align the pinned Yocto client with supported evaluation profiles",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/meta-suifleet",
+        "kas",
+        "scripts",
+        "docs/YOCTO_PACKAGING.md",
+        "docs/INSTALL_DEVICE_CLIENT.md"
+      ],
+      "resources": [],
+      "description": "Fix an independently confirmed customer-installation incompatibility: the Yocto recipe pins daemon0.2.1 at2d231cad, but the current seal-testnet deployment profile requires >=0.2.3 and the client rejects versions outside the manifest range. Update to an appropriate reviewed fixed source revision and regenerate the crate include, crate version and Cargo.lock digest together. Rebuild relevant supported recipe/profile without requiring physical Pi access. Add a meaningful drift guard between packaged client and supported shipping/evaluation profiles. Preserve network manifest/version rejection, runtime-only device identity, signer separation and pinned toolchain/security boundaries.",
+      "evidence": "2026-11-16 independent Claude customer audit plus Codex source confirmation: suifleet_1.0.bb SRCREV2d231cad/SUIFLEET_CRATE_VERSION0.2.1; profiles/seal-testnet/deployment.json supported_clients.edge.min0.2.3; config.rs474-477 rejects unsupported edge version. No physical build/run was claimed by the audit.",
+      "acceptance": [
+        "Recipe source pin, crate version, generated crate include and lock digest agree with a reviewed supported client; no AUTOREV or loosened manifest checks.",
+        "Relevant Yocto recipe/profile is rebuilt and exact toolchain/source/build evidence is retained; no device keys or enrollment credentials enter the image.",
+        "A regression guard detects packaged-client/profile version drift before customers flash an incompatible image.",
+        "Documentation accurately distinguishes rebuilt software/image artifacts from unrun physical Pi/reboot/mainnet/release-signing acceptance."
+      ],
+      "validation": "Run packaging/version consistency tests and rebuild the supported relevant recipe/image profile. Verify produced client/build-info and intended deployment manifest compatibility without physical hardware. Record exact commands and real limitations; do not replace rebuild evidence with a string comparison alone."
+    },
+    {
+      "key": "SF-270",
+      "title": "Recover completed-ticket publication and included-source CI waits",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Resolve verified coordinator gaps found during the owner-requested customer audit: SF-246 reached Done at revision12 with publication stuck at11, leaving approved included PR617/issue614 open; completed-source closure is then blocked by a newer same-head CI whose macOS job never acquired a hosted runner. Closed invalidated integration PR687/688 retain stopped retry jobs. Preserve current-main security/CI evidence and exact accepted-source authority. Retry pending Done mirrors before included-source closure, recognize narrowly authenticated current-main hosted-runner acquisition failures through existing bounded recovery, and retire only stopped obsolete closed review jobs with fresh remote and terminal-batch proof. Keep normal source/wallet/spending/release/hardware/mainnet protections unchanged.",
+      "evidence": "2026-11-16 actual SQLite/GitHub investigation: SF246 local12/published11, approved included acceptance job3968, CI43931104228 failed only job133523425081 cancelled before zero steps/no runner with exact GitHub hosted-capacity annotations. Supported publication retry and targeted runner rerun performed; no acceptance fabricated. Jobs3949/3950 reference closed invalidated PR687/688 and remain retry.",
+      "acceptance": [
+        "A completed ticket whose remote mirror fails is retried with bounded backoff and exact claim/revision checks before included-source closure; no duplicate completion or approval.",
+        "A current-main CI hosted-runner acquisition failure is eligible for the existing strict bounded job recovery only with authenticated current main/included-source evidence; test failures and arbitrary cancelled jobs remain blocked.",
+        "Closed/invalidated review retries are superseded only after exact process/helper stop and fresh matching remote/batch verification; uncertain workers remain reserved.",
+        "Regression tests reproduce all recovered failure modes and preserve failures for changed ownership, stale main, missing/altered acceptance and live processes.",
+        "Locally tested infrastructure is integrated under the user local-test policy with Tyler authorship, installed runtime provenance and verified issue/project reconciliation."
+      ],
+      "validation": "Coordinator regression suite on actual combined main candidate; offline tracking tests and dry run; exact receipt/source/CI/job proof and runtime/service checks. No hardware or chain writes required."
+    },
+    {
+      "key": "SF-279",
+      "title": "Restore testnet CI compatibility with protocol142",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "Dockerfile",
+        "scripts/sui_toolchain.py",
+        "scripts/tests/test_testnet_toolchain.py",
+        "docs/TESTNET.md"
+      ],
+      "resources": [],
+      "description": "Split the independently scoped protocol142 transaction-CLI repair from queue-recovery PR712 so the latter can use its local-test runtime integration lane. Public testnet advanced beyond the pinned1.83.0 transaction CLI max140, causing shared preflight failures on otherwise passing customer fixes. Preserve original repair commit9a5b7408, update only the transaction CLI pin/checksums/protocol limit to verified testnet-v1.84.0, and keep the release compiler/bytecode framework/wallet/spending protections unchanged. Integrate tested CI infrastructure under the existing user local-test policy, with exact main candidate evidence; do not invent hosted-CI success.",
+      "evidence": "Customer PR714 and related testnet/package-upgrade failures share protocol142 versus transaction CLI1.83.0 max140. Original repair9a5b7408 is preserved in PR712 history; its file changes are separated from runtime-core repair to avoid a scope-routing deadlock.",
+      "acceptance": [
+        "Dockerfile transaction CLI and NETWORK metadata agree with official release1.84.0, SHA256 identities and supported protocol142; unsupported143 still fails closed.",
+        "Release compiler/toolchain and all account/network/upgrade/spend verification remain unchanged.",
+        "Meaningful offline toolchain tests, binary identity validation and read-only protocol preflight pass on the actual combined main candidate; no testnet write is required to verify the pin itself.",
+        "Preserve honest hosted-CI state; after merge, relevant CI/testnet runs use the upgraded verified transaction CLI and remaining failures receive bounded targeted repair."
+      ],
+      "validation": "Run scripts/tests/test_testnet_toolchain.py plus tracking validation/diff checks; verify SHA256/version of the actual pinned binary and read-only live-network compatibility. Record precise local versus hosted evidence. No mainnet, account transfers, secret changes or approval fabrication."
+    },
+    {
+      "key": "SF-280",
+      "title": "Automatically retire obsolete offline CI for invalidated integration batches",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Invalidating an integration batch currently closes its PR but leaves queued/running offline GitHub Actions consuming runner capacity. Repeated base changes accumulate superseded CI and delay current candidates. Add durable bounded retry cleanup after invalidation and on later scans; authenticate the coordinator-owned closed same-repository PR, exact branch/head, workflow identity and run provenance before cancellation. Isolate per-run and per-batch transport failures. Never cancel live-wallet, release, hardware, mainnet, current source, reopened or unknown runs.",
+      "evidence": "On 2026-11-16 five offline CI/Move-security runs for closed invalidated batch PRs730-733 remained in progress while current main CI queued; operator canceled them only after exact remote/database checks.",
+      "acceptance": [
+        "Invalidated batches automatically cancel only positively identified obsolete offline candidate runs, including queued runs.",
+        "Cleanup retries transient cancellation/read failures and reconciles interrupted outcomes without repeatedly scanning successfully retired batches.",
+        "Open/reopened, merged, foreign-repository, changed-head, live-wallet/release and unrecognized workflows remain untouched.",
+        "A cleanup error never prevents independent source review or integration progression; regression tests cover failure and race paths."
+      ],
+      "validation": "Run targeted cancellation/queue regression tests and full coordinator suite on actual combined main; tracking dry-run and diff checks. Merge under explicit local-test infrastructure policy, activate merged runtime and verify live retry/cancellation evidence without claiming hosted CI passed."
     }
   ]
 }

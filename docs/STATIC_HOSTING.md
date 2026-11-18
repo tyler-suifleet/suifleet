@@ -1,5 +1,18 @@
 # Static hosting preparation (SF-176; not deployed)
 
+## Current deployed account — 5 November 2026
+
+The owner-controlled Cloudflare Pages migration is live at suifleet.io/www,
+app.suifleet.io and docs.suifleet.io. The active zone was already in the verified
+owner account; **do not perform the historical registrar/nameserver migration
+plan below**. The user set the four Pages CNAMEs, all domain associations are
+active, and actual HTTPS/browser/asset integrity evidence is in
+[SF-256](validation/SF256.md) and [the current receipts](../hosting/cloudflare-deployments.json).
+The old OpenAI Sites domain associations were removed. Existing preview and
+production CI credential/reviewer protections remain unchanged; machine OAuth
+login is not CI secret configuration or a waiver of those gates.
+
+
 Selected provider: Cloudflare Pages Direct Upload for suifleet.io,
 app.suifleet.io and docs.suifleet.io. No Functions, Workers, application server,
 Walrus portal or wal.app redirect belongs on these origins. The Walrus Site

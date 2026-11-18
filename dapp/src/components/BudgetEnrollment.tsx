@@ -15,8 +15,8 @@ export function BudgetEnrollment({ budget, selected, onChange }: {
     <label className="flex items-start gap-2">
       <input type="checkbox" className={`mt-0.5 ${FOCUS}`} checked={available && selected} disabled={!available}
         aria-describedby={!available ? "enrollment-funding-help" : undefined} onChange={(e) => onChange(e.target.checked)} />
-      <span>Enroll in my fleet budget: send the device a {formatToken(budget.defaultLimits.floatCap)} SUI starting balance and give its own account a {formatToken(defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap))} SUI reserve to draw from</span>
+      <span>Enroll in my device operating budget: send the device a {formatToken(budget.defaultLimits.floatCap)} SUI starting balance and give its own account a {formatToken(defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap))} SUI reserve to draw from</span>
     </label>
-    {!available && <p id="enrollment-funding-help" className="text-gray-700">Your fleet budget needs at least {formatToken(budget.defaultLimits.floatCap)} SUI to cover this device’s starting balance. You can register without this funding or <Link className={LINK} href="/budget">fund the fleet budget</Link> first.</p>}
+    {!available && <p id="enrollment-funding-help" className="text-gray-700">Your device operating budget needs at least {formatToken(budget.defaultLimits.floatCap)} SUI to cover this device’s starting balance. You can register without this funding or <Link className={LINK} href="/budget">fund the device operating budget</Link> first.</p>}
   </div>;
 }

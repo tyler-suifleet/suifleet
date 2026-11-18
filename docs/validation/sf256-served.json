@@ -1,0 +1,35 @@
+[
+  {
+    "origin": "https://suifleet.io",
+    "revision": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+    "files": 70,
+    "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'sha256-r9lzuo9Pb48wp55HClDsmwrHob2oaG1Yx/oWcqPI5qc='; style-src 'self'; font-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin"
+    }
+  },
+  {
+    "origin": "https://app.suifleet.io",
+    "revision": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+    "files": 152,
+    "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-3pigMnXAYetO1z3M87ZSAdlqAANRQHISWSMw+FpClSw=' 'sha256-4n9BZy2rnAO3t53KKScnF0Y5QINRKB5m0+tdg4bREG0=' 'sha256-Aoe5LHabVxx68/Z2BrYUHGQ+pWcEs9SJgShbKgFEbHI=' 'sha256-DrdHGOuTxT8Ip2IOc2c+6J4OH0jM1U1wuCaFaWa5UBE=' 'sha256-GtjYWyEOFAy+07MXyK4shqJ+6chqSXBXVlzxIzvya58=' 'sha256-OBTN3RiyCV4Bq7dFqZ5a2pAXjnCcCYeTJMO2I/LYKeo=' 'sha256-RH06754gHGcUq8PUK+bnrQx4JwtBzm8MVpFnRRecVVs=' 'sha256-UCsCUfP9Rn8HEInrNncOcDnaczT+8ZrzYRaz5d5mCac=' 'sha256-bc6v0vmds6qWb0/BYAwRLdwPQZHqfX9fbjjA2t/UH4s=' 'sha256-bxltJpNGbrozE3GkUHaGGkyaI+Ty7VKx/448nYwbcus=' 'sha256-ijPOY/2JfYOVywUrixrxG808QCibI0/oWxzI6dC/UOI=' 'sha256-kATp0r+U96svLjmERETQPZSYYhWU6mMJAcuutm2dJNI=' 'sha256-mU0JsOPPfzc8DGmoWuAEf8ZTM7/nS15ssIzblknGQxk=' 'sha256-nDYlb0NMDOZaMlJ2pLgAAvojoCQKkzmUnqoIkCVZKaE=' 'sha256-nFDSYBsB7fqBY65ccjLrD0LbnUk0h1NKnUnJjOar4vg=' 'sha256-qYx/7D9V30IXhLC4KxKVcyJuEkXrSDJe5oZBvXn5AUU=' 'sha256-qdvsFUbJb9UGWIrmMsQ7N14bw4qqqbhBer8RuL6tTWg=' 'sha256-zcLaSKyTC2DQ636uWoTpK2Ffd/WtyRb9IFx8R3JL6ws='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://aggregator.walrus-testnet.walrus.space https://publisher.walrus-testnet.walrus.space; font-src 'self'; connect-src 'self' https://aggregator.walrus-testnet.walrus.space https://api.coingecko.com https://fullnode.testnet.sui.io:443 https://publisher.walrus-testnet.h2o-nodes.com https://publisher.walrus-testnet.walrus.space https://seal-key-server-testnet-1.mystenlabs.com https://seal-key-server-testnet-2.mystenlabs.com https://walrus-publisher-testnet.n1stake.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin"
+    }
+  },
+  {
+    "origin": "https://docs.suifleet.io",
+    "revision": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+    "files": 33,
+    "headers": {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "strict-transport-security": "max-age=31536000",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin"
+    }
+  }
+]

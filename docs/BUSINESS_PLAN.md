@@ -101,6 +101,8 @@ Platform plan, graduated per device per month (each band applies only to the dev
 | Activation | $0.10 per device, one-time (enrollment objects and gas-float capital) |
 | Annual prepay | 10% discount |
 
+Subscription card funding remains provider-independent software in [SF-183/#372](https://github.com/tyler-suifleet/suifleet/issues/372): labelled Testnet USDC transfer simulation can continue into the existing on-chain prepay. Production checkout is disabled. The user still chooses the provider and completes partner signup; see [official-source diligence and outstanding decisions](business/CARD_PROVIDER_DILIGENCE.md). No production card acceptance, partner fees or universal US/EU availability is claimed.
+
 The platform price includes the default settings: an update check every 30 minutes (hourly on request), 60-second checks during rollout windows, staged rollouts, daily on-chain health, weekly encrypted log archives kept 6 weeks, enrollment and the dashboard. Live telemetry is not in the base product; it needs an off-chain service and would be a later add-on.
 
 Managed plan: the platform price plus $0.10 per device per month, with a $199 monthly minimum. It adds onboarding, help integrating SuiFleet into the customer's device image, and a support SLA. Its premium funds the support time that gross margin excludes.

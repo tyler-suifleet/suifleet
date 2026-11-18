@@ -25,6 +25,9 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    assert.equal(await page.getByRole('link', { name: 'Choose or publish a version' }).getAttribute('href'), '/components');
+    assert.equal(await page.getByPlaceholder('my-app', { exact: true }).isVisible(), false, 'direct file form is optional');
+    await page.getByText('Advanced: deploy a file directly', { exact: true }).click();
     // SF-194: after any validation alert the same file can be chosen again. A
     // browser only fires change for a different value, so each selection must
     // clear the input; re-selecting must then re-run validation.
@@ -69,6 +72,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.getByText(/same\.bin.*uploaded/).waitFor();
     // The main flow starts from a fresh page and fixture state.
     await page.reload();
+    await page.getByText("Advanced: deploy a file directly", { exact: true }).click();
     await page.getByPlaceholder('my-app', { exact: true }).fill('upload-test');
     await page.getByPlaceholder('1.0.0', { exact: true }).fill('1.0.0');
     await page.getByRole('radio').nth(1).check();
@@ -89,6 +93,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.getByRole('checkbox', { name: /Acceptance device/ }).check();
     const deploy = page.getByRole('button', { name: 'Deploy to 1 target', exact: true });
     // Multiple events before a render must still acquire exactly one upload.
+    const alertsBefore = (await alerts()).length;
     await deploy.evaluate(button => { button.click(); button.click(); button.click(); });
     await page.waitForFunction(() => window.uploadAcceptance.count() === 2);
     assert.equal(await page.getByRole('button', { name: 'Uploading recipe…', exact: true }).isDisabled(), true);
@@ -101,7 +106,9 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await modal.getByText(/Walrus is still processing storage/).waitFor();
     assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'), null);
     await page.evaluate(() => window.uploadAcceptance.finish(1, 503));
-    await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 1);
+    // SF-277: deployment failures are inline guidance, not browser alerts.
+    await page.getByRole('alert').filter({ hasText: 'The deployment was not submitted.' }).waitFor();
+    assert.equal((await page.evaluate(() => window.uploadAcceptance.alerts())).length, alertsBefore, 'no new browser alert');
     assert.equal(await page.evaluate(() => window.uploadAcceptance.walletCalls()), 0);
     await deploy.click();
     await page.waitForFunction(() => window.uploadAcceptance.count() === 3);
@@ -112,18 +119,45 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.evaluate(() => window.uploadAcceptance.phase('wallet'));
     await page.getByRole('dialog').getByText(/Your wallet is preparing/).waitFor();
     await page.evaluate(() => window.uploadAcceptance.reject());
-    await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 2);
+    await page.getByRole('alert').filter({ hasText: 'The deployment was cancelled in your wallet.' }).waitFor();
     await deploy.click();
     await page.waitForFunction(() => window.uploadAcceptance.count() === 4);
     await page.evaluate(() => window.uploadAcceptance.finish(3));
     await page.waitForFunction(() => window.uploadAcceptance.walletCalls() === 2);
+    // An unconfirmed deployment stays guarded: no second upload or wallet request until the customer has checked.
+    await page.evaluate(() => window.uploadAcceptance.uncertain());
+    await page.getByRole('alert').filter({ hasText: 'The deployment may have been submitted, but its result is not confirmed.' }).waitFor();
+    assert.equal(await deploy.isDisabled(), true);
+    await deploy.evaluate(button => button.click());
+    assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 4);
+    assert.equal(await page.evaluate(() => window.uploadAcceptance.walletCalls()), 2);
+    // The guard is saved: a reloaded (fresh) firmware page in the same browser stays paused too.
+    const saved = () => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('suifleet:unconfirmed:v1:') && k.endsWith('|action:deploy')).length);
+    assert.equal(await saved(), 1);
+    const storage = await page.evaluate(() => Object.entries(localStorage));
+    const restarted = await browser.newContext();
+    await restarted.addInitScript((entries) => { for (const [k, v] of entries) localStorage.setItem(k, v); }, storage);
+    const reloaded = await restarted.newPage();
+    await reloaded.goto(page.url());
+    // The direct-file panel starts collapsed on a fresh page; open it through the real UI.
+    await reloaded.getByText('Advanced: deploy a file directly', { exact: true }).click();
+    await reloaded.getByRole('status').filter({ hasText: 'was submitted but never confirmed. Deploying again is paused' }).waitFor();
+    assert.equal(await reloaded.getByRole('button', { name: 'I checked: it is not listed, allow deploying again' }).count(), 1);
+    await restarted.close();
+    await page.getByRole('button', { name: 'I checked: it is not listed, allow deploying again' }).click();
+    assert.equal(await saved(), 0, 'explicit check clears the saved guard');
+    await deploy.click();
+    await page.waitForFunction(() => window.uploadAcceptance.count() === 5);
+    await page.evaluate(() => window.uploadAcceptance.finish(4));
+    await page.waitForFunction(() => window.uploadAcceptance.walletCalls() === 3);
     await page.evaluate(() => window.uploadAcceptance.phase('confirming'));
     await page.getByRole('dialog').getByText(/Checking its execution result independently/).waitFor();
     await page.evaluate(() => window.uploadAcceptance.succeed());
     await page.getByText('Deployment created', { exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 4);
+    assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 5);
+    assert.equal((await page.evaluate(() => window.uploadAcceptance.alerts())).length, alertsBefore, 'no deployment-failure browser alerts');
     assert.deepEqual(errors, []);
-    console.log('PASS: same file re-selectable after missing-name, confidential-setup, public-acknowledgement and upload-failure alerts; real upload UI progress/unknown total/processing; duplicate clicks yield one upload; upload failure and wallet cancellation allow explicit retry; success shown without React key warnings');
+    console.log('PASS: same file re-selectable after missing-name, confidential-setup, public-acknowledgement and upload-failure alerts; real upload UI progress/unknown total/processing; duplicate clicks yield one upload; upload failure and wallet cancellation show inline guidance and allow explicit retry; an unconfirmed deployment blocks a repeat (also on a reloaded page) until explicitly checked; success shown without React key warnings');
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise(resolve => server.close(resolve));

@@ -1,0 +1,23 @@
+{
+  "duration": 20,
+  "fps": 30,
+  "voice": "af_heart",
+  "cues": [
+    {
+      "start": 0.5,
+      "text": "With SuiFleet, managing your devices is simple."
+    },
+    {
+      "start": 5.0,
+      "text": "You choose the update and approve it securely."
+    },
+    {
+      "start": 9.3,
+      "text": "Sui saves your approval. Walrus stores your software."
+    },
+    {
+      "start": 14.5,
+      "text": "Your devices download and verify it, ready to install."
+    }
+  ]
+}

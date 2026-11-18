@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from urllib.parse import quote
 
 IDENTITY = 'Tyler Bush <tyler.jonathan.bush@gmail.com>'
 TERMINAL = ('done', 'invalidated', 'failed')
@@ -24,6 +25,14 @@ class BatchInvalidated(RuntimeError):
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
+
+
+def pull_identity(value):
+    """Pin reconciliation authority without volatile embedded repo metadata."""
+    return (value.get('number'), value.get('state'), value.get('draft'),
+            *((value.get(side, {}).get('sha'), value.get(side, {}).get('ref'),
+               value.get(side, {}).get('repo', {}).get('full_name'))
+              for side in ('head', 'base')))
 
 
 def batch_error(batch):
@@ -45,6 +54,7 @@ class BatchController:
         self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
         self.installed = Path(installed) if installed is not None else Path(__file__).with_name('installed.json')
         self._installed_proofs = set()
+        self.obsolete_ci = ObsoleteBatchCI(coordinator, clock)
         self.db.execute('''CREATE TABLE IF NOT EXISTS shared_harness_incidents (
             project TEXT,batch_id TEXT,owner_ticket TEXT,manifest TEXT,error_hash TEXT,
             receipt TEXT,created REAL,PRIMARY KEY(project,batch_id))''')
@@ -68,6 +78,400 @@ class BatchController:
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batch_conflicts (
             project TEXT,pr INTEGER,head TEXT,base TEXT,batch_id TEXT,context TEXT,
             PRIMARY KEY(project,pr,head,base))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_historical_members (
+            project TEXT,batch_id TEXT,pr INTEGER,receipt TEXT,created REAL,
+            PRIMARY KEY(project,batch_id,pr))''')
+
+    def included_evidence(self, project, source, base):
+        """Read-only evidence for main's actual (main,parent) test identity.
+
+        Never retarget a source workflow or turn ancestry into acceptance. The
+        latest main CI and status must authenticate successful producer runs.
+        Mutable metadata is re-read on every review/publication/completion.
+        """
+        prefix = f"repos/{project['repository']}"
+        read = lambda path: json.loads(self.c.gh(project, ['api', path]))
+        commit = read(f'{prefix}/commits/{base}')
+        parent = commit['parents'][0]['sha']
+        if commit.get('sha') != base or not SHA.fullmatch(parent):
+            raise RuntimeError('included evidence commit identity unavailable')
+        def valid(run, name, path, events):
+            return (run.get('name') == name and run.get('path') == path
+                and run.get('head_sha') == base and run.get('head_branch') == 'main'
+                and run.get('event') in events and run.get('status') == 'completed'
+                and run.get('conclusion') == 'success'
+                and type(run.get('id')) is int and run['id'] > 0
+                and type(run.get('run_attempt')) is int and run['run_attempt'] > 0
+                and all(run.get(k, {}).get('full_name') == project['repository']
+                        for k in ('repository', 'head_repository')))
+        runs = read(f'{prefix}/actions/workflows/ci.yml/runs?head_sha={base}&branch=main&per_page=1')['workflow_runs']
+        if not runs:
+            raise RuntimeError('included evidence needs current-main CI; run gh workflow run ci.yml --ref main once')
+        ci = read(f"{prefix}/actions/runs/{runs[0]['id']}")
+        if not valid(ci, 'CI', '.github/workflows/ci.yml', ('push', 'workflow_dispatch', 'schedule')):
+            raise RuntimeError(f"included evidence CI is pending or failed; after repair run gh run rerun {ci['id']} -R {project['repository']} once")
+        jobs = read(f"{prefix}/actions/runs/{ci['id']}/attempts/{ci['run_attempt']}/jobs?per_page=100")
+        names = {j.get('name') for j in jobs['jobs']}
+        required = {'check', 'Security dependencies, secrets and configuration',
+                    *('Security CodeQL ('+lang+')' for lang in ('javascript-typescript', 'python', 'rust', 'actions'))}
+        if (jobs.get('total_count') != len(jobs['jobs']) or not required <= names
+                or not all(j.get('head_sha') == base and j.get('status') == 'completed'
+                           and j.get('conclusion') == 'success' for j in jobs['jobs'])):
+            raise RuntimeError('included evidence CI/security jobs are incomplete or unsuccessful')
+        statuses = read(f'{prefix}/commits/{base}/status')
+        status = next((s for s in statuses['statuses'] if s.get('context') == 'testnet/package-upgrade'), {})
+        match = re.fullmatch(r'https://github\.com/' + re.escape(project['repository'])
+                             + r'/actions/runs/([1-9][0-9]*)', status.get('target_url', ''))
+        if (status.get('state') != 'success' or status.get('description') != 'base:'+parent or not match):
+            raise RuntimeError('included evidence needs successful main/parent testnet; rerun current-main CI once after repair')
+        path = f'{prefix}/actions/runs/{match[1]}'
+        testnet = read(path)
+        if (str(testnet.get('id')) != match[1] or not valid(testnet, 'Automatic testnet',
+                '.github/workflows/testnet.yml', ('workflow_run',))):
+            raise RuntimeError('included evidence testnet producer is unauthenticated')
+        with tempfile.TemporaryDirectory(prefix='included-main-effects-') as directory:
+            self.c.gh(project, ['run', 'download', match[1], '-R', project['repository'],
+                               '-n', 'testnet-effects-'+base, '-D', directory])
+            file = Path(directory)/'package-upgrade.json'
+            if file.is_symlink() or not file.is_file() or file.stat().st_size > 4_000_000:
+                raise RuntimeError('included evidence effects unavailable; rerun current-main CI once')
+            raw = file.read_bytes()
+            effects = json.loads(raw)
+        if (effects.get('success') is not True or effects.get('head') != base
+                or effects.get('base') != parent or effects.get('chain', effects.get('chain_identifier')) != '4c78adac'):
+            raise RuntimeError('included evidence effects identity or outcome mismatch')
+        if (read(path) != testnet or read(f"{prefix}/actions/runs/{ci['id']}") != ci
+                or read(f'{prefix}/commits/{base}/status') != statuses
+                or self.main(project) != base):
+            raise RuntimeError('included evidence changed while authenticating')
+        return dict(source=source, head=base, base=parent, ci=ci['id'], ci_attempt=ci['run_attempt'],
+                    testnet=testnet['id'], testnet_attempt=testnet['run_attempt'],
+                    effects_sha256=hashlib.sha256(raw).hexdigest())
+
+    def included_snapshot(self, project, pr, base, identity):
+        snapshot = {**pr, 'baseRefName': 'main', 'baseRefOid': base,
+                    '_review_mode': 'included', '_included_source': identity,
+                    'statusCheckRollup': [dict(check) for check in pr['statusCheckRollup']]}
+        snapshot.pop('_included_evidence', None)
+        snapshot.pop('_included_evidence_error', None)
+        try:
+            snapshot['_included_evidence'] = self.included_evidence(project, pr['headRefOid'], base)
+            from coordinator import annotate_optional_skips
+            annotate_optional_skips(snapshot, project['repository'],
+                lambda path: json.loads(self.c.gh(project, ['api', path])),
+                lambda path: self.c.immutable_read(project, path))
+        except Exception as error:
+            # No worker is launched to wait on unavailable checks. Keep a bounded,
+            # executable operator action in the receipt and retry reads next tick.
+            snapshot['_included_evidence_error'] = (str(error) if type(error) is RuntimeError
+                else 'included evidence unavailable; inspect current-main CI/testnet and rerun CI once after repair')
+        return snapshot
+
+    def included_checkpoint_evidence(self, project, source, base, expected):
+        """Authenticate the original successful attempts, never a newer run ID."""
+        prefix = 'repos/'+project['repository']
+        read = lambda path: json.loads(self.c.gh(project, ['api', path]))
+        if (not isinstance(expected, dict) or expected.get('source') != source or expected.get('head') != base
+                or not re.fullmatch(r'[0-9a-f]{64}', expected.get('effects_sha256', ''))
+                or any(type(expected.get(k)) is not int or expected[k] <= 0
+                       for k in ('ci','ci_attempt','testnet','testnet_attempt'))):
+            raise RuntimeError('completed source checkpoint evidence is malformed')
+        commit = read(prefix+'/commits/'+base)
+        parent = commit['parents'][0]['sha']
+        if commit.get('sha') != base or parent != expected.get('base'):
+            raise RuntimeError('completed source checkpoint parent changed')
+        def attempt(kind, name, path, events):
+            endpoint = prefix+'/actions/runs/'+str(expected[kind])+'/attempts/'+str(expected[kind+'_attempt'])
+            run = read(endpoint)
+            if (run.get('id') != expected[kind] or run.get('run_attempt') != expected[kind+'_attempt']
+                    or run.get('name') != name or run.get('path') != path or run.get('event') not in events
+                    or run.get('head_sha') != base or run.get('head_branch') != 'main'
+                    or run.get('status') != 'completed' or run.get('conclusion') != 'success'
+                    or any((run.get(k) or {}).get('full_name') != project['repository']
+                           for k in ('repository','head_repository'))):
+                raise RuntimeError('completed source checkpoint producer is unauthenticated')
+            return endpoint, run
+        ci_path, ci = attempt('ci','CI','.github/workflows/ci.yml',('push','workflow_dispatch','schedule'))
+        jobs = read(ci_path+'/jobs?per_page=100')
+        required = {'check','Security dependencies, secrets and configuration',
+                    *('Security CodeQL ('+lang+')' for lang in ('javascript-typescript','python','rust','actions'))}
+        if (jobs.get('total_count') != len(jobs['jobs']) or not required <= {j.get('name') for j in jobs['jobs']}
+                or not all(j.get('head_sha') == base and j.get('status') == 'completed'
+                           and j.get('conclusion') == 'success' for j in jobs['jobs'])):
+            raise RuntimeError('completed source checkpoint CI/security jobs are unsuccessful')
+        testnet_path, testnet = attempt('testnet','Automatic testnet','.github/workflows/testnet.yml',('workflow_run',))
+        with tempfile.TemporaryDirectory(prefix='included-checkpoint-effects-') as directory:
+            self.c.gh(project, ['run','download',str(expected['testnet']),'-R',project['repository'],
+                               '-n','testnet-effects-'+base,'-D',directory])
+            file = Path(directory)/'package-upgrade.json'
+            if file.is_symlink() or not file.is_file() or file.stat().st_size > 4_000_000:
+                raise RuntimeError('completed source checkpoint effects unavailable')
+            raw = file.read_bytes(); effects = json.loads(raw)
+        if (hashlib.sha256(raw).hexdigest() != expected['effects_sha256'] or effects.get('success') is not True
+                or effects.get('head') != base or effects.get('base') != parent
+                or effects.get('chain', effects.get('chain_identifier')) != '4c78adac'
+                or read(ci_path) != ci or read(testnet_path) != testnet):
+            raise RuntimeError('completed source checkpoint effects changed')
+        return expected
+
+    def continue_completed_source(self, project, pr, owner):
+        """Finish only already-Done metadata; never accept or merge new work."""
+        from coordinator import feedback, gate, source_feedback
+        if (owner.get('status') != 'done' or owner.get('publish_pending') or owner.get('expired')
+                or pr.get('state') not in ('OPEN','CLOSED') or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('headRefName') != owner.get('branch')):
+            return False
+        rows = self.db.execute('SELECT head,base,receipt FROM batch_included_sources WHERE project=? AND pr=? AND head=? ORDER BY created DESC',
+            (project['id'],pr['number'],pr['headRefOid'])).fetchall()
+        accepted = [(head,base,json.loads(raw)) for head,base,raw in rows
+                    if json.loads(raw).get('status') in ('included-source-accepted','included-source-closed')]
+        if not accepted:
+            return False
+        head, base, receipt = accepted[0]
+        identity = receipt.get('identity') or {}
+        if (receipt.get('acceptance_complete') is not True or receipt.get('main') != base
+                or identity.get('head') != head
+                or identity.get('owner') != {k:owner.get(k) for k in ('key','agent','model','session','branch')}
+                or (receipt.get('status') == 'included-source-closed' and pr['state'] == 'OPEN')):
+            raise RuntimeError('completed source checkpoint authority changed')
+        row = self.db.execute("SELECT * FROM jobs WHERE id=? AND project=? AND pr=? AND head=? AND kind='review' AND status='done' AND publication_done=1",
+            (receipt.get('review'),project['id'],pr['number'],head)).fetchone()
+        if row is None:
+            raise RuntimeError('completed source checkpoint review unavailable')
+        review = dict(row); review['result'] = json.loads(review['result']); review['publication_pending'] = False
+        snapshot = json.loads((Path(review['directory'])/'snapshot.json').read_text())
+        if (snapshot.get('_review_mode') != 'included' or snapshot.get('_included_source') != identity
+                or snapshot.get('baseRefOid') != base or snapshot.get('headRefOid') != head
+                or snapshot.get('_included_evidence') != receipt.get('check_evidence')
+                or snapshot.get('ticket', {}).get('spec') != owner.get('spec')
+                or review['feedback'] != feedback(snapshot)
+                or gate(snapshot,{**owner,'status':'review'},review,included=True) is not None):
+            raise RuntimeError('completed source checkpoint review changed')
+        expected_evidence = (f"Included source PR #{pr['number']} head {head} in main {base}; "
+            f"accepted for redundant-source closure, not a GitHub merge. Independent acceptance job {review['id']}: "
+            + review['result']['evidence'])
+        if receipt.get('evidence') != expected_evidence:
+            raise RuntimeError('completed source checkpoint completion evidence changed')
+        events = owner.get('events', [])
+        claims = [e for e in events if e.get('kind') == 'claim' and e.get('actor') == owner['session']
+                  and str(e.get('ticket','')).split('::')[-1] == owner['key']]
+        tokens = [p.split('=',1)[1] for e in claims for p in e.get('detail','').split('; ') if p.startswith('token=')]
+        completion = {receipt.get('evidence'),str(receipt.get('evidence'))+'\nMerged commit: '+head}
+        if (len(claims) != 1 or len(tokens) != 1 or hashlib.sha256(tokens[0].encode()).hexdigest() != identity.get('claim_hash')
+                or not any(e.get('kind') == 'complete' and e.get('actor') == review['family']+'/'+review['result']['model']
+                           and str(e.get('ticket','')).split('::')[-1] == owner['key'] and e.get('detail') in completion for e in events)):
+            raise RuntimeError('completed source checkpoint claim/completion provenance unavailable')
+        newer = self.db.execute("SELECT result FROM jobs WHERE project=? AND pr=? AND head=? AND kind='review' AND status='done' AND id>?",
+            (project['id'],pr['number'],head,review['id'])).fetchall()
+        if any(json.loads(r[0]).get('verdict') == 'changes_requested' or json.loads(r[0]).get('source_complete') is False for r in newer):
+            raise RuntimeError('completed source checkpoint has a newer source finding')
+        main = self.main(project)
+        self.git(project,'fetch','--no-tags','origin','main',head,base)
+        for older,newer in ((head,base),(base,main),(identity.get('base'),base),(identity.get('comparison'),base)):
+            if not SHA.fullmatch(older or '') or not SHA.fullmatch(newer or ''):
+                raise RuntimeError('completed source checkpoint ancestry unavailable')
+            self.git(project,'merge-base','--is-ancestor',older,newer)
+        if self.git(project,'rev-parse','origin/main') != main:
+            raise RuntimeError('completed source checkpoint main changed')
+        evidence = self.included_checkpoint_evidence(project,head,base,receipt.get('check_evidence'))
+        recovery = getattr(self.c, 'hosted_runner_recovery', None)
+        if recovery and receipt['status'] == 'included-source-accepted':
+            notice = recovery.included_main(project,pr,owner,receipt)
+            if notice:
+                print(canonical(dict(project=project['id'],pr=pr['number'],hosted_runner_recovery=notice)),flush=True)
+        def fresh_checkpoint(fresh, current):
+            if (current.get('status') != 'done' or current.get('publish_pending') or current.get('expired')
+                    or any(current.get(k) != owner.get(k) for k in ('key','agent','model','session','branch','spec','revision'))
+                    or fresh.get('state') not in ('OPEN','CLOSED') or fresh.get('isCrossRepository')
+                    or any(fresh.get(k) != identity.get(v) for k,v in
+                        (('headRefOid','head'),('headRefName','branch'),('baseRefName','base_ref'),
+                         ('baseRefOid','base'),('comparisonBaseOid','comparison')))
+                    or source_feedback(fresh) != source_feedback(snapshot)
+                    or not self.c.source_receipt(project,fresh,current)):
+                raise RuntimeError('completed source checkpoint source/owner changed')
+            check = {**fresh,'baseRefName':'main','baseRefOid':base,'_review_mode':'included',
+                     '_included_source':identity,'_included_evidence':evidence}
+            from coordinator import annotate_optional_skips
+            annotate_optional_skips(check, project['repository'],
+                lambda path:json.loads(self.c.gh(project,['api',path])),lambda path:self.c.immutable_read(project,path))
+            if gate(check,{**current,'status':'review'},review,included=True) is not None:
+                raise RuntimeError('completed source checkpoint current source/security feedback changed')
+        fresh = self.c.pr(project,pr['number']); current = self.owner(project,{'owner':owner})
+        fresh_checkpoint(fresh,current)
+        again = self.c.pr(project,pr['number']); current = self.owner(project,{'owner':owner})
+        fresh_checkpoint(again,current)
+        if self.main(project) != main or again != fresh:
+            raise RuntimeError('completed source checkpoint changed before closure')
+        if again['state'] == 'OPEN':
+            self.c.gh(project,['api',f"repos/{project['repository']}/pulls/{pr['number']}",'--method','PATCH','-f','state=closed'])
+        closed = self.c.pr(project,pr['number'])
+        if closed.get('state') != 'CLOSED' or closed.get('headRefOid') != head:
+            raise RuntimeError('completed source checkpoint closure unconfirmed')
+        issue = self.c.issue_number(project,owner)
+        endpoint = f"repos/{project['repository']}/issues/{issue}"
+        self.c.gh(project,['api',endpoint,'--method','PATCH','-f','state=closed','-f','state_reason=completed'])
+        if json.loads(self.c.gh(project,['api',endpoint])).get('state') != 'closed':
+            raise RuntimeError('completed source checkpoint issue closure unconfirmed')
+        receipt.update(status='included-source-closed',completion_continuation=dict(main=main,review=review['id'],owner_revision=current['revision']))
+        self.db.execute('UPDATE batch_included_sources SET receipt=? WHERE project=? AND pr=? AND head=? AND base=?',
+            (canonical(receipt),project['id'],pr['number'],head,base))
+        self.db.execute('INSERT OR REPLACE INTO integrations VALUES(?,?,?,?,1)',(project['id'],pr['number'],head,base))
+        return True
+
+    def included_source(self, project, pr, owner):
+        """Handle a redundant source without inventing a GitHub merged state.
+
+        Return False only for a source which still needs normal integration.
+        The existing immutable job reservation bounds missing-evidence dispatch.
+        """
+        from coordinator import feedback, gate, checks_blocker
+        if owner and owner.get('status') == 'done':
+            return self.continue_completed_source(project, pr, owner)
+        if (not owner or owner.get('status') not in ('review', 'done') or owner.get('publish_pending')
+                or owner.get('expired') or pr.get('state') not in ('OPEN', 'CLOSED')
+                or pr.get('isDraft') or pr.get('isCrossRepository')
+                or owner.get('branch') != pr.get('headRefName')
+                or not self.c.source_receipt(project, pr, owner)):
+            return False
+        if pr['state'] == 'CLOSED' and owner['status'] != 'done':
+            return False
+        base = self.main(project)
+        self.git(project, 'fetch', '--no-tags', 'origin', 'main', pr['headRefOid'])
+        try:
+            self.git(project, 'merge-base', '--is-ancestor', pr['headRefOid'], base)
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1:
+                return False
+            raise
+        if self.git(project, 'rev-parse', 'origin/main') != base:
+            raise RuntimeError('included source main moved during fetch')
+        # Both the comparison commit and resolved source base must be included.
+        for revision in (pr.get('comparisonBaseOid'), pr.get('baseRefOid')):
+            if not revision or not SHA.fullmatch(revision):
+                raise RuntimeError('included source base identity is unavailable')
+            self.git(project, 'merge-base', '--is-ancestor', revision, base)
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        prior = self.db.execute('SELECT receipt FROM batch_included_sources WHERE project=? AND pr=? AND head=? AND base=?',
+                                (project['id'], pr['number'], pr['headRefOid'], base)).fetchone()
+        prior = json.loads(prior[0]) if prior else {}
+        done = owner['status'] == 'done'
+        if done:
+            if prior.get('status') not in ('included-source-accepted', 'included-source-closed'):
+                raise RuntimeError('completed included source lacks retained acceptance')
+        else:
+            current = self.owner(project, {'owner': owner})
+            if any(current.get(k) != owner.get(k) for k in
+                   ('token', 'key', 'agent', 'model', 'session', 'branch', 'spec')):
+                raise RuntimeError('included source owner identity changed')
+            self.c.assert_review_owner(project, current)
+        identity = dict(head=pr['headRefOid'], branch=pr['headRefName'],
+                        base_ref=pr['baseRefName'], comparison=pr['comparisonBaseOid'],
+                        base=pr['baseRefOid'], owner={k: owner.get(k) for k in
+                            ('key', 'agent', 'model', 'session', 'branch')},
+                        claim_hash=(prior.get('identity', {}).get('claim_hash') if done else
+                                    hashlib.sha256(owner['token'].encode()).hexdigest()))
+        snapshot = self.included_snapshot(project, pr, base, identity)
+        review = self.c.store.review(project['id'], pr['number'])
+        if done and prior.get('identity') != identity:
+            raise RuntimeError('completed included source identity changed')
+        blocker = checks_blocker(snapshot) or gate(snapshot, {**owner, 'status': 'review'}, review, included=True)
+        receipt = dict(identity=identity, main=base, acceptance_complete=False,
+                       status='included-source-awaiting-acceptance', blocker=blocker,
+                       acceptance_job=review.get('id') if review else None,
+                       check_evidence=snapshot.get('_included_evidence'),
+                       next_action=(f"Inspect/repair the reported evidence failure, then run gh workflow run ci.yml --ref main -R {project['repository']} once; never retarget the source branch"
+                                    if snapshot.get('_included_evidence_error') else None),
+                       missing_evidence=(snapshot.get('_included_evidence_error') or (review.get('result', {}).get('evidence') if review else
+                                         'Full independent exact-source/current-main acceptance is missing')))
+        def save():
+            self.db.execute('INSERT OR REPLACE INTO batch_included_sources VALUES(?,?,?,?,?,?)',
+                (project['id'], pr['number'], pr['headRefOid'], base, canonical(receipt), self.clock()))
+        if not done:
+            save()
+        if blocker:
+            if done:
+                raise RuntimeError('completed included source acceptance is no longer current')
+            # Full acceptance has a separate fingerprint from source-only work.
+            # An unchanged blocked result is retained, never repeatedly launched.
+            if (checks_blocker(snapshot) is None and (not review or review['head'] != snapshot['headRefOid']
+                    or review['feedback'] != feedback(snapshot))):
+                self.c.launch(project, snapshot, owner, 'review')
+            return True
+        # Reuse the existing stopped-process/helper, dependency and claim fences.
+        if not done:
+            LocalInfrastructure(self.c).fenced(project, pr, owner)
+        fresh = self.c.pr(project, pr['number'])
+        if (self.main(project) != base or any(fresh.get(k) != pr.get(k) for k in
+                ('state', 'headRefOid', 'headRefName', 'baseRefName', 'baseRefOid',
+                 'comparisonBaseOid', 'isDraft', 'isCrossRepository'))
+                or feedback(self.included_snapshot(project, fresh, base, identity)) != feedback(snapshot)
+                or checks_blocker(snapshot)):
+            raise RuntimeError('included source acceptance changed before completion')
+        if not done:
+            self.c.assert_review_owner(project, owner)
+        evidence = (f"Included source PR #{pr['number']} head {pr['headRefOid']} in main {base}; "
+                    f"accepted for redundant-source closure, not a GitHub merge. Independent acceptance job {review['id']}: "
+                    + review['result']['evidence'])
+        # Persist acceptance before completion so a failed remote mirror retains
+        # the exact evidence and can be investigated without replaying acceptance.
+        receipt.update(status='included-source-accepted', acceptance_complete=True,
+                       review=review['id'], evidence=evidence)
+        save()
+        if not done:
+            self.c.ticket(project, 'complete', owner['key'], '--expect-token', owner['token'],
+                          '--reviewer', review['family']+'/'+review['result']['model'],
+                          '--merged-commit', pr['headRefOid'], '--integration-ref', 'origin/main', '--text', evidence)
+        # Completion publication must succeed before any closure. Neither branch
+        # nor source merge metadata is rewritten or deleted.
+        completed = self.owner(project, {'owner': owner})
+        if completed.get('status') != 'done' or completed.get('publish_pending'):
+            raise RuntimeError('included source completion mirror is pending')
+        endpoint = f"repos/{project['repository']}/pulls/{pr['number']}"
+        if self.main(project) != base or self.c.pr(project, pr['number']) != fresh:
+            raise RuntimeError('included source changed before closure')
+        if pr['state'] == 'OPEN':
+            self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'state=closed'])
+        closed = self.c.pr(project, pr['number'])
+        if closed['state'] != 'CLOSED' or closed['headRefOid'] != pr['headRefOid']:
+            raise RuntimeError('included source closure unconfirmed')
+        issue = self.c.issue_number(project, owner)
+        self.c.gh(project, ['api', f"repos/{project['repository']}/issues/{issue}",
+                            '--method', 'PATCH', '-f', 'state=closed', '-f', 'state_reason=completed'])
+        confirmed_issue = json.loads(self.c.gh(project, ['api', f"repos/{project['repository']}/issues/{issue}"]))
+        if confirmed_issue.get('state') != 'closed':
+            raise RuntimeError('included source issue closure unconfirmed')
+        receipt.update(status='included-source-closed')
+        save()
+        self.db.execute('INSERT OR REPLACE INTO integrations VALUES(?,?,?,?,1)',
+                        (project['id'], pr['number'], pr['headRefOid'], base))
+        return True
+
+    def exclude_included_sources(self, project, candidates, base):
+        """Record ancestry only, never infer approval or ticket completion."""
+        if not candidates:
+            return []
+        self.git(project, 'fetch', '--no-tags', 'origin', base,
+                 *dict.fromkeys(m['head'] for m in candidates))
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        available = []
+        for member in candidates:
+            try:
+                self.git(project, 'merge-base', '--is-ancestor', member['head'], base)
+            except subprocess.CalledProcessError as error:
+                if error.returncode != 1:
+                    raise  # Unknown ancestry must not authorize a new candidate.
+                available.append(member)
+                continue
+            receipt = dict(head=member['head'], base=base, owner=member['owner'],
+                           status='included-source-awaiting-reconciliation',
+                           acceptance_complete=False)
+            self.db.execute('INSERT OR IGNORE INTO batch_included_sources VALUES(?,?,?,?,?,?)',
+                (project['id'], member['pr'], member['head'], base, canonical(receipt), self.clock()))
+        return available
 
     @staticmethod
     def suspension(project):
@@ -495,9 +899,17 @@ class BatchController:
                      *dict.fromkeys([m['head'] for m in members]+[m['reviewed_base'] for m in members]))
             self.git(project, 'worktree', 'add', '--detach', batch['directory'], batch['base'])
             for member in members:
-                # Old source reviews remain useful only when their base is in
-                # the pinned integration history, never an unrelated/future base.
-                self.git(project, 'merge-base', '--is-ancestor', member['reviewed_base'], batch['base'])
+                # A stacked source can be reviewed against a preceding member.
+                # Require that base in the already accepted candidate history;
+                # a later, rejected or unrelated source cannot supply it.
+                try:
+                    self.git(project, 'merge-base', '--is-ancestor', member['reviewed_base'], previous)
+                except subprocess.CalledProcessError as error:
+                    if error.returncode != 1:
+                        raise
+                    self.reject_member(project, batch, member,
+                        'reviewed base is absent from preceding candidate history')
+                    continue
                 try:
                     self.git(project, 'merge-base', '--is-ancestor', member['head'], previous)
                 except subprocess.CalledProcessError as error:
@@ -695,6 +1107,170 @@ class BatchController:
         self.git(project, 'push', 'origin', batch['head']+':refs/heads/main')
         self.update(batch, status='published')
 
+    def recognize_stacked_member(self, project, batch, member, pr, owner):
+        """Retarget an already-published stacked head; never merge or close it."""
+        members = json.loads(batch['members'])
+        preceding = members[:members.index(member)]
+        bases = {m['owner']['branch'] for m in preceding}
+        if (pr['state'] != 'OPEN' or pr['headRefOid'] != member['head']
+                or pr.get('baseRefName') not in bases or pr.get('isCrossRepository')
+                or pr.get('isDraft') or batch.get('publish_intent') != 1
+                or not batch.get('review_id')):
+            return False
+        approval = next((a for a in self.approval_rows(batch)
+                         if a['pr'] == member['pr']), None)
+        if (not approval or approval['status'] != 'applied'
+                or approval['head'] != member['head'] or not approval['review_node']):
+            raise RuntimeError('stacked member lacks published acceptance approval')
+        # The manifest and candidate merge were verified by reconcile. Assert
+        # the member is reachable from the actual integration branch as well.
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], 'origin/main')
+        endpoint = f"repos/{project['repository']}/pulls/{member['pr']}"
+        fresh = json.loads(self.c.gh(project, ['api', endpoint]))
+        if (fresh.get('number') != member['pr'] or fresh.get('state') != 'open'
+                or fresh.get('draft') is not False
+                or fresh.get('head', {}).get('sha') != member['head']
+                or fresh.get('base', {}).get('ref') not in bases
+                or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
+                       for side in ('head', 'base'))):
+            raise RuntimeError('stacked member identity changed before recognition')
+        # Recheck retained ownership immediately before the sole external write.
+        current = self.owner(project, member)
+        if (current.get('status') not in ('review', 'done')
+                or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                   != member['owner']['claim_hash']):
+            raise RuntimeError('stacked member claim changed before recognition')
+        self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'base=main'])
+        return True
+
+    def reconcile_integrated_stacked_member(self, project, batch, candidate, member, pr):
+        """Complete through the real merged candidate, never invent a source merge.
+
+        A first member can retain a base from an earlier integrated batch. GitHub
+        may refuse a no-diff retarget, so recognize its exact contribution using
+        the sealed candidate and close the redundant source PR only afterwards.
+        """
+        branches = {m['owner']['branch'] for m in json.loads(batch['members'])}
+        if (pr['headRefOid'] != member['head'] or pr.get('baseRefName') == 'main'
+                or pr.get('baseRefName') in branches or pr['state'] not in ('OPEN', 'CLOSED')):
+            return False
+        if (pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('headRefName') != member['owner']['branch']
+                or batch.get('publish_intent') != 1 or not batch.get('review_id')):
+            raise RuntimeError('integrated stacked member publication identity changed')
+        approval = next((a for a in self.approval_rows(batch) if a['pr'] == member['pr']), None)
+        if (not approval or approval['status'] != 'applied'
+                or approval['head'] != member['head'] or not approval['review_node']):
+            raise RuntimeError('integrated stacked member lacks published acceptance approval')
+        endpoint = f"repos/{project['repository']}/pulls/{member['pr']}"
+        fresh = json.loads(self.c.gh(project, ['api', endpoint]))
+        if (fresh.get('number') != member['pr'] or fresh.get('state') != pr['state'].lower()
+                or fresh.get('draft') is not False
+                or fresh.get('head', {}).get('sha') != member['head']
+                or fresh.get('head', {}).get('ref') != member['owner']['branch']
+                or fresh.get('base', {}).get('ref') != pr.get('baseRefName')
+                or fresh.get('base', {}).get('sha') != pr.get('comparisonBaseOid')
+                or not SHA.fullmatch(pr.get('comparisonBaseOid', ''))
+                or not SHA.fullmatch(pr.get('baseRefOid', ''))
+                or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
+                       for side in ('head', 'base'))):
+            raise RuntimeError('integrated stacked member remote identity changed')
+        # REST pins the historical comparison base, while Coordinator.pr binds
+        # baseRefOid to the live branch tip. Neither may substitute for the other.
+        ref_endpoint = (f"repos/{project['repository']}/git/ref/heads/"
+                        + quote(pr['baseRefName'], safe='/'))
+
+        def assert_live_base():
+            reference = json.loads(self.c.gh(project, ['api', ref_endpoint]))
+            if (reference.get('ref') != 'refs/heads/' + pr['baseRefName']
+                    or reference.get('object', {}).get('type') != 'commit'
+                    or reference.get('object', {}).get('sha') != pr['baseRefOid']):
+                raise RuntimeError('integrated stacked member live base changed')
+
+        assert_live_base()
+        self.git(project, 'fetch', '--no-tags', 'origin', pr['baseRefName'])
+        if self.git(project, 'rev-parse', 'FETCH_HEAD') != pr['baseRefOid']:
+            raise RuntimeError('integrated stacked member fetched base changed')
+        for base in (pr['comparisonBaseOid'], pr['baseRefOid']):
+            self.git(project, 'merge-base', '--is-ancestor', base, 'origin/main')
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], batch['head'])
+        current = self.owner(project, member)
+        # Completion clears the token. A retry after completion must still match
+        # every sealed owner identity field, but need not retain that token.
+        if (current.get('status') not in ('review', 'done') or current.get('publish_pending')
+                or any(current.get(k) != v for k, v in member['owner'].items() if k != 'claim_hash')
+                or not ((current.get('status') == 'done' and current.get('token') is None)
+                        or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                           == member['owner']['claim_hash'])):
+            raise RuntimeError('integrated stacked member retained claim changed')
+        if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
+            raise RuntimeError('integrated stacked member changed before completion')
+        assert_live_base()
+        # The candidate really is MERGED and contains the exact reviewed source.
+        # Existing completion verifies its main ancestry and closes this owner's
+        # issue. Do not pass a synthetic MERGED source PR to that code.
+        self.c.reconcile(project, candidate, current, None)
+        if pull_identity(json.loads(self.c.gh(project, ['api', endpoint]))) != pull_identity(fresh):
+            raise RuntimeError('integrated stacked source changed before closure')
+        assert_live_base()
+        if pr['state'] == 'OPEN':
+            self.c.gh(project, ['api', endpoint, '--method', 'PATCH', '-f', 'state=closed'])
+        closed = json.loads(self.c.gh(project, ['api', endpoint]))
+        if pull_identity(closed) != pull_identity({**fresh, 'state': 'closed'}):
+            raise RuntimeError('integrated stacked source closure unconfirmed')
+        assert_live_base()
+        self.db.execute('INSERT OR REPLACE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,1)',
+                        (project['id'], member['pr'], member['head'], batch['head']))
+        return True
+
+    def recognize_historical_member(self, project, batch, member, pr):
+        """Record an integrated contribution, leaving its advanced PR untouched.
+
+        Called only after manifest, candidate merge and main ancestry checks.
+        This is not ticket completion or approval of the owner's newer work.
+        """
+        if pr['headRefOid'] == member['head']:
+            return False
+        if (pr['state'] != 'OPEN' or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('headRefName') != member['owner']['branch']
+                or batch.get('publish_intent') != 1 or not batch.get('review_id')):
+            raise RuntimeError('advanced member identity or publication changed')
+        approval = next((a for a in self.approval_rows(batch) if a['pr'] == member['pr']), None)
+        if (not approval or approval['status'] != 'applied'
+                or approval['head'] != member['head'] or not approval['review_node']):
+            raise RuntimeError('advanced member lacks published acceptance approval')
+        endpoint = f"repos/{project['repository']}/pulls/{member['pr']}"
+        fresh = json.loads(self.c.gh(project, ['api', endpoint]))
+        if (fresh.get('number') != member['pr'] or fresh.get('state') != 'open'
+                or fresh.get('draft') is not False
+                or fresh.get('head', {}).get('sha') != pr['headRefOid']
+                or fresh.get('head', {}).get('ref') != member['owner']['branch']
+                or fresh.get('base', {}).get('ref') != pr.get('baseRefName')
+                or any(fresh.get(side, {}).get('repo', {}).get('full_name') != project['repository']
+                       for side in ('head', 'base'))):
+            raise RuntimeError('advanced member remote identity changed')
+        # Fetch only the owning branch; require the published contribution to be
+        # retained by both real main and the newer owner head, never a rewrite.
+        self.git(project, 'fetch', '--no-tags', 'origin', member['owner']['branch'])
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], 'origin/main')
+        self.git(project, 'merge-base', '--is-ancestor', member['head'], pr['headRefOid'])
+        current = self.owner(project, member)
+        if (current.get('status') not in ('review', 'in_progress') or current.get('publish_pending')
+                or any(current.get(k) != v for k, v in member['owner'].items() if k != 'claim_hash')
+                or hashlib.sha256((current.get('token') or '').encode()).hexdigest()
+                   != member['owner']['claim_hash']):
+            raise RuntimeError('advanced member retained claim changed')
+        # Detect a push or PR-state change during the Git/ownership reads. No
+        # external write follows; a later push still needs its own fresh review.
+        if json.loads(self.c.gh(project, ['api', endpoint])) != fresh:
+            raise RuntimeError('advanced member changed during historical recognition')
+        receipt = dict(manifest=batch['manifest_digest'], candidate=batch['head'],
+                       published_head=member['head'], observed_head=pr['headRefOid'],
+                       claim_hash=member['owner']['claim_hash'], approval=approval['review_node'])
+        self.db.execute('INSERT OR IGNORE INTO batch_historical_members VALUES(?,?,?,?,?)',
+                        (project['id'], batch['id'], member['pr'], canonical(receipt), self.clock()))
+        return True
+
     def reconcile(self, project, batch):
         self.verify_manifest(project, batch)
         self.git(project, 'fetch', '--no-tags', 'origin', 'main')
@@ -707,6 +1283,13 @@ class BatchController:
             return
         for member in json.loads(batch['members']):
             pr = self.c.pr(project, member['pr'])
+            if self.recognize_historical_member(project, batch, member, pr):
+                continue
+            if self.reconcile_integrated_stacked_member(project, batch, candidate, member, pr):
+                continue
+            owner = self.owner(project, member)
+            if self.recognize_stacked_member(project, batch, member, pr, owner):
+                pr = self.c.pr(project, member['pr'])
             if pr['state'] != 'MERGED' or pr['headRefOid'] != member['head'] or not pr.get('mergeCommit'):
                 self.update(batch, error='awaiting verified member merge recognition')
                 return
@@ -979,7 +1562,8 @@ class BatchController:
                     (row['manifest_digest'],hashlib.sha256(row['error'].encode()).hexdigest())):
                 continue  # Explicit durable authorization; the failed row is never reset.
             failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
-        pool = [m for m in candidates if ((m['pr'],m['head']),) not in failed]
+        pool = self.exclude_included_sources(project,
+            [m for m in candidates if ((m['pr'],m['head']),) not in failed], base)
         # One acceptance reviewer must be independent of every member author.
         # Split mixed-family pools instead of attributing a fictitious author.
         if pool:
@@ -1106,18 +1690,45 @@ class BatchController:
             for terminal in self.rows(project):
                 if terminal['status'] in TERMINAL:
                     self.cleanup_terminal(project, terminal)
+        if execute:
+            self.obsolete_ci.tick(project, self.rows(project))
+        # Retry accepted-but-unfinished closures even after GitHub stops listing
+        # the closed source. The durable receipt never manufactures merge state.
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_included_sources (
+            project TEXT,pr INTEGER,head TEXT,base TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,pr,head,base))''')
+        if execute:
+            for row in self.db.execute('SELECT pr,receipt FROM batch_included_sources WHERE project=?', (project['id'],)).fetchall():
+                if json.loads(row[1]).get('status') != 'included-source-accepted':
+                    continue
+                try:
+                    pending = self.c.pr(project, row[0])
+                    self.included_source(project, pending, self.c.owner(project, pending, owners))
+                except Exception as error:
+                    print(f"{project['id']} PR#{row[0]}: included closure retained ({type(error).__name__})", flush=True)
         candidates = []
+        included = set()
         def priority(pr):
             owner = self.c.owner(project, pr, owners) or {}
             return (owner.get('spec',{}).get('priority','P9'),pr['number'])
         for pr in sorted(prs, key=priority):
             if pr.get('headRefName', '').startswith('integration/batch/'):
                 continue
+            if execute:
+                try:
+                    if self.included_source(project, pr, self.c.owner(project, pr, owners)):
+                        included.add(pr['number'])
+                        continue
+                except Exception as error:
+                    # An unsafe included source cannot delay unrelated queues.
+                    included.add(pr['number'])
+                    print(f"{project['id']} PR#{pr['number']}: included reconciliation held ({type(error).__name__})", flush=True)
+                    continue
             source = self.source(project, pr, self.c.owner(project, pr, owners))
             if source:
                 candidates.append(source)
                 # source() already validates Review ownership without renewing a lease.
-        held = {member['pr'] for member in candidates}
+        held = included | {member['pr'] for member in candidates}
         active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
         limit = project.get('integration_batch', {}).get('max_in_flight', 2)
         if type(limit) is not int or not 1 <= limit <= 4:
@@ -1268,6 +1879,52 @@ def infrastructure_scope(paths):
         for path in paths)
 
 
+TRACKING_FILES = {'docs/tracking/backlog.json', 'docs/tracking/github-state.json'}
+
+
+def local_scope(git, repository, base, head, owner=None):
+    """Permit only the current published infra ticket's append-only seed pair."""
+    paths = git('diff', '--name-only', '--no-renames', base+'..'+head).splitlines()
+    core = [p for p in paths if p not in TRACKING_FILES]
+    if not infrastructure_scope(core):
+        return None
+    tracking = set(paths) & TRACKING_FILES
+    if not tracking:
+        return {'paths': paths, 'tracking': None}
+    if tracking != TRACKING_FILES or not owner:
+        return None
+    try:
+        before, after = [], []
+        for ref, destination in [(base, before), (head, after)]:
+            for path in ['docs/tracking/backlog.json','docs/tracking/github-state.json']:
+                destination.append(json.loads(git('show', ref+':'+path)))
+        for old, new in zip(before, after):
+            if ({k:v for k,v in old.items() if k!='issues'} != {k:v for k,v in new.items() if k!='issues'}
+                    or old.get('repository') != repository):
+                return None
+        old, new = before[0]['issues'], after[0]['issues']
+        if not isinstance(old,list) or not isinstance(new,list) or new[:len(old)] != old or len(new)!=len(old)+1:
+            return None
+        spec = new[-1]; key = owner['key']
+        if (spec != owner['spec'] or spec.get('key') != key or spec.get('area')!='infra'
+                or any(v.get('key')==key for v in old)):
+            return None
+        old, new = before[1]['issues'], after[1]['issues']
+        if (not isinstance(old,dict) or not isinstance(new,dict) or key in old
+                or set(new)!=set(old)|{key} or any(new[k]!=v for k,v in old.items())):
+            return None
+        remote = new[key]; number = remote['number']
+        if (type(number) is not int or number<=0 or remote['url']!=f'https://github.com/{repository}/issues/{number}'
+                or remote['url']!=owner['remote']['url'] or remote['project_item_id']!=owner['remote']['item_id']
+                or type(remote.get('id')) is not int or remote['id']<=0
+                or not isinstance(remote.get('node_id'),str) or not remote['node_id']):
+            return None
+        proof = {'key':key,'spec':spec,'remote':{'url':remote['url'],'item_id':remote['project_item_id']}}
+        return {'paths':paths,'tracking':proof}
+    except (KeyError,TypeError,ValueError):
+        return None
+
+
 class LocalInfrastructure:
     """User-authorized local validation, distinct from independent approval."""
     def __init__(self, coordinator):
@@ -1292,8 +1949,7 @@ class LocalInfrastructure:
         if not all(SHA.fullmatch(x) for x in (base, head)):
             return False
         self.b.git(project, 'fetch', '--no-tags', 'origin', base, head)
-        paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base+'...'+head).splitlines()
-        return infrastructure_scope(paths)
+        return local_scope(lambda *args:self.b.git(project,*args), project['repository'], base, head, owner) is not None
 
     def fenced(self, project, pr, owner):
         self.c.assert_review_owner(project, owner)
@@ -1309,11 +1965,81 @@ class LocalInfrastructure:
         directory = self.c.state/'implementations'/owner['session']
         path = directory/'process.json'
         if not path.exists():
-            raise RuntimeError('implementation process identity is unavailable')
+            if directory.exists() or owner['session'].startswith(('dispatch-', 'recovery-')):
+                raise RuntimeError('implementation process identity is unavailable')
+            self.manual_repair_fence(project, pr, owner)
+            return
         process = json.loads(path.read_text())
         if (not worker_stopped(process.get('pid'), process.get('started'))
                 or claim_processes(owner['token'], process.get('started'))):
             raise RuntimeError('implementation worker/helpers have not stopped')
+
+    def manual_repair_fence(self, project, pr, owner):
+        """Bind manual ownership to a verified stopped coordinator repair.
+
+        This supplies process provenance only; all acceptance gates still apply.
+        Scan from claim acquisition so helpers older than the repair remain fenced,
+        without attributing unrelated pre-claim processes to this implementation.
+        """
+        from coordinator import claim_processes, worker_stopped
+        columns = [row[1] for row in self.db.execute('PRAGMA table_info(jobs)')]
+        if not {'id', 'repair_claim', 'directory', 'pid', 'started', 'family', 'result'} <= set(columns):
+            raise RuntimeError('manual implementation lacks verified stopped repair provenance')
+        row = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind='fix' ORDER BY id DESC LIMIT 1",
+                              (project['id'], pr['number'])).fetchone()
+        if not row:
+            raise RuntimeError('manual implementation lacks verified stopped repair provenance')
+        # Never fall back past a failed, uncertain or different-claim repair.
+        job = dict(zip(columns, row))
+        try:
+            claim = json.loads(job['repair_claim'])
+            result = json.loads(job['result'])
+            directory = Path(job['directory'])
+            process = json.loads((directory/'process.json').read_text())
+            exit_receipt = json.loads((directory/'exit.json').read_text())
+            expected = dict(claim=hashlib.sha256(owner['token'].encode()).hexdigest(),
+                            key=owner['key'], branch=owner['branch'], worktree=owner['worktree'])
+            valid = (all(claim.get(k) == v for k, v in expected.items())
+                     and job['status'] == 'done' and job['family'] == owner['agent']
+                     and result['verdict'] == 'fixed' and bool(result.get('model'))
+                     and bool(result.get('evidence')) and exit_receipt['returncode'] == 0
+                     and process == dict(pid=job['pid'], started=job['started'])
+                     and type(process['pid']) is int and process['pid'] > 0
+                     and str(process['started']).isdigit())
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            valid = False
+        if not valid:
+            raise RuntimeError('manual implementation repair provenance is invalid')
+        # The ticket event binds the lower bound to this exact claim generation.
+        # Heartbeats and repair launches are too recent: older helpers could survive.
+        try:
+            events = [event for event in owner['events']
+                      if event['kind'] == 'claim' and event['actor'] == owner['session']
+                      and str(event['ticket']).split('::')[-1] == owner['key']
+                      and f"token={owner['token']}" in event['detail'].split('; ')]
+            acquired = float(events[0]['at']) if len(events) == 1 else 0
+            boot = int(next(line.split()[1] for line in Path('/proc/stat').read_text().splitlines()
+                            if line.startswith('btime ')))
+            if not 0 < acquired <= time.time():
+                raise ValueError('invalid claim timestamp')
+            # btime has whole-second precision; round down with one second of
+            # margin rather than excluding a helper on the acquisition boundary.
+            started = str(max(0, int((acquired - boot - 1) * os.sysconf('SC_CLK_TCK'))))
+        except (OSError, ValueError, TypeError, KeyError, StopIteration, OverflowError):
+            raise RuntimeError('manual implementation claim acquisition provenance is unavailable') from None
+        if not worker_stopped(process['pid'], process['started']) or claim_processes(owner['token'], started):
+            raise RuntimeError('manual implementation worker/helpers have not stopped')
+        locks = json.loads(self.c.ticket(project, 'locks'))
+        now = time.time()
+        for lock in locks:
+            if lock.get('expired') or (lock.get('expires') or 0) <= now:
+                continue
+            named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+',
+                               f"{lock.get('session') or ''} {lock.get('purpose') or ''}".upper())
+            if not (str(lock.get('ticket') or '').split('::')[-1] == owner['key']
+                    or lock.get('session') == owner['session'] or owner['key'] in named):
+                continue
+            raise RuntimeError('manual implementation still holds a resource lease')
 
     def tick(self, project, pr, owner):
         """Return True when this PR belongs to the local lane (including holds)."""
@@ -1355,8 +2081,10 @@ class LocalInfrastructure:
             receipt['commit'] = self.b.git(project, 'rev-parse', 'HEAD', cwd=tree)
             receipt['tree'] = self.b.git(project, 'rev-parse', 'HEAD^{tree}', cwd=tree)
             paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base, receipt['commit']).splitlines()
-            if not infrastructure_scope(paths):
+            scope=local_scope(lambda *args:self.b.git(project,*args),project['repository'],base,receipt['commit'],owner)
+            if scope is None:
                 raise RuntimeError('combined scope is not infrastructure')
+            if scope['tracking'] is not None:receipt['tracking']=scope['tracking']
             receipt['paths'] = paths
             self.b.git(project, 'diff', '--check', base, receipt['commit'])
             for index, command in enumerate(LOCAL_COMMANDS):
@@ -1674,3 +2402,113 @@ class SharedAcceptanceRepair:
         except Exception:
             self.record(project,episode,key,head,batch['base'],None,'launch_uncertain','inspect retained launch; no automatic replay')
             raise
+
+
+# These workflows were audited as offline. A filename alone does not establish
+# that property in a different repository; adding one needs an explicit audit.
+OBSOLETE_OFFLINE = {'tyler-suifleet/suifleet': frozenset((
+    '.github/workflows/ci.yml', '.github/workflows/move-security.yml'))}
+OBSOLETE_ACTIVE = frozenset(('queued', 'in_progress', 'waiting', 'pending', 'requested'))
+
+
+class ObsoleteBatchCI:
+    def __init__(self, coordinator, clock):
+        self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
+        self.db.execute('''CREATE TABLE IF NOT EXISTS obsolete_batch_ci (
+            project TEXT,batch_id TEXT,head TEXT,checked REAL,status TEXT,receipt TEXT,
+            PRIMARY KEY(project,batch_id))''')
+
+    def read(self, project, path):
+        return json.loads(self.c.gh(project, ['api', path]))
+
+    @staticmethod
+    def closed(project, batch, pr):
+        return (pr.get('number') == batch['pr'] and pr.get('state') == 'closed'
+                and not pr.get('merged_at')
+                and pr.get('head', {}).get('sha') == batch['head']
+                and pr.get('head', {}).get('ref') == batch['branch']
+                and pr.get('head', {}).get('repo', {}).get('full_name') == project['repository']
+                and pr.get('base', {}).get('repo', {}).get('full_name') == project['repository'])
+
+    @staticmethod
+    def obsolete(project, batch, run):
+        return (type(run.get('id')) is int and run['id'] > 0
+                and run.get('event') == 'pull_request'
+                and run.get('head_branch') == batch['branch']
+                and run.get('head_sha') == batch['head']
+                and run.get('repository', {}).get('full_name') == project['repository']
+                and run.get('head_repository', {}).get('full_name') == project['repository']
+                and run.get('path') in OBSOLETE_OFFLINE.get(project['repository'], ()))
+
+    def save(self, project, batch, status, receipt):
+        previous = self.db.execute('SELECT receipt FROM obsolete_batch_ci WHERE project=? AND batch_id=?',
+            (project['id'], batch['id'])).fetchone()
+        if previous:
+            old = json.loads(previous[0])
+            history = {r['run']: r for r in old.get('runs', [])}
+            for run in receipt.get('runs', []):
+                history[run['run']] = dict(history.get(run['run'], {}), **run)
+            receipt = dict(receipt, runs=list(history.values()))
+        self.db.execute('INSERT OR REPLACE INTO obsolete_batch_ci VALUES(?,?,?,?,?,?)',
+            (project['id'], batch['id'], batch['head'], self.clock(), status,
+             json.dumps(receipt, sort_keys=True)))
+
+    def tick(self, project, batches):
+        if project.get('repository') not in OBSOLETE_OFFLINE:
+            return
+        due = []
+        for batch in batches:
+            if (batch.get('status') != 'invalidated' or not batch.get('pr')
+                    or not re.fullmatch('[0-9a-f]{40}', batch.get('head') or '')
+                    or batch.get('branch') != 'integration/batch/' + batch['id']):
+                continue
+            row = self.db.execute('SELECT head,checked,status FROM obsolete_batch_ci '
+                'WHERE project=? AND batch_id=?', (project['id'], batch['id'])).fetchone()
+            if row and (row[0] != batch['head'] or row[2] == 'settled' or self.clock()-row[1] < 60):
+                continue
+            due.append((row[1] if row else 0, -batch.get('updated', 0), batch))
+        # Bound API work per pass and rotate retries behind uninspected batches.
+        for _, _, batch in sorted(due, key=lambda x: x[:2])[:4]:
+            try:
+                self.retire(project, batch)
+            except Exception as error:
+                self.save(project, batch, 'retry', {'error_type': type(error).__name__})
+                print(f"{project['id']} batch {batch['id']}: obsolete offline CI cleanup deferred "
+                      f"({type(error).__name__})", flush=True)
+
+    def retire(self, project, batch):
+        prefix = 'repos/' + project['repository']
+        pull = prefix + '/pulls/' + str(batch['pr'])
+        if not self.closed(project, batch, self.read(project, pull)):
+            # Do not settle a reopened/changed candidate: recheck on a later scan.
+            self.save(project, batch, 'retained', {'reason': 'candidate identity/state changed'})
+            return
+        path = prefix + '/actions/runs?branch=' + quote(batch['branch'], safe='') + '&event=pull_request&per_page=100'
+        pages = json.loads(self.c.gh(project, ['api', '--paginate', '--slurp', path]))
+        if not isinstance(pages, list) or any(not isinstance(p.get('workflow_runs'), list) for p in pages):
+            raise ValueError('invalid workflow run listing')
+        receipts, pending = [], False
+        for run in (r for page in pages for r in page['workflow_runs']):
+            if not self.obsolete(project, batch, run) or run.get('status') not in OBSOLETE_ACTIVE:
+                continue
+            endpoint = prefix + '/actions/runs/' + str(run['id'])
+            try:
+                fresh = self.read(project, endpoint)
+                if (fresh.get('id') != run['id'] or not self.obsolete(project, batch, fresh)
+                        or fresh.get('status') not in OBSOLETE_ACTIVE):
+                    continue
+                if not self.closed(project, batch, self.read(project, pull)):
+                    self.save(project, batch, 'retained', {'reason': 'candidate changed before cancellation'})
+                    return
+                self.c.gh(project, ['api', endpoint + '/cancel', '--method', 'POST'])
+                # A cancellation request is not completed cancellation. Re-read on
+                # later ticks until GitHub confirms a terminal run state.
+                pending = True
+                receipts.append({'run': run['id'], 'cancel_requested': True})
+            except Exception as error:
+                pending = True
+                receipts.append({'run': run['id'], 'error_type': type(error).__name__})
+        # Allow delayed workflow delivery for ten minutes after invalidation.
+        # Settled batches require no more API reads; manual reruns are operator work.
+        quiet = self.clock() - batch.get('updated', self.clock()) >= 600
+        self.save(project, batch, 'settled' if quiet and not pending else 'retry', {'runs': receipts})

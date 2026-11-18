@@ -1,9 +1,9 @@
 # Budget and pricing policy
 
-SuiFleet is in public-testnet preview; mainnet service has not launched.
-Product pricing is a proposal, not an active subscription, guaranteed quote
-or authorization to purchase a service. See the public
-[pricing page](https://suifleet.io/pricing/) for the current proposal.
+Use the public [pricing page](https://suifleet.io/pricing/) to compare fleet
+plans and request a written quote. Final availability, service terms and
+configuration are confirmed in your order. Planning estimates do not authorize
+a purchase or guarantee the cost of future network activity.
 
 The owner prepays actual network resources through the
 [fleet budget](FLEET_BUDGET.md): SUI for device transactions and Walrus storage.
@@ -14,6 +14,6 @@ is not a fixed fee or proof that a deposit succeeded.
 only within the configured contract limits. Monitor remaining balance and storage
 retention; deposits do not remove quotas or guarantee provider availability.
 
-Public testnet tokens are test resources, not evidence of production economics.
-Production provider terms, accounts, credentials, availability and mainnet costs
-require final external acceptance before a production rollout.
+Review provider terms, account setup, availability and expected workloads before
+a fleet rollout. Actual network prices and usage can differ from estimates;
+confirm the quoted allowance and renewal terms for your deployment.

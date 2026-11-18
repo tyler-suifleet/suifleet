@@ -3,11 +3,11 @@
     <div><p class="eyebrow">Product walkthrough</p><h1>Product guide</h1><a class="guide-overview-link" href="/how-it-works/#overview">New? Watch how it works first →</a></div>
     <label class="guide-stage-picker">Jump to stage<select aria-label="Guide stage" data-guide-select disabled>{{guide_options}}</select></label>
   </header>
-  <div class="guide-progress"><progress aria-label="Guide progress" max="{{guide_count}}" value="0" data-guide-progress></progress><span data-guide-status role="status" aria-live="polite">Read the stages below. Interactive navigation becomes available when the guide loads.</span></div>
+  <div class="guide-progress"><progress aria-label="Guide progress" max="{{guide_count}}" value="0" data-guide-progress></progress><span data-guide-status role="status" aria-live="polite">First device: sign in → capacity → budget → register → publish → deploy. Batch enrollment and staged rollout are optional; configure private access before confidential publishing.</span></div>
   <div class="guide-screen" id="guide-screen">{{guide_steps}}
     <section class="guide-complete" data-guide-complete hidden tabindex="-1">
       <span class="guide-complete-icon" aria-hidden="true">✓</span><h2>You’re ready to try it</h2>
-      <p>Open the testnet console to put the walkthrough into practice. Test tokens have no monetary value.</p>
+      <p>Open the console to put the walkthrough into practice with your own fleet.</p>
       <a class="button primary" href="{{app_url}}">Open SuiFleet</a>
       <p class="guide-caption">Installing a device? See the <a href="{{docs_url}}install/">installation guide</a>.</p>
     </section>

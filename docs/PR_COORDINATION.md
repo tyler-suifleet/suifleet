@@ -1715,3 +1715,163 @@ pending reservations remain charged to the non-replenishing run allowance;
 parking a journal does not claim the unfinished exercise passed. Install the
 coordinator only from reviewed merged source; actual automatic testnet recovery
 and installed routing remain post-handoff evidence, not offline test results.
+
+### Expired worker authentication
+
+A stopped Claude review that reports an expired OAuth session enters a provider
+sign-in hold instead of repeatedly launching the same failing request. `fleet-status`
+shows the required WSL command, `claude auth login --claudeai`. Never share its
+codes or credentials in chat, issues or logs. The coordinator checks credential
+file metadata, then verifies local sign-in status after a change (or on a bounded
+five-minute recheck). Successful sign-in releases stopped review retry deadlines;
+uncertain implementation repairs retain their ownership-safe recovery checks.
+
+The local infrastructure lane also accepts the current published infrastructure
+issue's exact append-only backlog and GitHub-link records alongside infrastructure
+code. It rejects edits to existing tickets, additional tickets, changed tracker
+metadata, unpublished links and application files. The activation receipt retains
+that scope proof so installation verifies the same restriction against merged main.
+
+When a published batch member still targets a branch integrated by an earlier
+batch, GitHub can leave the source PR open despite its exact head being in main.
+The coordinator verifies the sealed merged candidate, published member approval,
+unchanged source/claim and integration of the current stacked base. It completes
+the ticket using the real candidate merge and then closes the redundant source
+PR; it does not report a fabricated source merge or retarget the owner's branch.
+Advanced source heads retain their separate review and acceptance requirements.
+
+The integrated stacked-member check keeps `comparisonBaseOid` (the historical
+PR comparison commit) separate from `baseRefOid` (the resolved live branch tip).
+REST snapshots must retain the comparison identity; live ref reads and the
+fetched branch must match the resolved tip. Both commits must be ancestors of
+main. Rechecks before completion and closure reject a moving live ref even
+when GitHub retains the same historical comparison base.
+
+### Already-included sources without a manifest (SF-267)
+
+The sole coordinator checks reviewed sources for exact inclusion in current
+remote main before candidate collection, including open stacked PRs such as
+#617 whose original integration has no retained batch manifest. Ancestry only
+excludes redundant candidate work; it never completes acceptance. The route
+requires a published independent source receipt, unchanged published Review
+ownership and dependencies, same-repository source identity, and inclusion of
+both the comparison base and live base tip.
+
+Missing full acceptance dispatches the existing bounded independent review job
+with `_review_mode: included`. Its snapshot pins current main and retains the
+original source/base/claim identities in `_included_source`. This fingerprint is
+separate from source-only reviews. An unchanged blocked result remains visible
+with its precise missing evidence; it does not repeatedly launch workers. Pending
+or failed CI cannot become acceptance through reviewer prose. Real ordinary,
+security and applicable exact-head/current-main testnet checks and a published
+independent acceptance-complete approval remain mandatory. Changed evidence or
+main requires fresh acceptance. Unrelated candidates continue during these holds.
+
+Before completion, the coordinator repeats source/main/feedback checks and the
+existing stopped implementation/helper, active-job, dependency and claim fences.
+It records evidence in `batch_included_sources`, completes the retained ticket
+through the supported ticket CLI, verifies publication, then closes the redundant
+source PR and linked issue. GitHub's source remains **closed**, never a fabricated
+**merged** PR. Branches and worktrees are preserved. An accepted but unfinished
+closure is retried from its durable receipt, including when the source is no
+longer in the open-PR list; pending mirrors or changed identities fail closed.
+
+Install only through the reviewed merged-only workflow. After installation,
+record exact runtime revision/readiness and the actual #617/ticket acceptance
+and closure receipts. Offline regressions establish neither installed behavior
+nor public-testnet acceptance; existing SF-173/SF-253 authorization holds are
+unchanged. The 2026-11-01 local infrastructure integration authorization applies
+to this repair and its actual combined-main offline validation.
+
+### Already-included source evidence
+
+Included-source reconciliation preserves the source PR/head/claim and its original
+comparison refs. Its separate current-main evidence context authenticates the
+latest exact-main CI run, all CI jobs (including dependency/configuration and all
+CodeQL jobs), and a successful Automatic testnet producer with a matching
+`package-upgrade.json`. Main is tested against its first parent; this does not
+claim a source-head/current-main workflow ran. All other source checks, ownership,
+dependency, worker, authorization and independent acceptance gates remain required.
+Known deployment skips on a stacked source must authenticate against its original
+comparison base/ref, the pinned workflow and the actual run/job/check provenance;
+unknown skips remain blocking. The evidence identity and artifact digest enter the final review fingerprint and
+are read again at review publication and completion. An old source-only receipt
+cannot satisfy final acceptance.
+
+Missing or unsuccessful evidence holds only that reconciliation and records a
+bounded next action: repair the reported main check, then rerun that main CI run
+once (`gh run rerun RUN_ID -R OWNER/REPO`), or dispatch `ci.yml --ref main` once if
+no current-main CI exists. These are operator actions, not automatic workflow
+retargeting or retries by a waiting model. The coordinator starts fresh independent
+acceptance only after checks are available; an unchanged blocked review is not
+relaunched. Installed provenance and actual source closure must be verified after
+the normal merged-only rollout; offline tests do not establish runtime acceptance.
+
+
+Manual implementation origins without a dispatcher directory can reconcile through
+the latest coordinator repair's retained same-claim process and exit receipts.
+The repair must be successful, belong to the current claim/family/branch/worktree,
+and have a verified stopped process. The coordinator bounds the helper scan by
+the unique acquisition event for the current claim token/session, converted to
+Linux boot ticks with conservative rounding. Helpers older than the repair remain
+fenced; unrelated processes predating the claim do not block it. Missing or
+ambiguous acquisition evidence fails closed. Live leases match qualified ticket
+keys, owner sessions, and ticket names in lease sessions/purposes; expired leases
+do not block reconciliation.
+A missing or damaged managed implementation receipt never uses this fallback.
+This provides process provenance only: independent exact-source/current-base
+acceptance and authenticated CI/security/testnet evidence are still required.
+Missing proof keeps ownership reserved; do not manufacture a process receipt.
+
+### Completed-source recovery and obsolete review notices
+
+A ticket can be locally Done while its GitHub/Project mirror is pending. The
+coordinator retries that exact completed owner/revision with the same bounded
+publication backoff used for Review, before retrying included-source closure.
+Completion retires the active claim token; retries bind the retained owner identity
+and revision, never resume the implementation or create a second completion.
+
+A newer current-main CI run can still block a previously accepted included source.
+If its macOS job never acquired a hosted runner, recovery may retry only that job
+using the existing exact runner-capacity annotations, empty steps/runner identity,
+per-head budget and durable POST intent. This path additionally requires the
+retained independently approved included-source receipt/snapshot, unchanged source
+and completed owner, and a fresh current-main reference before submission. Ordinary
+test failures, arbitrary cancellations and testnet runs are not retried by this path.
+
+Stopped failed review retries for closed terminal integration PRs are superseded
+only after matching wrapper/exit receipts, no runnable session helpers, two fresh
+matching remote reads, and an unchanged terminal batch record. A durable retirement
+proof is retained. Missing identities, timeout/signal outcomes, active workers,
+changed/reopened PRs and uncertain launch/publication state remain reserved. This
+cleanup changes no ticket, implementation claim, approval or acceptance result.
+
+Once an included source is already Done, unfinished PR/issue closure is metadata
+continuation rather than another implementation acceptance. The coordinator binds
+that continuation to the original retained accepted receipt, published independent
+review, original successful CI/testnet attempts and effects digest, retired claim
+and completion events, and unchanged owner/spec/source/feedback. Its accepted main
+and source must remain ancestors of current main. New same-byte CI producer IDs or
+later independently integrated main commits do not require another completion or
+approval. Fresh source/security/change-request guards still apply; unknown evidence
+fails closed. This path only closes the redundant source PR and linked issue. It
+cannot merge code, accept a changed source, resume a claim or waive release checks.
+
+### Obsolete offline CI cleanup
+
+Invalidating a batch closes its candidate PR; it must also release GitHub runner
+capacity. Each executing batch scan now inspects up to four abandoned candidates,
+with persistent cancellation receipts and a one-minute retry cooldown. It checks
+all workflow-run pages and rechecks the closed PR and exact run before requesting
+cancellation. A later scan must observe a terminal run state before cleanup settles.
+The first ten minutes after invalidation remain pollable for delayed workflow events.
+Settled candidates stop making API calls; manually restarting their CI is an operator
+action. Transport errors are isolated to their candidate/run and do not stop new work.
+
+Cancellation currently covers only SuiFleet's audited offline `ci.yml` and
+`move-security.yml` pull-request workflows. Same-repository ownership, the recorded
+batch branch and exact head, and a closed unmerged candidate are required. Changed,
+reopened, foreign or merged candidates are retained. Automatic testnet, live gates,
+release and unknown workflows are never canceled by this cleanup. Other repositories
+require their own offline-workflow audit before joining this allowlist. These receipts
+change neither reviews nor acceptance results.

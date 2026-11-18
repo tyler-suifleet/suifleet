@@ -2,7 +2,7 @@
 
 Static product pages, a written console guide, an offline console screenshot,
 proposed pricing, documentation entry, security/custody and contact/privacy.
-The nine guide stages include testnet WebM/MP4 recordings, posters, complete written instructions and console-build provenance. The viewport-sized player shows one instruction at a time with local instruction arrows and Back/Next stage controls; long instructions are divided to fit without clipping or scroll panes. Changing stages pauses inactive videos. Stage and instruction links are kept in the URL fragment. Regeneration and spending controls are described
+The ten guide stages include testnet WebM/MP4 recordings, posters, complete written instructions and console-build provenance. The viewport-sized player shows one instruction at a time with local instruction arrows and Back/Next stage controls; long instructions are divided to fit without clipping or scroll panes. Changing stages pauses inactive videos. Stage and instruction links are kept in the URL fragment. Regeneration and spending controls are described
 in [guide/RECORDING.md](guide/RECORDING.md).
 Standard-library Python 3.10+; no install or network needed to build:
 
@@ -31,8 +31,11 @@ The user split issue #338 on 2026-10-27:
 - SF-175 owns testnet screencasts; no videos are claimed recorded here. See
   [guide/RECORDING.md](guide/RECORDING.md) for the media contract and screenshot reproduction.
 - SF-176 owns hosting, DNS, TLS and authorized production publication.
-- SF-177 owns the rendered docs site under site/docs. Until then, the Docs page
-  links to repository documentation, including device installers.
+- The rendered docs site under site/docs serves the curated customer guides.
+  Public Docs navigation uses the configured docs origin (docs.suifleet.io by default);
+  /docs/ remains a topic directory with explicit technical-reference links.
+  SF-275 verified the public docs root returned HTTP 200 with the documentation
+  title on 2026-11-16; that read-only check does not verify every published page.
 - SF-178 owns pricing generated from the canonical model. The present page is
   generated from the shared console price table and subscription policy, including
   Managed plan and entry offers. It mirrors the proposed terms in docs/BUSINESS_PLAN.md;

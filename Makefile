@@ -48,8 +48,13 @@ dapp-build:
 edge-build:
 	$(RUN) bash -c "cd suifleet-edge && cargo build --locked --release"
 
+# These tests share process-wide subreaper state and exercise real child,
+# socket and readiness deadlines alongside fsync-heavy queue tests. Isolate
+# them by default to avoid intra-suite contention consuming those deadlines.
+# Keep an explicit override for intentional parallel stress runs.
+EDGE_TEST_THREADS ?= 1
 edge-test:
-	$(RUN) bash -c "cd suifleet-edge && cargo test --locked && cargo test --locked --features pkcs11"
+	$(RUN) bash -c "cd suifleet-edge && cargo test --locked -- --test-threads=$(EDGE_TEST_THREADS) && cargo test --locked --features pkcs11 -- --test-threads=$(EDGE_TEST_THREADS)"
 
 .PHONY: test-ota test-component dapp-typecheck build-walrus-codec test-native-seal
 
@@ -121,11 +126,13 @@ test-component:
 # collection/artifact pins and Node/codec/daemon recipe consistency. No BitBake.
 .PHONY: test-yocto-packaging
 test-yocto-packaging:
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_yocto_profiles.py
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_inspect_pi_image.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_runtime_packaging.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_layer_export.py'
 
 dapp-typecheck:
+	$(RUN) node scripts/test_subscription_card.cjs
 	$(RUN) node scripts/test_subscription_checkout.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_billing_progress_browser.cjs
 	$(MAKE) test-testnet
@@ -253,7 +260,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
+CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-transaction-feedback test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -550,6 +557,7 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_live_subscription_card.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_abort_site.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_security_delay.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_upgrade_security_localnet.py'
@@ -839,9 +847,20 @@ test-retention-scale-upgrade:
 test-budget-enrollment-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment
 
+# SF-277: transaction outcome stages and customer guidance, handover review
+# before approval, devices duplicate guard and enrollment credential warnings
+# and lost-file recovery in a real browser (fixture chain/wallet only).
+.PHONY: test-transaction-feedback
+test-transaction-feedback:
+	$(RUN) node scripts/test_tx_feedback.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_administration_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_devices_pending_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_enrollment_feedback_browser.cjs
+
 # SF136: offline discovery/transaction checks and actual React/Chromium isolation.
 .PHONY: test-customer-fleets test-customer-upgrade-localnet
 test-customer-fleets:
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_subscription_card_browser.cjs
 	$(RUN) node scripts/test_customer_entitlements.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs

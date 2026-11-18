@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "account_id": "891137fc20b3722a2be4716e655769ea",
+  "zone_id": "05f2e929552eb648e1488b86f860fc94",
+  "zone_name": "suifleet.io",
+  "production_branch": "production",
+  "projects": {
+    "website": {"name": "suifleet-marketing", "domains": ["suifleet.io", "www.suifleet.io"]},
+    "app": {"name": "suifleet-console", "domains": ["app.suifleet.io"]},
+    "docs": {"name": "suifleet-docs", "domains": ["docs.suifleet.io"]}
+  }
+}

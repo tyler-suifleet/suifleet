@@ -50,6 +50,7 @@ Usage (make live-gate-package-upgrade sets these from the environment):
                           [--max-spend-mist N] [--evidence FILE]
 """
 import argparse
+from contextlib import ExitStack
 import copy
 import hashlib
 import json
@@ -456,8 +457,9 @@ def owner_of(client, object_id):
     return owner.get("AddressOwner") or ("custodied" if "ObjectOwner" in owner else ("shared" if "Shared" in owner else None))
 
 
-def fixture_alive(fixture, operator, client):
+def fixture_alive(fixture, operator, client, diagnostics=None):
     """Free reads: every cached object still exists with the expected owner."""
+    diagnostics = diagnostics if diagnostics is not None else []
     expected = {fixture["upgrade_cap"]: operator, fixture["device"]: "custodied",
                 fixture["owner_cap"]: operator,
                 fixture["device_cap"]: fixture["device_address"], fixture["group"]: "shared",
@@ -465,10 +467,12 @@ def fixture_alive(fixture, operator, client):
     for object_id, owner in expected.items():
         actual = owner_of(client, object_id)
         if actual is None or (owner in ("shared", "custodied") and actual != owner) or (owner not in ("shared", "custodied") and dm.object_id(actual) != dm.object_id(owner)):
+            diagnostics.append(dict(object_id=object_id, expected_owner=owner, actual_owner=actual))
             return False
     try:
         client("object", fixture["head_package"])  # Packages are immutable: existence is enough.
     except RuntimeError:
+        diagnostics.append(dict(object_id=fixture["head_package"], error="package read failed"))
         return False
     return True
 
@@ -552,6 +556,16 @@ def plain(value):
     return value
 
 
+# Public vocabulary mirrors sync_diagnostics.rs. Unknown labels are discarded.
+SYNC_STAGES = ('poll', 'recovery', 'reports', 'watch', 'manifest', 'authority',
+               'baseline', 'discovery', 'announcements', 'events', 'reconcile', 'journal', 'deferred')
+SYNC_CATEGORIES = ('timeout', 'rate-limited', 'unavailable', 'unauthorized',
+                   'not-found', 'invalid-argument', 'unimplemented', 'internal',
+                   'decode', 'missing-data', 'watch-batch', 'chain-mismatch',
+                   'authority', 'schema', 'history-pruned', 'event-stream',
+                   'integrity', 'tls', 'storage', 'other')
+
+
 def daemon_progress(journal, log):
     """Bounded public diagnostics: no raw log, configuration, cursor or error text."""
     try:
@@ -580,7 +594,8 @@ def daemon_progress(journal, log):
                        '429', 'SHA-256 mismatch')
             categories = [marker for marker in markers
                           if isinstance(error, str) and marker in error]
-            public[id] = dict(error_categories=categories, status=status if type(status) is int and status in (0, 1, 2) else None,
+            # Anonymous slots preserve bounded outcomes without exporting object IDs.
+            public[str(len(public))] = dict(error_categories=categories, status=status if type(status) is int and status in (0, 1, 2) else None,
                               reported=outcome.get('reported') is True, has_error=bool(outcome.get('error')))
     try:
         with log.open('rb') as stream:
@@ -592,8 +607,48 @@ def daemon_progress(journal, log):
     categories = ('Sync failed', 'Deployment schema rejected', 'Deployment finished', 'Apply admitted',
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
-                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
+                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded',
+                  # Fixed markers only: provider errors can contain private
+                  # configuration or response bodies. Keep enough structure to
+                  # diagnose a pre-discovery failure without exporting them.
+                  'incomplete watch batch', 'watch read failed',
+                  'missing discovery fence', 'missing discovery merge fence',
+                  'combined discovery requires a migrated cursor',
+                  'event frame without watermark', 'event outside requested type',
+                  'unknown event query completion reason',
+                  'event index has not reached the cursor-merge checkpoint fence',
+                  'event stream ended without completion',
+                  'event stream frame without a resume cursor',
+                  'event stream returned an unusable resume cursor',
+                  'undecodable DeviceAddedToGroup event',
+                  'undecodable DeploymentCreated event',
+                  'undecodable head components', 'undecodable head component',
+                  'announced records have no baseline',
+                  'InvalidArgument', 'FailedPrecondition', 'OutOfRange',
+                  'Unavailable', 'Unimplemented', 'ResourceExhausted',
+                  'Invalid argument', 'Failed precondition', 'Out of range',
+                  'Service was not ready', 'Operation is not implemented',
+                  'Resource exhausted',
+                  'watch read failed for',
+                  'device has no registry identity', 'DeviceOwnerCap has no operator owner',
+                  'custody field has no fleet owner',
+                  'upstream connect error or disconnect/reset before headers',
+                  'transport error', 'Connection refused', 'connection reset',
+                  'Service Unavailable', 'Deadline expired')
+    # Exact fixed tokens only; never copy a suffix or an unknown provider value.
+    import re
+    stages = {label: 0 for label in SYNC_STAGES}
+    errors = {label: 0 for label in SYNC_CATEGORIES}
+    for match in re.finditer(r'SUIFLEET_SYNC_V1 stage=([a-z-]+) categories=([a-z,-]+)(?=\s|$)', text):
+        stage, labels = match.groups()
+        if stage not in stages:
+            continue
+        stages[stage] += 1
+        for label in set(labels.split(',')):
+            if label in errors:
+                errors[label] += 1
     return dict(initialized=state.get('initialized') is True, outcomes=public,
+                sync_stages=stages, sync_error_categories=errors,
                 log_counts={name: text.count(name) for name in categories})
 
 
@@ -778,7 +833,7 @@ def run(args):
     cleanup = []
     cleanup_package = None
     try:
-        with tempfile.TemporaryDirectory(prefix="suifleet-live-upgrade-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="suifleet-live-upgrade-") as temporary, ExitStack() as diagnostics:
             root = Path(temporary)
             package_dir, pubfile = root / "package", root / "Pub.live.toml"
             staging = root / "base"; staging.mkdir()
@@ -801,7 +856,11 @@ def run(args):
                 state, base_tree, head_tree, tools, evidence["toolchain"]["framework"])
             if fixture and args.fresh:
                 raise RuntimeError("verified bytecode already exists; fresh package republication is refused")
-            if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client)):
+            fixture_diagnostics = []
+            if fixture and not fixture.get("owner_cap"):
+                fixture_diagnostics.append(dict(error="cached fixture has no owner_cap"))
+            if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client, fixture_diagnostics)):
+                evidence["fixture_reconciliation"] = fixture_diagnostics
                 raise RuntimeError("cached fixture needs object reconciliation; immutable code is not republished")
             if fixture:
                 verify_publication(fixture, rpc_url, operator, client)
@@ -1068,6 +1127,9 @@ def run(args):
             process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release/config.toml")},
                                        stdout=log, stderr=log)
             journal = root / "state" / "state.json"
+            # Run before TemporaryDirectory removes private files, on success or failure.
+            diagnostics.callback(lambda: evidence.__setitem__('daemon_progress',
+                daemon_progress(journal, root / 'daemon.log')))
             wait_for(lambda: journal.exists() and json.loads(journal.read_text()).get("initialized"), "daemon did not enroll", process)
             run_id = "live-" + uuid.uuid4().hex[:10]
 

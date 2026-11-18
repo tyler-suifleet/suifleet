@@ -23,6 +23,7 @@ identity = Path(f'/proc/{os.getpid()}/stat').read_text().rsplit(')',1)[1].split(
 atomic(directory/'process.json',{'pid':os.getpid(),'started':identity})
 command = json.loads((directory/'command.json').read_text())
 with open(directory/'worker.log','a') as log:
+    log.write('\n[pr-coordinator worker attempt]\n');log.flush()
     limits = directory/'limits.json'
     timeout = json.loads(limits.read_text())['timeout_seconds'] if limits.exists() else None
     try:

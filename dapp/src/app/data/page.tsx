@@ -1,4 +1,5 @@
 "use client";
+import { ReportingHelp } from "@/components/ReportingHelp";
 import { ReportingReadiness } from "@/components/ReportingReadiness";
 import { liveArchiveEntries } from "@/lib/stream-retention";
 import { StreamRetentionPanel } from "@/components/StreamRetention";
@@ -163,13 +164,13 @@ export default function FleetDataPage() {
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
   return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device files and logs, verify their contents and choose who can access them." /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
-    <StreamRetentionPanel />
+    <ReportingHelp /><StreamRetentionPanel />
     {!DATA_CONFIG ? <ReportingReadiness /> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}
       <button className="border rounded p-2 ml-3" disabled={!device || isPending || (role!=='owner' && role!=='support')} onClick={()=>void diagnostics()}>Request diagnostics</button>
       {!SEAL_SETTINGS && <p>An administrator needs to set up the encryption service before you can open private archives.</p>}
-      <p data-testid="archive-role">{role==='owner'?'This account manages the fleet budget and can open its private archives.':role==='support'?'This account is a granted support account and may decrypt archives.':role==='none'?'This account is not authorized to decrypt fleet archives. Log search and diagnostic bundles are unavailable.':'Checking archive read permission…'}</p>
+      <p data-testid="archive-role">{role==='owner'?'This account manages the device operating budget and can open its private archives.':role==='support'?'This account is a granted support account and may decrypt archives.':role==='none'?'This account is not authorized to decrypt fleet archives. Log search and diagnostic bundles are unavailable.':'Checking archive read permission…'}</p>
       {message && <p role="status">{message}</p>}
       {entries.length>0 && (role==='owner' || role==='support') && <button className="border rounded p-2" disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(entries[0].index,entries[0].anchor.kind)}>Open current shadow documents</button>}
       <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index,anchor.kind)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Availability is checked when you open this archive</span><details><summary>Storage details</summary><p>Originally purchased through storage period (Walrus epoch) {anchor.end_epoch}. Availability is verified when opened; this original period does not establish current renewal or availability.</p></details></li>)}</ul>

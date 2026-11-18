@@ -1342,3 +1342,80 @@ existing or interrupted fixture replay. Its explicit recovery flags reconcile
 only an unfunded unsigned setup or one independently verified insufficient-gas
 creation failure before a bounded top-up; they never release uncertain charges.
 Use `--help` for required private paths and preserve those paths until cleanup.
+
+## Subscription card purchase tracking (SF-183 partial scope)
+
+Production subscription card checkout is disabled pending the user's provider
+choice/signup and a reviewed adapter. `NEXT_PUBLIC_ONRAMP_APP_ID` still applies
+only to the existing network-budget integration; it cannot enable USDC checkout.
+See [provider diligence and unresolved scope](business/CARD_PROVIDER_DILIGENCE.md).
+No provider API, server, webhook or secret was added.
+
+For a Testnet build only, set `NEXT_PUBLIC_SUBSCRIPTION_CARD_TEST=true`. The
+manifest must say `testnet` and chain `4c78adac`; this flag has no effect on
+mainnet or another chain. In Plans and billing select a reviewed USDC offer as a
+customer administrator, choose **Start testnet simulated purchase**, then transfer
+the displayed manifest-pinned USDC from a separate test wallet into the connected
+wallet. It is a labelled simulation of a card purchase using a real coin transfer,
+not a provider sandbox or fake balance. Fund SUI gas separately. The target shown
+is the whole quote, conservatively covering renewals even when escrow has credit;
+SF-182 computes the actual required deposit at approval time.
+
+Tracking persists locally per exact wallet, chain, package, customer, coin and
+quote. Partial and late transfers remain in the wallet. Abandoning tracking does
+not cancel a provider order, spend funds or refund a card. Resume tracking to use
+arrivals; expired quotes require a new reviewed offer and existing funds remain
+available to normal wallet prepay. Net balance changes establish available funds,
+not the sender/provider or a purchase receipt. Concurrent spending can mask an
+arrival. No automatic charge or prepay occurs. Balance/RPC failures disable the
+tracked approval. A positive SUI balance is only preliminary readiness; wallet gas
+estimation and on-chain effects remain authoritative.
+
+The tracked approval rechecks funds, deployment, current offer and administrator
+through SF-182. An approval attempt is saved before wallet invocation; a submitted
+digest is retained across reloads. Rejection or uncertainty conservatively requires
+reconciliation before using the ordinary prepay action: inspect the wallet's
+transaction history and verify the subscription/digest on the pinned network.
+Do not delete browser storage and pay again to resolve an uncertain transaction.
+This UI deliberately does not retry an interrupted approval automatically.
+
+Automated checks:
+
+```bash
+node scripts/test_subscription_card.cjs
+node scripts/test_subscription_card_browser.cjs
+node scripts/test_subscription_checkout.cjs
+```
+
+The browser test uses real React/Query/localStorage and fixture chain/wallet I/O;
+it is not extension-wallet or public-network acceptance. The bounded
+`scripts/live_subscription_card.py --help` runner uses the dedicated agent,
+checksum-pinned transaction CLI, explicit manifest/offer and global Testnet lease.
+It creates a fresh funded test identity/customer, transfers partial then complete
+USDC, runs the actual frontend prepay builder and typed plan verification, then
+refunds the entire uncollected term. Its private directory is exclusive; unknown
+outcomes must be reconciled, never replayed. Narrow recovery flags only admit the
+stated independently checked pre-sign or failed-creation cases. Parent funding
+counts in full against the 100,000,000 MIST limit; child gas, failed transactions
+and cleanup remain recorded, and refunds never replenish the allowance.
+
+The [SF-183 Testnet receipt](validation/sf183-testnet.json) records transfers of
+1,000 and 9,000 USDC base units into a disposable wallet, frontend prepay digest
+`AY1eBhiMMT82PMNr55MtfdqNWYreFiQCqhynkSEFthx3`, independent typed confirmation,
+and cancellation/refund to the dedicated funder. The retained parent allowance
+is **49,322,895 / 100,000,000 MIST**, including the full 45,000,000 MIST child
+funding. Child gas used **33,912,400 MIST** within that grant, including one
+confirmed insufficient-gas creation failure. No faucet/package publication.
+Cleanup left 11,901 MIST in the retained private test identity. Two pre-sign
+refusals and their narrow recoveries are recorded; no transfer or signed payment
+was replayed. The last resumed segment's balance delta is not the full run cost;
+the retained non-replenishing ledger is authoritative. Full production provider
+and card acceptance remains explicitly unrun.
+
+Read-only independent verification (no mutation lease):
+
+```bash
+node scripts/live_subscription_card.cjs \
+  docs/validation/sf181-testnet-current-manifest.json \
+  --verify-evidence docs/validation/sf183-testnet.json
+```

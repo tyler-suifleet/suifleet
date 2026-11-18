@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "provider": "Cloudflare Pages",
+  "scope": "website-and-docs-only",
+  "source_revision": "a94ce0f33305f6e4e9e93b6d66a6101f671e19a2",
+  "release_sha256": {
+    "website": "683639b373b6982d6723593bb2bca4364e22d4ec1c089b2a40d13fbbd3f36fda",
+    "docs": "ef28b7d219267fc7c07e0062202ea504e3536e6cfeb7e5a5c7f09216fa7a23e2"
+  },
+  "app_unchanged": true,
+  "projects": {
+    "website": {
+      "id": "69d2af6b-6fbf-436d-885b-2973a2cd3d76",
+      "url": "https://69d2af6b.suifleet-marketing.pages.dev",
+      "source": {
+        "branch": "production",
+        "commit_hash": "a94ce0f33305f6e4e9e93b6d66a6101f671e19a2",
+        "commit_message": "Product website messaging 683639b373b6982d6723593bb2bca4364e22d4ec1c089b2a40d13fbbd3f36fda",
+        "commit_dirty": false
+      },
+      "status": "success"
+    },
+    "app": {
+      "id": "87431e6f-2be7-4d91-971c-c8ff6f69c732",
+      "url": "https://87431e6f.suifleet-console.pages.dev",
+      "source": {
+        "branch": "production",
+        "commit_hash": "41818430302e09f96046eaa05e0d72f0707bc4d5",
+        "commit_message": "SuiFleet immutable HTML collection c93557c8ef229124b37c2addbefbe489f610e9ec4402d960f9400b9d51854b06",
+        "commit_dirty": false
+      },
+      "status": "success"
+    },
+    "docs": {
+      "id": "351fd9af-d48f-40f7-b471-6d5ba87ed191",
+      "url": "https://351fd9af.suifleet-docs.pages.dev",
+      "source": {
+        "branch": "production",
+        "commit_hash": "a94ce0f33305f6e4e9e93b6d66a6101f671e19a2",
+        "commit_message": "Product website messaging ef28b7d219267fc7c07e0062202ea504e3536e6cfeb7e5a5c7f09216fa7a23e2",
+        "commit_dirty": false
+      },
+      "status": "success"
+    }
+  },
+  "served_verification": [
+    {
+      "origin": "https://suifleet.io",
+      "revision": "a94ce0f33305f6e4e9e93b6d66a6101f671e19a2",
+      "files": 70,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'sha256-r9lzuo9Pb48wp55HClDsmwrHob2oaG1Yx/oWcqPI5qc='; style-src 'self'; font-src 'self'; img-src 'self'; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "strict-transport-security": "max-age=31536000",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "strict-origin-when-cross-origin"
+      }
+    },
+    {
+      "origin": "https://docs.suifleet.io",
+      "revision": "a94ce0f33305f6e4e9e93b6d66a6101f671e19a2",
+      "files": 33,
+      "headers": {
+        "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "strict-transport-security": "max-age=31536000",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "strict-origin-when-cross-origin"
+      }
+    }
+  ]
+}

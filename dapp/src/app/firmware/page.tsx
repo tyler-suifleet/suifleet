@@ -28,6 +28,9 @@ import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configura
 import { PageHeader, ConnectionRequired } from "@/components/ui";
 import { ConfigurationFields } from "@/components/ConfigurationFields";
 import Link from "next/link";
+import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
+import { transactionStage } from "@/lib/tx-feedback";
+import { useUnconfirmedAction } from "@/hooks/usePendingRows";
 
 type Step = "artifact" | "recipe" | "deploy" | "done";
 
@@ -64,6 +67,10 @@ export default function FirmwarePage() {
   const [fleetPaid, setFleetPaid] = useState(false);
   const [store, setStore] = useState<BlobStore | undefined>(undefined);
   const { mutateAsync: signAndExecute, isPending: txPending } = useFleetTransaction();
+  const failure = useTransactionFeedback();
+  // An unconfirmed deployment stays guarded until the customer has checked it.
+  // Saved before the wallet can submit, so a reload or restart keeps it.
+  const deployIntent = useUnconfirmedAction("deploy");
 
   const [step, setStep] = useState<Step>("artifact");
   const [uploading, setUploading] = useState(false);
@@ -71,6 +78,8 @@ export default function FirmwarePage() {
   const deploymentInFlight = useRef(false);
   const [uploadProgress, setUploadProgress] = useState<Progress | null>(null);
   const [deployPhase, setDeployPhase] = useState<DeploymentPhase | null>(null);
+  // Only after the attempt ends: while the wallet is open the deploy phase shows instead.
+  const deployUnconfirmed = !!deployIntent.row && deployPhase === null;
   const [deploymentStartedAt, setDeploymentStartedAt] = useState(0);
   const [recipeProgress, setRecipeProgress] = useState<Progress | null>(null);
   const [artifact, setArtifact] = useState<ArtifactResult | null>(null);
@@ -104,7 +113,7 @@ export default function FirmwarePage() {
     try {
       const release = releaseProtection(client, delivery, policies);
       // Fleet-paid storage is never silently replaced by the publisher.
-      if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+      if (fleetPaid && !fleet.store) throw new Error(`Storage budget is unavailable: ${fleet.reason ?? "unknown reason"}`);
       if (period.error || !period.epochs || period.loading) throw Error(period.error ?? "Wait for storage settings");
       const chosen = fleetPaid ? period.fleetStore : period.publisherStore;
       const result = await uploadArtifact(file, account?.address ?? null, release, setUploadProgress, chosen);
@@ -127,17 +136,19 @@ export default function FirmwarePage() {
   async function handleDeploy() {
     // A ref closes the gap before React renders busy state, including the
     // entire recipe upload; mutation.isPending starts too late for that.
-    if (deploymentInFlight.current || step !== "deploy" || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
+    if (deploymentInFlight.current || deployIntent.row || step !== "deploy" || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
     if (!catalogVersion && (!artifact || !protection)) return;
     if (desired && selectedDevices.size > 0) {
       alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
       return;
     }
     deploymentInFlight.current = true;
+    failure.clear();
     setDeploymentStartedAt(Date.now());
     setDeployPhase("preparing");
     setRecipeProgress(null);
-    let succeeded = false;
+    let guarded = false;
+    const label = catalogVersion ? `catalog version ${catalogVersion.objectId}` : `${componentName} ${version}`;
     try {
       let transaction;
       if (catalogVersion) {
@@ -158,15 +169,19 @@ export default function FirmwarePage() {
               !selectedFleet && account && inboxSupported() ? announcementsFor(groups, devices, account.address, [...selectedGroups],
                 [...selectedDevices], await existingInboxes(client, [...selectedDevices])) : undefined, selectedFleet);
       }
-      const result = await signAndExecute({ transaction, onProgress: setDeployPhase });
-      succeeded = true;
+      const result = await signAndExecute({ transaction, onProgress: (phase) => { setDeployPhase(phase); if (phase === "wallet") deployIntent.mark(label); } });
+      deployIntent.clear();
+      guarded = true;
       setTxDigest(result.digest);
       setStep("done");
     } catch (error) {
-      alert(`Deployment failed: ${error instanceof Error ? error.message : String(error)}`);
+      failure.report(error, "The deployment");
+      if (transactionStage(error) === "uncertain") { guarded = true; deployIntent.mark(label); }
+      else deployIntent.clear();
     } finally {
-      // A successful operation stays guarded until explicit "Deploy another".
-      if (!succeeded) deploymentInFlight.current = false;
+      // A successful or unconfirmed operation stays guarded until the customer
+      // explicitly chooses "Deploy another" or confirms it is not listed.
+      if (!guarded) deploymentInFlight.current = false;
       setDeployPhase(null);
     }
   }
@@ -205,12 +220,12 @@ export default function FirmwarePage() {
     setter(next);
   }
 
-  if (!account) return <ConnectionRequired title="Deploy component" description="Choose software, select your devices and review an update before deploying." />;
+  if (!account) return <ConnectionRequired title="Deploy software" description="Choose software, select your devices and review an update before deploying." />;
 
   if (step === "done" && txDigest) {
     return (
       <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
-        <PageHeader title="Deploy component" />
+        <PageHeader title="Deploy software" />
         <div className="bg-white border border-gray-200 rounded p-8 text-center space-y-3">
           <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
             <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -246,17 +261,26 @@ export default function FirmwarePage() {
   }
 
   const steps: { key: Step; label: string }[] = catalogVersion ? [{ key: "deploy", label: "Targets & review" }] : [
-    { key: "artifact", label: "Artifact" },
-    { key: "recipe",   label: "Recipe" },
+    { key: "artifact", label: "Software file" },
+    { key: "recipe",   label: "Installation & runtime" },
     { key: "deploy",   label: "Target groups" },
   ];
 
   return (
     <div className="max-w-2xl space-y-4 [overflow-wrap:anywhere]">
-      <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Choose a software file, describe how to install or run it, and select the devices that should receive it."} />
+      <PageHeader title="Deploy software" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Choose a published version from your library, then select devices and review delivery."} />
 
+      {!catalogVersion && <section className="rounded border bg-white p-5 space-y-3" aria-label="Choose software">
+        <h2 className="font-semibold">Start with your software library</h2>
+        <p>Publish a version once, then choose Deploy on that version to select devices and review delivery. Publishing alone does not update devices.</p>
+        <Link href="/components" className="inline-block rounded bg-blue-600 px-4 py-2 text-white">Choose or publish a version</Link>
+        <p className="text-sm text-gray-600">Integrators can use the optional direct-file workflow below for a one-off deployment without a library entry.</p>
+      </section>}
       {catalogError && <p role="alert">{catalogError}</p>}
       {catalogVersion && <section aria-label="Published version review" className="rounded border bg-white p-4 space-y-2"><p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p><ol className="text-sm">{catalogVersion.manifests.map((m, i) => <li key={i}>{i + 1}. {m.os}/{m.arch}<ReleaseRecipeStorage recipeBlobId={m.recipeBlobId} recipeSha256={m.recipeSha256} /></li>)}</ol><p className="text-sm text-gray-500">Review targets below before submitting. Deployment requests delivery; installed and running state require device reports.</p><Link href="/components" className="text-sm text-blue-600">Back to software library</Link></section>}
+      <details open={catalogVersion ? true : undefined} key={catalogVersion?.objectId ?? "direct"}>
+      <summary className={catalogVersion ? "hidden" : "cursor-pointer rounded border p-4 font-semibold"}>Advanced: deploy a file directly</summary>
+      {!catalogVersion && <p className="my-3 text-sm">This workflow uploads a file and installation instructions for one deployment. It does not publish a reusable library version. Installer commands require explicit device configuration.</p>}
       {/* Step indicators */}
       <div className="flex items-center gap-2 text-sm">
         {steps.map((s, i) => (
@@ -310,10 +334,10 @@ export default function FirmwarePage() {
         </div>
         {selectedFile && step === "artifact" && <div className="text-sm"><p>Selected: {selectedFile.name}</p><button className="rounded border px-3 py-2" disabled={uploading || period.loading || !!period.error || period.price === undefined} onClick={() => handleFile(selectedFile)}>Upload selected artifact</button></div>}
         {artifact && (
-          <div className="bg-gray-50 border border-gray-200 rounded p-3 text-xs font-mono space-y-1">
+          <details className="bg-gray-50 border border-gray-200 rounded p-3 text-xs font-mono space-y-1"><summary>Uploaded file technical details</summary>
             <p><span className="text-gray-400">Artifact blob:</span> <span className="text-gray-700">{artifact.blobId}</span></p>
             <p><span className="text-gray-400">SHA-256:     </span> <span className="text-gray-700">{artifact.sha256}</span></p>
-          </div>
+          </details>
         )}
         {artifact && <StorageSummary label="Artifact storage" storage={artifact.storage} />}
       </Card>
@@ -372,7 +396,7 @@ export default function FirmwarePage() {
             </>
           )}
         </div>
-        <ConfigurationFields value={configuration} onChange={setConfiguration} disabled={step !== "recipe"} />
+        <details><summary>Advanced: configuration JSON and validation</summary><ConfigurationFields value={configuration} onChange={setConfiguration} disabled={step !== "recipe"} /></details>
         {step === "recipe" && (
           <button
             onClick={() => {
@@ -392,6 +416,11 @@ export default function FirmwarePage() {
 
       </>}
 
+      <TransactionFeedback feedback={failure.feedback} onDismiss={deployUnconfirmed ? undefined : failure.clear} />
+      {deployUnconfirmed && <div role="status" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <p>Deploying {deployIntent.row!.label} was submitted but never confirmed. Deploying again is paused so the same update is not created twice. Check <Link href="/deployments" className="underline">Deployments</Link> and your wallet activity first.</p>
+        <button type="button" className="mt-2 underline" onClick={() => { deploymentInFlight.current = false; deployIntent.clear(); failure.clear(); }}>I checked: it is not listed, allow deploying again</button>
+      </div>}
       {deployPhase && <DeploymentProgress phase={deployPhase} progress={recipeProgress} startedAt={deploymentStartedAt} catalog={!!catalogVersion} />}
       {/* Step 3 — Targets */}
       <Card disabled={step !== "deploy"} title={catalogVersion ? "Select targets & review" : "3. Select targets"}>
@@ -459,12 +488,13 @@ export default function FirmwarePage() {
 
         <button
           onClick={handleDeploy}
-          disabled={deployPhase !== null || txPending || (selectedGroups.size === 0 && selectedDevices.size === 0) || (!artifact && !catalogVersion) || step !== "deploy"}
+          disabled={deployPhase !== null || txPending || deployUnconfirmed || (selectedGroups.size === 0 && selectedDevices.size === 0) || (!artifact && !catalogVersion) || step !== "deploy"}
           className="mt-2 bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white px-5 py-2 rounded text-sm disabled:opacity-40"
         >
           {deployPhase === "uploading" ? "Uploading recipe…" : deployPhase !== null || txPending ? "Deploying…" : `Deploy to ${selectedGroups.size + selectedDevices.size} target${selectedGroups.size + selectedDevices.size !== 1 ? "s" : ""}`}
         </button>
       </Card>
+      </details>
     </div>
   );
 }
@@ -528,7 +558,7 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
       <details><summary>Storage expiry and renewal details</summary>
       <p className="text-gray-500">
         Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}
-        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your fleet budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
+        {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your storage budget" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
         {storage.costFrost !== undefined && <> · cost {storage.costFrost.toString()} FROST</>}
       </p>
       </details>

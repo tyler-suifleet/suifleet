@@ -56,7 +56,7 @@ Verified readiness means configuration is readable and correctly bound. A device
 with no signed report remains **unreported**. Health is independently verified
 from its current registry signer and on-chain sample; downloading settings or
 successful setup is not a health result. Storage starts empty: fund archive
-storage through Network budget and configure the approved archive/Seal settings
+storage through Device and storage budgets and configure the approved archive/Seal settings
 before enabling encrypted log uploads. Health alone does not require a Walrus
 purchase, provider credentials or a rebuilt app.
 
@@ -69,7 +69,7 @@ make edge-test
 make test-ota
 make dapp-typecheck
 make dapp-build
-# Disposable network-none chain with pinned 1.83.0 transaction/node CLI:
+# Disposable network-none chain with pinned 1.84.0 transaction/node CLI:
 SF247_REPORTING=1 make test-fleet-data-upgrade-localnet
 ```
 

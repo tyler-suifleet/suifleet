@@ -189,6 +189,7 @@ struct HistoryNode {
     starts: Arc<Mutex<Vec<u64>>>,
     package_reads: Arc<Mutex<u64>>,
     publication_reads: Arc<Mutex<u64>>,
+    publication_error: Arc<Mutex<Option<tonic::Code>>>,
 }
 #[tonic::async_trait]
 impl proto::ledger_service_server::LedgerService for HistoryNode {
@@ -239,6 +240,9 @@ impl proto::ledger_service_server::LedgerService for HistoryNode {
             sui_sdk_types::Digest::new([7; 32]).to_string()
         );
         *self.publication_reads.lock().unwrap() += 1;
+        if let Some(code) = *self.publication_error.lock().unwrap() {
+            return Err(tonic::Status::new(code, "publication unavailable"));
+        }
         let mut transaction = proto::ExecutedTransaction::default();
         transaction.checkpoint = Some(10);
         let mut response = proto::GetTransactionResponse::default();
@@ -275,6 +279,7 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         starts: Default::default(),
         package_reads: Default::default(),
         publication_reads: Default::default(),
+        publication_error: Default::default(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let sui = client(&format!("http://{}", listener.local_addr().unwrap()));
@@ -309,6 +314,37 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         .to_string()
         .contains("pruned"));
     assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
+
+    // A long-lived immutable package can remain after its publication tx is
+    // pruned. Reproduce the public-testnet fixture failure with a fresh client
+    // (no cached birth). Only this missing history enters explicit head recovery.
+    *node.publication_error.lock().unwrap() = Some(tonic::Code::NotFound);
+    let fresh = client(&sui.manifest().rpc_url);
+    let error = fresh.memberships(&None).await.err().unwrap();
+    let pruned = error.downcast_ref::<HistoryPruned>().unwrap();
+    assert_eq!((pruned.position, pruned.lowest), (0, 11));
+    assert!(fresh.poll.lock().unwrap().membership_birth.is_none());
+    // Existing cursors still require their actual position; they do not consult
+    // the missing publication or jump to the retention floor.
+    fresh.memberships(&Some(json!({"checkpoint": 12}))).await.unwrap();
+    assert_eq!(*node.starts.lock().unwrap(), [10, 10, 12]);
+    for code in [tonic::Code::PermissionDenied, tonic::Code::Unavailable,
+                 tonic::Code::InvalidArgument] {
+        *node.publication_error.lock().unwrap() = Some(code);
+        let error = client(&sui.manifest().rpc_url).memberships(&None).await.err().unwrap();
+        assert!(error.downcast_ref::<HistoryPruned>().is_none());
+        assert_eq!(error.downcast_ref::<tonic::Status>().unwrap().code(), code);
+    }
+    assert_eq!(*node.starts.lock().unwrap(), [10, 10, 12]);
+    // General transaction reads must not claim membership-history recovery.
+    *node.publication_error.lock().unwrap() = Some(tonic::Code::NotFound);
+    let error = fresh.transaction_checkpoint(&sui_sdk_types::Digest::new([7; 32]).to_string())
+        .await.err().unwrap();
+    assert!(error.downcast_ref::<HistoryPruned>().is_none());
+    assert_eq!(error.downcast_ref::<tonic::Status>().unwrap().code(), tonic::Code::NotFound);
+    // Archival nodes still start at genesis without publication lookup.
+    node.floor.store(0, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(client(&sui.manifest().rpc_url).membership_start().await.unwrap(), 0);
 }
 
 #[tokio::test]

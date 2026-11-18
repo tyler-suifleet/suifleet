@@ -1,0 +1,334 @@
+{
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "SF-183 fund isolated test identity",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 45000000,
+      "status": "not_submitted",
+      "allowance_used_mist": 0
+    },
+    {
+      "label": "SF-183 fund isolated test identity",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 45000000,
+      "status": "success",
+      "digest": "9sCL5iMexjqdwsEpEdapkk34bL5btEtViicQxg98SCsD",
+      "gas_mist": 1000099,
+      "allowance_used_mist": 46000099
+    },
+    {
+      "label": "SF-183 simulated purchase transfer 1000",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "ChxxTXdmUerthCDoaMo3N2tEZAd7xJrPzY7nr9kNPCF2",
+      "gas_mist": 1000264,
+      "allowance_used_mist": 47000363
+    },
+    {
+      "label": "SF-183 simulated purchase transfer 9000",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "6g6biKvATBxu7PZ6V2fMZiGSTzJ3G6LChtMR2uFiS894",
+      "gas_mist": 2322532,
+      "allowance_used_mist": 49322895
+    }
+  ],
+  "checks": [],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf183-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/tmp/sf196-network-183/sui",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1274,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "max_spend_mist": 100000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.83.0-16d2dc1e05ed"
+  },
+  "simulated_purchase": {
+    "binding": {
+      "chain": "4c78adac",
+      "package": "0x9fa20cc73455f1f6f65ea3f8796856ee5945abac0b895f038dbcc7919e838882",
+      "wallet": "0x227e4bbb3c6d23ac316fadd7b8cd72e639ce3ae1a930f22a25055d9844faa34d",
+      "customer": "0xa9e2d333b8eb99f5d64ae03b12d38c0a0a1cf119cede9f5fad88c11ecd1210ba",
+      "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+      "quote": {
+        "offerId": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+        "symbol": "USDC",
+        "usdPerCoin": 1,
+        "observedAt": 1793755804331,
+        "source": "Test-only USDC denomination: 1 USD/USDC, no market-price claim"
+      },
+      "total": "10000",
+      "expiresAt": 1798939804331
+    },
+    "purchase": {
+      "version": 1,
+      "binding": {
+        "chain": "4c78adac",
+        "package": "0x9fa20cc73455f1f6f65ea3f8796856ee5945abac0b895f038dbcc7919e838882",
+        "wallet": "0x227e4bbb3c6d23ac316fadd7b8cd72e639ce3ae1a930f22a25055d9844faa34d",
+        "customer": "0xa9e2d333b8eb99f5d64ae03b12d38c0a0a1cf119cede9f5fad88c11ecd1210ba",
+        "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+        "quote": {
+          "offerId": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+          "symbol": "USDC",
+          "usdPerCoin": 1,
+          "observedAt": 1793755804331,
+          "source": "Test-only USDC denomination: 1 USD/USDC, no market-price claim"
+        },
+        "total": "10000",
+        "expiresAt": 1798939804331
+      },
+      "startBalance": "0",
+      "startedAt": 1793846240685,
+      "abandoned": false
+    },
+    "state": {
+      "state": "ready",
+      "received": "10000",
+      "missing": "0"
+    }
+  },
+  "observations": [
+    {
+      "usdc": "10000",
+      "sui": "20397046",
+      "state": "ready",
+      "received": "10000",
+      "missing": "0"
+    }
+  ],
+  "prepay": {
+    "account": {
+      "id": "0x7ad444257671af57f14ef83f0f161d0b636ae32c4cc9ff4c850d557b6d5b8ae7",
+      "customer_id": "0xa9e2d333b8eb99f5d64ae03b12d38c0a0a1cf119cede9f5fad88c11ecd1210ba",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "balance": {
+        "value": "10000"
+      },
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "remaining": "1",
+      "period_ms": "2592000000",
+      "next_due_ms": "1793846297809",
+      "term_end_ms": "1796438297809",
+      "cancelled": false
+    },
+    "quote": {
+      "offerId": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+      "symbol": "USDC",
+      "usdPerCoin": 1,
+      "observedAt": 1793755804331,
+      "source": "Test-only USDC denomination: 1 USD/USDC, no market-price claim"
+    },
+    "digest": "AY1eBhiMMT82PMNr55MtfdqNWYreFiQCqhynkSEFthx3"
+  },
+  "child_transactions": [
+    {
+      "label": "SF-183 isolated customer",
+      "gas_budget_mist": 23000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "s6WubEYbB1ohLuaEY213Ts3kkXmw1WwykHBbhyEezKx",
+      "gas_mist": 1000277,
+      "allowance_used_mist": 1000277
+    },
+    {
+      "label": "SF-183 isolated customer",
+      "gas_budget_mist": 35000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "3TKyox4nY9gxUAQ8T64fPeAaZWDBXtM5WC8Z9Jyfc43j",
+      "gas_mist": 23602677,
+      "allowance_used_mist": 24602954
+    },
+    {
+      "label": "SF-183 frontend prepay after simulated arrival",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "not_submitted",
+      "allowance_used_mist": 24602954
+    },
+    {
+      "label": "SF-183 frontend prepay after simulated arrival",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "AY1eBhiMMT82PMNr55MtfdqNWYreFiQCqhynkSEFthx3",
+      "gas_mist": 3675858,
+      "allowance_used_mist": 28278812
+    },
+    {
+      "label": "SF-183 cancel and refund isolated term",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "9ZNwuztWb6Wbyw7yy1Md3Mgywe7cffjk82PiREvCrQom",
+      "gas_mist": 3645489,
+      "allowance_used_mist": 31924301
+    },
+    {
+      "label": "SF-183 return remaining child gas",
+      "gas_budget_mist": 2000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "8ymvsXHzUhH6xnXQDy6hg34AKWFbj4NQV67fEHLDTsTi",
+      "gas_mist": 1988099,
+      "allowance_used_mist": 33912400
+    }
+  ],
+  "child_used_mist": 33912400,
+  "child_funding_mist": 45000000,
+  "child_remaining_mist": 11901,
+  "limits": [
+    "Provider-independent Testnet transfer simulation, no real card/provider/wallet-extension acceptance.",
+    "Disposable 0.01 USDC test tariff; existing package and offer reused, no original customer/app objects modified.",
+    "Full uncollected subscription refunded to dedicated agent. Child funding is charged in full; gas/refunds do not replenish the 0.1 SUI ceiling.",
+    "Remaining child gas (if any) retained privately; no key material in evidence."
+  ],
+  "allowance_used_mist": 49322895,
+  "finished": "2026-11-05T02:38:23Z",
+  "independent_grpc": {
+    "checks": [
+      {
+        "digest": "9sCL5iMexjqdwsEpEdapkk34bL5btEtViicQxg98SCsD",
+        "success": true,
+        "signed_net_gas_mist": "1000099"
+      },
+      {
+        "digest": "ChxxTXdmUerthCDoaMo3N2tEZAd7xJrPzY7nr9kNPCF2",
+        "success": true,
+        "signed_net_gas_mist": "1000264"
+      },
+      {
+        "digest": "6g6biKvATBxu7PZ6V2fMZiGSTzJ3G6LChtMR2uFiS894",
+        "success": true,
+        "signed_net_gas_mist": "2322532"
+      },
+      {
+        "digest": "s6WubEYbB1ohLuaEY213Ts3kkXmw1WwykHBbhyEezKx",
+        "success": false,
+        "signed_net_gas_mist": "1000277"
+      },
+      {
+        "digest": "3TKyox4nY9gxUAQ8T64fPeAaZWDBXtM5WC8Z9Jyfc43j",
+        "success": true,
+        "signed_net_gas_mist": "23602677"
+      },
+      {
+        "digest": "AY1eBhiMMT82PMNr55MtfdqNWYreFiQCqhynkSEFthx3",
+        "success": true,
+        "signed_net_gas_mist": "3675858"
+      },
+      {
+        "digest": "9ZNwuztWb6Wbyw7yy1Md3Mgywe7cffjk82PiREvCrQom",
+        "success": true,
+        "signed_net_gas_mist": "3645489"
+      },
+      {
+        "digest": "8ymvsXHzUhH6xnXQDy6hg34AKWFbj4NQV67fEHLDTsTi",
+        "success": true,
+        "signed_net_gas_mist": "1988099"
+      }
+    ],
+    "transfers": [
+      {
+        "digest": "ChxxTXdmUerthCDoaMo3N2tEZAd7xJrPzY7nr9kNPCF2",
+        "recipient": "0x227e4bbb3c6d23ac316fadd7b8cd72e639ce3ae1a930f22a25055d9844faa34d",
+        "amount": "1000"
+      },
+      {
+        "digest": "6g6biKvATBxu7PZ6V2fMZiGSTzJ3G6LChtMR2uFiS894",
+        "recipient": "0x227e4bbb3c6d23ac316fadd7b8cd72e639ce3ae1a930f22a25055d9844faa34d",
+        "amount": "9000"
+      }
+    ],
+    "final_account": {
+      "id": "0x7ad444257671af57f14ef83f0f161d0b636ae32c4cc9ff4c850d557b6d5b8ae7",
+      "customer_id": "0xa9e2d333b8eb99f5d64ae03b12d38c0a0a1cf119cede9f5fad88c11ecd1210ba",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "balance": {
+        "value": "0"
+      },
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "remaining": "0",
+      "period_ms": "2592000000",
+      "next_due_ms": "1796438297809",
+      "term_end_ms": "1796438297809",
+      "cancelled": true
+    },
+    "final_wallet_usdc": "0",
+    "final_wallet_sui": "11901",
+    "parent_allowance_used_mist": "49322895",
+    "child_used_mist": "33912400"
+  },
+  "resumed_segment": {
+    "started": "2026-11-05T02:38:07Z",
+    "start_balance_mist": 7854917171,
+    "end_balance_mist": 7865992870,
+    "spent_mist": -11075699
+  },
+  "accounting_note": "Resumed-segment balance delta is not the full run cost. The authoritative non-replenishing parent ledger includes all funded child gas (45,000,000 MIST); child effects are recorded separately within that grant. Refunds/returned gas never replenish the allowance. Pre-sign refusals did not submit transactions.",
+  "run_diagnostics": [
+    "Initial compiler/transaction preflight refused an absent host binary and an older 1.82.1 container transaction CLI; switched to checksum-verified 1.83.0 before signing.",
+    "The provided wallet client.yaml used a container-only keystore path. A private runtime client.yaml points at the same dedicated agent keystore; original configuration and keys preserved.",
+    "One funding build was refused before submission because keytool expected client.yaml in its runtime config directory. Retained NotSubmitted record, verified child unfunded, then resumed once with the same allowance.",
+    "Customer creation with a 23,000,000 MIST gas budget failed with effects-confirmed InsufficientGas; charged 1,000,277 MIST within child grant. Exact failed effects/no Customer and retained parent/child charges were reconciled before one 35,000,000-budget creation succeeded.",
+    "Frontend prepay was refused before signing because SDK coinWithBalance added framework coin::destroy_zero. Added that exact expected call, preserved the already received USDC and original purchase baseline, then resumed only the not-submitted prepay.",
+    "Partial arrival was asserted during the first bridge session; resumed final receipt retains ready observation and independently verifies both recipient transfers (1,000 and 9,000 base units). No partial observation snapshot was reconstructed or fabricated.",
+    "Cleanup refunded all 10,000 USDC base units and returned available child gas; 11,901 MIST remains in the retained private test identity, bounded by its charged grant. No faucet or package publication."
+  ],
+  "verification": {
+    "card_unit": "node scripts/test_subscription_card.cjs: PASS",
+    "card_browser": "node scripts/test_subscription_card_browser.cjs: PASS (real React/Query/localStorage; chain/wallet fixtures)",
+    "subscription_regression": "node scripts/test_subscription_checkout.cjs: PASS",
+    "frontend_typecheck": "Docker network none, sf182-receipts:check Node 22.22.2; node node_modules/typescript/bin/tsc --noEmit: PASS",
+    "frontend_build": "Docker network none, sf182-receipts:check Node 22.22.2; node node_modules/next/dist/bin/next build: PASS (18 static routes)",
+    "independent_chain": "node scripts/live_subscription_card.cjs docs/validation/sf181-testnet-current-manifest.json --verify-evidence docs/validation/sf183-testnet.json: PASS",
+    "wallet_manifest": "node scripts/test_wallet_manifest.cjs: PASS",
+    "subscription_manifest": "node scripts/test_subscription_manifest.cjs: PASS",
+    "recovery_refusals": "python3 -m unittest discover -s scripts -p 'test_live_subscription_card.py' -v: PASS 5",
+    "tracking": "make test-tracking: PASS 10"
+  },
+  "source_provenance": {
+    "network_execution_base_head": "54ac232d2cf103b83bc4dde1c4b177a7440345b6",
+    "frontend_implementation_commit": "ffb5232bf969020cdfb32c3e49d74faf6310e626",
+    "final_harness_commit": "00b87f8cb2e9841c26d84590e3120e06d0d29a65",
+    "note": "Network execution used the assigned dirty worktree before these commits. The final read-only verifier rechecks all recorded effects and bindings; no exact-head hosted CI or independent review is claimed."
+  }
+}
