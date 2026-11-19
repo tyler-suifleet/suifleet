@@ -40,7 +40,7 @@ ranges, with the selected release above all relevant fixed floors.
 
 ## Chosen remediation and compatibility
 
-- Next **16.4.1**, React/React DOM **19.3.1**, React types **19.3.0**:
+- Next **16.4.6**, React/React DOM **19.3.1**, React types **19.3.0**:
   current supported releases, with Next's generated route types/automatic JSX
   configuration retained. Node **22.22.2** exceeds Next's 20.9 minimum.
   The app uses no synchronous request APIs requiring migration.
@@ -54,7 +54,8 @@ ranges, with the selected release above all relevant fixed floors.
   Autoprefixer is removed because v4 handles prefixing itself.
   [Tailwind migration guide](https://tailwindcss.com/docs/upgrade-guide).
 - Direct PostCSS **8.5.30**; the lock contains Next's **8.5.23** and the Tailwind
-  plugin's **8.5.18** too. All resolve Nano ID **3.3.20** and source-map-js **1.2.2**.
+  plugin's **8.5.18** too. All resolve Nano ID **3.3.20**. Next's PostCSS
+  resolves source-map-js **1.2.3**. The other two resolve **1.2.2**.
   The frozen dependency tree contains no Braces or Browserslist. No overrides,
   patches, ignore files, scanner exclusions or severity policies were added.
 - `@mysten/sui` **2.36.0**, `@mysten/dapp-kit-react` **2.1.40** and
@@ -63,7 +64,36 @@ ranges, with the selected release above all relevant fixed floors.
 - Removed the unused `next lint` script because Next 16 removed that command;
   typecheck and all existing CI gates remain enabled.
 
-## Verification
+## Next.js security patch (SF-283)
+
+The previous pin, **16.4.1**, falls within all seven affected 16.x ranges
+below. Each range is inclusive. The first fixed 16.x version is **16.4.5**,
+and the dApp pins **16.4.6** with its matching pnpm lockfile.
+[Next.js 16.4.5 security release](https://github.com/vercel/next.js/releases/tag/v16.4.5)
+· [Next.js 16.4.6 release](https://github.com/vercel/next.js/releases/tag/v16.4.6)
+
+| Affected feature | Affected 16.x versions | Upstream advisory |
+|---|---|---|
+| `use cache` through `unstable_cache` | 16.3.0–16.4.4 | [GHSA-mfr8-8qww-v76h](https://github.com/vercel/next.js/security/advisories/GHSA-mfr8-8qww-v76h) |
+| Nested `use cache` | 16.2.0–16.4.4 | [GHSA-vc7v-qv4w-wrv8](https://github.com/vercel/next.js/security/advisories/GHSA-vc7v-qv4w-wrv8) |
+| Cache Components fallback shells | 16.4.0–16.4.4 | [GHSA-vvgp-ww4w-46vf](https://github.com/vercel/next.js/security/advisories/GHSA-vvgp-ww4w-46vf) |
+| `use cache` with binary arguments | 16.0.0–16.4.4 | [GHSA-rhh4-g77r-r9qj](https://github.com/vercel/next.js/security/advisories/GHSA-rhh4-g77r-r9qj) |
+| Forwarding fetched responses | 16.0.0–16.4.4 | [GHSA-pc58-hwjq-p385](https://github.com/vercel/next.js/security/advisories/GHSA-pc58-hwjq-p385) |
+| Image optimization | 16.0.0–16.4.4 | [GHSA-7qx7-33qx-rqx2](https://github.com/vercel/next.js/security/advisories/GHSA-7qx7-33qx-rqx2) |
+| Edge runtime cookies | 16.0.0–16.4.4 | [GHSA-f3mh-rxg3-f5g2](https://github.com/vercel/next.js/security/advisories/GHSA-f3mh-rxg3-f5g2) |
+
+Production serves prerendered files from `dapp/out`. The export has no
+Next.js request-time cache, response-forwarding handler, or Edge route.
+Images are unoptimized, so there is no Next.js image optimizer endpoint.
+These advisories therefore do not apply to the served static export.
+[dApp export configuration](../dapp/next.config.mjs)
+
+The SF-283 unfiltered `pnpm audit` reported one remaining pre-existing moderate
+finding in PostCSS 8.5.18 through `@tailwindcss/postcss`, a build dependency.
+The audit exited 1 with this finding. [PostCSS advisory](https://github.com/advisories/GHSA-fxqj-rqcc-2cmp)
+· [SF-283 tracking comment](https://github.com/tyler-suifleet/suifleet/issues/794#issuecomment-7020616818)
+
+## SF-049 verification
 
 Passed with Node **22.22.2** / pnpm **11.0.8**:
 
