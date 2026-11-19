@@ -103,6 +103,40 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  assert.ok(await fallbackPlayerPage.locator('#fund video').evaluate(v=>new URL(v.currentSrc).pathname.endsWith('fund.mp4')),'MP4 plays after WebM 404');
  assert.equal(await fallbackPlayerPage.locator('#fund [data-video-error]').isVisible(),false,'working MP4 is not marked unavailable');
  await fallbackPlayerPage.close();missingMedia.clear();
+ // WebKit may report NO_SOURCE before lazy source selection. This is not a
+ // failed request: every stage must remain usable once metadata is available.
+ const lazyPage=await browser.newPage();
+ await lazyPage.addInitScript(()=>{
+  const original=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'networkState');
+  Object.defineProperty(HTMLMediaElement.prototype,'networkState',{get(){
+   return this.preload==='none'&&this.readyState===0?HTMLMediaElement.NETWORK_NO_SOURCE:original.get.call(this);
+  }});
+ });
+ await lazyPage.goto(origin+'/guide/',{waitUntil:'networkidle'});
+ for(const step of steps){
+  await lazyPage.getByLabel('Guide stage').selectOption(step.id);
+  const player=lazyPage.locator(`#${step.id} video`);
+  if(!await player.count())continue;
+  await player.evaluate(async v=>{v.muted=true;await v.play()});
+  await lazyPage.waitForFunction(id=>document.querySelector(`#${id} video`).readyState>=2,step.id);
+  assert.equal(await player.evaluate(v=>v.hidden),false,`${step.id}: lazy state must not hide playable media`);
+  assert.equal(await lazyPage.locator(`#${step.id} [data-video-error]`).isVisible(),false);
+ }
+ await lazyPage.close();
+ // Genuine exhausted fallbacks show the error; a successful retry clears it.
+ missingMedia.add('/media/guide/fund.webm');missingMedia.add('/media/guide/fund.mp4');
+ const retryPage=await browser.newPage();
+ await retryPage.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
+ await retryPage.locator('#fund [data-video-error]').waitFor();
+ missingMedia.clear();
+ await retryPage.locator('#fund video').evaluate(v=>{v.muted=true});
+ await retryPage.locator('#fund [data-video-retry]').click();
+ await retryPage.waitForFunction(()=>document.querySelector('#fund video').readyState>=2);
+ assert.equal(await retryPage.locator('#fund video').evaluate(v=>v.hidden),false);
+ assert.equal(await retryPage.locator('#fund [data-video-error]').isVisible(),false);
+ await retryPage.close();
+ console.log('PASS lazy NO_SOURCE states and successful media retry recovery');
+
  // Native captions load from the same origin on desktop and mobile. Keyboard
  // focus stays on the native player; Space must start/pause real playback.
  for(const viewport of [{width:1280,height:720},{width:390,height:844}]) {

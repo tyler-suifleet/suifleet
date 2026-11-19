@@ -5382,6 +5382,28 @@
         "A cleanup error never prevents independent source review or integration progression; regression tests cover failure and race paths."
       ],
       "validation": "Run targeted cancellation/queue regression tests and full coordinator suite on actual combined main; tracking dry-run and diff checks. Merge under explicit local-test infrastructure policy, activate merged runtime and verify live retry/cancellation evidence without claiming hosted CI passed."
+    },
+    {
+      "key": "SF-282",
+      "title": "Fix premature unavailable errors in Safari guide videos",
+      "priority": "P0",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "site"
+      ],
+      "resources": [],
+      "description": "WebKit reports NETWORK_NO_SOURCE for inactive preload=none videos during guide initialization. guide.js treats that transient state as a permanent media failure before a stage is loaded, hides videos and never clears the error on successful metadata. Reproduced against live suifleet.io using Playwright WebKit. Remove premature state inference, recover video UI on successful metadata and preserve real exhausted-format fallback errors. Publish the scoped reviewed fix under the existing deployment authorization.",
+      "evidence": "Live Chromium first stage loads; WebKit marks later unloaded stages video.hidden=true before navigation. All media GETs and byte ranges work; no missing upload.",
+      "acceptance": [
+        "All guide stages can load and play in Chromium and WebKit without a stale unavailable message.",
+        "An actual unsupported or failed media load retains understandable fallback handling; successful reload clears the failure.",
+        "Regression tests reproduce the pre-fix WebKit behavior, verify the fix, and verify real failure handling.",
+        "Publish updated marketing release and verify real-domain playback without claiming physical iPhone testing."
+      ],
+      "validation": "Browser WebKit and Chromium metadata/playback across all stages, real failure/recovery tests, site unit/build checks and live domain checks. No wallet or chain writes."
     }
   ]
 }

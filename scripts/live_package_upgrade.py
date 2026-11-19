@@ -715,6 +715,23 @@ def package_client(network_sui, wallet, *command, json_output=True, check=True, 
     return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
 
 
+def delete_deployments(label, package, cleanup, *, client, operator, sign, mutate, gas, evidence):
+    deployments = cleanup[:]
+    target = f"{package}::deployment_manager::delete_deployment"
+    ptb = [arg for deployment in deployments for arg in ("--move-call", target, f"@{deployment}")]
+    entry = {"label": label, "deployments": deployments}
+    evidence.setdefault("deployment_cleanup", []).append(entry)
+
+    def record(identity):
+        entry["expected_digest"] = identity["digest"]
+
+    # Once this cleanup starts, the finally handler must not rebuild it on an
+    # ambiguous result. Retain the target IDs and verified digest in evidence.
+    cleanup.clear()
+    return mutate(label, toolchain.ptb_submitter(client, ptb, sender=operator,
+        calls=[target] * len(deployments), sign=sign, persist=record), gas=gas, require_full=True)
+
+
 def run(args):
     compact = getattr(args, "compact_lifecycle", False)
     ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
@@ -1212,11 +1229,8 @@ def run(args):
                 and not audit_fixture.get('creation_cleanup')
                 and not audit_fixture.get('pending_operation') else None)
             if not recycle:
-                deletes = []
-                for deployment in cleanup:
-                    deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{deployment}"]
-                transaction("delete final completed deployment", *deletes)
-                cleanup.clear()
+                delete_deployments("delete final completed deployment", new, cleanup, client=client,
+                    operator=operator, sign=sign, mutate=mutate, gas=ptb_budget, evidence=evidence)
 
             def save_audit():
                 save_state(state_path, state)
@@ -1244,10 +1258,8 @@ def run(args):
             process.wait()
         if cleanup:
             try:
-                deletes = []
-                for deployment in cleanup:
-                    deletes += ["--move-call", f"{cleanup_package}::deployment_manager::delete_deployment", f"@{deployment}"]
-                transaction("bounded abort cleanup", *deletes)
+                delete_deployments("bounded abort cleanup", cleanup_package, cleanup, client=client,
+                    operator=operator, sign=sign, mutate=mutate, gas=ptb_budget, evidence=evidence)
             except Exception as error:
                 evidence['cleanup_error'] = str(error)
         walrus.close()
