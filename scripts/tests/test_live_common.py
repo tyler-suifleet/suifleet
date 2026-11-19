@@ -386,6 +386,78 @@ class ReadThrottleTests(unittest.TestCase):
                 sleep.assert_not_called()
 
 
+class PackageCleanupTests(unittest.TestCase):
+    def run_cleanup(self, responses):
+        deployment = "0x1234"
+        cleanup = [deployment]
+        evidence = {"transactions": []}
+        ledger = Budget(60_000_000, evidence["transactions"])
+        label = "delete final completed deployment"
+        result = effects()
+        sign = Mock(return_value="signature")
+        inspect = Mock(return_value={
+            "sender": OPERATOR, "gas_owner": OPERATOR, "gas_budget": "60000000",
+            "digest": result["digest"], "commands": [{
+                "kind": "MoveCall", "package": "0x1", "module": "deployment_manager",
+                "function": "delete_deployment",
+            }],
+        })
+
+        def client(*command, **kwargs):
+            return live_package_upgrade.package_client("sui", "wallet.yaml", *command, **kwargs)
+
+        submitter = sui_toolchain.ptb_submitter
+        with patch.object(sui_toolchain, "ptb_submitter", side_effect=lambda *a, **kw: submitter(
+                    *a, **kw, inspect=inspect)), \
+                patch.object(live_common.subprocess, "run", side_effect=responses) as cli, \
+                patch.object(live_common.time, "sleep") as sleep:
+            try:
+                live_package_upgrade.delete_deployments(label, "0x1", cleanup, client=client,
+                    operator=OPERATOR, sign=sign, mutate=lambda *a, **kw: ledger.execute(client, *a, **kw),
+                    gas=60_000_000, evidence=evidence)
+            except RuntimeError as error:
+                self.assertIn("429 Too Many Requests", str(error))
+            self.assertEqual(cleanup, [])
+            self.assertEqual(evidence["deployment_cleanup"][0]["deployments"], [deployment])
+            return evidence, ledger, sign, [call.args[0] for call in cli.call_args_list], sleep
+
+    def test_throttled_cleanup_build_recovers_before_one_submission(self):
+        evidence, ledger, sign, calls, sleep = self.run_cleanup([
+            ReadThrottleTests.failure, CompletedProcess([], 0, "unsigned-bytes", ""),
+            CompletedProcess([], 0, json.dumps(effects()), ""),
+        ])
+        self.assertEqual(calls[0], calls[1])
+        self.assertIn("--serialize-unsigned-transaction", calls[0])
+        self.assertIn("@0x1234", calls[0])
+        self.assertIn("execute-signed-tx", calls[2])
+        self.assertEqual(len(calls), 3)
+        sleep.assert_called_once_with(5)
+        sign.assert_called_once_with("unsigned-bytes")
+        self.assertEqual(evidence["transactions"][0]["status"], "success")
+        self.assertEqual(ledger.used, 1_000_000)
+
+    def test_unknown_cleanup_submission_keeps_digest_and_reservation(self):
+        evidence, ledger, sign, calls, sleep = self.run_cleanup([
+            CompletedProcess([], 0, "unsigned-bytes", ""), ReadThrottleTests.failure,
+        ])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("execute-signed-tx", calls[1])
+        sleep.assert_not_called()
+        sign.assert_called_once_with("unsigned-bytes")
+        self.assertEqual(evidence["deployment_cleanup"][0]["expected_digest"], effects()["digest"])
+        self.assertEqual(evidence["transactions"][0]["status"], "unknown")
+        self.assertEqual(ledger.used, 60_000_000)
+
+    def test_exhausted_build_does_not_sign_or_charge(self):
+        evidence, ledger, sign, calls, sleep = self.run_cleanup([ReadThrottleTests.failure] * 5)
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(sleep.call_count, 4)
+        sign.assert_not_called()
+        self.assertNotIn("expected_digest", evidence["deployment_cleanup"][0])
+        self.assertEqual(evidence["transactions"][0]["status"], "not_submitted")
+        self.assertEqual(ledger.used, 0)
+
+
 class ThrottledSubmissionTests(unittest.TestCase):
     """CI run 40315547246: the public fullnode answered a mutating `ptb` with
     HTTP 429 and no digest, an unknown outcome that failed the suite. PTBs are
