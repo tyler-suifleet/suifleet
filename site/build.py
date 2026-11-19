@@ -150,7 +150,7 @@ def render_guide(config):
             out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
                        f'<source src="{media_url("file")}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
-            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="{media_url("fallback" if video.get("fallback") else "file")}">download it</a>.</p></div>')
+            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. <button type="button" data-video-retry>Retry video</button> or <a href="{media_url("fallback" if video.get("fallback") else "file")}">download it</a>.</p></div>')
             out.append(f'<figcaption><span>Optional subtitles (CC) · Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="{media_url("fallback" if video.get("fallback") else "file")}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')

@@ -110,6 +110,13 @@
       video.hidden = true; video.closest("figure").querySelector("[data-video-error]").hidden = false;
     };
     video.addEventListener("error", unavailable);
+    video.closest("figure").querySelector("[data-video-retry]")?.addEventListener("click", () => {
+      video.hidden = false;
+      video.closest("figure").querySelector("[data-video-error]").hidden = true;
+      video.preload = "metadata";
+      video.load();
+      void video.play().catch(() => {});
+    });
     // Source errors do not bubble. Only the last failure exhausts format fallbacks.
     const sources = video.querySelectorAll("source");
     if (sources.length) sources[sources.length - 1].addEventListener("error", unavailable);

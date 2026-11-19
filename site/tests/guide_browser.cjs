@@ -129,7 +129,9 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  await retryPage.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
  await retryPage.locator('#fund [data-video-error]').waitFor();
  missingMedia.clear();
- await retryPage.locator('#fund video').evaluate(async v=>{v.muted=true;v.load();await v.play()});
+ await retryPage.locator('#fund video').evaluate(v=>{v.muted=true});
+ await retryPage.locator('#fund [data-video-retry]').click();
+ await retryPage.waitForFunction(()=>document.querySelector('#fund video').readyState>=2);
  assert.equal(await retryPage.locator('#fund video').evaluate(v=>v.hidden),false);
  assert.equal(await retryPage.locator('#fund [data-video-error]').isVisible(),false);
  await retryPage.close();
