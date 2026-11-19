@@ -110,10 +110,23 @@
       video.hidden = true; video.closest("figure").querySelector("[data-video-error]").hidden = false;
     };
     video.addEventListener("error", unavailable);
+    video.closest("figure").querySelector("[data-video-retry]")?.addEventListener("click", () => {
+      video.hidden = false;
+      video.closest("figure").querySelector("[data-video-error]").hidden = true;
+      video.preload = "metadata";
+      video.load();
+      void video.play().catch(() => {});
+    });
     // Source errors do not bubble. Only the last failure exhausts format fallbacks.
     const sources = video.querySelectorAll("source");
     if (sources.length) sources[sources.length - 1].addEventListener("error", unavailable);
-    if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) unavailable();
+    // An inactive preload=none player can report NETWORK_NO_SOURCE before
+    // source selection. Only real error events establish a failed load.
+    // Successful retries must also recover the player from an earlier error.
+    video.addEventListener("loadedmetadata", () => {
+      video.hidden = false;
+      video.closest("figure").querySelector("[data-video-error]").hidden = true;
+    });
   });
   root.querySelectorAll(".guide-instructions").forEach(list => { list.hidden = true; });
   document.body.classList.add("guide-ready");

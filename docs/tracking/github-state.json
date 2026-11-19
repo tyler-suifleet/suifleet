@@ -1535,6 +1535,13 @@
       "id": 6433487306,
       "node_id": "I_kwDOSXKBE88AAAABf3c5yg",
       "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhJU_FE"
+    },
+    "SF-282": {
+      "number": 790,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/790",
+      "id": 6480409925,
+      "node_id": "I_kwDOSXKBE88AAAABgkM1RQ",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhKAz68"
     }
   }
 }
