@@ -1803,12 +1803,18 @@ class BatchController:
                     self.publish_candidate(project, batch)
                     status = batch['status']
                 if status in ('awaiting_ci','awaiting_review','ready','approving_members'):
-                    self.adopt_approvals(project, batch)
                     from coordinator import checks_blocker, gate
-                    self.validate_members(project, batch)
                     candidate = self.candidate(project, batch)
                     if candidate['state'] != 'OPEN' or candidate.get('isDraft'):
                         raise BatchInvalidated('integration candidate is not open and ready')
+                    if status == 'approving_members':
+                        # An uncertain POST must not pin a candidate after its base
+                        # moves. For a current candidate, adopt before hashing
+                        # member feedback so our own receipt is recognized.
+                        if self.main(project) != batch['base']:
+                            raise BatchInvalidated('integration base changed')
+                        self.adopt_approvals(project, batch)
+                    self.validate_members(project, batch)
                     owner = self.synthetic_owner(batch)
                     review = self.c.store.review(project['id'], batch['pr'])
                     # Published, exact-candidate source findings are actionable
