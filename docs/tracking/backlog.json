@@ -5404,6 +5404,25 @@
         "Publish updated marketing release and verify real-domain playback without claiming physical iPhone testing."
       ],
       "validation": "Browser WebKit and Chromium metadata/playback across all stages, real failure/recovery tests, site unit/build checks and live domain checks. No wallet or chain writes."
+    },
+    {
+      "key": "SF-285",
+      "title": "Authenticate optional deployment skips for the reviewed DNS artifact workflow",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Pin the independently reviewed static-site workflow used by SF-284.",
+      "evidence": "Batch PR #799 and protected Testnet run 45191905225.",
+      "acceptance": [
+        "Authenticate the three eligible deployment skips for the exact reviewed blob only. Preserve all other checks."
+      ],
+      "validation": "Run coordinator regression and combined-main tests."
     }
   ]
 }
