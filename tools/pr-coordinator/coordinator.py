@@ -204,6 +204,8 @@ OPTIONAL_DEPLOYMENT_BLOB = 'a5a5c9aea5d6a6addb7e13187d27ad705c5e395b'
 OPTIONAL_DEPLOYMENT_BLOBS = frozenset((
     OPTIONAL_DEPLOYMENT_BLOB,
     '9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0',
+    # SF-284 adds the DNS download to the offline artifact build.
+    '639a9fdfe76247089caf70f2fbf754bb6c3046ad',
 ))
 OPTIONAL_DEPLOYMENT_JOBS = frozenset(('preview', 'production-preflight', 'production'))
 

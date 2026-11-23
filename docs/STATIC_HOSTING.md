@@ -79,6 +79,10 @@ record real three-origin preview URLs/deployment IDs and digests, check served
 bytes/headers/TLS and rehearse preview rollback. Obtain independent review and
 exact-head CI; obtain explicit production authorization only after those checks.
 
+## Pull request deployment checks
+
+Pull request runs build the static artifacts and skip the protected preview and production jobs. The coordinator verifies skip applicability against the reviewed workflow blob and the exact GitHub run, job, attempt, head and base. If artifact preparation changes the workflow blob, compare the old and new workflow and get the new blob reviewed before adding it to the coordinator policy. After the policy repair is merged and activated, check the current integration candidate and its independent review receipt. Hosted publication and served verification still require the existing preview or production workflow and authorization.
+
 ## Account and workflow setup
 
 Create Direct Upload projects with these names and production branches:
