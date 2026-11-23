@@ -5423,6 +5423,25 @@
         "Authenticate the three eligible deployment skips for the exact reviewed blob only. Preserve all other checks."
       ],
       "validation": "Run coordinator regression and combined-main tests."
+    },
+    {
+      "key": "SF-286",
+      "title": "Recover stale batches after an uncertain member approval",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Validate an integration candidate and its members before adopting an uncertain approval receipt.",
+      "evidence": "Batch PR #803, source PR #798, and the durable uncertain publication receipt.",
+      "acceptance": [
+        "Retire stale candidates through the coordinator. Preserve fail-closed approval reconciliation for current candidates."
+      ],
+      "validation": "Run coordinator regression tests, combined-main checks, and tracking dry run."
     }
   ]
 }
