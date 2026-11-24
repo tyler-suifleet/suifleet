@@ -17,7 +17,10 @@ core-recipe appends is included in the standalone export.
 Standalone consumers must supply equivalent distro fixes/guards and validate
 the resulting builds, or accept unvalidated status and possible build failures.
 The extracted export passed yocto-check-layer on both pinned series, but that
-is not a recipe task-execution build. Before advertising standalone build
+is not a recipe task-execution build. A partial standalone Scarthgap
+`bitbake suifleet` run is recorded in the core repository's
+`docs/validation/SF307.md`; it reused integration-layer shared-state for most
+dependencies and ran no Wrynose build. Before advertising standalone build
 support, build `suifleet`, `suifleet-node` and `suifleet-walrus-codec` from the
 extracted export without meta-suifleet-integration on both pinned series,
 recording any separately supplied distro fixes and package QA results. Do not

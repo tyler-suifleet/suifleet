@@ -25,8 +25,9 @@ The archive runtime's prebuilt Node recipe supports Linux AArch64/glibc only.
 There are no standalone release branches yet; series compatibility is not proof
 that a same-named remote branch exists. No other release/architecture is claimed.
 
-After supplying the distro fixes below, add this directory to BBLAYERS and run
-`bitbake suifleet`; this standalone task-execution path remains unvalidated. Optional archive
+Add this directory to BBLAYERS and run `bitbake suifleet`. One standalone
+core-client build is recorded (Scarthgap only, see below); supply the distro
+fixes below for any other configuration. Optional archive
 packages are `suifleet-node` and `suifleet-walrus-codec`. They are not needed to
 parse the layer or build `suifleet`. Without its five checksum-pinned codec files,
 the codec recipe is skipped with a reason that names the missing files. Requesting
@@ -39,16 +40,23 @@ policy, test components and core-recipe build workarounds. Existing kas profiles
 include both layers. Generic consumers should select their own BSP/distro and
 must not add the integration layer without reviewing its policy.
 
-All recorded recipe builds on both pinned series included that integration
-layer. They applied Scarthgap OpenSSL install serialization
+The recorded Wrynose builds and the earlier Scarthgap builds included that
+integration layer. They applied Scarthgap OpenSSL install serialization
 (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap target-toolchain relink fixes,
 Wrynose xzmore Bash interpreter/runtime-dependency fixes, and the AArch64
 glibc usrmerge loader/linker-script guard. These are not in this export.
 Standalone consumers must supply equivalent distro fixes/guards and validate
 their builds, or accept an unvalidated configuration that may fail. The extracted
-export alone passed yocto-check-layer on both series; no recipe task-execution
-build without the integration layer has been validated. See RELEASE.md before
-claiming standalone build support.
+export alone passed yocto-check-layer on both series. One build without the
+integration layer is recorded in the core repository's `docs/validation/SF307.md`:
+Scarthgap, qemuarm64, poky with systemd/usrmerge, no codec directory and no
+added distro fixes. `bitbake suifleet` succeeded (4463 tasks; the daemon recipe
+executed through `do_package_qa`). Most dependency tasks, including OpenSSL,
+were restored from shared-state built with the integration layer, so this does
+not show that those core recipes build without its fixes. Wrynose has no
+standalone task-execution build, and `suifleet-node`/`suifleet-walrus-codec` were
+built standalone only with a test-only public-input bbappend. See RELEASE.md
+before claiming standalone build support.
 
 Builds contain examples only: no device keys, enrollment configuration, signer
 PINs or journals. Provision identities at runtime. Preserve /etc/suifleet and
