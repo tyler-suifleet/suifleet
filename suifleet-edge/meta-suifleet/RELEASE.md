@@ -1,113 +1,59 @@
-# Standalone release and index submission checklist
+# Release and Layer Index submission
 
-Publication is not performed by the export tool. A release operator needs explicit
-authorization to create/publish a public repository and submit to the index.
-Do not ship an export as customer-installable until the source prerequisites below
-are publicly fetchable without credentials and their checks have passed.
+## Source distributions
 
-## Standalone build validation prerequisite
+The recipes fetch SHA-256-pinned tarballs at immutable Git blob paths in
+[the source-distributions branch](https://github.com/tyler-suifleet/meta-suifleet/tree/source-distributions).
+The daemon archive contains its Cargo files, source, packaging inputs,
+shared interfaces, test fixtures and root MIT license. The codec archive
+contains the five files produced by the core repository's
+`scripts/package_walrus_codec.py`, including third-party notices and
+source provenance.
 
-The recorded successful recipe builds used both the software layer and the core
-repository's meta-suifleet-integration layer. That layer supplied Scarthgap
-OpenSSL install serialization (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap
-target-toolchain relink fixes, Wrynose xzmore Bash interpreter/runtime-dependency
-fixes, and the AArch64 glibc usrmerge loader/linker-script guard. None of these
-core-recipe appends is included in the standalone export.
+For updates, export committed files with `git archive` from reviewed core
+main. Audit the exact file set for private state and credentials before
+publishing. Build the codec from the same commit using that commit's frozen
+pnpm lockfile and Node version. Normalize tar ownership and timestamps and
+compress both archives with `gzip -n`. Publish under new filenames containing
+the full source commit. Verify anonymous downloads and update the two archive
+URLs and SHA-256 values, the source revision and version, the codec file
+hashes and license metadata in the same change. Run BitBake
+`-c update_crates suifleet` and verify the lock digest and generated include.
 
-Standalone consumers must supply equivalent distro fixes/guards and validate
-the resulting builds, or accept unvalidated status and possible build failures.
-The extracted export passed yocto-check-layer on both pinned series, but that
-is not a recipe task-execution build. Before advertising standalone build
-support, build `suifleet`, `suifleet-node` and `suifleet-walrus-codec` from the
-extracted export without meta-suifleet-integration on both pinned series,
-recording any separately supplied distro fixes and package QA results. Do not
-add the integration layer blindly: it also contains board/access/test policy.
+Build `suifleet`, `suifleet-node` and `suifleet-walrus-codec`, and run
+`yocto-check-layer` against the standalone checkout on each advertised series.
+Use a fresh build directory for validation and record the dependency commits,
+compiler, task outcomes and package QA. Keep downstream image access policy
+and distro workarounds in the separate integration layer.
 
-## Source availability and synchronization
+## Layer Index worksheet
 
-The current daemon recipe still fetches the core Git repository at immutable
-SRCREV. Anonymous access to that pinned Cargo.lock was verified on 2026-11-02 and
-matched the recipe digest; the core repository is currently public. This does not
-provide source availability independent of that repository. Before standalone
-public release, publish a reviewed immutable source distribution as follows:
+Use the [OpenEmbedded Layer Index form](https://layers.openembedded.org/layerindex/submit/).
 
-1. Export the complete source tree at SRCREV (including root LICENSE and the
-   suifleet-edge directory), after a credential/private-state audit. Publish it
-   at an immutable versioned HTTPS URL; preserve its SHA-256 and license texts.
-   Do not use a mutable branch archive or a signed/expiring URL.
-2. In a reviewed layer change replace only the Git entry in SRC_URI with that
-   URL plus `;name=edge;subdir=git` for a tarball whose contents are at its root;
-   set `SRC_URI[edge.sha256sum]` to the verified archive hash. Keep SRCREV as
-   source provenance for build-info and keep S pointing at the unpacked git
-   directory. Validate the actual archive layout in both unpack implementations.
-   Never invent a URL/checksum or silently fall back to private credentials.
-3. Verify Cargo.lock against SUIFLEET_LOCK_SHA256 and regenerate
-   suifleet-crates.inc with `bitbake -c update_crates suifleet` at that source.
-   Check SUIFLEET_CRATE_VERSION against Cargo.toml. Commit all coupled pins.
-4. Build the codec at the identical revision with frozen pnpm dependencies using
-   `scripts/package_walrus_codec.py` from the core repository. Publish the five
-   immutable artifacts with all third-party notices. Update the codec recipe's
-   source revision, five SHA-256 values, LICENSE and license md5 together. Either
-   distribute these files for SUIFLEET_WALRUS_CODEC_DIR or implement and test
-   checksum-pinned public fetch entries before advertising archive availability.
-5. Run recipe builds, package QA, image inspection and yocto-check-layer against
-   both pinned series; preserve compiler/layer revisions and artifact hashes.
-   Check anonymous source/artifact downloads from a clean credential-free host.
-   Never bundle runtime identities, config.toml, device.key, PINs or journals.
-
-This publication step is outstanding; existing historical build evidence in the
-core docs is not evidence that a public distribution is downloadable today.
-
-## Reproducible export
-
-From a reviewed, committed core checkout:
-
-```
-python3 scripts/export_yocto_layer.py --revision <full-reviewed-commit> --output /tmp/meta-suifleet.tar.gz
-sha256sum /tmp/meta-suifleet.tar.gz
-```
-
-Only Git blobs in export-files.json are included; untracked and modified working
-files cannot enter the archive. The root is meta-suifleet/, ownership/timestamps
-are normalized, file modes retained and export-provenance.json records the core
-commit plus every file digest. Repeat into another output and compare SHA-256.
-Review additions to the explicit file list as release inputs. Extract into a
-fresh directory; validate that exported layer, not the monorepo path.
-
-## OpenEmbedded Layer Index submission worksheet
-
-Reference: https://layers.openembedded.org/ and the Yocto layer guide at
-https://docs.yoctoproject.org/dev/dev-manual/layers.html .
-
-Current actual repository: https://github.com/tyler-suifleet/suifleet.git;
-current development branch: main; current subdirectory:
-suifleet-edge/meta-suifleet. This is an existing monorepo location, not a
-published standalone repository.
-Do not submit it as evidence of standalone publication.
-
-After authorized standalone publication, fill the form using verified values:
-
-| Field | Value / required verification |
+| Field | Value |
 | --- | --- |
 | Name | meta-suifleet |
 | Layer type | Software |
 | Summary | SuiFleet edge client and isolated signing service |
-| Repository | Actual authorized public standalone Git clone URL; not allocated yet |
-| Web URL | Actual public repository browser URL |
-| Subdirectory | Empty for exported repository root |
-| Branch | Actual published branch for each validated series; none published yet |
-| Dependencies | openembedded-core and meta-openembedded/meta-oe; verify index identities |
+| Repository | https://github.com/tyler-suifleet/meta-suifleet.git |
+| Web URL | https://github.com/tyler-suifleet/meta-suifleet |
+| Subdirectory | Leave empty, the layer is at the repository root |
+| Series branches | scarthgap and wrynose, after checking both remote refs and their build receipts |
+| Dependencies | openembedded-core and meta-oe |
 | Maintainer | Tyler Bush, tyler.jonathan.bush@gmail.com |
-| License | MIT metadata; recipe payloads retain their own licenses |
+| License | MIT metadata, with recipe-specific payload licenses |
 
-Create scarthgap/wrynose branches only after each exact branch has build/check
-receipts; do not submit master/main as proof of both. Verify remote IDs and
-anonymous clone, then submit and record the real resulting listing URL and
-maintainer acceptance in SF-230/#518. No repository or listing is claimed here.
+Record submission confirmation and the listing URL separately in
+[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820).
+The Index entry and optional Yocto Project Compatible certification have
+separate requirements.
 
-`yocto-check-layer /absolute/path/meta-suifleet --dependency /path/meta-oe`
-(with the release's build environment initialized) is a compatibility test,
-not index publication. Include required Rust mixin and codec artifact path in
-that environment. Keep any failures explicit. Optional Yocto Project Compatible
-branding has a separate application/eligibility process; an index listing or
-passing script grants no logo rights.
+## Core mirror
+
+The core checkout retains a copy of the software-layer files used by its
+packaging tests and native Linux installation instructions. Export committed
+layer files with the core script
+`python3 scripts/export_yocto_layer.py --revision <commit> --output <new-archive>`.
+The script uses the explicit file inventory and emits core-commit and per-file
+hash provenance. Diff release metadata against that inventory when updating
+the downstream kas pins.

@@ -313,9 +313,10 @@ class RecipeTests(unittest.TestCase):
         self.assertIn('RDEPENDS:${PN} = "suifleet-node (= ${SUIFLEET_CODEC_NODE_VERSION})"', CODEC)
         self.assertIn('addtask verify_codec after do_unpack before do_populate_lic do_configure', CODEC)
         self.assertRegex(CODEC, r'LIC_FILES_CHKSUM = "file://THIRD_PARTY_LICENSES\.txt;md5=[0-9a-f]{32}"')
-        self.assertIn('SUIFLEET_WALRUS_CODEC_DIR ??= "${TOPDIR}/suifleet-walrus-codec/${SUIFLEET_CODEC_SOURCE_REV}"', CODEC)
-        source = re.search(r'^SRC_URI = "([^"]*)"', CODEC, re.M | re.S).group(1)
-        self.assertEqual(re.findall(r'file://([^;\s]+)', source), codec.ARTIFACTS)
+        self.assertRegex(CODEC, r'SRC_URI = "https://raw\.githubusercontent\.com/tyler-suifleet/meta-suifleet/[0-9a-f]{40}/suifleet-walrus-codec-\$\{SUIFLEET_CODEC_SOURCE_REV\}\.tar\.gz;subdir=codec"')
+        self.assertRegex(CODEC, r'SRC_URI\[sha256sum\] = "[0-9a-f]{64}"')
+        self.assertNotIn('SUIFLEET_WALRUS_CODEC_DIR', CODEC)
+        self.assertEqual(sorted(codec.recipe_pins(CODEC)[1]), sorted(codec.ARTIFACTS))
 
     def test_installed_paths_match_configuration_examples(self):
         example = (LAYER/'recipes-edge/suifleet/files/config.toml.example').read_text()
@@ -334,6 +335,8 @@ class RecipeTests(unittest.TestCase):
     def test_daemon_pins_are_immutable_and_consistent(self):
         self.assertRegex(var(DAEMON, 'SRCREV'), '^[0-9a-f]{40}$')
         self.assertNotIn('AUTOREV', DAEMON)
+        self.assertRegex(DAEMON, r'https://raw\.githubusercontent\.com/tyler-suifleet/meta-suifleet/[0-9a-f]{40}/suifleet-edge-\$\{SRCREV\}\.tar\.gz;subdir=source;name=edge')
+        self.assertRegex(DAEMON, r'SRC_URI\[edge\.sha256sum\] = "[0-9a-f]{64}"')
         self.assertRegex(var(DAEMON, 'SUIFLEET_LOCK_SHA256'), '^[0-9a-f]{64}$')
         self.assertRegex(var(DAEMON, 'SUIFLEET_CRATE_VERSION'), r'^\d+\.\d+\.\d+$')
         self.assertIn("'${SUIFLEET_CRATE_VERSION}' > ${D}${datadir}/suifleet/build-info", DAEMON)
