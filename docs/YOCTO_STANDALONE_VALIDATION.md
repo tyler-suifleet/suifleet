@@ -3,6 +3,10 @@
 These are software build/export results,
 not physical, production-provider, mainnet or public-distribution acceptance.
 
+The daemon source-archive builder and the layer source/pin audit, with their
+anonymous-fetch results, are in
+[Yocto source distributions](YOCTO_SOURCE_DISTRIBUTION.md) (SF-306).
+
 ## Export and offline checks
 
 `INSIDE_DEV_CONTAINER=1 make test-yocto-packaging` passed all 44 tests
