@@ -1875,3 +1875,42 @@ reopened, foreign or merged candidates are retained. Automatic testnet, live gat
 release and unknown workflows are never canceled by this cleanup. Other repositories
 require their own offline-workflow audit before joining this allowlist. These receipts
 change neither reviews nor acceptance results.
+
+
+## Independent scheduling lanes
+
+Enable `parallel_pipeline: true` in the private coordinator configuration after
+activating the compatible committed-main runtime. The existing service supervises
+separate processes for each batched project:
+
+- **Source:** reads eligible source PRs and dispatches independent reviews.
+- **Completion:** collects worker results, publishes reviews and completes repair
+  ownership handoffs every 15 seconds when its previous pass has finished.
+- **CI:** performs bounded hosted-runner/shared-acceptance recovery independently
+  of review threads and merge scans, on a two-minute cadence.
+- **Integration:** advances batches, dispatches candidate reviews/source repairs,
+  reconciles merged issues and serially publishes main, on a 30-second cadence.
+
+A cadence includes processing time. These are independent polling loops, not a
+promise that a slow GitHub request completes within that interval. Projects that
+have not enabled batches keep their existing combined loop in a separate process;
+one project's slow scan no longer stops another project. Existing integration
+candidates are fetched and advanced before unrelated source snapshots; each batch
+is advanced at most once per pass.
+
+Each process owns its own SQLite connection and an exclusive project/lane lock.
+Shared transactional job reservations preserve worker limits and prevent duplicate
+PR workers. Only the integration lane selects/reserves batches and publishes main;
+source dispatch respects durable member reservations. Existing exact-head/base,
+feedback, independent review, CI/testnet, claim and wallet protections still apply.
+The source and reconciliation fetches use private refs rather than shared
+`FETCH_HEAD`. Private state receipts are under
+`~/.local/state/pr-coordinator/PROJECT/lanes/ROLE.json`; they record PID, runtime,
+phase and last completed pass, with no credentials or claim tokens.
+
+The supervisor retries an exited lane after 30 seconds. Stopping/restarting the
+service terminates its scheduling children while preserving model workers and
+durable results. Linux parent-death signalling also stops scheduling children if
+the supervisor is killed abruptly. Keep the existing `KillMode=process` unit.
+Disabling `parallel_pipeline` and restarting restores the combined loop; retained
+jobs, batch reservations and merge evidence stay in the same database.
