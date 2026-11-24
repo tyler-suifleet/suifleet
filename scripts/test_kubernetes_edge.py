@@ -91,7 +91,7 @@ class Cluster:
             "--write-kubeconfig-mode=600",
             # A nearly full development disk must not taint the disposable node
             # with disk-pressure; this changes only the test node's eviction.
-            "--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%",
+            "--kubelet-arg=eviction-hard=imagefs.available<512Mi,nodefs.available<512Mi",
             "--kubelet-arg=image-gc-high-threshold=99", "--kubelet-arg=image-gc-low-threshold=98",
             timeout=300)
         port = run("docker", "port", self.name, "6443/tcp").stdout.split(":")[-1].strip()
@@ -326,7 +326,18 @@ def scenario(cluster, work, supervisor):
     check("workload keeps running after the client stops",
           cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.status.availableReplicas}").stdout == "1")
 
+    # Removal deletes only this component's objects in its namespace.
+    result = helper("remove", profiles, extra=("--component", COMPONENT))
+    remaining = cluster.admin("get", "deployments,configmaps,services", "-n", NAMESPACE, "-l",
+                              f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip()
+    check("remove deletes the component's objects", result.returncode == 0 and remaining == "", result.stderr + remaining)
+    check("remove leaves the customer's own object", cluster.admin("get", "configmap", "legacy", "-n", NAMESPACE, ok=False).returncode == 0)
+    check("objects in other namespaces were never touched",
+          cluster.admin("get", "configmap", "decoy", "-n", "default", ok=False).returncode == 0)
+
     if supervisor:
+        # The supervisor fixture's component is named "app": it must not (and
+        # cannot) adopt the removed "web-app" objects, so it starts clean.
         bad = variant(work, "broken", "broken", extra_configmap="bad-extra", image=MISSING_IMAGE)
         env = dict(os.environ, SF_K8S_HELPER=str(HELPER), SF_K8S_PROFILE_ROOT=str(profiles),
                    SF_K8S_BUNDLE_GOOD=str(v1), SF_K8S_BUNDLE_BAD=str(bad), RUSTUP_TOOLCHAIN="1.94.0")
@@ -341,14 +352,10 @@ def scenario(cluster, work, supervisor):
         wait("v1 content after supervisor rollback", lambda: "SuiFleet v1" in served(cluster), timeout=90)
         check("service serves v1 content after supervisor rollback", True)
 
-    # Removal deletes only this component's objects in its namespace.
-    result = helper("remove", profiles, extra=("--component", COMPONENT))
-    remaining = cluster.admin("get", "deployments,configmaps,services", "-n", NAMESPACE, "-l",
-                              f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip()
-    check("remove deletes the component's objects", result.returncode == 0 and remaining == "", result.stderr + remaining)
-    check("remove leaves the customer's own object", cluster.admin("get", "configmap", "legacy", "-n", NAMESPACE, ok=False).returncode == 0)
-    check("objects in other namespaces were never touched",
-          cluster.admin("get", "configmap", "decoy", "-n", "default", ok=False).returncode == 0)
+        result = helper("remove", profiles, extra=("--component", "app"))
+        remaining = cluster.admin("get", "deployments,configmaps,services", "-n", NAMESPACE, "-l",
+                                  "app.kubernetes.io/managed-by=suifleet", "-o", "name").stdout.strip()
+        check("remove deletes the supervised component's objects", result.returncode == 0 and remaining == "", remaining)
 
 
 def main():
@@ -370,6 +377,12 @@ def main():
         except Exception as caught:  # Report, then always clean up.
             error = caught
             print(f"ERROR: {caught!r}", flush=True)
+            try:  # Cluster-side context for the failure (no credentials).
+                for query in (("describe", "nodes"), ("get", "pods", "-A", "-o", "wide"),
+                              ("get", "events", "-n", NAMESPACE, "--sort-by=.lastTimestamp")):
+                    print(cluster.admin(*query, ok=False).stdout[-3000:], flush=True)
+            except Exception as diagnostic:  # noqa: BLE001 - best effort only
+                print(f"(diagnostics unavailable: {diagnostic!r})", flush=True)
         finally:
             cluster.stop()
     report = {"ticket": "SF-305", "k3s_image": K3S_IMAGE, "seconds": round(time.time() - started),
