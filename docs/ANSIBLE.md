@@ -33,7 +33,9 @@ The role stops before changing anything on these hosts:
   ([key isolation](KEY_ISOLATION.md)).
 - **Other architectures.** Only x86_64 and aarch64 have packaged clients.
 - **`deb` on an untested distribution.** This needs
-  `suifleet_allow_untested_distribution: true`.
+  `suifleet_allow_untested_distribution: true`. Releases match exactly:
+  Debian `12` covers its 12.x point releases, while Ubuntu `24.04` excludes
+  24.10 and other non-LTS releases (`suifleet_deb_distributions`).
 
 Yocto devices get the client from the image recipe
 ([Yocto guide](CUSTOMER_YOCTO.md)), not from Ansible. macOS has its own
@@ -55,7 +57,9 @@ suifleet --verify-release /srv/suifleet/release-0.2.3 /etc/suifleet/release-trus
 
 Copy each artifact's SHA-256 from that verified `release.json` into the
 inventory (`suifleet_deb_sha256`). The role checks the SHA-256 on the
-controller, then checks the copy on each host, before installing. For
+controller, then stages the artifact under `/var/cache/suifleet` and checks
+the staged copy on each host before installing. A binary replaces
+`/usr/bin/suifleet` only after its staged copy matches. For
 `systemd-binary`, extract the binary from the verified tarball and pin its own
 SHA-256 (`suifleet_binary_sha256`). Point `suifleet_units_src` at the reviewed
 `suifleet-edge/meta-suifleet/recipes-edge/suifleet/files` directory of the same
@@ -134,7 +138,17 @@ Keys, address, enrollment record, configuration and journal are preserved.
 one host at a time. It checks health and that the address did not change.
 
 **Idempotence.** Rerunning `site.yml` on converged hosts reports no changes.
-Check mode reports pending installs and enrollments without performing them.
+Check mode reports pending installs, upgrades and enrollments without
+performing them; an upgrade preview leaves the installed bytes, package and
+running services untouched.
+
+**Interrupted runs.** Restarts are not tied only to the current run's changes.
+Before starting services, the role checks each running SuiFleet service on the
+host: a process whose executable was replaced, whose unit files changed, or
+that started before the files it reads (`suifleet_signer_inputs`,
+`suifleet_daemon_inputs`) is restarted. A rollout that stopped after its files
+landed but before the restarts therefore converges on the next run, and the
+health check fails while a service still runs replaced inputs.
 
 ## Security properties
 
@@ -162,7 +176,8 @@ Check mode reports pending installs and enrollments without performing them.
 ## Recovery
 
 - **A failed batch stops the rollout.** Fix the cause, then run `site.yml`
-  again. Completed hosts report no changes.
+  again. Completed hosts report no changes; hosts whose services still run
+  replaced inputs are restarted.
 - **Interrupted enrollment.** If enrollment ran on chain but the record was
   not written, `/etc/suifleet/.enrollment.json.partial` may hold its public
   output. The Enrollment page also shows the device as *Enrolled*, with its IDs
@@ -198,21 +213,30 @@ namespace:
 
 The harness checks these phases:
 
-1. Refusal of the host without systemd.
-2. Check mode on fresh hosts changes nothing.
-3. Install, on-device identity, enrollment, configuration and start, in three
+1. Profile selection with injected facts: Debian 12.x and Ubuntu 24.04 select
+   `deb`; Ubuntu 24.10 and Debian 13 are refused for `deb` unless explicitly
+   allowed.
+2. Refusal of the host without systemd.
+3. Check mode on fresh hosts changes nothing.
+4. Install, on-device identity, enrollment, configuration and start, in three
    rollout batches.
-4. A rerun with the credential batch deleted reports `changed=0`, and so does
+5. A rerun with the credential batch deleted reports `changed=0`, and so does
    check mode.
-5. Package and binary upgrade, then a rerun with `changed=0`.
-6. Rolling restart.
+6. An upgrade preview in check mode leaves bytes, package versions and service
+   processes unchanged.
+7. Package and binary upgrade, then a rerun with `changed=0`.
+8. An interrupted binary/configuration rollout: the files land but no restart
+   runs. The retry must restart the stale services onto the installed binary
+   and configuration, then a rerun reports `changed=0`.
+9. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that
 device's own claim, with the DeviceCap owned by the device and the
 DeviceOwnerCap by the operator. It also checks claim erasure, file modes, no
 leftover Ansible temporary files, and that no device or claim key appears in
-Ansible output, controller files or host journals.
+Ansible output, controller files or host journals. The scanners receive keys
+on standard input, never as process arguments.
 
 **Limits.** The containers are not physical targets. They share the host
 kernel (Linux 6.6 on the test host), and arm64 was not run. The harness checks
@@ -224,8 +248,12 @@ Mainnet and production-provider acceptance stay in SF-087
 ([#159](https://github.com/tyler-suifleet/suifleet/issues/159)). Production
 hosting and signing stay in SF-042 ([#62](https://github.com/tyler-suifleet/suifleet/issues/62)).
 
-**Recorded run (2026-11-24).** `scripts/test_ansible.py` passed every phase with
-ansible-core 2.20.11 and client 0.2.3 (debug build, stripped). Converged
-reruns and check mode reported `changed=0` on all three hosts. The three
-enrollments succeeded on the disposable chain, each paid by its own claim.
-The run used no public network or testnet funds.
+**Recorded run (2026-11-24, after review repair).** `scripts/test_ansible.py`
+passed every phase with ansible-core 2.20.11 and client 0.2.3 (debug build,
+stripped): the six preflight cases, the upgrade preview (bytes, package
+versions and service PIDs unchanged), the interrupted rollout and its retry
+(both services on the binary-profile host and the daemons on the `deb` hosts
+restarted onto the installed inputs), and converged reruns and check mode with
+`changed=0` on all three hosts. The three enrollments succeeded on the
+disposable chain, each paid by its own claim. The run used no public network
+or testnet funds.
