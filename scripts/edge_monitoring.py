@@ -17,6 +17,7 @@ import argparse
 import collections
 import hashlib
 import hmac
+import http.client
 import http.server
 import ipaddress
 import json
@@ -326,6 +327,11 @@ class ConsoleError(Exception):
         self.status = status
 
 
+# Transport failures, including a truncated or malformed HTTP response
+# (http.client.IncompleteRead/BadStatusLine are HTTPException, not OSError).
+_IO_ERRORS = (OSError, ValueError, http.client.HTTPException)
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -344,9 +350,13 @@ class Console:
             with self.opener.open(request, timeout=self.timeout) as response:
                 data = response.read(MAX_CONSOLE_RESPONSE + 1)
         except urllib.error.HTTPError as error:
-            data = error.read(MAX_CONSOLE_RESPONSE + 1)
-            error.close()
-        except (OSError, ValueError):
+            try:
+                data = error.read(MAX_CONSOLE_RESPONSE + 1)
+            except _IO_ERRORS:
+                raise ConsoleError("unreachable") from None
+            finally:
+                error.close()
+        except _IO_ERRORS:
             raise ConsoleError("unreachable") from None
         if len(data) > MAX_CONSOLE_RESPONSE:
             raise ConsoleError("too-large")
@@ -710,7 +720,7 @@ class Transport:
             if value and value.strip().isdigit():
                 retry_after = int(value.strip())
             error.close()
-        except (OSError, ValueError):
+        except _IO_ERRORS:
             status, data = None, b""
         if status is not None and 200 <= status < 300:
             rejected = _partial_rejected(data, signal_name)

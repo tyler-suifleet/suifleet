@@ -27,6 +27,20 @@ import edge_monitoring as em  # noqa: E402
 CONSOLE_TOKEN = "sfc_" + "A" * 43
 
 
+def send_truncated(handler, status):
+    """Start a chunked reply, then close mid-chunk so the client's body read
+    raises http.client.IncompleteRead (a transient transport failure)."""
+    handler.protocol_version = "HTTP/1.1"
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Transfer-Encoding", "chunked")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.wfile.write(b"100\r\n{\"version\":1")
+    handler.wfile.flush()
+    handler.close_connection = True
+
+
 class FakeConsole:
     def __init__(self):
         self.health = dict(health="degraded", reasons=["svc exited"], daemon_version="0.2.9", started_ms=1000,
@@ -44,6 +58,7 @@ class FakeConsole:
         self.logs = {"svc": ["one", "two"]}
         self.requests = []
         self.status = None
+        self.truncate = []          # queued HTTP statuses answered with a truncated body
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
         self.server = server
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -63,6 +78,8 @@ class FakeConsole:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 fake.requests.append((dict(self.headers), body))
+                if fake.truncate:
+                    return send_truncated(self, fake.truncate.pop(0))
                 if self.headers.get("Authorization") != "Bearer " + CONSOLE_TOKEN:
                     return self.reply(401, dict(version=1, status="unauthenticated"))
                 if fake.status:
@@ -100,6 +117,7 @@ class FakeCollector:
         self.require = require
         self.received = []
         self.responses = []         # queued (status, headers, body); default 200
+        self.truncate = []          # queued HTTP statuses answered with a truncated body
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
         self.server = server
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -118,6 +136,10 @@ class FakeCollector:
 
             def do_POST(self):
                 body = self.rfile.read(int(self.headers["Content-Length"]))
+                if fake.truncate:
+                    status = fake.truncate.pop(0)
+                    fake.received.append((self.path, dict(self.headers), json.loads(body), status))
+                    return send_truncated(self, status)
                 if fake.require and self.headers.get("Authorization") != fake.require:
                     status, headers, reply = 401, {}, b""
                 elif fake.responses:
@@ -352,6 +374,40 @@ class AdapterTests(Base):
         self.assertNotIn("suifleet_device_healthy", text)
         self.assertIn("suifleet_exporter_last_success_timestamp_seconds", text)
 
+    def test_truncated_console_response_withdraws_health_and_recovers(self):
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+        for status in (200, 503):                       # success body and HTTPError body paths
+            self.console.truncate = [status]
+            self.assertFalse(exporter.poll(console))
+            text = exporter.render_prometheus().decode()
+            self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 0', text)
+            self.assertNotIn("suifleet_device_healthy", text)
+        self.assertEqual(exporter.polls["unreachable"], 2)
+        self.assertTrue(exporter.poll(console))         # console recovers on the next poll
+        self.assertIn('suifleet_device_healthy{evidence="simulated",device="sim-1"} 0',
+                      exporter.render_prometheus().decode())
+
+    def test_truncated_log_response_is_counted(self):
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
+                                           logs=dict(components=["svc"], max_lines=10))
+        self.assertTrue(exporter.poll(console))
+        self.console.logs["svc"] = ["one", "two", "three"]
+        real_call = console.call
+        calls = []
+
+        def call(operation, **fields):
+            if operation == "logs" and not calls:
+                calls.append(operation)
+                self.console.truncate = [200]
+            return real_call(operation, **fields)
+        console.call = call
+        self.assertTrue(exporter.poll(console))
+        self.assertEqual(exporter.polls["logs-unreachable"], 1)
+        self.assertEqual(len(exporter.log_buffer), 2)   # nothing new buffered from the truncated read
+        self.assertTrue(exporter.poll(console))
+        self.assertEqual([line for _, _, line in exporter.log_buffer], ["one", "two", "three"])
+
     def test_wrong_console_token_counts_unauthenticated(self):
         cfg, exporter, _ = self.make()
         self.assertFalse(exporter.poll(em.Console(cfg.console_url, "sfc_" + "B" * 43)))
@@ -448,6 +504,30 @@ class AdapterTests(Base):
         for _, sent_headers, body, _ in collector.received:
             self.assertNotIn("abc123", json.dumps(body))
             self.assertNotIn("otlp-secret", json.dumps(body))
+
+    def test_truncated_collector_response_retries_and_keeps_logs(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=2, max_backoff_seconds=8),
+            logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        now = [0.0]
+        transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
+        exporter.poll(console)
+        for status in (200, 503):                       # success body and HTTPError paths
+            collector.truncate = [status, status]
+            em.export_once(exporter, transport)
+            self.assertFalse(transport.ready("metrics"))
+            self.assertFalse(transport.ready("logs"))
+            self.assertEqual(len(exporter.log_buffer), 2)   # retained for retry
+            now[0] += 100
+        self.assertEqual(exporter.otlp_results[("metrics", "unreachable")]
+                         + exporter.otlp_results[("metrics", "retry")], 2)
+        self.assertEqual(transport.failures["logs"], 2)
+        em.export_once(exporter, transport)             # collector recovers
+        self.assertEqual(len(exporter.log_buffer), 0)
+        self.assertEqual(exporter.log_records["exported"], 2)
+        self.assertEqual(exporter.backoff["metrics"], 0.0)
 
     def test_otlp_unauthorized_backs_off(self):
         collector = FakeCollector(require="Bearer right")
