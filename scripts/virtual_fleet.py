@@ -242,13 +242,24 @@ def scenario(args, root, telemetry, summary, manifest, operator, client, transac
         wait_for(lambda: read() == expected, f"{record}: expected authoritative receipts {expected}",
                  timeout=args.receipt_timeout)
         entry = {"id": record, "case": case, "statuses": expected}
-        for name in (("ReceiptsKey", "RolloutHealthKey") if health else ("ReceiptsKey",)):
-            wait_for(lambda: field(record, name), f"{record}: {name} not indexed")
-            data = field(record, name)
-            if name == "RolloutHealthKey":
+        if health:
+            expected_health = dict.fromkeys(expected, True)
+
+            def rollout_health():
+                data = field(record, "RolloutHealthKey")
+                if not data:
+                    return {}
                 sample = data["content"]["fields"]["value"]["fields"]
-                healthy = {dm.object_id(d): ok for d, ok in zip(sample["devices"], sample["healthy"], strict=True)}
-                require(healthy == dict.fromkeys(expected, True), f"{record}: unexpected rollout health {healthy}")
+                return {dm.object_id(device): healthy for device, healthy in
+                        zip(sample["devices"], sample["healthy"], strict=True)}
+
+            wait_for(lambda: rollout_health() == expected_health,
+                     f"{record}: expected rollout health {expected_health}", timeout=args.receipt_timeout)
+            observed_health = rollout_health()
+            require(observed_health == expected_health, f"{record}: unexpected rollout health {observed_health}")
+
+        for name in (("ReceiptsKey", "RolloutHealthKey") if health else ("ReceiptsKey",)):
+            data = field(record, name)
             object_id = data["objectId"]
             obj = dm.rpc(rpc, "sui_getObject", [object_id, {"showPreviousTransaction": True}])
             digest = obj["data"]["previousTransaction"]
@@ -469,7 +480,9 @@ def execute(args):
                     def has_checkpoint():
                         try:
                             chain = dm.chain_facts(rpc)["chain_identifier"]
-                        except ValueError:
+                        except ValueError as error:
+                            if not str(error).startswith("chain read failed:"):
+                                raise
                             return False
                         require(chain not in {"4c78adac", "35834a8a"}, "public chain rejected")
                         return True
@@ -510,7 +523,7 @@ def main():
         return 0
     if args.workspace is None:
         parser.error("--workspace is required for a fleet run")
-    signal.signal(signal.SIGTERM, lambda *_: signal.raise_signal(signal.SIGINT))
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         execute(args)
     except KeyboardInterrupt:
