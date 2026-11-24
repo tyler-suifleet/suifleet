@@ -48,7 +48,8 @@ class EdgePlatforms(unittest.TestCase):
         for profile, check, reason in (
             ("linux-amd64-musl-5.15", "isolated-signer", "SF-292/#818"),
             ("yocto-kirkstone", "image-build", "SF-295/#820"),
-            ("yocto-dunfell", "image-build", "SF-295/#820"),
+            ("yocto-dunfell", "image-build", "SF-295/#820 strict log ingestion"),
+            ("linux-legacy-target", "strict-log-ingestion", "SF-296/#830 strict log ingestion"),
             ("missing-profile", "ota-simulator", "available profiles"),
         ):
             with self.subTest(profile=profile):
