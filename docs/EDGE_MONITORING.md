@@ -157,7 +157,7 @@ the two apart.
 | `suifleet_exporter_info{adapter_version}` | gauge | Adapter version. |
 | `suifleet_exporter_polls_total{result}` | counter | Console reads by result (`ok`, `unreachable`, `unauthenticated`, `denied`, `unavailable`, `malformed`, and `logs-…` for log reads). |
 | `suifleet_exporter_last_success_timestamp_seconds` | gauge | Last successful console read. |
-| `suifleet_exporter_otlp_exports_total{signal,result}` | counter | OTLP posts by `metrics`/`logs` and `ok`, `rejected`, `retry`, `unauthorized` or `unreachable`. |
+| `suifleet_exporter_otlp_exports_total{signal,result}` | counter | OTLP posts by `metrics`/`logs` and `ok`, `invalid_response` (accepted, but the partial-success count was not a nonnegative int64; the batch is not resent and counts as exported), `rejected`, `retry`, `unauthorized` or `unreachable`. |
 | `suifleet_exporter_otlp_backoff_seconds{signal}` | gauge | Current retry delay; 0 when healthy. |
 | `suifleet_exporter_log_records_total{result}` | counter | Log lines `exported`, `dropped` from the full buffer or `rejected` by the collector. |
 | `suifleet_exporter_log_gaps_total` | counter | Polls whose tail did not overlap the previous one, so lines may have been missed. |

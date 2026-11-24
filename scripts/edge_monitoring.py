@@ -747,6 +747,11 @@ class Transport:
         if status is not None and 200 <= status < 300:
             rejected = _partial_rejected(data, signal_name)
             self._success(signal_name)
+            if rejected is _INVALID:
+                # Accepted (2xx) but the partial-success count is unusable:
+                # count the reply, never resend, report no rejected records.
+                self._record(signal_name, "invalid_response")
+                return ("ok", None)
             self._record(signal_name, "ok")
             return ("ok", rejected)
         if status in (400, 413, 422):
@@ -781,22 +786,36 @@ class Transport:
             self.exporter.backoff[signal_name] = round(delay, 3)
 
 
+_MAX_OTLP_COUNT = 2 ** 63 - 1                 # OTLP int64 counts
+_INVALID = object()
+
+
 def _partial_rejected(data, signal_name):
+    """Rejected count from an OTLP partial-success reply.
+
+    None when the reply carries no count; _INVALID when it is not a
+    nonnegative int64 (OTLP JSON encodes int64 as a number or decimal string).
+    """
     if not data or len(data) > MAX_OTLP_RESPONSE:
         return None
     try:
         parsed = json.loads(data)
-    except ValueError:
-        return None
+    except (ValueError, RecursionError):
+        return _INVALID
     partial = parsed.get("partialSuccess") if isinstance(parsed, dict) else None
-    if not isinstance(partial, dict):
+    if partial is None:
         return None
+    if not isinstance(partial, dict):
+        return _INVALID
     key = "rejectedDataPoints" if signal_name == "metrics" else "rejectedLogRecords"
     value = partial.get(key)
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
+    if value is None:
         return None
+    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,19}", value):
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= _MAX_OTLP_COUNT:
+        return _INVALID
+    return value
 
 
 def export_once(exporter, transport, signals=("metrics", "logs")):
