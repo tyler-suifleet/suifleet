@@ -295,9 +295,9 @@ def run(bin_dir, evidence_path):
 
             secrets_dir = root / 'monitoring'
             secrets_dir.mkdir(mode=0o700)
-            token_file = secrets_dir / 'console.token'
-            token_file.write_text(monitor['token'] + '\n')
-            token_file.chmod(0o600)
+            console_auth_path = secrets_dir / 'console.token'
+            console_auth_path.write_text(monitor['token'] + '\n')
+            console_auth_path.chmod(0o600)
             scrape_token = json.loads(subprocess.run([sys.executable, str(ADAPTER), '--token'], capture_output=True,
                                                      text=True, check=True).stdout)
             scrape_file = secrets_dir / 'scrape.token'
@@ -326,7 +326,7 @@ def run(bin_dir, evidence_path):
             assert result.returncode == 0 and 'disabled' in result.stderr, result
             assert not listening(metrics_port), 'disabled adapter listened'
             unsafe = adapter_config('unsafe.json', enabled=True, evidence='simulated',
-                                    console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(token_file)),
+                                    console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(console_auth_path)),
                                     prometheus=dict(listen=f'0.0.0.0:{metrics_port}', allow_remote=True))
             result = subprocess.run([sys.executable, str(ADAPTER), '--config', str(unsafe)], capture_output=True,
                                     text=True, timeout=30)
@@ -359,7 +359,7 @@ def run(bin_dir, evidence_path):
             adapter_port = free_port()
             adapter_cfg = adapter_config('monitoring.json', enabled=True, evidence='simulated', device='sim-device-1',
                 interval_seconds=10,
-                console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(token_file)),
+                console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(console_auth_path)),
                 prometheus=dict(listen=f'127.0.0.1:{adapter_port}', token_sha256=scrape_digest),
                 otlp=dict(endpoint=f'http://127.0.0.1:{gateway.port}', headers_file=str(headers_file),
                           timeout_seconds=2, initial_backoff_seconds=1, max_backoff_seconds=4),
@@ -431,7 +431,7 @@ def run(bin_dir, evidence_path):
             wrong_headers.chmod(0o600)
             wrong_port = free_port()
             wrong_cfg = adapter_config('wrong.json', enabled=True, evidence='simulated', interval_seconds=10,
-                console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(token_file)),
+                console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(console_auth_path)),
                 prometheus=dict(listen=f'127.0.0.1:{wrong_port}'),
                 otlp=dict(endpoint=f'http://127.0.0.1:{gateway.port}', headers_file=str(wrong_headers)))
             processes['wrong'] = subprocess.Popen([sys.executable, str(ADAPTER), '--config', str(wrong_cfg)],
