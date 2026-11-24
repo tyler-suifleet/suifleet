@@ -2,7 +2,7 @@
 
 The class must stay opt-in (no layer-wide inclusion, so yocto-check-layer
 signatures are unchanged), act only on its named recipes/series/variants, and
-remain free of board, access and QA policy.
+remain the single definition shared by the integration layer's bbappends.
 Real BitBake builds are recorded in docs/YOCTO_STANDALONE_VALIDATION.md.
 """
 import json
@@ -101,6 +101,15 @@ class CoreFixClassTests(unittest.TestCase):
         for bpn in ('glibc', 'systemd', 'suifleet', 'openssl3', 'xz-utils', 'libcap-ng', ''):
             for series in ('scarthgap', 'wrynose', ''):
                 self.assertEqual(anonymous_changes(bpn, series), [], (bpn, series))
+
+    def test_integration_layer_reuses_the_single_definition(self):
+        for recipe in ('openssl', 'libcap', 'xz'):
+            append = INTEGRATION / f'recipes-support/{recipe}/{recipe}_%.bbappend'
+            self.assertEqual(code_lines(append), ['inherit suifleet-core-fixes'], append)
+        # The glibc layout guard is local cache hygiene, not a standalone fix.
+        glibc = (INTEGRATION / 'recipes-core/glibc/glibc_%.bbappend').read_text()
+        self.assertIn('bbfatal', glibc)
+        self.assertNotIn('glibc', '\n'.join(code_lines(CLASS)))
 
 
 if __name__ == '__main__':
