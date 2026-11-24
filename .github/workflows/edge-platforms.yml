@@ -1,0 +1,66 @@
+name: Edge platform compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  current-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Record host profile and test compatibility diagnostics
+        run: |
+          uname -a
+          getconf GNU_LIBC_VERSION
+          systemctl --version
+          python3 scripts/test_edge_platform.py
+          python3 scripts/edge_platform.py linux-amd64-systemd --require-check ota-simulator
+      - name: Build and exercise the default GNU/Linux daemon
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml \
+            --bin suifleet --example grpc_sim_shim
+          python3 scripts/test_ota.py
+
+  legacy-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    container:
+      image: rust:1.94.0-slim@sha256:f7bf1c266d9e48c8d724733fd97ba60464c44b743eb4f46f935577d3242d81d0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install VM tools and obtain the pinned Jammy GA kernel
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends -y busybox-static cpio curl musl-tools python3 qemu-system-x86
+          dpkg-query -W busybox-static musl-tools qemu-system-x86
+          package=linux-image-5.15.0-25-generic_5.15.0-25.25_amd64.deb
+          curl --fail --silent --show-error --location --retry 3 --output "/tmp/$package" \
+            "https://archive.ubuntu.com/ubuntu/pool/main/l/linux-signed/$package"
+          echo "ad56f8c442a54d4f5ff2dff010d00321d53e32b543f3a92f3ba4e042d20a71da  /tmp/$package" | sha256sum --check
+          dpkg-deb -x "/tmp/$package" /tmp/legacy-kernel
+      - name: Build the musl daemon without systemd notification
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: |
+          rustc --version
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --locked --manifest-path suifleet-edge/Cargo.toml \
+            --bin suifleet --no-default-features --target x86_64-unknown-linux-musl
+      - name: Boot Linux 5.15 and run the daemon inside the guest
+        run: |
+          scripts/test_edge_legacy_vm.sh \
+            suifleet-edge/target/x86_64-unknown-linux-musl/debug/suifleet \
+            /tmp/legacy-kernel/boot/vmlinuz-5.15.0-25-generic
