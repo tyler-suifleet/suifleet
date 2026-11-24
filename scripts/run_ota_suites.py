@@ -21,6 +21,8 @@ SUITES = [
     ('dependencies', 'test_dependency_ota.py'),
     ('firmware-helper', 'test_ota.py', '--firmware-helper'),
     ('firmware-restart', 'test_firmware_restart.py'),
+    ('swupdate-example', 'test_firmware_restart.py', '--installer', 'swupdate'),
+    ('rauc-example', 'test_firmware_restart.py', '--installer', 'rauc'),
     ('supervisor', 'test_supervisor.py'),
     ('configuration', 'test_configuration.py'),
     ('greengrass-runtime', 'test_greengrass_runtime.py'),

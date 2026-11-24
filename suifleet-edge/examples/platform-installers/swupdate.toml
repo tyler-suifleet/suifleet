@@ -1,0 +1,7 @@
+# Install as /etc/suifleet/firmware.toml (root:root, 0600).
+# Signed-image SWUpdate build with an operator-provisioned RSA public key.
+# SuiFleet appends the private local .swu copy as the argument to -i.
+command = "/usr/bin/swupdate -k /etc/swupdate/signing-public.pem -i"
+timeout_seconds = 600
+spool_dir = "/var/lib/suifleet/firmware"
+work_dir = "/var/lib/suifleet-firmware"
