@@ -123,7 +123,8 @@ in order and never drops or reorders:
 
 Each payload is serialized and copied (frozen) when it is queued, so changing
 the caller's object afterwards changes neither the queued message nor the byte
-accounting.
+accounting. The queued item itself is frozen too, so inspecting `head` (or the
+item on `UncertainDeliveryError`) cannot change its destination or payload.
 An item whose request frame would exceed the 64 KiB IPC frame limit is
 refused with `RangeError` at enqueue, leaving the queue unchanged, so no
 unsendable item can block the items behind it. `discardHead()` refuses an
