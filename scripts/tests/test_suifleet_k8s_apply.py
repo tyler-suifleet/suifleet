@@ -317,6 +317,28 @@ class CredentialTest(unittest.TestCase):
     def test_accepts_token_or_client_certificate(self):
         k8s.check_credentials(self.view())
         k8s.check_credentials(self.view(user={"client-certificate-data": "x", "client-key-data": "y"}))
+        k8s.check_credentials(self.view(user={"client-certificate": "/p/c.crt", "client-key": "/p/c.key"}))
+        k8s.check_credentials(self.view(user={"tokenFile": "/p/token"}))
+
+    def test_exactly_one_complete_credential_method(self):
+        cert = {"client-certificate-data": "x", "client-key-data": "y"}
+        cases = [
+            ({"token": "t", **cert}, "exactly one credential method"),
+            ({"tokenFile": "/p/token", **cert}, "exactly one credential method"),
+            ({"token": "t", "client-key-data": "y"}, "exactly one credential method"),
+            ({"token": "t", "client-certificate": "/p/c.crt"}, "exactly one credential method"),
+            ({"token": "t", "tokenFile": "/p/token"}, "both token and tokenFile"),
+            ({"client-certificate-data": "x"}, "supplied together"),
+            ({"client-certificate": "/p/c.crt"}, "supplied together"),
+            ({"client-key-data": "y"}, "supplied together"),
+            ({"client-certificate-data": "x", "client-certificate": "/p/c.crt", "client-key-data": "y"}, "once each"),
+            ({"client-certificate-data": "x", "client-key-data": "y", "client-key": "/p/c.key"}, "once each"),
+            ({"token": ""}, "token or client certificate"),
+        ]
+        for user, message in cases:
+            with self.subTest(user=sorted(user)), self.assertRaises(k8s.Rejected) as caught:
+                k8s.check_credentials(self.view(user=user))
+            self.assertIn(message, str(caught.exception))
 
     def test_rejections(self):
         cases = [

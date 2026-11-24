@@ -428,7 +428,9 @@ def load_profile(root, name):
 
 def check_credentials(view):
     """Reject kubeconfigs that are not one ServiceAccount-style credential over
-    verified TLS: no exec/auth-provider plugins, impersonation or basic auth."""
+    verified TLS: exactly one method (a token, or a complete client
+    certificate/key pair), no exec/auth-provider plugins, impersonation or
+    basic auth."""
     _require(isinstance(view, dict), "kubeconfig view must be an object")
     contexts, clusters, users = (view.get(k) or [] for k in ("contexts", "clusters", "users"))
     _require(len(contexts) == 1 and len(clusters) == 1 and len(users) == 1,
@@ -441,8 +443,20 @@ def check_credentials(view):
     user = users[0].get("user") or {}
     for field in ("exec", "auth-provider", "username", "password", "as", "as-groups", "as-uid", "as-user-extra"):
         _require(field not in user, f"kubeconfig user must not use {field!r}")
-    _require(user.get("token") or user.get("tokenFile") or user.get("client-certificate-data") or user.get("client-certificate"),
-             "kubeconfig user must have a token or client certificate")
+
+    def present(*fields):
+        return [field for field in fields if user.get(field) not in (None, "")]
+
+    tokens = present("token", "tokenFile")
+    certificates = present("client-certificate-data", "client-certificate")
+    keys = present("client-key-data", "client-key")
+    _require(len(tokens) <= 1, "kubeconfig user must not set both token and tokenFile")
+    _require(len(certificates) <= 1 and len(keys) <= 1,
+             "kubeconfig user must set the client certificate and key once each (inline data or file, not both)")
+    _require(not (tokens and (certificates or keys)),
+             "kubeconfig user must use exactly one credential method, not a token and a client certificate")
+    _require(bool(certificates) == bool(keys), "kubeconfig client certificate and client key must be supplied together")
+    _require(tokens or certificates, "kubeconfig user must have a token or client certificate")
 
 
 # ------------------------------------------------------------------- kubectl
