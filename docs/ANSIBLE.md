@@ -143,31 +143,50 @@ performing them; an upgrade preview leaves the installed bytes, package and
 running services untouched.
 
 **Interrupted runs.** Restarts are not tied only to the current run's changes.
-Before starting services, the role checks each running SuiFleet service on the
-host: a process whose executable was replaced, whose unit files changed, or
-that started before the files it reads (`suifleet_signer_inputs`,
-`suifleet_daemon_inputs`) is restarted. A rollout that stopped after its files
-landed but before the restarts therefore converges on the next run, and the
-health check fails while a service still runs replaced inputs.
+After the units pass their health checks, the role records a SHA-256 digest
+of each unit's inputs in `/var/lib/suifleet-ansible/applied.json` (root-owned,
+public digests only). The inputs are the unit's own files plus
+`suifleet_signer_inputs` or `suifleet_daemon_inputs`; the signing socket and
+`suifleet-enrollment.path` are covered by their unit files. On the next run,
+an active unit whose inputs differ from that record (or that has no record),
+that waits for a daemon-reload, or whose process runs a replaced executable is
+restarted. No timestamps are compared, so a change made just after a restart
+is still detected. A rollout that stopped after its files landed but before
+the restarts therefore converges on the next run.
+
+A changed signing socket unit is applied in dependency order: the signing
+service stops, the socket is recreated with the new settings (for example
+its mode or group), then the signing service and the daemon restart. A
+changed `suifleet-enrollment.path` is restarted. The health check fails while
+any of these units still runs replaced inputs. A host that already runs
+SuiFleet but has no record (for example one installed by hand) has its units
+restarted once.
 
 ## Security properties
 
 - **Device keys never leave the device.** Each host generates its own key; the
   role checks only the key's owner and mode. It never reads, copies or fetches
   the key, and never puts a key in an image, package or Git.
-- **Claims are single-use and kept private.** The claim key is copied with
-  `no_log` into a private staging directory on a memory-backed `/run`. It is
-  used by the current key holder (the daemon user, not root), then erased.
-  Ansible's own transfer passes through the connection user's private
-  temporary directory. Revoke a claim that was exposed before use.
+- **Claims are single-use and never reach persistent storage.** The
+  controller reads the claim into memory (Ansible Vault files are decrypted in
+  memory, not into its local temporary directory). It reaches the host as the
+  `no_log` standard input of a command, inside the pipelined module stream,
+  and the current key holder (the daemon user, not root) writes it into a
+  private staging directory on a memory-backed `/run`. Ansible's file copy,
+  which goes through the remote temporary directory, is never used for the
+  claim. Enrollment refuses to send a claim unless modules are pipelined, so
+  keep `pipelining = True` and leave `ANSIBLE_KEEP_REMOTE_FILES` unset. The
+  staging directory is erased after enrollment, when it fails, and at the
+  start of the next attempt; an interrupted run leaves the claim only on that
+  tmpfs, which a reboot also clears. Revoke a claim that was exposed before use.
 - **One enrollment per device.** `/etc/suifleet/enrollment.json` records the
   public IDs, and a recorded host never enrolls again. A host that has
   `config.toml` but no record is refused rather than given a new claim.
 - **Records are checked against the key.** A record whose address differs from
   the device's own key stops the play.
 - **No secrets in command arguments or logs.** Commands receive file paths
-  only. `ansible.cfg` sets no log file. The daemon journal stays on the host;
-  only health exit codes are reported.
+  only; the claim arrives on standard input. `ansible.cfg` sets no log file.
+  The daemon journal stays on the host; only health exit codes are reported.
 - **Least privilege.** Connect as an unprivileged account with sudo; never SSH
   as root. Package installation, service control and file ownership need root.
   The daemon and the signing service run as separate unprivileged users
@@ -217,7 +236,11 @@ The harness checks these phases:
    `deb`; Ubuntu 24.10 and Debian 13 are refused for `deb` unless explicitly
    allowed.
 2. Refusal of the host without systemd.
-3. Check mode on fresh hosts changes nothing.
+3. Check mode on fresh hosts changes nothing. Then a claim transfer is
+   interrupted right after staging, for plain and Vault claims: the claim must
+   exist only in the tmpfs staging directory, not anywhere on the host's
+   persistent filesystem (including Ansible's remote temporary directories)
+   or in the controller's files and Ansible home.
 4. Install, on-device identity, enrollment, configuration and start, in three
    rollout batches.
 5. A rerun with the credential batch deleted reports `changed=0`, and so does
@@ -228,15 +251,23 @@ The harness checks these phases:
 8. An interrupted binary/configuration rollout: the files land but no restart
    runs. The retry must restart the stale services onto the installed binary
    and configuration, then a rerun reports `changed=0`.
-9. Rolling restart.
+9. A configuration-only change whose file time is set to half a second after
+   the daemon started (indistinguishable by timestamp) is detected; the retry
+   restarts the daemon onto it, then a rerun reports `changed=0`.
+10. A signing socket unit-only update (`SocketMode` 0660 to 0620) on the
+   binary-profile host, interrupted after the unit files and daemon-reload:
+   the retry must recreate the socket with the new mode and restart the
+   signer and the daemon, then a rerun reports `changed=0`.
+11. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that
 device's own claim, with the DeviceCap owned by the device and the
 DeviceOwnerCap by the operator. It also checks claim erasure, file modes, no
 leftover Ansible temporary files, and that no device or claim key appears in
-Ansible output, controller files or host journals. The scanners receive keys
-on standard input, never as process arguments.
+Ansible output, controller files or host journals, and that no claim appears
+on any host's persistent filesystem. The scanners receive keys on standard
+input, never as process arguments.
 
 **Limits.** The containers are not physical targets. They share the host
 kernel (Linux 6.6 on the test host), and arm64 was not run. The harness checks
