@@ -263,7 +263,7 @@ jobs:
         run: |
           docker build -f docker/release.Dockerfile --build-arg USER_UID="$(id -u)" \
             --build-arg USER_GID="$(id -g)" -t suifleet-release:ci docker/
-          python3 scripts/release.py build --out dist-client --image suifleet-release:ci
+          python3 scripts/release.py build --target x86_64-unknown-linux-gnu --out dist-client --image suifleet-release:ci
           docker build -f docker/rpm.Dockerfile -t suifleet-rpm:local docker/
           for dir in rpm-a rpm-b rpm-upgrade; do
             mkdir "$dir"

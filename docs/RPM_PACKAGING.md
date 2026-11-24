@@ -14,7 +14,7 @@ Build a trusted x86_64 GNU/Linux bundle from committed source using the pinned
 its immutable image ID for reproducibility.
 
 ```sh
-python3 scripts/release.py build --out dist-client --reproduce
+python3 scripts/release.py build --target x86_64-unknown-linux-gnu --out dist-client --reproduce
 docker build --platform linux/amd64 -f docker/rpm.Dockerfile -t suifleet-rpm:local docker
 mkdir dist-rpm
 docker run --rm --network none --user "$(id -u):$(id -g)" \
