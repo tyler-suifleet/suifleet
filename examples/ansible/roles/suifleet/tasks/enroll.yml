@@ -91,23 +91,12 @@
       block:
         # The current key holder (the daemon user before signer.toml exists)
         # runs the enrollment, not root.
-        - name: Create the private staging directory
-          ansible.builtin.file:
-            path: "{{ suifleet_enroll_staging }}"
-            state: directory
-            owner: "{{ suifleet_key.stat.pw_name }}"
-            group: "{{ suifleet_key.stat.gr_name }}"
-            mode: "0700"
-
-        - name: Stage the single-use claim key
-          ansible.builtin.copy:
-            src: "{{ batch }}/claim.key"
-            dest: "{{ suifleet_enroll_staging }}/claim.key"
-            owner: "{{ suifleet_key.stat.pw_name }}"
-            group: "{{ suifleet_key.stat.gr_name }}"
-            mode: "0600"
-          no_log: true
-          diff: false
+        - name: Stage the single-use claim key in memory-backed storage
+          ansible.builtin.import_tasks: stage_claim.yml
+          vars:
+            suifleet_claim_file: "{{ batch }}/claim.key"
+            suifleet_claim_owner: "{{ suifleet_key.stat.pw_name }}"
+            suifleet_claim_group: "{{ suifleet_key.stat.gr_name }}"
 
         - name: Stage the enrollment configuration and manifest
           ansible.builtin.copy:

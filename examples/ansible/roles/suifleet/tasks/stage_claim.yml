@@ -1,0 +1,58 @@
+---
+# Writes the claim (suifleet_claim_file on the controller, plain or Vault)
+# to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner.
+# enroll.yml checks that the staging directory is on tmpfs and erases it
+# afterwards, also when enrollment fails.
+#
+# The claim must not touch persistent storage. Ansible's copy module
+# would transfer the decrypted file through the remote temporary
+# directory (and decrypt Vault files into the controller's local
+# temporary directory). Instead the controller reads the claim into
+# memory (the file lookup decrypts Vault in memory) and passes it as
+# the command module's stdin. With pipelining the module and its
+# arguments reach the host on the SSH stream, never in a file, and
+# the current key holder writes the claim straight to tmpfs.
+- name: Check that modules reach the host through pipelining
+  ansible.builtin.command:
+    argv: [sh, -c, 'tr "\0" " " < /proc/$PPID/cmdline']
+  register: suifleet_module_parent
+  changed_when: false
+
+- name: Refuse to send the claim without pipelining
+  ansible.builtin.assert:
+    that: suifleet_module_parent.stdout is not search('AnsiballZ_')
+    quiet: true
+    fail_msg: >-
+      Ansible wrote its module to a file on {{ inventory_hostname }}, so
+      the claim would reach persistent storage. Enable SSH pipelining
+      (examples/ansible/ansible.cfg) and leave ANSIBLE_KEEP_REMOTE_FILES unset.
+
+- name: Erase a claim left by an interrupted run
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: absent
+
+- name: Create the private staging directory
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: directory
+    owner: "{{ suifleet_claim_owner }}"
+    group: "{{ suifleet_claim_group }}"
+    mode: "0700"
+
+- name: Stage the single-use claim key in memory-backed storage
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ suifleet_claim_owner }}"
+      - --
+      - sh
+      - -c
+      - umask 077 && cat > "$1"
+      - sh
+      - "{{ suifleet_enroll_staging }}/claim.key"
+    stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
+  no_log: true
+  diff: false
+
