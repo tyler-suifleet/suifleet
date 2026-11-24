@@ -22,8 +22,11 @@ dependencies. Run `sui move build --path contracts` to populate the dev image's
 Move cache, then mount that cache at `/home/dev/.move` in the network-none
 container. The user inside the container must own the private results mount.
 The runner owns the node, loopback blob server, faucet and virtual
-daemons. It stops them on completion, failure, Ctrl-C or SIGTERM. The local
-genesis, operator wallet and chain database are disposable. Keep the private
+daemons. Keep ports 9000 (RPC) and 9123 (faucet) free inside the container
+and outside its ephemeral port range. Startup failures include the tail of
+the run's `node.log`. The runner stops its processes on completion, failure,
+Ctrl-C or SIGTERM. The local genesis, operator wallet and chain database are
+disposable. Keep the private
 workspace to reuse signer identities. Each invocation enrolls those signers on a
 fresh genesis with fresh object IDs and per-run configs, journals, logs and
 installer output. Daemon restarts within a run use the same journal and work

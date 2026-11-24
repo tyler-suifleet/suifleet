@@ -379,11 +379,16 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def free_ports():
-    with socket.socket() as rpc, socket.socket() as faucet:
-        rpc.bind(("127.0.0.1", 0))
-        faucet.bind(("127.0.0.1", 0))
-        return rpc.getsockname()[1], faucet.getsockname()[1]
+def wait_for_node(condition, message, node, log_path):
+    try:
+        wait_for(lambda: node.poll() is None and condition(), message, node)
+    except AssertionError:
+        status = node.poll()
+        detail = message if status is None else f"Sui localnet exited with status {status} during startup"
+        with log_path.open("rb") as log:
+            log.seek(max(0, log_path.stat().st_size - 4096))
+            tail = log.read().decode(errors="replace").strip()
+        raise RuntimeError(f"{detail}\n{log_path} (tail):\n{tail}") from None
 
 
 def rss_kib(process):
@@ -455,8 +460,11 @@ def execute(args):
 
         started = time.monotonic()
         try:
-            with tempfile.TemporaryDirectory(prefix="virtual-fleet-node-") as tmp, (root / "node.log").open("wb") as log:
-                port, faucet = free_ports()
+            node_log = root / "node.log"
+            with tempfile.TemporaryDirectory(prefix="virtual-fleet-node-") as tmp, node_log.open("wb") as log:
+                # The isolated namespace lets us use Sui's standard ports,
+                # below the range used for its internal ephemeral listeners.
+                port, faucet = 9000, 9123
                 rpc = f"http://127.0.0.1:{port}"
                 args.faucet = f"http://127.0.0.1:{faucet}/v2/gas"
                 node = subprocess.Popen(
@@ -475,7 +483,7 @@ def execute(args):
                         except OSError:
                             return False
 
-                    wait_for(ready, "local node or faucet failed to listen", node)
+                    wait_for_node(ready, "local node or faucet failed to listen", node, node_log)
                     # Reads must succeed before any enrollment or fixture publication.
                     def has_checkpoint():
                         try:
@@ -487,7 +495,7 @@ def execute(args):
                         require(chain not in {"4c78adac", "35834a8a"}, "public chain rejected")
                         return True
 
-                    wait_for(has_checkpoint, "local node did not index its first checkpoint", node)
+                    wait_for_node(has_checkpoint, "local node did not index its first checkpoint", node, node_log)
                     summary["sampled_node_rss_kib"] = rss_kib(node)
                     run(rpc, args.faucet, scenario=lambda *fixture: scenario(
                         args, root, telemetry, summary, *fixture),
