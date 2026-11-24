@@ -257,8 +257,15 @@ The recipe's `do_verify_codec` runs before license population and install. It
 requires exactly the five pinned files, their SHA-256 values, a schema-1
 manifest naming the packaged Node release, recipe pins equal to the manifest's,
 and provenance from `SUIFLEET_CODEC_SOURCE_REV`. A tampered file fails that
-task. A missing artifact directory fails parsing for every target in the build,
-because the `file://` checksums cannot be computed. `inspect_pi_image.py` also
+task. Missing local codec inputs no longer stop parsing (SF-307). The recipe's
+parse-time guard skips it and names the missing files, so the core client and
+other targets still parse and build. An image or command that asks for
+`suifleet-walrus-codec` fails with "was skipped: optional Walrus codec inputs
+not found: …". Remote inputs are fetched and must match their `sha256sum`. Both
+`suifleet-node` and the codec are also skipped, with a reason, for any target
+other than AArch64 with `TCLIBC = "glibc"`. `COMPATIBLE_HOST` alone would accept
+`aarch64-*-linux-musl`. There is no fallback to another libc, architecture or
+source. `inspect_pi_image.py` also
 requires the codec's provenance revision to equal the daemon's `build-info`.
 `make test-yocto-packaging` covers these rules offline, including
 `test_codec_and_daemon_share_source_revision`.

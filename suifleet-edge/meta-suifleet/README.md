@@ -27,8 +27,11 @@ that a same-named remote branch exists. No other release/architecture is claimed
 
 After supplying the distro fixes below, add this directory to BBLAYERS and run
 `bitbake suifleet`; this standalone task-execution path remains unvalidated. Optional archive
-packages are `suifleet-node` and `suifleet-walrus-codec`; the codec requires five
-prebuilt, checksum-pinned files at SUIFLEET_WALRUS_CODEC_DIR **before parsing**.
+packages are `suifleet-node` and `suifleet-walrus-codec`. They are not needed to
+parse the layer or build `suifleet`. Without its five checksum-pinned codec files,
+the codec recipe is skipped with a reason that names the missing files. Requesting
+it then fails with that reason. Both recipes are skipped, with a reason, on any
+target other than Linux AArch64 glibc. There is no musl, 32-bit or x86 fallback.
 See RELEASE.md for source/artifact publication prerequisites.
 
 The separate, core-repository `meta-suifleet-integration` contains Pi image/access
