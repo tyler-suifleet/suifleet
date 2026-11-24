@@ -47,3 +47,32 @@
         argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
       changed_when: false
       check_mode: false
+
+    # The on-disk checks above do not prove the running processes loaded these
+    # inputs; this does. Skipped in check mode, where restarts are only planned.
+    - name: Check that the running services use the installed inputs
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', 'running_inputs.py') }}"
+          - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
+          - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
+      register: suifleet_running_after
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Refuse services still running replaced inputs
+      vars:
+        running: "{{ suifleet_running_after.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - running['suifleet.service'].running
+          - not running['suifleet.service'].stale
+          - not running['suifleet-signer.service'].stale
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }}: {{ running | to_json }}. A SuiFleet service
+          did not load the installed binary or configuration; rerun the play or
+          see journalctl -u suifleet.service -u suifleet-signer.service.
+      when: not ansible_check_mode

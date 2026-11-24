@@ -23,10 +23,13 @@ suifleet_binary_sha256: ""
 # controller (suifleet-edge/meta-suifleet/recipes-edge/suifleet/files).
 suifleet_units_src: ""
 
-# Debian 12 and Ubuntu 24.04 are the tested deb distributions.
+# Debian 12 and Ubuntu 24.04 are the tested deb distributions. Each entry
+# must equal the host's full release (ansible_facts.distribution_version) or
+# its major release (distribution_major_version): Debian point releases are
+# 12.x, while Ubuntu "24.04" excludes 24.10 and other non-LTS releases.
 suifleet_deb_distributions:
   Debian: ["12"]
-  Ubuntu: ["24"]
+  Ubuntu: ["24.04"]
 suifleet_allow_untested_distribution: false
 
 # Network manifest on the controller (console "Download connection settings"
@@ -61,3 +64,14 @@ suifleet_signer_extra: ""
 # Post-start health: the daemon must be active and its journal initialized.
 suifleet_health_retries: 30
 suifleet_health_delay: 2
+
+# Files each service reads at startup. A running service whose process
+# predates any of them (or whose executable or unit was replaced) is
+# restarted, including after an interrupted earlier run.
+suifleet_signer_inputs:
+  - /etc/suifleet/deployment.json
+  - /etc/suifleet/signer.toml
+suifleet_daemon_inputs:
+  - /etc/suifleet/deployment.json
+  - /etc/suifleet/signer.toml
+  - /etc/suifleet/config.toml
