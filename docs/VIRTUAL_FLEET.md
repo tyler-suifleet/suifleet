@@ -23,11 +23,13 @@ Move cache, then mount that cache at `/home/dev/.move` in the network-none
 container. The user inside the container must own the private results mount.
 The runner owns the node, loopback blob server, faucet and virtual
 daemons. Keep ports 9000 (RPC) and 9123 (faucet) free inside the container
-and outside its ephemeral port range. Startup failures include the tail of
-the run's `node.log`. The runner stops its processes on completion, failure,
-Ctrl-C or SIGTERM. The local genesis, operator wallet and chain database are
-disposable. Keep the private
-workspace to reuse signer identities. Each invocation enrolls those signers on a
+and outside its ephemeral port range. The runner refuses unavailable ports
+and concurrent runs in the same network namespace, even with separate
+workspaces. Use a separate container for each concurrent fleet. Node readiness
+failures include the tail of the run's `node.log`. The runner stops its
+processes on completion, failure, Ctrl-C or SIGTERM. The local genesis,
+operator wallet and chain database are disposable. Keep the private workspace
+to reuse signer identities. Each invocation enrolls those signers on a
 fresh genesis with fresh object IDs and per-run configs, journals, logs and
 installer output. Daemon restarts within a run use the same journal and work
 directories. Keep the workspace out of source control and share only selected

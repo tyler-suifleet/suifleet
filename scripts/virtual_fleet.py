@@ -5,6 +5,7 @@ import argparse
 import base64
 from contextlib import ExitStack
 from dataclasses import dataclass
+import errno
 import fcntl
 import hashlib
 from html import escape
@@ -379,6 +380,25 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+def reserve_localnet(guard, ports):
+    # Linux abstract sockets are scoped to the network namespace and vanish
+    # when closed. Hold this guard through teardown, even across workspaces.
+    try:
+        guard.bind("\0suifleet-virtual-fleet-localnet")
+    except OSError as error:
+        if error.errno != errno.EADDRINUSE:
+            raise
+        raise RuntimeError("another fleet run owns this network namespace") from error
+
+    for port in ports:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError as error:
+                raise RuntimeError(f"Sui localnet port 127.0.0.1:{port} is unavailable: {error}") from error
+
+
 def wait_for_node(condition, message, node, log_path):
     try:
         wait_for(lambda: node.poll() is None and condition(), message, node)
@@ -461,18 +481,23 @@ def execute(args):
         started = time.monotonic()
         try:
             node_log = root / "node.log"
-            with tempfile.TemporaryDirectory(prefix="virtual-fleet-node-") as tmp, node_log.open("wb") as log:
+            with (
+                socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as guard,
+                tempfile.TemporaryDirectory(prefix="virtual-fleet-node-") as tmp,
+            ):
                 # The isolated namespace lets us use Sui's standard ports,
                 # below the range used for its internal ephemeral listeners.
                 port, faucet = 9000, 9123
                 rpc = f"http://127.0.0.1:{port}"
                 args.faucet = f"http://127.0.0.1:{faucet}/v2/gas"
-                node = subprocess.Popen(
-                    ["sui", "start", "--force-regenesis",
-                     "--fullnode-rpc-port", str(port), f"--with-faucet=127.0.0.1:{faucet}"],
-                    env={**os.environ, "SUI_CONFIG_DIR": tmp},
-                    stdout=log, stderr=log,
-                )
+                reserve_localnet(guard, (port, faucet))
+                with node_log.open("wb") as log:
+                    node = subprocess.Popen(
+                        ["sui", "start", "--force-regenesis",
+                         "--fullnode-rpc-port", str(port), f"--with-faucet=127.0.0.1:{faucet}"],
+                        env={**os.environ, "SUI_CONFIG_DIR": tmp},
+                        stdout=log, stderr=log,
+                    )
                 try:
                     def ready():
                         try:
@@ -500,6 +525,7 @@ def execute(args):
                     run(rpc, args.faucet, scenario=lambda *fixture: scenario(
                         args, root, telemetry, summary, *fixture),
                         receive=telemetry.receive, record_effects=effects)
+                    require(node.poll() is None, "Sui localnet exited before the fleet run completed")
                     summary["result"] = "passed"
                 finally:
                     stop(node)
