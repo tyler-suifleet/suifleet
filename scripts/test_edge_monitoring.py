@@ -50,6 +50,7 @@ ADAPTER = ROOT / 'scripts/edge_monitoring.py'
 CANARY = 'hunter2-monitoring-secret'
 GATEWAY_TOKEN = 'gateway-credential-canary'
 ADAPTER_RSS_LIMIT_KIB = 64 * 1024
+OTLP_PATHS = {'/v1/metrics': '/v1/metrics', '/v1/logs': '/v1/logs'}
 
 
 def free_port():
@@ -104,9 +105,14 @@ class Gateway:
                 if self.headers.get('Authorization') != f'Bearer {GATEWAY_TOKEN}':
                     gateway.unauthorized += 1
                     return self.reply(401, b'')
-                gateway.forwarded.append((self.path, body))
+                # Forward only the fixed OTLP/HTTP signal paths; never splice the
+                # request path into the upstream URL.
+                upstream_path = OTLP_PATHS.get(self.path)
+                if upstream_path is None:
+                    return self.reply(404, b'')
+                gateway.forwarded.append((upstream_path, body))
                 try:
-                    status, data = http(gateway.upstream + self.path, data=body,
+                    status, data = http(gateway.upstream + upstream_path, data=body,
                                         headers={'Content-Type': self.headers.get('Content-Type', '')})
                 except OSError:
                     status, data = 503, b''
@@ -294,6 +300,10 @@ def run(bin_dir, evidence_path):
             token_file.chmod(0o600)
             scrape_token = json.loads(subprocess.run([sys.executable, str(ADAPTER), '--token'], capture_output=True,
                                                      text=True, check=True).stdout)
+            # Store only a digest computed here, and check it matches the one the
+            # adapter reported for the generated token.
+            scrape_digest = hashlib.sha256(scrape_token['token'].encode()).hexdigest()
+            assert scrape_digest == scrape_token['token_sha256'], 'adapter --token digest mismatch'
             scrape_file = secrets_dir / 'scrape.token'
             scrape_file.write_text(scrape_token['token'])
             scrape_file.chmod(0o600)
@@ -304,7 +314,7 @@ def run(bin_dir, evidence_path):
             def adapter_config(name, **fields):
                 path = secrets_dir / name
                 path.write_text(json.dumps(fields))
-                path.chmod(0o644)
+                path.chmod(0o640)
                 return path
 
             # Disabled by default: no listener, no console request.
@@ -349,7 +359,7 @@ def run(bin_dir, evidence_path):
             adapter_cfg = adapter_config('monitoring.json', enabled=True, evidence='simulated', device='sim-device-1',
                 interval_seconds=10,
                 console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(token_file)),
-                prometheus=dict(listen=f'127.0.0.1:{adapter_port}', token_sha256=scrape_token['token_sha256']),
+                prometheus=dict(listen=f'127.0.0.1:{adapter_port}', token_sha256=scrape_digest),
                 otlp=dict(endpoint=f'http://127.0.0.1:{gateway.port}', headers_file=str(headers_file),
                           timeout_seconds=2, initial_backoff_seconds=1, max_backoff_seconds=4),
                 logs=dict(components=['svc'], max_lines=50, max_buffer=500))

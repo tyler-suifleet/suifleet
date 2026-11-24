@@ -161,11 +161,11 @@ class ConfigTests(Base):
     def test_disabled_by_default(self):
         self.assertFalse(em.Config({}).enabled)
         self.assertFalse(em.Config(dict(enabled=False, otlp=dict(endpoint="ftp://x"))).enabled)
-        path = self.write("config.json", "{}", 0o644)
+        path = self.write("config.json", "{}", 0o640)
         self.assertEqual(em.main(["--config", path]), 0)
 
     def test_disabled_main_opens_no_socket(self):
-        path = self.write("config.json", json.dumps(dict(enabled=False)), 0o644)
+        path = self.write("config.json", json.dumps(dict(enabled=False)), 0o640)
         with unittest.mock.patch.object(em, "make_server", side_effect=AssertionError("listened")), \
                 unittest.mock.patch.object(em, "Console", side_effect=AssertionError("polled")):
             self.assertEqual(em.main(["--config", path]), 0)
@@ -210,7 +210,7 @@ class ConfigTests(Base):
                 em.Config(self.config(**overrides))
 
     def test_secret_files_are_protected(self):
-        wide = self.write("wide.token", CONSOLE_TOKEN, 0o644)
+        wide = self.write("wide.token", CONSOLE_TOKEN, 0o640)
         link = self.dir / "link.token"
         link.symlink_to(self.token_file)
         wrong = self.write("wrong.token", "hunter2", 0o600)
@@ -225,7 +225,7 @@ class ConfigTests(Base):
     def test_rejected_configuration_message_has_no_secret(self):
         headers = self.write("h", "Authorization: Bearer topsecretvalue\nHost: x\n")
         path = self.write("config.json", json.dumps(self.config(
-            otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers))), 0o644)
+            otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers))), 0o640)
         with unittest.mock.patch("sys.stderr") as stderr:
             self.assertEqual(em.main(["--config", path]), 2)
         written = "".join(call.args[0] for call in stderr.write.call_args_list)
