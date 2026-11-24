@@ -13,13 +13,20 @@ only loopback (the chain container is started with --network none):
     refused;
   - a pinned ansible-core controller (examples/ansible/requirements-controller.txt).
 
-Phases: refusal, check mode on fresh hosts (no change), install + on-device
-identity + claim enrollment + configuration + start, rerun without the claim
-batch (changed=0), check mode (changed=0), package/binary upgrade, rerun
-(changed=0), rolling restart. It checks preserved identity and enrollment,
-on-chain enrollment effects (device sender, claim-sponsored gas, cap owners),
-claim erasure, and that no device or claim key appears in Ansible output,
-controller files or host journals. Containers are not physical targets.
+Phases: release/profile preflight cases with injected facts (Ubuntu 24.10 and
+Debian 13 refused for deb unless explicitly allowed), refusal, check mode on
+fresh hosts (no change), install + on-device identity + claim enrollment +
+configuration + start, rerun without the claim batch (changed=0), check mode
+(changed=0), package/binary upgrade preview in check mode (bytes, package
+versions and service PIDs untouched), package/binary upgrade, rerun
+(changed=0), an interrupted binary/config rollout (files land, restarts never
+run) followed by a retry that must restart the stale services onto the new
+inputs, rerun (changed=0), rolling restart. It checks preserved identity and
+enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
+cap owners), claim erasure, and that no device or claim key appears in
+Ansible output, controller files or host journals (keys are passed to the
+scanners on stdin, never as process arguments). Containers are not physical
+targets.
 
   python3 scripts/test_ansible.py --move-volume VOLUME [--evidence FILE]
 
@@ -89,6 +96,45 @@ HOSTS = {
     "bin-debian12": ("debian12", 2203, "systemd-binary", "SN-0003"),
 }
 UNSUPPORTED = ("nosystemd", 2204)
+# Facts for the release/profile preflight cases.
+PREFLIGHT_CASES = [
+    # (name, distribution, version, major, extra vars, expected profile or refusal text)
+    ("Debian 12 point release selects deb", "Debian", "12.8", "12", {}, "deb"),
+    ("Ubuntu 24.04 selects deb", "Ubuntu", "24.04", "24", {}, "deb"),
+    ("Ubuntu 24.10 is not a tested deb host", "Ubuntu", "24.10", "24", {}, "No supported profile"),
+    ("Ubuntu 24.10 deb refused without opt-in", "Ubuntu", "24.10", "24", {"suifleet_profile": "deb"},
+     "tested on Debian 12 and Ubuntu 24.04 only"),
+    ("Ubuntu 24.10 deb accepted with opt-in", "Ubuntu", "24.10", "24",
+     {"suifleet_profile": "deb", "suifleet_allow_untested_distribution": True}, "deb"),
+    ("Debian 13 deb refused without opt-in", "Debian", "13.1", "13", {"suifleet_profile": "deb"},
+     "tested on Debian 12 and Ubuntu 24.04 only"),
+]
+PREFLIGHT_PLAY = """- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: preflight.yml}
+    - ansible.builtin.debug:
+        msg: "SELECTED={{ suifleet_selected_profile }} TESTED={{ suifleet_tested_deb }}"
+"""
+# The role's install, identity, enrollment and configuration tasks without
+# the service and health tasks: a rollout interrupted after its files landed.
+INTERRUPTED_PLAY = """- hosts: suifleet_devices
+  gather_facts: true
+  tasks:
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: preflight.yml}
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: install_deb.yml}
+      when: suifleet_selected_profile == 'deb'
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: install_binary.yml}
+      when: suifleet_selected_profile == 'systemd-binary'
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: identity.yml}
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: enroll.yml}
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: configure.yml}
+"""
+# Counts how many of the secrets on stdin appear in the host journal.
+JOURNAL_SCAN = ("import subprocess, sys; secrets = sys.stdin.read().split(); "
+                "data = subprocess.run(['journalctl', '--no-pager', '-o', 'cat'], capture_output=True, text=True).stdout; "
+                "print(sum(s in data for s in secrets))")
 RECAP = re.compile(r"^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)", re.M)
 
 
@@ -264,11 +310,12 @@ class Harness:
             out[revision] = deb
         # A content-different binary for the systemd-binary upgrade: bytes after
         # the ELF image are ignored by the loader.
-        binaries = {"1": packages / "suifleet-1", "2": packages / "suifleet-2"}
-        shutil.copyfile(binary, binaries["1"])
-        shutil.copyfile(binary, binaries["2"])
-        with binaries["2"].open("ab") as handle:
-            handle.write(b"\0sf304-binary-upgrade\n")
+        binaries = {r: packages / f"suifleet-{r}" for r in ("1", "2", "3")}
+        for revision, path in binaries.items():
+            shutil.copyfile(binary, path)
+            if revision != "1":
+                with path.open("ab") as handle:
+                    handle.write(f"\0sf304-binary-upgrade-{revision}\n".encode())
         for path in binaries.values():
             path.chmod(0o755)
         self.debs, self.binaries, self.version = out, binaries, version
@@ -358,14 +405,14 @@ class Harness:
             unsupported=dict(vars=common, hosts={"nosystemd": dict(ansible_port=UNSUPPORTED[1], suifleet_serial="SN-0404")}))
         (self.work / "ctl/inventory.yml").write_text(json.dumps(inventory, indent=2))
 
-    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook"):
+    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True):
         command = ["docker", "run", "--rm", "--network", f"container:{self.chain}",
                    "-v", f"{EXAMPLES}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
                    "-v", f"{self.work / 'artifacts'}:/artifacts:ro", "-v", f"{UNITS}:/units:ro",
                    "-w", "/ansible", "-e", "ANSIBLE_CONFIG=/ansible/ansible.cfg", "-e", "ANSIBLE_FORCE_COLOR=0",
                    "-e", "ANSIBLE_NOCOLOR=1", self.controller, tool]
         if tool == "ansible-playbook":
-            command += ["-i", "/work/inventory.yml", playbook]
+            command += [*(["-i", "/work/inventory.yml"] if inventory else []), playbook]
         else:
             command += [playbook]
         result = subprocess.run([*command, *extra], text=True, capture_output=True)
@@ -386,6 +433,8 @@ class Harness:
 
     def unchanged(self, recap, phase):
         assert set(recap) == set(self.hosts), (phase, recap)
+        if any(c["changed"] for c in recap.values()):
+            print("\n".join(line for line in self.outputs[-1].splitlines() if "will restart" in line or "changed:" in line))
         for name, counts in recap.items():
             assert counts["changed"] == 0 and counts["failed"] == 0 and counts["unreachable"] == 0, (phase, name, counts)
 
@@ -396,6 +445,7 @@ class Harness:
         def sh(script):
             return self.exec(container, "sh", "-c", script).stdout.strip()
         key = sh("cat /etc/suifleet/device.key")
+        signer_pid = sh("systemctl show -p MainPID --value suifleet-signer.service")
         stat = sh("stat -c '%U:%G %a' /etc/suifleet/device.key")
         state = dict(
             key_sha256=hashlib.sha256(key.encode()).hexdigest(),
@@ -405,12 +455,18 @@ class Harness:
             enrollment_sha256=hashlib.sha256(sh("cat /etc/suifleet/enrollment.json").encode()).hexdigest(),
             active=self.exec(container, "systemctl", "is-active", "suifleet.service", check=False).stdout.strip(),
             main_pid=sh("systemctl show -p MainPID --value suifleet.service"),
+            signer_pid=signer_pid,
+            running_inputs=self.running_inputs(name),
+            daemon_exe_sha256=sh(f"sha256sum /proc/{sh('systemctl show -p MainPID --value suifleet.service')}/exe 2>/dev/null"
+                                 " | cut -d' ' -f1"),
+            signer_exe_sha256=sh(f"sha256sum /proc/{signer_pid}/exe 2>/dev/null | cut -d' ' -f1") if signer_pid != "0" else "",
+            poll_seconds=sh("sed -n 's/^poll_seconds = //p' /etc/suifleet/config.toml"),
             binary_sha256=sh("sha256sum /usr/bin/suifleet | cut -d' ' -f1"),
             package=sh("dpkg-query -W -f='${Version}' suifleet 2>/dev/null || true"),
             claims_left=sh("find / -xdev \\( -name claim.key -o -name '*.enrollment.json.partial' \\) 2>/dev/null; "
                            "ls -A /run/suifleet-enroll 2>/dev/null || true"),
             ansible_tmp=sh("find /home/deploy/.ansible /root/.ansible -type f 2>/dev/null | head -5"),
-            journal_key_hits=sh("journalctl --no-pager -o cat 2>/dev/null | grep -c " + shlex.quote(key) + " || true"),
+            journal_key_hits=self.journal_hits(container, [key]),
             initialized=self.exec(container, "python3", "-c", "import json; print(json.load(open('/var/lib/suifleet/state.json'))"
                                   ".get('initialized'))", check=False).stdout.strip(),
             config=sh("stat -c '%U:%G %a' /etc/suifleet/config.toml /etc/suifleet/signer.toml /etc/suifleet/deployment.json"),
@@ -427,11 +483,24 @@ class Harness:
         assert state["config"].split("\n") == ["root:suifleet 640", "root:suifleet-signer 640", "root:suifleet 640"], (name, state["config"])
         assert not state["claims_left"], (name, "claim material left on host", state["claims_left"])
         assert not state["ansible_tmp"], (name, "Ansible temporary files left", state["ansible_tmp"])
-        assert state["journal_key_hits"] in ("", "0"), (name, "device key in the host journal")
+        assert state["journal_key_hits"] == 0, (name, "device key in the host journal")
+        for unit, report in state["running_inputs"].items():
+            assert not report["stale"], (name, unit, "running replaced inputs", report["reason"])
         if host["profile"] == "deb":
             assert state["package"], (name, "package not installed")
         else:
             assert not state["package"], (name, "systemd-binary host has the package")
+
+    def journal_hits(self, container, secrets):
+        # The secrets travel on stdin: never in a process argument list.
+        return int(self.exec(container, "python3", "-c", JOURNAL_SCAN, input="\n".join(secrets) + "\n").stdout.strip())
+
+    def running_inputs(self, name):
+        container = self.hosts[name]["container"]
+        script = (EXAMPLES / "roles/suifleet/files/running_inputs.py").read_text()
+        units = ["suifleet-signer.service=/etc/suifleet/deployment.json,/etc/suifleet/signer.toml",
+                 "suifleet.service=/etc/suifleet/deployment.json,/etc/suifleet/signer.toml,/etc/suifleet/config.toml"]
+        return json.loads(self.exec(container, "python3", "-", *units, input=script).stdout)
 
     def scan_secrets(self, keys):
         secrets = [*keys, *self.claim_secrets.values()]
@@ -442,14 +511,72 @@ class Harness:
         for path in (self.work / "ctl").rglob("*"):
             if path.is_file():
                 data = path.read_text(errors="replace")
-                for secret in keys:
-                    assert secret not in data, f"a device key appeared in controller file {path.name}"
+                for secret in secrets:
+                    assert secret not in data, f"a device or claim key appeared in controller file {path.name}"
+        for name, host in self.hosts.items():
+            assert self.journal_hits(host["container"], secrets) == 0, (name, "a device or claim key in the host journal")
         print(f"PASS no device or claim key in {len(self.outputs)} Ansible runs, controller files or host journals")
+
+    def preflight_cases(self):
+        (self.work / "ctl/preflight.yml").write_text(PREFLIGHT_PLAY)
+        common = dict(service_mgr="systemd", kernel="6.8.0-generic", architecture="x86_64", pkg_mgr="apt")
+        base = dict(suifleet_manifest_src="/chain/deployment.json", suifleet_deb_src="/artifacts/1/" + self.debs["1"].name,
+                    suifleet_deb_sha256=sha256(self.debs["1"]), ansible_become=False)
+        for index, (case, distribution, version, major, extra, expected) in enumerate(PREFLIGHT_CASES):
+            facts = dict(common, distribution=distribution, distribution_version=version, distribution_major_version=major)
+            vars_file = self.work / f"ctl/preflight-{index}.json"
+            vars_file.write_text(json.dumps(dict(base, ansible_facts=facts, **extra)))
+            ok = expected in ("deb", "systemd-binary")
+            output, _ = self.ansible(f"preflight: {case}", "/work/preflight.yml", "-i", "localhost,",
+                                     "-e", f"@/work/preflight-{index}.json", expect_rc=0 if ok else "nonzero", inventory=False)
+            if ok:
+                assert f"SELECTED={expected} " in output, (case, output[-2000:])
+            else:
+                assert expected in output and "SELECTED=" not in output, (case, output[-2000:])
+
+    def interrupted_rollout(self, vault, upgrade, previous):
+        """A binary/config rollout stops after its files land, before restarts."""
+        (self.work / "ctl/interrupted.yml").write_text(INTERRUPTED_PLAY)
+        rollout = [*upgrade, "-e", "suifleet_binary_src=/artifacts/suifleet-3",
+                   "-e", f"suifleet_binary_sha256={sha256(self.binaries['3'])}", "-e", "suifleet_poll_seconds=11"]
+        self.ansible("interrupted rollout: files only", "/work/interrupted.yml", *vault, *rollout)
+        interrupted = {}
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            assert state["poll_seconds"] == "11", (name, "configuration not installed")
+            assert state["main_pid"] == previous[name]["main_pid"] != "0", (name, "the interruption restarted the daemon")
+            assert state["running_inputs"]["suifleet.service"]["stale"], (name, "stale daemon not detected")
+            if host["profile"] == "systemd-binary":
+                assert state["binary_sha256"] == sha256(self.binaries["3"]), name
+                assert state["signer_pid"] == previous[name]["signer_pid"] != "0", (name, "signer not running or restarted")
+                assert state["running_inputs"]["suifleet-signer.service"]["stale"], (name, "stale signer not detected")
+            interrupted[name] = state
+        print("PASS interrupted rollout left services running replaced inputs and they were detected")
+        _, recap = self.ansible("retry after the interrupted rollout", "site.yml", *vault, *rollout)
+        after = {}
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert recap[name]["changed"] > 0, (name, "retry restarted nothing")
+            assert state["main_pid"] != interrupted[name]["main_pid"], (name, "daemon not restarted by the retry")
+            assert state["daemon_exe_sha256"] == state["binary_sha256"], (name, "daemon runs other bytes")
+            if host["profile"] == "systemd-binary":
+                assert state["signer_pid"] != interrupted[name]["signer_pid"], (name, "signer not restarted by the retry")
+                assert state["signer_exe_sha256"] == sha256(self.binaries["3"]), (name, "signer runs other bytes")
+                assert state["daemon_exe_sha256"] == sha256(self.binaries["3"]), name
+            for field in ("key_sha256", "address", "enrollment_sha256"):
+                assert state[field] == previous[name][field], (name, field)
+            after[name] = state
+        print("PASS retry restarted the stale services onto the installed binary and configuration")
+        _, recap = self.ansible("rerun after the retry", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the retry")
+        return after
 
     def main(self):
         self.packages()
         self.start()
         self.write_inventory()
+        self.preflight_cases()
 
         output, _ = self.ansible("refuse a host without systemd", "site.yml", "-e", "suifleet_hosts=unsupported",
                                  expect_rc="nonzero")
@@ -494,6 +621,13 @@ class Harness:
 
         upgrade = ["-e", f"suifleet_deb_src=/artifacts/2/{self.debs['2'].name}", "-e", f"suifleet_deb_sha256={sha256(self.debs['2'])}",
                    "-e", "suifleet_binary_src=/artifacts/suifleet-2", "-e", f"suifleet_binary_sha256={sha256(self.binaries['2'])}"]
+        _, recap = self.ansible("upgrade preview in check mode", "site.yml", "--check", "--diff", *vault, *upgrade)
+        for name in self.hosts:
+            assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
+            state, _ = self.host_state(name)
+            for field in ("binary_sha256", "package", "main_pid", "signer_pid", "key_sha256", "enrollment_sha256"):
+                assert state[field] == before[name][field], (name, field, "changed by the check-mode preview")
+        print("PASS upgrade preview changed no bytes, package version or service process")
         _, recap = self.ansible("upgrade package and binary", "site.yml", *vault, *upgrade)
         after = {}
         for name, host in self.hosts.items():
@@ -510,6 +644,7 @@ class Harness:
         print("PASS upgrade preserved key, address and enrollment; daemons restarted on the new code")
         _, recap = self.ansible("rerun after upgrade", "site.yml", *vault, *upgrade)
         self.unchanged(recap, "rerun after upgrade")
+        after = self.interrupted_rollout(vault, upgrade, after)
 
         self.ansible("rolling restart", "restart.yml")
         for name in self.hosts:
