@@ -5,8 +5,8 @@
 //
 // Environment: SUIFLEET_IPC_SOCKET, SUIFLEET_COMPONENT (the configured name
 // owned by this process's Unix UID), SENSOR_STREAM, SENSOR_TOPIC, SENSOR_COUNT.
-// The ACL needs config, health, publish (topic), stream_create/stream_append
-// with a matching `streams` glob.
+// The ACL needs config, health, publish (topic) and stream_create/
+// stream_append/stream_describe with a matching `streams` glob.
 import { Client, IpcError, OutboundBuffer } from '@suifleet/component-ipc';
 
 const client = new Client({
@@ -19,8 +19,9 @@ const stream = process.env.SENSOR_STREAM ?? 'sensor-readings';
 const topic = process.env.SENSOR_TOPIC ?? 'sensor/events';
 const count = Number(process.env.SENSOR_COUNT ?? 5);
 
+// null until the component has a committed configuration (before its first install).
 const configuration = await client.configuration();
-const interval = configuration.effective?.interval_ms ?? 0;
+const interval = configuration?.effective?.interval_ms ?? 0;
 try {
   await client.streamCreate(stream, { maxSize: 65536, strategyOnFull: 'RejectNewData' });
 } catch (error) {
@@ -42,5 +43,5 @@ if (flushed.error) {
   process.exitCode = 1;
 }
 const description = await client.streamDescribe(stream);
-console.log(JSON.stringify({ configuration: configuration.effective, sent: flushed.sent, pending: flushed.pending,
+console.log(JSON.stringify({ configuration: configuration?.effective ?? null, sent: flushed.sent, pending: flushed.pending,
   stream: { name: description.name, oldest: description.oldest, newest: description.newest } }));

@@ -202,6 +202,12 @@ def run(package=None):
             start()
             # Administrator management through the Node SDK.
             assert ok(0, 'list')['installed'] == {}
+            # Before its first install the authorized sensor has no committed configuration:
+            # the daemon returns null and the unmodified example must cope with it.
+            assert ok(SENSOR, 'config')['configuration'] is None
+            early = example(SENSOR, 'sensor.mjs', {'SENSOR_COUNT': '0'})
+            assert (early['configuration'], early['sent'], early['pending']) == (None, 0, 0), early
+            print('PASS: configuration() is null before the first install; the sensor example handles it', flush=True)
             installed = ok(0, 'install', payload='0x701')
             assert installed['status'] == 1, installed
             assert ok(0, 'status', component='sensor')['runtime']['phase'] == 'running'

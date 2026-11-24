@@ -53,6 +53,9 @@ test('named methods send the documented operation, topic and payload', async () 
           : r.operation === 'logs' ? { tail: 'log' } : { echoed: true }));
   const client = new Client({ socketPath: server.path, component: 'svc' });
   assert.deepEqual(await client.configuration(), { effective: { a: 1 } });
+  const unconfigured = await serve(() => ok({ configuration: null, services: {} }));
+  assert.equal(await new Client({ socketPath: unconfigured.path, component: 'svc' }).configuration(), null);
+  await unconfigured.close();
   assert.equal(await client.streamAppend('s', { v: 1 }), 7);
   assert.equal((await client.streamRead('s', { start: 3, minMessages: 1, maxMessages: 9 })).length, 1);
   assert.equal(await client.logs(), 'log');

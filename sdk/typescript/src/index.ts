@@ -192,9 +192,12 @@ export class Client {
   status(): Promise<JsonObject> { return this.request('status'); }
   async logs(): Promise<string> { return (await this.request<{ tail: string }>('logs')).tail; }
 
-  /** Public committed configuration; confidential overlay values are never returned. Poll to observe changes. */
-  async configuration(): Promise<ComponentConfiguration> {
-    return (await this.request<{ configuration: ComponentConfiguration }>('config')).configuration;
+  /**
+   * Public committed configuration; confidential overlay values are never returned. Poll to observe changes.
+   * `null` when the component has no committed configuration yet (for example before its first install).
+   */
+  async configuration(): Promise<ComponentConfiguration | null> {
+    return (await this.request<{ configuration: ComponentConfiguration | null }>('config')).configuration ?? null;
   }
 
   /** Volatile self-reported health. It never asserts firmware or boot health. */
