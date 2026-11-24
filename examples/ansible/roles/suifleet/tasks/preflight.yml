@@ -34,10 +34,11 @@
 
 - name: Select the packaging profile
   vars:
+    tested_releases: "{{ suifleet_deb_distributions[ansible_facts.distribution] | default([]) | map('string') | list }}"
     tested_deb: >-
       {{ ansible_facts.pkg_mgr == 'apt'
-         and (ansible_facts.distribution_major_version | string)
-             in (suifleet_deb_distributions[ansible_facts.distribution] | default([])) }}
+         and ((ansible_facts.distribution_version | string) in tested_releases
+              or (ansible_facts.distribution_major_version | string) in tested_releases) }}
   ansible.builtin.set_fact:
     suifleet_selected_profile: >-
       {{ suifleet_profile if suifleet_profile != 'auto'
