@@ -41,7 +41,7 @@ def prepare(package, out, fingerprint):
         if not public.stat().st_size:
             raise ValueError("signing public key not found")
         run("rpmsign", "--define", f"_gpg_name {fingerprint}",
-            "--addsign", str(signed))
+            "--resign", str(signed))
         db = root / "rpmdb"
         db.mkdir()
         run("rpmkeys", "--dbpath", str(db), "--import", str(public))

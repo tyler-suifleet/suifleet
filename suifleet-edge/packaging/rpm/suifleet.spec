@@ -2,11 +2,11 @@ Name: suifleet
 Version: %{fleet_version}
 Release: %{fleet_release}
 Summary: SuiFleet edge client and isolated device signer
-License: Apache-2.0
+License: MIT
 URL: https://github.com/tyler-suifleet/suifleet
 Source0: payload.tar
 ExclusiveArch: x86_64
-Requires: systemd, ca-certificates
+Requires: systemd, ca-certificates, coreutils, grep
 Requires(pre): shadow-utils, systemd, coreutils, glibc-common
 Requires(preun): systemd
 Requires(post): systemd
@@ -47,6 +47,11 @@ if [ "$daemon_uid" = 0 ] || [ "$signer_uid" = 0 ] || [ "$daemon_uid" = "$signer_
     echo 'SuiFleet requires separate unprivileged daemon and signer users and groups' >&2
     exit 1
 fi
+for account in suifleet suifleet-signer; do
+    case " $(id -G "$account") " in
+        *" 0 "*) echo "$account must not belong to root group" >&2; exit 1 ;;
+    esac
+done
 case " $(id -G suifleet) " in
     *" $signer_gid "*) echo 'Daemon must not belong to signer group' >&2; exit 1 ;;
 esac

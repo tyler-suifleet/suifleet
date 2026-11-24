@@ -175,6 +175,8 @@ def main():
     parser.add_argument("--inside", action="store_true")
     args = parser.parse_args()
     if args.inside:
+        run("uname", "-r")
+        run("rpm", "-q", "rocky-release", "systemd", "rpm-build", "dnf", "createrepo_c", "gnupg2")
         with tempfile.TemporaryDirectory(prefix="rpm-qa-") as work:
             lifecycle(args.first, args.second, Path(work))
         return
@@ -195,6 +197,11 @@ def main():
             raise RuntimeError("Rocky systemd container did not boot")
         run("docker", "exec", container, "python3", "-B", "/src/scripts/test_rpm.py",
             "--inside", first, second)
+    except subprocess.CalledProcessError:
+        subprocess.run(["docker", "exec", container, "journalctl", "--no-pager",
+                        "-u", "suifleet-provision.service", "-u", "suifleet-signer.service",
+                        "-u", "suifleet-signer.socket"], check=False)
+        raise
     finally:
         run("docker", "rm", "-f", container)
 
