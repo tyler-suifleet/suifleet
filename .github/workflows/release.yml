@@ -133,8 +133,14 @@ jobs:
             -e KEY_ID="$RELEASE_SIGNING_KEY_ID" suifleet-release:ci bash -ec '
               for bundle in ../dist/unsigned-release-*; do
                 cargo run --locked --release --example sign_release -- sign /key/key "$KEY_ID" "$bundle"
-                cargo run --locked --release --bin suifleet -- --verify-release "$bundle" ../release/trust.toml
+                cargo run --locked --release --bin suifleet -- --verify-release "$bundle" ../release/trust.toml "${bundle##*unsigned-release-}"
               done'
+
+      - name: Install APT publication tools
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils gnupg
 
       - name: Prepare immutable publication assets
         if: startsWith(github.ref, 'refs/tags/v')
@@ -146,8 +152,6 @@ jobs:
             echo "::error::APT signing key and fingerprint must be configured"
             exit 1
           fi
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends apt-utils gnupg
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
             echo "::error::unsupported release tag"
             exit 1
@@ -156,16 +160,25 @@ jobs:
           GNUPGHOME=$(mktemp -d)
           trap 'gpgconf --kill all; rm -rf "$GNUPGHOME"' EXIT
           printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          unset APT_SIGNING_KEY
           mkdir dist/publication
+          packages=()
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            bundle="dist/unsigned-release-$target"
+            file=$(jq -er '[.files[].path | select(endswith(".deb"))] | if length == 1 then .[0] else error("expected one signed package") end' "$bundle/release.json")
+            packages+=("$bundle/$file")
+          done
           snapshot="suifleet-$GITHUB_REF_NAME-apt"
           python3 scripts/build_apt_snapshot.py --output "dist/$snapshot" \
-            --fingerprint "$APT_SIGNING_FINGERPRINT" dist/unsigned-release-*/*.deb
+            --fingerprint "$APT_SIGNING_FINGERPRINT" "${packages[@]}"
           gpg --batch --export "$APT_SIGNING_FINGERPRINT" > "$GNUPGHOME/publisher.gpg"
           gpgv --keyring "$GNUPGHOME/publisher.gpg" "dist/$snapshot/InRelease"
           gpgv --keyring "$GNUPGHOME/publisher.gpg" "dist/$snapshot/Release.gpg" "dist/$snapshot/Release"
           tar -C dist -czf "dist/publication/$snapshot.tar.gz" "$snapshot"
           for bundle in dist/unsigned-release-*; do
             target=${bundle#dist/unsigned-release-}
+            jq -e --arg commit "$GITHUB_SHA" --arg version "${GITHUB_REF_NAME#v}" \
+              '.commit == $commit and .version == $version' "$bundle/release.json" >/dev/null
             tar -C "$bundle" -czf "dist/publication/suifleet-$GITHUB_REF_NAME-$target-release.tar.gz" .
           done
           (cd dist/publication && sha256sum -- *.tar.gz > SHA256SUMS)
@@ -191,6 +204,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          git fetch --no-tags origin "refs/tags/$GITHUB_REF_NAME"
+          [ "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA" ]
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::error::refusing to replace an existing release"
             exit 1

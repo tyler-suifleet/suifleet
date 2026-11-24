@@ -38,6 +38,11 @@ def unsafe_accounts(package):
     print("PASS package rejects preexisting daemon/signer UID collision")
 
 
+def pin_version(path, version):
+    path.write_text(f"Package: suifleet\nPin: version {version}\nPin-Priority: 990\n\n"
+                    "Package: suifleet\nPin: version *\nPin-Priority: -1\n")
+
+
 def signed_apt_sources(package, upgrade, version):
     import os
     import shutil
@@ -69,10 +74,18 @@ def signed_apt_sources(package, upgrade, version):
     rejected = subprocess.run(update, capture_output=True, text=True)
     assert rejected.returncode != 0 and "NO_PUBKEY" in rejected.stderr
     keyring.write_bytes(subprocess.check_output([*gpg, "--export", fingerprint]))
+    snapshot = apt_root / "initial"
+    run("gpgv", "--keyring", str(keyring), str(snapshot / "Release.gpg"), str(snapshot / "Release"))
+    metadata = snapshot / "InRelease"
+    signed = metadata.read_bytes()
+    metadata.write_bytes(signed.replace(b"Origin: SuiFleet", b"Origin: Elsewhere", 1))
+    rejected = subprocess.run(update, capture_output=True, text=True)
+    assert rejected.returncode != 0 and "BADSIG" in rejected.stderr
+    metadata.write_bytes(signed)
     run(*update)
 
     pin = Path("/etc/apt/preferences.d/suifleet")
-    pin.write_text(f"Package: suifleet\nPin: version {version}\nPin-Priority: 990\n")
+    pin_version(pin, version)
     # APT must enforce the indexed package digest after accepting InRelease.
     published = next((apt_root / "initial/pool").glob("*.deb"))
     original = published.read_bytes()
@@ -80,7 +93,7 @@ def signed_apt_sources(package, upgrade, version):
     rejected = subprocess.run(["apt-get", "install", "-y", "suifleet"], capture_output=True, text=True)
     assert rejected.returncode != 0 and "Hash Sum mismatch" in rejected.stderr
     shutil.copyfile(package, published)
-    print("PASS APT refused an unknown signer and a modified package, then accepted signed indexes")
+    print("PASS APT refused an unknown signer, modified metadata and a modified package")
     return pin
 
 
@@ -188,7 +201,7 @@ def inside(package):
         assert hashlib.sha256(key.read_bytes()).hexdigest() == digest
 
     run("systemctl", "--no-reload", "enable", "suifleet-enrollment.path", "suifleet-signer.socket")
-    pin.write_text(f"Package: suifleet\nPin: version {version}.1\nPin-Priority: 990\n")
+    pin_version(pin, version + ".1")
     run("apt-get", "install", "-y", "--only-upgrade", "suifleet")
     assert subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", "suifleet"], text=True) == version + ".1"
     preserved()
@@ -197,7 +210,7 @@ def inside(package):
     assert not Path("/etc/systemd/system/multi-user.target.wants/suifleet-enrollment.path").is_symlink()
     assert not Path("/etc/systemd/system/sockets.target.wants/suifleet-signer.socket").is_symlink()
     assert not Path("/usr/bin/suifleet").exists()
-    pin.write_text(f"Package: suifleet\nPin: version {version}\nPin-Priority: 990\n")
+    pin_version(pin, version)
     run("apt-get", "install", "-y", "suifleet")
     preserved()
     run("apt-get", "purge", "-y", "suifleet")
