@@ -36,7 +36,7 @@ function audit() {
     const cold = process.env.FLEET_TEST_COLD_START === "1";
     if (cold) {
       const catalog = JSON.parse(await fs.readFile("interfaces/fleet-v1.json", "utf8"));
-      for (const type of catalog.optional_type_origins.customer) manifest.type_origins[type] = manifest.call_package_id;
+      for (const type of [...catalog.optional_type_origins.customer, ...catalog.optional_type_origins.fleet_budget]) manifest.type_origins[type] = manifest.call_package_id;
     }
     const bundle = path.join(dir, "app.js");
     await build({ entryPoints: [path.resolve(__dirname, "browser/onboarding-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") }, define: { "process.env": "{}", "process.env.NEXT_PUBLIC_ENOKI_API_KEY": JSON.stringify("enoki_public_fixture"), "process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID": JSON.stringify("fixture.apps.googleusercontent.com"), "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)), COLD_START: JSON.stringify(cold), ACCEPTANCE_MANIFEST: JSON.stringify(manifest) }, logLevel: "warning" });
@@ -132,8 +132,28 @@ function audit() {
       assert.equal(await register.isDisabled(), true);
       await page.evaluate(() => window.acceptance.staleFleet(false));
       await page.getByText("Create your first fleet", { exact: true }).waitFor();
+      const funding = page.locator("#step-funding");
+      const budgetWarning = funding.getByRole("alert").filter({ hasText: "Device operating budget could not be verified." });
+      const payment = funding.getByRole("heading", { name: "Fund the device operating budget" });
+      for (const [administrator, message, screenshot] of [
+        [true, "Device limit reached: 1 active devices, limit 1", "full-fleet"],
+        [false, "An organization administrator must register devices.", "member-fleet"],
+      ]) {
+        await page.evaluate((value) => window.acceptance.setFleetAdministrator(value), administrator);
+        const warning = funding.getByRole("status").filter({ hasText: message });
+        await warning.waitFor();
+        await payment.waitFor();
+        await budgetWarning.waitFor();
+        assert.equal(await readiness.isVisible(), false);
+        const paymentTop = (await payment.boundingBox()).y;
+        assert.ok((await warning.boundingBox()).y < paymentTop);
+        assert.ok((await budgetWarning.boundingBox()).y < paymentTop);
+        assert.equal(await register.isDisabled(), true);
+        await layout(screenshot);
+      }
+      assert.equal(await page.evaluate(() => window.acceptance.signCalls()), 0);
       assert.deepEqual(errors, []);
-      console.log("PASS: cold-start desktop/mobile signed-out, optional sign-in unavailable, connected-no-fleet funding/faucet, preview/cancel, capacity/reporting disclosures and restricted content gate; no signing");
+      console.log("PASS: cold-start desktop/mobile signed-out, optional sign-in unavailable, connected-no-fleet funding/faucet, preview/cancel, capacity/reporting disclosures and restricted content gate, full and non-admin fleet warnings before payment, budget verification failure; no signing");
       return;
     }
     // Disconnected: one clear next action, later steps honestly waiting, no advanced operations.

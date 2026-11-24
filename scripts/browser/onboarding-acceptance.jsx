@@ -13,6 +13,7 @@ import { selectionKey } from "@/lib/customer-fleets";
 import { FleetSelectionProvider, FleetScope, onboardingRoute } from "@/hooks/useFleetSelection";
 import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { FirstRun } from "@/components/FirstRun";
+import { customer_CustomerBcs, customer_FleetBcs, customer_MembershipBcs } from "@/lib/fleet-protocol";
 import { DeviceBcs } from "@/lib/move-bcs";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { manifestClient } from "../fixtures/manifest-client.ts";
@@ -60,19 +61,39 @@ const client = kit.getClient();
 const responses = manifestClient(m, () => chain);
 client.ledgerService.getServiceInfo = async () => { const result = await responses.ledgerService.getServiceInfo(); result.response.epoch = epoch; return result; };
 client.getBalance = async () => { if (balanceFail) throw new Error("Balance service unavailable"); return { balance: { balance: gasBalance } }; };
+const customerId = normalizeSuiAddress("0xc2"), fleetId = normalizeSuiAddress("0xf0");
+const customerType = (name) => `${m.type_origins[`customer::${name}`]}::customer::${name}`;
+const queries = new QueryClient();
+let administrator;
 const deviceType = `${m.type_origins["device_registry::Device"]}::device_registry::Device`;
 client.listOwnedObjects = async ({ type }) => {
+  if (type === customerType("Membership") && administrator !== undefined) {
+    const id = normalizeSuiAddress("0xc1");
+    return { objects: [{ objectId: id, type, content: customer_MembershipBcs.serialize({ id, customer_id: customerId }).toBytes() }], hasNextPage: false };
+  }
   if (inventoryFail) throw new Error("Inventory service unavailable");
   const objects = type === deviceType ? inventory.map((d) => ({ objectId: d.id, type: deviceType, content: DeviceBcs.serialize({
     id: d.id, name: d.name, device_address: d.address, arch: "aarch64", meta: { contents: [] }, registered_at: 1, schema_version: 1 }).toBytes() })) : [];
   return { objects, hasNextPage: false };
 };
-client.getObject = responses.getObject;
+client.getObject = async (request) => {
+  if (request.objectId === customerId) return { object: { type: customerType("Customer"), content: customer_CustomerBcs.serialize({
+    id: customerId, version: 201, registry_id: m.shared_objects.registry.id, name: "Fixture customer",
+    credentials: { contents: [{ key: address, value: administrator }] }, administrators: 1, fleets: [fleetId], default_fleet: fleetId,
+    active_devices: 1, device_limit: administrator ? 1 : 2, allowance: 0, used: 0, period: 0, charge_type: [],
+  }).toBytes() } };
+  if (request.objectId === fleetId) return { object: { type: customerType("Fleet"), content: customer_FleetBcs.serialize({
+    id: fleetId, version: 1, customer_id: customerId, name: "Fixture fleet", budget_id: normalizeSuiAddress("0xb0"),
+    devices: [], pending_devices: 0, groups: [], deployments: [], policies: { contents: [] }, enrollment_policies: [],
+  }).toBytes() } };
+  return responses.getObject(request);
+};
 client.waitForTransaction = (async () => ({ $kind: "Transaction", Transaction: { digest, status: { success: true } } }));
 
 window.addEventListener("wallet-standard:app-ready", (event) => event.detail.register(wallet));
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
 Object.assign(window, { acceptance: {
+  setFleetAdministrator: (value) => { administrator = value; return queries.invalidateQueries({ queryKey: ["customer-fleets"] }); },
   staleFleet: (stale) => { if (stale) localStorage.setItem(selectionKey(address), "0xdead"); else localStorage.removeItem(selectionKey(address)); window.dispatchEvent(new Event("storage")); },
   fund: () => { gasBalance = "1000000000"; }, expire: () => { expired = true; }, advanceEpoch: () => { epoch = 2n; }, reject: () => { reject = true; }, effectsFail: () => { reject = false; failEffects = true; },
   budgetRace: () => { budgetRace = true; },
@@ -86,4 +107,4 @@ Object.assign(window, { acceptance: {
   wallets: () => kit.stores.$wallets.get().map((w) => w.name), signCalls: () => signCalls, disconnect: () => kit.disconnectWallet(),
 } });
 function App() { return COLD_START ? <FleetSelectionProvider><FleetSwitcher /><FleetScope allowWithoutFleet={onboardingRoute("/get-started/")}><FirstRun connect={<ConnectButton />} /></FleetScope><FleetScope><p>Restricted fleet content</p></FleetScope></FleetSelectionProvider> : <FirstRun connect={<ConnectButton />} />; }
-createRoot(document.getElementById("root")).render(<QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><App /></DAppKitProvider></QueryClientProvider>);
+createRoot(document.getElementById("root")).render(<QueryClientProvider client={queries}><DAppKitProvider dAppKit={kit}><App /></DAppKitProvider></QueryClientProvider>);

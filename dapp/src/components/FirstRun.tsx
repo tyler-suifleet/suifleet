@@ -155,6 +155,14 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </nav>
 
     <StepCard id="funding" index={2} title="Add funds" state={steps[1].state}>
+      {account && fleet && capacity && (!capacity.available || !capacity.administrator) &&
+        <p role="status" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+          {!capacity.administrator ? "An organization administrator must register devices." : deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)}{" "}
+          <Link className={LINK} href="/entitlements">Check device capacity</Link>
+        </p>}
+      {account && budgets.isError && <p role="alert" className="text-red-800">
+        Device operating budget could not be verified. Check the <Link className={LINK} href="/budget">Device and storage budgets page</Link> before depositing again.
+      </p>}
       <Disclosure summary="Before your first device: capacity, fees and budgets">
         <PilotReadiness connected={!!account} capacity={fleet ? { used: fleet.activeDevices, limit: fleet.deviceLimit, administrator: fleet.administrator } : undefined}
           balance={state.isSuccess ? state.data : undefined} balanceFailed={state.isError}
