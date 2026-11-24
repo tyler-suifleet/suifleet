@@ -4,11 +4,11 @@ The Linux supervisor selects one local engine per daemon state root. Set
 `SUIFLEET_OCI_ENGINE` in the daemon service environment. The packaged service
 reads `/etc/suifleet/env`. Recipes cannot select an engine.
 
-| Selection | Unix socket | Network setting | Engine requirements |
-| --- | --- | --- | --- |
-| `docker` (default) | `/var/run/docker.sock` | `none`, `bridge` | Local Docker CLI and Docker Engine with resource limits |
-| `podman-rootful` | `/run/podman/podman.sock` | `none`, `bridge` | `/usr/bin/podman-remote` and separately managed rootful API service, cgroup v2, CPU/memory/PID controllers and seccomp |
-| `podman-rootless` | `/run/suifleet-podman/podman.sock` | `none` | `/usr/bin/podman-remote`, API service under the daemon UID, subordinate UID/GID mappings, delegated cgroup v2 CPU/memory/PID controllers and seccomp |
+| Selection | Unix socket | Network setting | Linux image platforms | Engine requirements |
+| --- | --- | --- | --- | --- |
+| `docker` (default) | `/var/run/docker.sock` | `none`, `bridge` | amd64, arm64, ARMv7 | Local Docker CLI and Docker Engine with resource limits |
+| `podman-rootful` | `/run/podman/podman.sock` | `none`, `bridge` | amd64, arm64 | `/usr/bin/podman-remote` and separately managed rootful API service, cgroup v2, CPU/memory/PID controllers and seccomp |
+| `podman-rootless` | `/run/suifleet-podman/podman.sock` | `none` | amd64, arm64 | `/usr/bin/podman-remote`, API service under the daemon UID, subordinate UID/GID mappings, delegated cgroup v2 CPU/memory/PID controllers and seccomp |
 
 Run the Podman API service outside the SuiFleet unit. For both Podman modes,
 provision `/run/suifleet-podman` and `/run/suifleet-podman/libpod` as mode 0700
@@ -49,8 +49,9 @@ marker implies Docker. A mismatched engine selection fails before cleanup;
 restore the prior configuration and keep the marker. Before downgrading to
 a daemon that predates Podman support, retire its Podman components and confirm
 cleanup with the Podman-capable daemon. Remote hosts,
-Docker Desktop, Windows and macOS are outside this adapter's scope. Native Linux
-amd64, arm64 and ARMv7 image selection is implemented. Physical ARM/Pi
+Docker Desktop, Windows and macOS are outside this adapter's scope. Both Podman
+modes reject ARMv7 before contacting the engine because image inspection lacks
+the ARM variant needed to verify the platform. Physical ARM/Pi
 installation, crash/reboot and target limits remain acceptance in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
 Image/Yocto builds leave engine installation and provisioning to the platform.
@@ -86,7 +87,7 @@ manifest/index digest and upload/hash the descriptor bytes as the artifact:
 
 Unknown fields fail. Images require an explicit repository and immutable SHA-256;
 tags alone fail. Platforms must match the daemon: `linux/amd64`, `linux/arm64` or
-`linux/arm/v7` (ARMv7 only; ARMv6 daemon targets are unsupported). There is no
+`linux/arm/v7` (Docker only; ARMv6 daemon targets are unsupported). There is no
 automatic emulation or architecture fallback. The
 engine's cached image platform and repository digest are checked before use.
 Images declaring implicit `VOLUME`s fail. Choose images compatible with a non-root

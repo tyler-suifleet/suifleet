@@ -263,6 +263,10 @@ impl Engine {
             return Ok(());
         }
         ensure!(
+            descriptor.platform != "linux/arm/v7",
+            "Podman OCI does not support linux/arm/v7: image inspect cannot verify the ARM variant"
+        );
+        ensure!(
             self != Self::PodmanRootless || descriptor.network == "none",
             "rootless Podman supports only OCI network none"
         );
@@ -758,8 +762,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_podman_armv7_before_engine_operation() {
+        let mut descriptor = descriptor();
+        descriptor.platform = "linux/arm/v7".to_owned();
+        for engine in [Engine::PodmanRootful, Engine::PodmanRootless] {
+            assert_eq!(
+                engine.check(&descriptor).await.unwrap_err().to_string(),
+                "Podman OCI does not support linux/arm/v7: image inspect cannot verify the ARM variant"
+            );
+        }
+        assert!(Engine::Docker.check(&descriptor).await.is_ok());
+    }
+
+    #[tokio::test]
     async fn rejects_rootless_bridge_before_engine_operation() {
         let mut descriptor = descriptor();
+        descriptor.platform = "linux/amd64".to_owned();
         descriptor.network = "bridge".to_owned();
         assert!(Engine::PodmanRootless
             .check(&descriptor)
