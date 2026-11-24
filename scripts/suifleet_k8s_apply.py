@@ -12,17 +12,29 @@ It is deliberately narrow:
   RoleBinding, and places a kubeconfig for that ServiceAccount in a device-local
   profile (default /etc/suifleet/k8s/PROFILE). Recipes never carry credentials,
   never choose the namespace and never receive cluster-admin.
-- Only Deployments, ConfigMaps and ClusterIP Services are accepted. Pod
-  specifications are rejected when they request host namespaces, host paths,
-  privilege, added capabilities, Secrets, ServiceAccount tokens or mutable
-  image tags. The cluster's RBAC and Pod Security Admission remain the
-  authoritative boundary; this validation is early, explainable failure.
+- Only Deployments and ConfigMaps are accepted. Services and other
+  networking objects stay administrator-owned. Pod specifications are rejected
+  when they request host namespaces, host paths, privilege, added
+  capabilities, Secrets, ServiceAccounts/tokens or mutable image tags. The
+  cluster's RBAC, Pod Security Admission and the administrator's
+  ValidatingAdmissionPolicy remain the authoritative boundary; this
+  validation is early, explainable failure.
 - Objects carry `app.kubernetes.io/managed-by=suifleet` and the component's
-  label. Server-side apply uses one field manager and never forces conflicts;
-  existing objects that SuiFleet did not create are never adopted. A field
-  changed by another manager makes the apply fail instead of being overwritten.
+  label. Every write is bound to the observed object: absent objects are
+  created with create-only semantics, existing owned objects are updated by
+  server-side apply with the observed UID and resourceVersion as
+  preconditions (one field manager, never forced), and deletions carry UID and
+  resourceVersion delete preconditions. A competing creation, replacement or
+  relabel between the ownership check and the write fails that write; the
+  helper re-reads and re-checks ownership instead of mutating another
+  instance. Objects SuiFleet did not create are never adopted, and a field
+  held by another manager makes the apply fail instead of being overwritten.
 - Pruning deletes only objects labelled for this component that the current
   bundle no longer contains.
+- A multi-object apply is not transactional: if a later write fails, earlier
+  objects may already carry the new bundle. Readiness never reports success
+  until every object carries this bundle's digest, and the next apply
+  converges.
 
 It manages workloads inside a cluster. It does not install, configure or
 update Kubernetes, nodes, the OS, firmware or the SuiFleet client, and it never
@@ -34,8 +46,9 @@ SUIFLEET_COMPONENT / SUIFLEET_COMPONENT_VERSION environment):
   apply    --bundle FILE --profile NAME        validate, apply once, prune
   run      --bundle FILE --profile NAME        apply, then re-apply every
                                               --interval seconds (foreground)
-  ready    --bundle FILE --profile NAME        exit 0 when the bundle's
-                                              Deployments are rolled out
+  ready    --bundle FILE --profile NAME        exit 0 when every bundle object
+                                              is owned, applied from this
+                                              bundle and Deployments rolled out
   remove   --profile NAME --component NAME     delete the component's objects
 """
 import argparse
@@ -62,12 +75,17 @@ VERSION_ANNOTATION = "suifleet.io/version"
 BUNDLE_ANNOTATION = "suifleet.io/bundle-sha256"
 DEFAULT_PROFILE_ROOT = "/etc/suifleet/k8s"
 KUBECTL_TIMEOUT = 60
+WRITE_ATTEMPTS = 8
 
-# (apiVersion, kind) -> kubectl resource name used for get/delete/prune.
+# (apiVersion, kind) -> kubectl resource name used for get/list/prune.
 ALLOWED_KINDS = {
     ("v1", "ConfigMap"): "configmaps",
-    ("v1", "Service"): "services",
     ("apps/v1", "Deployment"): "deployments.apps",
+}
+# kubectl resource name -> namespaced REST collection path (for preconditioned DELETE).
+API_PATHS = {
+    "configmaps": "/api/v1/namespaces/{namespace}/configmaps/{name}",
+    "deployments.apps": "/apis/apps/v1/namespaces/{namespace}/deployments/{name}",
 }
 DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 LABEL_VALUE = re.compile(r"^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$")
@@ -89,6 +107,14 @@ class Conflict(Exception):
 def _require(condition, message):
     if not condition:
         raise Rejected(message)
+
+
+def _list(where, value):
+    """An optional list field: None or a list; returns a list."""
+    if value is None:
+        return []
+    _require(isinstance(value, list), f"{where} must be a list")
+    return value
 
 
 def _keys(where, value, allowed):
@@ -118,7 +144,8 @@ def _security_context(where, context, container):
     _require(context.get("runAsUser") != 0, f"{where}.runAsUser 0 is not allowed")
     _require(context.get("windowsOptions") is None, f"{where}.windowsOptions is not supported")
     if container:
-        capabilities = context.get("capabilities") or {}
+        capabilities = context.get("capabilities")
+        capabilities = {} if capabilities is None else capabilities
         _require(isinstance(capabilities, dict), f"{where}.capabilities must be an object")
         _require(not capabilities.get("add"), f"{where}.capabilities.add is not allowed")
 
@@ -130,13 +157,16 @@ def _container(where, container):
     image = container.get("image")
     _require(isinstance(image, str) and IMAGE_DIGEST.match(image),
              f"{where}.image must be an explicit repository pinned by @sha256 digest")
-    for port in container.get("ports") or []:
+    for port in _list(f"{where}.ports", container.get("ports")):
         _require(isinstance(port, dict) and "hostPort" not in port and "hostIP" not in port,
                  f"{where}.ports must not use hostPort/hostIP")
-    for item in container.get("envFrom") or []:
+    for item in _list(f"{where}.envFrom", container.get("envFrom")):
         _require(isinstance(item, dict) and "secretRef" not in item, f"{where}.envFrom must not reference Secrets")
-    for item in container.get("env") or []:
-        source = isinstance(item, dict) and item.get("valueFrom") or {}
+    for item in _list(f"{where}.env", container.get("env")):
+        _require(isinstance(item, dict), f"{where}.env entries must be objects")
+        source = item.get("valueFrom")
+        source = {} if source is None else source
+        _require(isinstance(source, dict), f"{where}.env valueFrom must be an object")
         _require("secretKeyRef" not in source, f"{where}.env must not reference Secrets")
     _security_context(f"{where}.securityContext", container.get("securityContext"), True)
     _require("volumeDevices" not in container, f"{where}.volumeDevices is not allowed")
@@ -154,9 +184,9 @@ def _pod_spec(where, spec):
     containers = spec.get("containers")
     _require(isinstance(containers, list) and containers, f"{where}.containers must be a non-empty list")
     for kind in ("containers", "initContainers"):
-        for index, container in enumerate(spec.get(kind) or []):
+        for index, container in enumerate(_list(f"{where}.{kind}", spec.get(kind))):
             _container(f"{where}.{kind}[{index}]", container)
-    for index, volume in enumerate(spec.get("volumes") or []):
+    for index, volume in enumerate(_list(f"{where}.volumes", spec.get("volumes"))):
         _require(isinstance(volume, dict), f"{where}.volumes[{index}] must be an object")
         sources = set(volume) - {"name"}
         _require(len(sources) == 1 and sources <= ALLOWED_VOLUME_SOURCES,
@@ -168,6 +198,7 @@ def _resource(index, resource):
     where = f"resources[{index}]"
     _require(isinstance(resource, dict), f"{where} must be an object")
     key = (resource.get("apiVersion"), resource.get("kind"))
+    _require(all(isinstance(part, str) for part in key), f"{where}.apiVersion and kind must be strings")
     _require(key in ALLOWED_KINDS, f"{where}: {key[0]}/{key[1]} is not an allowed kind "
              f"(allowed: {sorted(f'{a}/{k}' for a, k in ALLOWED_KINDS)})")
     metadata = resource.get("metadata")
@@ -179,16 +210,11 @@ def _resource(index, resource):
     kind = key[1]
     if kind == "ConfigMap":
         _keys(where, resource, ("apiVersion", "kind", "metadata", "data", "immutable"))
-        data = resource.get("data") or {}
+        data = resource.get("data")
+        data = {} if data is None else data
         _require(isinstance(data, dict) and all(isinstance(v, str) for v in data.values()),
                  f"{where}.data must map keys to strings")
-    elif kind == "Service":
-        _keys(where, resource, ("apiVersion", "kind", "metadata", "spec"))
-        spec = resource.get("spec")
-        _keys(f"{where}.spec", spec, ("type", "selector", "ports", "clusterIP", "sessionAffinity"))
-        _require(spec.get("type", "ClusterIP") == "ClusterIP", f"{where}.spec.type must be ClusterIP")
-        for port in spec.get("ports") or []:
-            _require(isinstance(port, dict) and "nodePort" not in port, f"{where}.spec.ports must not set nodePort")
+        _require(resource.get("immutable") in (None, True, False), f"{where}.immutable must be a boolean")
     else:
         _keys(where, resource, ("apiVersion", "kind", "metadata", "spec"))
         spec = resource.get("spec")
@@ -196,7 +222,8 @@ def _resource(index, resource):
                                        "revisionHistoryLimit", "progressDeadlineSeconds"))
         template = spec.get("template")
         _keys(f"{where}.spec.template", template, ("metadata", "spec"))
-        template_metadata = template.get("metadata") or {}
+        template_metadata = template.get("metadata")
+        template_metadata = {} if template_metadata is None else template_metadata
         _keys(f"{where}.spec.template.metadata", template_metadata, ("labels", "annotations"))
         _labels(f"{where}.spec.template.metadata.labels", template_metadata.get("labels"))
         _labels(f"{where}.spec.template.metadata.annotations", template_metadata.get("annotations"))
@@ -210,15 +237,27 @@ def load_bundle(path):
     _require(len(data) <= MAX_BUNDLE_BYTES, f"bundle exceeds {MAX_BUNDLE_BYTES} bytes")
     try:
         bundle = json.loads(data)
-    except ValueError as error:
+    except (ValueError, RecursionError) as error:
         raise Rejected(f"bundle is not JSON: {error}") from None
     validate_bundle(bundle)
     return bundle, hashlib.sha256(data).hexdigest()
 
 
 def validate_bundle(bundle):
+    """Raise Rejected (never another exception) unless the bundle is acceptable."""
+    try:
+        _validate_bundle(bundle)
+    except Rejected:
+        raise
+    except (TypeError, ValueError, AttributeError, KeyError, IndexError, RecursionError) as error:
+        # Explicit type checks above should make this unreachable; stay fail-closed.
+        raise Rejected(f"malformed bundle: {type(error).__name__}") from None
+
+
+def _validate_bundle(bundle):
     _keys("bundle", bundle, ("version", "resources"))
-    _require(bundle.get("version") == BUNDLE_VERSION, f"bundle version must be {BUNDLE_VERSION}")
+    version = bundle.get("version")
+    _require(type(version) is int and version == BUNDLE_VERSION, f"bundle version must be {BUNDLE_VERSION}")
     resources = bundle.get("resources")
     _require(isinstance(resources, list), "bundle.resources must be a list")
     _require(len(resources) <= MAX_RESOURCES, f"bundle has more than {MAX_RESOURCES} resources")
@@ -268,6 +307,65 @@ def ownership(existing, component):
 def prune_candidates(listed, desired_names):
     """Names of listed component objects that the bundle no longer contains."""
     return sorted(item["metadata"]["name"] for item in listed if item["metadata"]["name"] not in desired_names)
+
+
+def object_ready(current, desired, component):
+    """(ready, reason) for one live object against its rendered desired state:
+    present, not terminating, owned by this component, carrying exactly the
+    desired labels/annotations (so this bundle's digest and version) and, for
+    ConfigMaps, the desired data. Deployments additionally need a rollout."""
+    kind, name = desired["kind"], desired["metadata"]["name"]
+    if current is None:
+        return False, f"{kind}/{name} is missing"
+    metadata = current.get("metadata") or {}
+    if metadata.get("deletionTimestamp"):
+        return False, f"{kind}/{name} is being deleted"
+    problem = ownership(current, component)
+    if problem:
+        return False, f"{kind}/{name} {problem}"
+    for field in ("labels", "annotations"):
+        live = metadata.get(field) or {}
+        for key, value in desired["metadata"].get(field, {}).items():
+            if live.get(key) != value:
+                return False, f"{kind}/{name} not yet applied from this bundle ({field} {key})"
+    if kind == "ConfigMap":
+        if (current.get("data") or {}) != (desired.get("data") or {}) or \
+                bool(current.get("immutable")) != bool(desired.get("immutable")):
+            return False, f"{kind}/{name} content differs from this bundle"
+    if kind == "Deployment":
+        ok, reason = deployment_ready(current, desired["metadata"]["annotations"][BUNDLE_ANNOTATION])
+        if not ok:
+            return False, f"{kind}/{name}: {reason}"
+    return True, "ready"
+
+
+def transfer_patch(current):
+    """Merge patch that converts the field ownership recorded by SuiFleet's own
+    create-only write (operation Update) into its server-side apply ownership,
+    conditional on the observed UID and resourceVersion. None when nothing to
+    transfer. Without this, later applies would conflict with SuiFleet's own
+    creation entry."""
+    metadata = current.get("metadata") or {}
+    entries = metadata.get("managedFields") or []
+    created = [e for e in entries if e.get("manager") == FIELD_MANAGER and e.get("operation") == "Update"
+               and not e.get("subresource")]
+    if not created:
+        return None
+    applied = [e for e in entries if e.get("manager") == FIELD_MANAGER and e.get("operation") == "Apply"
+               and not e.get("subresource")]
+    fields = {}
+    for entry in applied + created:
+        _merge_fields(fields, entry.get("fieldsV1") or {})
+    merged = dict((applied or created)[0], operation="Apply", fieldsType="FieldsV1", fieldsV1=fields)
+    merged.pop("time", None)
+    others = [e for e in entries if e not in created and e not in applied]
+    return {"metadata": {"uid": metadata["uid"], "resourceVersion": metadata["resourceVersion"],
+                         "managedFields": others + [merged]}}
+
+
+def _merge_fields(target, source):
+    for key, value in source.items():
+        _merge_fields(target.setdefault(key, {}), value if isinstance(value, dict) else {})
 
 
 def deployment_ready(deployment, digest):
@@ -375,53 +473,138 @@ def connect(profile, cache_dir):
     return kubectl
 
 
-def apply(kubectl, objects, component):
-    namespace = kubectl.profile["namespace"]
-    desired = {}
-    for item in objects:
+def _stale(error, *extra):
+    """The write lost an optimistic-concurrency race: a resourceVersion or UID
+    precondition failed (or an `extra` race marker matched). The caller
+    re-reads and re-checks ownership; it never retries blindly."""
+    lowered = error.lower()
+    return any(marker in lowered for marker in (
+        "the object has been modified", "uid mismatch", "metadata.uid", "precondition") + extra)
+
+
+class Writer:
+    """Ownership-checked, precondition-bound writes for one component."""
+
+    def __init__(self, kubectl, component, pause=0.2):
+        self.kubectl, self.component, self.pause = kubectl, component, pause
+        self.namespace = kubectl.profile["namespace"]
+
+    def get(self, resource, name, managed_fields=False):
+        extra = ("--show-managed-fields",) if managed_fields else ()
+        return self.kubectl.json("get", resource, name, "--ignore-not-found", *extra)
+
+    def _retry(self, attempt):
+        if self.pause:
+            time.sleep(self.pause * (attempt + 1))
+
+    def apply(self, item):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
         name = item["metadata"]["name"]
-        existing = kubectl.json("get", resource, name, "--ignore-not-found")
-        problem = ownership(existing, component)
-        if problem:
-            raise Conflict(f"{item['kind']}/{name} in {namespace} {problem}")
-        desired.setdefault(resource, set()).add(name)
-    if objects:
-        payload = json.dumps({"apiVersion": "v1", "kind": "List", "items": objects})
-        # No --force-conflicts: a field owned by another manager fails the apply.
-        result = kubectl("apply", "--server-side", f"--field-manager={FIELD_MANAGER}", "-f", "-", stdin=payload)
-        if result.returncode != 0:
+        label = f"{item['kind']}/{name} in {self.namespace}"
+        for attempt in range(WRITE_ATTEMPTS):
+            current = self.get(resource, name, managed_fields=True)
+            if current is None:
+                # Create-only: fails instead of adopting an object that appeared
+                # after the read. The next iteration verifies and applies.
+                result = self.kubectl("create", f"--field-manager={FIELD_MANAGER}", "-f", "-", stdin=json.dumps(item))
+                if result.returncode != 0 and not _stale(result.stderr, "already exists", "alreadyexists"):
+                    raise Rejected(f"kubectl create {label} failed: {result.stderr.strip()[:500]}")
+                continue
+            problem = ownership(current, self.component)
+            if problem:
+                raise Conflict(f"{label} {problem}")
+            if (current.get("metadata") or {}).get("deletionTimestamp"):
+                raise Rejected(f"{label} is being deleted; retry after deletion completes")
+            patch = transfer_patch(current)
+            if patch is not None:
+                result = self.kubectl("patch", resource, name, "--type=merge", f"--field-manager={FIELD_MANAGER}",
+                                      "--patch-file=/dev/stdin", stdin=json.dumps(patch))
+                if result.returncode != 0 and not _stale(result.stderr, "not found", "notfound"):
+                    raise Rejected(f"kubectl patch {label} failed: {result.stderr.strip()[:500]}")
+                continue
+            bound = json.loads(json.dumps(item))
+            bound["metadata"]["uid"] = current["metadata"]["uid"]
+            bound["metadata"]["resourceVersion"] = current["metadata"]["resourceVersion"]
+            # No --force-conflicts: a field owned by another manager fails the apply.
+            result = self.kubectl("apply", "--server-side", f"--field-manager={FIELD_MANAGER}", "-f", "-",
+                                  stdin=json.dumps(bound))
+            if result.returncode == 0:
+                return
             error = result.stderr.strip()[:1000]
-            if "conflict" in error.lower():
-                raise Conflict(f"another field manager owns fields in the bundle; not overriding: {error}")
-            raise Rejected(f"kubectl apply failed: {error}")
-    return prune(kubectl, component, desired)
+            if "apply failed with" in error.lower():
+                # The API server may report a field conflict before a failed
+                # UID/resourceVersion precondition. If the object changed since
+                # the check, re-read and re-check ownership for an accurate result.
+                again = self.get(resource, name)
+                same = again is not None and all(
+                    (again.get("metadata") or {}).get(key) == current["metadata"][key] for key in ("uid", "resourceVersion"))
+                if not same:
+                    self._retry(attempt)
+                    continue
+                raise Conflict(f"another field manager owns fields of {label}; not overriding: {error}")
+            if not _stale(error):
+                raise Rejected(f"kubectl apply {label} failed: {error}")
+            self._retry(attempt)
+        raise Conflict(f"{label} kept changing during {WRITE_ATTEMPTS} attempts; not overriding")
+
+    def delete(self, resource, current):
+        """Delete one listed object only while it is the same owned instance.
+        Returns True when deleted or already gone, False when left alone
+        because it was relabelled or replaced by someone else."""
+        name = current["metadata"]["name"]
+        path = API_PATHS[resource].format(namespace=self.namespace, name=name)
+        for attempt in range(WRITE_ATTEMPTS):
+            if current is None:
+                return True
+            if ownership(current, self.component):
+                return False
+            metadata = current["metadata"]
+            options = {"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": "Background",
+                       "preconditions": {"uid": metadata["uid"], "resourceVersion": metadata["resourceVersion"]}}
+            result = self.kubectl("delete", "--raw", path, "-f", "-", stdin=json.dumps(options), namespaced=False)
+            if result.returncode == 0:
+                return True
+            error = result.stderr.strip()[:500]
+            if "notfound" in error.lower().replace(" ", ""):
+                return True
+            if not _stale(error, "(conflict)"):
+                raise Rejected(f"delete {resource}/{name} failed: {error}")
+            self._retry(attempt)
+            current = self.get(resource, name)
+        raise Conflict(f"{resource}/{name} kept changing during {WRITE_ATTEMPTS} delete attempts")
 
 
-def prune(kubectl, component, desired):
+def apply(kubectl, objects, component, writer=None):
+    writer = writer or Writer(kubectl, component)
+    desired = {}
+    for item in objects:
+        writer.apply(item)
+        desired.setdefault(ALLOWED_KINDS[(item["apiVersion"], item["kind"])], set()).add(item["metadata"]["name"])
+    return prune(kubectl, component, desired, writer)
+
+
+def prune(kubectl, component, desired, writer=None):
+    writer = writer or Writer(kubectl, component)
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     removed = []
     for resource in ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}
-        for name in prune_candidates(listed.get("items") or [], desired.get(resource, set())):
-            result = kubectl("delete", resource, name, "--ignore-not-found", "--wait=false")
-            if result.returncode != 0:
-                raise Rejected(f"kubectl delete {resource}/{name} failed: {result.stderr.strip()[:500]}")
-            removed.append(f"{resource}/{name}")
+        items = {item["metadata"]["name"]: item for item in listed.get("items") or []}
+        for name in prune_candidates(list(items.values()), desired.get(resource, set())):
+            if writer.delete(resource, items[name]):
+                removed.append(f"{resource}/{name}")
+            else:
+                _log(f"left {resource}/{name}: no longer this component's object")
     return removed
 
 
-def ready(kubectl, objects, digest):
+def ready(kubectl, objects, component):
     for item in objects:
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
-        name = item["metadata"]["name"]
-        current = kubectl.json("get", resource, name, "--ignore-not-found")
-        if current is None:
-            return False, f"{item['kind']}/{name} is missing"
-        if item["kind"] == "Deployment":
-            ok, reason = deployment_ready(current, digest)
-            if not ok:
-                return False, f"Deployment/{name}: {reason}"
+        current = kubectl.json("get", resource, item["metadata"]["name"], "--ignore-not-found")
+        ok, reason = object_ready(current, item, component)
+        if not ok:
+            return False, reason
     return True, "ready"
 
 
@@ -459,7 +642,7 @@ def main(argv=None):
                 return 0
             objects = render(bundle, profile["namespace"], args.component, args.version, digest)
             if args.command == "ready":
-                ok, reason = ready(kubectl, objects, digest)
+                ok, reason = ready(kubectl, objects, args.component)
                 if not ok:
                     _log(f"not ready: {reason}")
                 return 0 if ok else 1
