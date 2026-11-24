@@ -67,8 +67,12 @@ How the helper keeps two controllers from fighting:
    it is the same instance (the listed UID) and still this component's
    object. A replacement is left alone, even one that carries this
    component's labels. An object that is already terminating (for example,
-   held by a finalizer) is not deleted again. Updates and rollbacks remove the
-   other version's extra objects.
+   held by a finalizer) is not deleted again. Deletes use foreground
+   cascading deletion: a pruned Deployment stays visible, terminating and
+   still labelled, until the garbage collector has removed its ReplicaSets and
+   their Pods. Readiness therefore sees old Pods that still run, without the
+   publisher needing any Pod or ReplicaSet permission. Updates and rollbacks
+   remove the other version's extra objects.
    Customer objects, other components and other namespaces are never deleted.
 4. **Autoscalers.** If a `HorizontalPodAutoscaler` (created by the administrator)
    scales a SuiFleet Deployment, omit `spec.replicas` from the bundle. Otherwise
@@ -227,6 +231,9 @@ all not ready, also for ConfigMap-only bundles. `ready` also requires prune
 convergence: while any other object labelled for this component remains in
 the namespace, including one still terminating, it reports that object as not
 yet pruned. This applies to updates, rollbacks and empty retirement bundles.
+Because pruning is foreground, a pruned Deployment counts as remaining until
+its ReplicaSets and Pods are gone, so a retirement is not ready while the old
+workload can still serve through an administrator-owned Service.
 A replacement that never becomes ready
 fails, and the supervisor restores the previous version. That version's `run`
 re-applies its bundle and prunes the failed version's extra objects.
@@ -307,20 +314,27 @@ It checks the following:
 - A finalizer-delayed prune keeps `ready` failing until the object is gone,
   and re-applying meanwhile does not re-delete it. An empty retirement bundle
   is not ready before its apply and is ready once pruning has converged.
+- Dependent cleanup: while a finalizer holds a Pod of a pruned Deployment, the
+  Deployment stays terminating (with the `foregroundDeletion` finalizer), its
+  ReplicaSet and Pod remain, an empty retirement bundle is not ready and
+  re-applying does not re-delete. It becomes ready only after the Pod is
+  released and the Pod, ReplicaSet and Deployment are gone. Removal likewise
+  waits for the component's Pods to disappear.
 - An update followed by a rollback prunes the extra object.
 - Run mode re-creates a deleted object, stops on SIGTERM and leaves the
   workload running.
 - With `--supervisor`, the real SuiFleet supervisor deploys a bundle, fails
   readiness on a broken image and rolls back with pruning. It then retires the
-  component with an empty bundle while a finalizer holds one deleted object,
-  and the deployment becomes ready only after the hold is released. This is
+  component with an empty bundle while finalizers hold one deleted object and
+  the pruned Deployment's Pod, and the deployment becomes ready only after the
+  hold is released. No Pod or ReplicaSet of the pruned Deployment remains. This is
   an ignored Rust test,
   `kubernetes_publisher_real_cluster_rollout_rollback_and_retirement`.
 - Removal deletes only this component's objects. A decoy object in another
   namespace is never touched.
 
-Recorded run (2026-11-24, SF-305, after the second review repair):
-`--supervisor` passed all 94 checks in 188 s. It ran on x86-64 WSL2 with
+Recorded run (2026-11-24, SF-305, after the third review repair):
+`--supervisor` passed all 102 checks in 339 s. It ran on x86-64 WSL2 with
 Docker, k3s v1.31.4+k3s1 and Rust 1.94.0. The offline unit tests passed 35 of
 35. This run is a point-in-time record,
 not a substitute for rerunning the tests after changes.
