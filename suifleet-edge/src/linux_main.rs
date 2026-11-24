@@ -283,6 +283,7 @@ async fn main() -> anyhow::Result<()> {
             overlay_dir: cfg.components.configuration_overlay_dir.clone(),
         },
     )?;
+    supervisor.configure_oci(cfg.oci_policy());
     supervisor.configure_recovery(cfg.components.recovery_commands.clone());
     let configs = configuration::Store::open(&cfg.runtime.state_dir, &cfg.components.configuration_overlay_dir)?;
     // Resolve completed application recovery before service tasks or stream
