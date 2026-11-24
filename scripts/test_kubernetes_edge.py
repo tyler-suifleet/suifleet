@@ -17,16 +17,21 @@ ServiceAccount credential:
 - Profile/credential hygiene and offline bundle rejection.
 - Apply, ownership-checked readiness (including ConfigMap-only bundles and
   foreign or stale objects), content served through an administrator-owned
-  Service, update, prune and rollback.
+  Service, update, prune and rollback. Readiness includes prune convergence:
+  an empty retirement bundle, a same-owner replacement left by a pruning race
+  and a finalizer-delayed prune are all reported not ready until gone.
 - No adoption of pre-existing objects and no overriding of fields owned by
   another field manager (two controllers do not fight).
 - Races injected between the helper's ownership check and its write (through
   a kubectl wrapper): a competing creation, a replacement and a relabel are
-  not mutated, and pruning leaves relabelled or replaced objects alone.
+  not mutated, and pruning leaves relabelled or replaced objects alone, even a
+  replacement that carries this component's labels.
 - Foreground run mode re-creates a deleted object, exits on SIGTERM and leaves
   the workload running.
 - Optionally (--supervisor) the real SuiFleet supervisor deploys, fails
-  readiness on a broken bundle and rolls back (ignored Rust test).
+  readiness on a broken bundle and rolls back, then retires the component
+  with an empty bundle whose readiness waits for a finalizer-delayed prune
+  (ignored Rust test).
 
 Requires Linux, Docker able to run a privileged container, network access to
 pull the pinned k3s and busybox images (or a pre-populated cache), Python 3.9+
@@ -39,6 +44,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
 import signal
 import subprocess
 import sys
@@ -376,9 +382,18 @@ def scenario(cluster, work, supervisor):
         {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "settings"}, "data": {"mode": "v2"}}]}))
     result = helper("ready", profiles, newer, component="settings-app", version="2.0.0")
     check("readiness rejects an object from a stale bundle digest", result.returncode == 1 and "not yet applied" in result.stderr, result.stderr)
-    check("remove deletes the ConfigMap-only component",
-          helper("remove", profiles, extra=("--component", "settings-app")).returncode == 0
-          and cluster.admin("get", "configmap", "settings", "-n", NAMESPACE, ok=False).returncode != 0)
+    # Empty retirement bundle: readiness includes prune convergence.
+    retire = work / "retire.json"
+    retire.write_text(json.dumps({"version": 1, "resources": []}))
+    result = helper("ready", profiles, retire, component="settings-app")
+    check("empty retirement bundle is not ready while the old object remains",
+          result.returncode == 1 and "configmaps/settings not yet pruned" in result.stderr, result.stderr)
+    result = helper("apply", profiles, retire, component="settings-app")
+    check("empty retirement bundle prunes the component",
+          result.returncode == 0 and cluster.admin("get", "configmap", "settings", "-n", NAMESPACE, ok=False).returncode != 0,
+          result.stderr)
+    result = helper("ready", profiles, retire, component="settings-app")
+    check("empty retirement bundle is ready once pruning converged", result.returncode == 0, result.stderr)
 
     # Objects in another namespace are never touched (namespaced credential).
     cluster.admin("create", "configmap", "decoy", "-n", "default", "--from-literal=k=v")
@@ -445,18 +460,62 @@ def scenario(cluster, work, supervisor):
     restore()
 
     # Race: a prune candidate is relabelled, then replaced, between list and delete.
+    # A replacement that still carries this component's labels must not be
+    # deleted either: pruning only ever deletes the listed UID.
     v2 = variant(work, "v2", "hello from SuiFleet v2", extra_configmap="v2-extra")
-    for name, commands, expected in (
-            ("relabelled", [["label", "configmap", "v2-extra", "app.kubernetes.io/managed-by=customer", "--overwrite"]], {"k": "hello from SuiFleet v2"}),
-            ("replaced", [["delete", "configmap", "v2-extra", "--wait=true"], ["create", "configmap", "v2-extra", "--from-literal=k=customer"]], {"k": "customer"})):
+    replace = [["delete", "configmap", "v2-extra", "--wait=true"], ["create", "configmap", "v2-extra", "--from-literal=k=customer"]]
+    same_owner = ["label", "configmap", "v2-extra", "app.kubernetes.io/managed-by=suifleet", f"suifleet.io/component={COMPONENT}"]
+    for name, commands, expected, owner in (
+            ("relabelled", [["label", "configmap", "v2-extra", "app.kubernetes.io/managed-by=customer", "--overwrite"]], {"k": "hello from SuiFleet v2"}, "customer"),
+            ("replaced", replace, {"k": "customer"}, None),
+            ("same-owner replaced", replace + [same_owner], {"k": "customer"}, "suifleet")):
         check(f"apply v2 before the {name}-prune race", helper("apply", profiles, v2, version="2.0.0").returncode == 0)
+        before = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]["uid"]
         race.arm(["delete", "--raw"], *commands)
         result = helper("apply", profiles, v1, profile="race")
+        after = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
         found, data = labels_of("v2-extra")
         check(f"pruning leaves a {name} object alone",
               race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
-              and found.get("app.kubernetes.io/managed-by") != "suifleet" and data == expected, result.stderr)
+              and found.get("app.kubernetes.io/managed-by") == owner and data == expected
+              and (after["uid"] != before) == (name != "relabelled"), result.stderr)
+        if owner == "suifleet":
+            # The surviving same-owner object is stale for v1: readiness reports
+            # the incomplete prune instead of success.
+            result = helper("ready", profiles, v1)
+            check("readiness reports an incomplete prune after a same-owner replacement",
+                  result.returncode == 1 and "configmaps/v2-extra not yet pruned" in result.stderr, result.stderr)
         cluster.admin("delete", "configmap", "v2-extra", "-n", NAMESPACE)
+    wait_ready(profiles, v1, "1.0.0")
+    check("readiness succeeds once the stale object is gone", True)
+
+    # Delayed pruning: a finalizer holds the deleted stale object; readiness
+    # waits for it to disappear.
+    check("apply v2 before the delayed-prune case", helper("apply", profiles, v2, version="2.0.0").returncode == 0)
+    cluster.admin("patch", "configmap", "v2-extra", "-n", NAMESPACE, "--type=merge",
+                  "-p", '{"metadata":{"finalizers":["example.com/hold"]}}')
+    result = helper("apply", profiles, v1)
+    check("rollback with a held stale object issues the prune", result.returncode == 0, result.stderr)
+    held = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
+    # Readiness reports desired-object problems first: once the v1 rollout has
+    # settled, the held stale object is the only remaining reason.
+    pending = []
+
+    def only_prune_pending():
+        result = helper("ready", profiles, v1)
+        pending[:] = [result]
+        return result.returncode == 1 and "configmaps/v2-extra not yet pruned" in result.stderr
+
+    wait("readiness to report only the held prune", only_prune_pending, timeout=240, interval=2)
+    check("readiness waits for a terminating stale object after the rollout settles",
+          held.get("deletionTimestamp") and pending[0].returncode == 1, pending[0].stderr)
+    result = helper("apply", profiles, v1)
+    check("re-applying while the prune is pending stays successful without re-deleting",
+          result.returncode == 0 and "v2-extra" not in result.stderr, result.stderr)
+    cluster.admin("patch", "configmap", "v2-extra", "-n", NAMESPACE, "--type=json",
+                  "-p", '[{"op":"remove","path":"/metadata/finalizers"}]')
+    wait_ready(profiles, v1, "1.0.0")
+    check("readiness succeeds once the delayed prune completes", True)
 
     # Update with an extra object, then roll back and prune it.
     check("helper applies v2", helper("apply", profiles, v2, version="2.0.0").returncode == 0)
@@ -501,23 +560,27 @@ def scenario(cluster, work, supervisor):
         # The supervisor fixture's component is named "app": it must not (and
         # cannot) adopt the removed "web-app" objects, so it starts clean.
         bad = variant(work, "broken", "broken", extra_configmap="bad-extra", image=MISSING_IMAGE)
+        admin = " ".join(shlex.quote(str(part)) for part in
+                         (cluster.kubectl, "--kubeconfig", cluster.admin_config, "-n", NAMESPACE))
+        hold = f"""{admin} patch configmap web-content --type=merge -p '{{"metadata":{{"finalizers":["example.com/hold"]}}}}'"""
+        release = f"""{admin} patch configmap web-content --type=json -p '[{{"op":"remove","path":"/metadata/finalizers"}}]'"""
         env = dict(os.environ, SF_K8S_HELPER=str(HELPER), SF_K8S_PROFILE_ROOT=str(profiles),
-                   SF_K8S_BUNDLE_GOOD=str(v1), SF_K8S_BUNDLE_BAD=str(bad), RUSTUP_TOOLCHAIN="1.94.0")
+                   SF_K8S_BUNDLE_GOOD=str(v1), SF_K8S_BUNDLE_BAD=str(bad), SF_K8S_BUNDLE_EMPTY=str(retire),
+                   SF_K8S_HOLD=hold, SF_K8S_RELEASE=release, RUSTUP_TOOLCHAIN="1.94.0")
         test = subprocess.run(["cargo", "test", "--locked", "--manifest-path", str(ROOT / "suifleet-edge/Cargo.toml"),
                                "kubernetes_publisher_real_cluster", "--", "--ignored", "--nocapture"],
                               env=env, capture_output=True, text=True, timeout=1800)
         tail = (test.stdout + test.stderr)[-3000:]
-        check("real supervisor deploys, fails readiness on a broken bundle and rolls back",
+        check("real supervisor deploys, rolls back a broken bundle (readiness includes its prune) and waits "
+              "for a delayed prune before an empty retirement bundle is ready",
               test.returncode == 0 and "1 passed" in test.stdout, tail)
         check("supervisor rollback pruned the broken bundle's extra object",
               cluster.admin("get", "configmap", "bad-extra", "-n", NAMESPACE, ok=False).returncode != 0)
-        wait("v1 content after supervisor rollback", lambda: "SuiFleet v1" in served(cluster), timeout=90)
-        check("service serves v1 content after supervisor rollback", True)
-
-        result = helper("remove", profiles, extra=("--component", "app"))
         remaining = cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
                                   "app.kubernetes.io/managed-by=suifleet", "-o", "name").stdout.strip()
-        check("remove deletes the supervised component's objects", result.returncode == 0 and remaining == "", remaining)
+        check("supervised empty retirement bundle removed every SuiFleet object", remaining == "", remaining)
+        result = helper("remove", profiles, extra=("--component", "app"))
+        check("remove after retirement is a successful no-op", result.returncode == 0, result.stderr)
 
 
 def main():
