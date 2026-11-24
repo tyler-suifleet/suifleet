@@ -31,6 +31,9 @@ ServiceAccount credential:
   replacement that carries this component's labels.
 - Foreground run mode re-creates a deleted object, exits on SIGTERM and leaves
   the workload running.
+- `remove` exits 1 while a finalizer holds a Pod of the removed Deployment
+  (and a retry does not re-delete), and exits 0 only once the component's
+  objects and Pods are gone.
 - Optionally (--supervisor) the real SuiFleet supervisor deploys, fails
   readiness on a broken bundle and rolls back, then retires the component
   with an empty bundle whose readiness waits for a finalizer-delayed prune
@@ -591,18 +594,30 @@ def scenario(cluster, work, supervisor):
     check("re-apply v1 after the dependent-held retirement", helper("apply", profiles, v1).returncode == 0)
     wait_ready(profiles, v1, "1.0.0")
 
-    # Removal deletes only this component's objects in its namespace.
-    result = helper("remove", profiles, extra=("--component", COMPONENT))
-
+    # Removal deletes only this component's objects in its namespace, and its
+    # exit status reports convergence: while a finalizer holds a web Pod the
+    # foreground-deleted Deployment remains, so remove must not exit 0.
     def remaining_objects():
         return cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
                              f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip()
 
-    wait("removed objects (foreground) to disappear", lambda: remaining_objects() == "" and web_pods() == [],
-         timeout=180, interval=2)
-    remaining = remaining_objects()
-    check("remove deletes the component's objects and their Pods", result.returncode == 0 and remaining == "",
-          result.stderr + remaining)
+    held_pods = [pod for pod in web_pods() if cluster.admin(
+        "patch", "pod", pod, "-n", NAMESPACE, "--type=merge",
+        "-p", '{"metadata":{"finalizers":["example.com/hold"]}}', ok=False).returncode == 0]
+    check("a live web Pod is held before the dependent-held removal", bool(held_pods), str(held_pods))
+    result = helper("remove", profiles, extra=("--component", COMPONENT, "--timeout", "10"))
+    check("remove exits 1 (not removed) while a finalizer holds the Deployment's Pod",
+          result.returncode == 1 and "not removed" in result.stderr and "deployments.apps/web" in result.stderr
+          and set(held_pods) <= set(web_pods()) and "deployment.apps/web" in remaining_objects(), result.stderr)
+    result = helper("remove", profiles, extra=("--component", COMPONENT, "--timeout", "5"))
+    check("retrying remove while held does not re-delete and still exits 1",
+          result.returncode == 1 and "no object to delete" in result.stderr, result.stderr)
+    for pod in held_pods:
+        cluster.admin("patch", "pod", pod, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}')
+    result = helper("remove", profiles, extra=("--component", COMPONENT))
+    remaining, pods = remaining_objects(), web_pods()
+    check("remove exits 0 only once the component's objects and their Pods are gone",
+          result.returncode == 0 and remaining == "" and pods == [], result.stderr + remaining + str(pods))
     check("remove leaves the customer's own object", cluster.admin("get", "configmap", "legacy", "-n", NAMESPACE, ok=False).returncode == 0)
     check("objects in other namespaces were never touched",
           cluster.admin("get", "configmap", "decoy", "-n", "default", ok=False).returncode == 0)

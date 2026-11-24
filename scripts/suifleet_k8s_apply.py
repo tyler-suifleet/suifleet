@@ -54,7 +54,11 @@ SUIFLEET_COMPONENT / SUIFLEET_COMPONENT_VERSION environment):
                                               is owned, applied from this
                                               bundle, Deployments rolled out and
                                               no stale component object remains
-  remove   --profile NAME --component NAME     delete the component's objects
+  remove   --profile NAME --component NAME     delete the component's objects,
+                                              then wait (up to --timeout
+                                              seconds) until none remains;
+                                              exit 0 only once converged,
+                                              1 when objects still remain
 """
 import argparse
 import hashlib
@@ -653,6 +657,22 @@ def ready(kubectl, objects, component):
     return True, "ready"
 
 
+def remove(kubectl, component, timeout, writer=None, pause=2.0):
+    """(converged, reason): delete every object labelled for this component,
+    then poll until none remains (foreground deletion keeps a Deployment
+    listed until its ReplicaSets and Pods are gone). Objects already
+    terminating are not re-deleted; a finalizer or a raced replacement left
+    alone keeps it unconverged. Returns (False, reason) at the deadline."""
+    removed = prune(kubectl, component, {}, writer)
+    _log(f"deleting {removed}" if removed else "no object to delete")
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        ok, reason = ready(kubectl, [], component)
+        if ok or time.monotonic() >= deadline:
+            return ok, ("removed" if ok else reason)
+        time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
+
+
 # ----------------------------------------------------------------------- CLI
 
 def _log(message):
@@ -668,6 +688,8 @@ def main(argv=None):
     parser.add_argument("--component", default=os.environ.get("SUIFLEET_COMPONENT"))
     parser.add_argument("--version", default=os.environ.get("SUIFLEET_COMPONENT_VERSION", ""))
     parser.add_argument("--interval", type=float, default=30.0)
+    parser.add_argument("--timeout", type=float, default=300.0,
+                        help="remove: seconds to wait for the deleted objects (and Pods) to disappear")
     args = parser.parse_args(argv)
     try:
         if args.command != "remove":
@@ -682,9 +704,9 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix="suifleet-k8s-") as cache:
             kubectl = connect(profile, cache)
             if args.command == "remove":
-                removed = prune(kubectl, args.component, {})
-                _log(f"removed {removed}")
-                return 0
+                ok, reason = remove(kubectl, args.component, args.timeout)
+                _log(reason if ok else f"not removed: {reason}")
+                return 0 if ok else 1
             objects = render(bundle, profile["namespace"], args.component, args.version, digest)
             if args.command == "ready":
                 ok, reason = ready(kubectl, objects, args.component)

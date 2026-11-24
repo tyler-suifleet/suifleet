@@ -507,6 +507,29 @@ class WriterTest(unittest.TestCase):
         self.assertNotIn("delete", [call[0] for call in fake.calls])
 
 
+    def test_remove_waits_until_nothing_remains(self):
+        # prune lists configmaps+deployments and deletes "old"; the first
+        # convergence poll still sees it terminating (foreground deletion in
+        # progress) and stops listing there, the second sees nothing.
+        terminating = obj(name="old")
+        terminating["metadata"]["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+        fake = FakeKubectl([{"items": [obj(name="old")]}, {"items": []},
+                            {"items": [terminating]},
+                            {"items": []}, {"items": []}], [(0, "")])
+        ok, reason = k8s.remove(fake, "web-app", 60, k8s.Writer(fake, "web-app", pause=0), pause=0)
+        self.assertEqual((ok, reason), (True, "removed"))
+        self.assertEqual([call[0] for call in fake.calls].count("delete"), 1)
+        self.assertEqual(fake.gets, [])
+
+    def test_remove_reports_unconverged_when_a_finalizer_holds(self):
+        held = obj(name="old")
+        held["metadata"]["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+        fake = FakeKubectl([{"items": [held]}, {"items": []}, {"items": [held]}], [])
+        ok, reason = k8s.remove(fake, "web-app", 0, k8s.Writer(fake, "web-app", pause=0), pause=0)
+        self.assertFalse(ok)
+        self.assertIn("configmaps/old not yet pruned", reason)
+        self.assertNotIn("delete", [call[0] for call in fake.calls])
+
 class ReadyTest(unittest.TestCase):
     """ready() requires every desired object ready AND prune convergence."""
 
