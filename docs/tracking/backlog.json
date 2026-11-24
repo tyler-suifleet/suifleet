@@ -5442,6 +5442,28 @@
         "Retire stale candidates through the coordinator. Preserve fail-closed approval reconciliation for current candidates."
       ],
       "validation": "Run coordinator regression tests, combined-main checks, and tracking dry run."
+    },
+    {
+      "key": "SF-287",
+      "title": "Simplify product guide instructions and improve mobile touch controls",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:enhancement",
+      "depends_on": [],
+      "paths": [
+        "site"
+      ],
+      "resources": [],
+      "description": "Customer review on live 320/390px layouts found dense guide summaries, blockchain terminology before the task is explained, and32px instruction arrow targets. Rewrite summaries and instructional prose around what the customer does and why, preserving actual console labels, financial distinctions, optional/private order, approval safety and device/platform boundaries. Enlarge mobile touch controls while preserving the single-screen guide and all accessible paginated instructions.",
+      "evidence": "Read-only customer crawl of live suifleet.io and app.suifleet.io on2026-11-23;320/390px screenshots and text extraction retained in/tmp/suifleet-customer-20261123. No wallet signing or chain writes.",
+      "acceptance": [
+        "Plain-language summaries explain each task without unexplained blockchain or deployment jargon.",
+        "All actual UI labels, optional step ordering and security/financial meaning remain accurate.",
+        "Mobile guide controls have usable touch targets at320/390px and short landscape widths; no clipped controls, lost instructions or page scrolling.",
+        "Responsive browser navigation, playback/captions/retry, site tests/build/links pass; record comparison screenshots."
+      ],
+      "validation": "Run scoped regression tests and real browser checks at320/390px and desktop. Preserve existing review/CI and deferred human/Pi/mainnet acceptance."
     }
   ]
 }
