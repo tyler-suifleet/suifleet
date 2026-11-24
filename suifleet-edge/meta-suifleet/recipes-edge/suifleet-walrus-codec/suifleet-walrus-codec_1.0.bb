@@ -71,6 +71,25 @@ do_install() {
     done
 }
 
+# Optional archive runtime: an absent codec input or unsupported target must
+# not break parsing for the core client or anything else in the build. Skip
+# this recipe with the reason instead, so only an explicit request for it
+# (IMAGE_INSTALL, RDEPENDS or bitbake suifleet-walrus-codec) fails, and fails
+# with that reason. Remote inputs stay authoritative through the fetcher's
+# sha256sum and do_verify_codec; there is no fallback to another source,
+# architecture or C library.
+python () {
+    if d.getVar('HOST_ARCH') != 'aarch64':
+        raise bb.parse.SkipRecipe('the Walrus codec runs only on the Linux AArch64 glibc suifleet-node runtime; %s is unsupported' % d.getVar('HOST_SYS'))
+    if d.getVar('TCLIBC') != 'glibc':
+        raise bb.parse.SkipRecipe('the Walrus codec runs only on the glibc suifleet-node runtime; TCLIBC=%s is unsupported' % d.getVar('TCLIBC'))
+    local = [entry[len('file://'):].split(';')[0]
+             for entry in (d.getVar('SRC_URI') or '').split() if entry.startswith('file://')]
+    missing = [name for name in local if not bb.utils.which(d.getVar('FILESPATH'), name)]
+    if missing:
+        raise bb.parse.SkipRecipe('optional Walrus codec inputs not found: %s. Build them with scripts/package_walrus_codec.py at SUIFLEET_CODEC_SOURCE_REV (docs/YOCTO_PACKAGING.md) or leave suifleet-walrus-codec out of the image' % ', '.join(missing))
+}
+
 # The bundle needs exactly this Node release; the WASM loads from the bundle's directory.
 RDEPENDS:${PN} = "suifleet-node (= ${SUIFLEET_CODEC_NODE_VERSION})"
 FILES:${PN} = "${SUIFLEET_CODEC_DIR}"

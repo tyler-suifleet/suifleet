@@ -4,9 +4,12 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
+import textwrap
+import types
 import unittest
 import sys
 
@@ -341,6 +344,110 @@ class RecipeTests(unittest.TestCase):
     # The codec bundle must come from the daemon's exact source revision.
     def test_codec_and_daemon_share_source_revision(self):
         self.assertEqual(var(CODEC, 'SUIFLEET_CODEC_SOURCE_REV'), var(DAEMON, 'SRCREV'))
+
+
+
+def anonymous_python(text):
+    """Body of the recipe's single anonymous python function, as Python source."""
+    bodies = re.findall(r'^python \(\) \{\n(.*?)^\}$', text, re.M | re.S)
+    if len(bodies) != 1:
+        raise AssertionError('expected one anonymous python function, found %d' % len(bodies))
+    return textwrap.dedent(bodies[0])
+
+
+class SkipRecipe(Exception):
+    pass
+
+
+class FakeData:
+    def __init__(self, **values):
+        self.values = values
+
+    def getVar(self, name):
+        return self.values.get(name)
+
+
+def which(path, item):
+    """bb.utils.which: first existing item under a colon-separated search path."""
+    for base in (path or '').split(':'):
+        candidate = os.path.join(base, item)
+        if base and os.path.exists(candidate):
+            return candidate
+    return ''
+
+
+def run_anonymous(text, **values):
+    """Evaluate a recipe's parse-time guard; returns the skip reason or None."""
+    data = dict(HOST_ARCH='aarch64', HOST_SYS='aarch64-poky-linux', TCLIBC='glibc', FILESPATH='', SRC_URI='')
+    data.update(values)
+    fake_bb = types.SimpleNamespace(parse=types.SimpleNamespace(SkipRecipe=SkipRecipe),
+                                    utils=types.SimpleNamespace(which=which))
+    try:
+        exec(anonymous_python(text), {'d': FakeData(**data), 'bb': fake_bb})
+    except SkipRecipe as skipped:
+        return str(skipped)
+    return None
+
+
+# SF-307: the optional archive runtime never breaks parsing of the core client.
+class OptionalRuntimeParseTests(unittest.TestCase):
+    LOCAL = ' '.join('file://%s;subdir=codec' % name for name in codec.ARTIFACTS)
+
+    def test_codec_with_all_local_inputs_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in codec.ARTIFACTS:
+                Path(tmp, name).write_text('x')
+            self.assertIsNone(run_anonymous(CODEC, SRC_URI=self.LOCAL, FILESPATH='/nonexistent:' + tmp))
+
+    def test_missing_local_codec_inputs_skip_with_their_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, codec.ARTIFACTS[0]).write_text('x')
+            reason = run_anonymous(CODEC, SRC_URI=self.LOCAL, FILESPATH=tmp)
+        self.assertIsNotNone(reason)
+        self.assertIn('optional Walrus codec inputs not found', reason)
+        self.assertNotIn(codec.ARTIFACTS[0] + ',', reason)
+        for name in codec.ARTIFACTS[1:]:
+            self.assertIn(name, reason)
+        self.assertIn('scripts/package_walrus_codec.py', reason)
+
+    def test_remote_codec_inputs_are_left_to_the_fetcher(self):
+        remote = 'https://example.invalid/codec.tar.gz;subdir=codec'
+        self.assertIsNone(run_anonymous(CODEC, SRC_URI=remote, FILESPATH='/nonexistent'))
+
+    def test_current_codec_source_parses_without_a_codec_directory(self):
+        # Every local input of the committed recipe is outside the layer, so a
+        # clean checkout must skip rather than fail parsing.
+        source = re.search(r'^SRC_URI = "([^"]*)"', CODEC, re.M | re.S).group(1)
+        files = str(LAYER/'recipes-edge/suifleet-walrus-codec')
+        reason = run_anonymous(CODEC, SRC_URI=' '.join(source.split()), FILESPATH=files)
+        if 'file://' in source:
+            self.assertIn('optional Walrus codec inputs not found', reason)
+        else:
+            self.assertIsNone(reason)
+
+    def test_codec_refuses_other_architectures_and_libcs(self):
+        for arch, host, libc in [('x86_64', 'x86_64-poky-linux', 'glibc'),
+                                 ('arm', 'arm-poky-linux-gnueabi', 'glibc'),
+                                 ('riscv64', 'riscv64-poky-linux', 'glibc')]:
+            reason = run_anonymous(CODEC, HOST_ARCH=arch, HOST_SYS=host, TCLIBC=libc)
+            self.assertIn('only on the Linux AArch64 glibc', reason)
+            self.assertIn(host, reason)
+        reason = run_anonymous(CODEC, HOST_SYS='aarch64-poky-linux-musl', TCLIBC='musl')
+        self.assertIn('TCLIBC=musl is unsupported', reason)
+
+    def test_node_refuses_musl_without_fallback(self):
+        text = NODE_RECIPES[0].read_text()
+        self.assertIsNone(run_anonymous(text))
+        for libc in ['musl', 'newlib', 'baremetal']:
+            self.assertIn('TCLIBC=%s is unsupported' % libc, run_anonymous(text, TCLIBC=libc))
+        # The architecture limit stays the standard COMPATIBLE_HOST check.
+        self.assertIn('COMPATIBLE_HOST = "aarch64.*-linux"', text)
+
+    def test_core_client_does_not_need_the_archive_runtime(self):
+        for name in ['DEPENDS', 'RDEPENDS:${PN}']:
+            for value in re.findall(r'^' + re.escape(name) + r' \+?= "([^"]*)"', DAEMON, re.M):
+                self.assertNotIn('suifleet-node', value)
+                self.assertNotIn('walrus', value)
 
 
 if __name__ == '__main__':
