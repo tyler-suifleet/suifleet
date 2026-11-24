@@ -131,6 +131,130 @@ No QA/sanity/signature checks were disabled. Both shared build configurations
 were restored and their resource locks released after testing.
 
 
+## Opt-in OE-Core fixes and standalone builds (SF-308)
+
+These results come from local builds. They are not physical, production-provider,
+mainnet or public-distribution acceptance, and they do not establish a Layer Index
+listing.
+
+### Audit of the integration layer's core-recipe appends
+
+Each append was checked against the pinned revisions and against the OE-Core
+heads fetched on 2026-11-24: master `7412d08a`, scarthgap `d521a7d8` and
+wrynose `16a03ed6`.
+
+| Append | Series | Upstream status | Resolution |
+|---|---|---|---|
+| openssl `PARALLEL_MAKEINST = "-j1"` | all | Unfixed: recursive `install_sw` is unchanged in openssl 3.5.9 and 4.1.0. | Moved to the opt-in class. `PARALLEL_MAKEINST[vardepvalue] = "1"`, so it is signature-neutral. |
+| libcap install-time cross toolchain | Wrynose (2.77; master 2.78) | Unfixed: `do_install` still omits CC/AR/RANLIB/OBJCOPY/BUILD_CC. | Moved to the opt-in class. Applied on Wrynose only, to all variants. |
+| xzmore `${bindir}/bash` plus RDEPENDS | Wrynose (5.8.2; head 5.8.4) | Unfixed: only `xz-ptest` declares bash. | Moved to the opt-in class. Applied to the Wrynose target only. |
+| glibc AArch64 usrmerge loader/linker-script guard | all | Not an upstream defect. It is a check-only guard that 0d23a1ec added after a reused local cache produced an incompatible layout. | Kept in the integration layer only. A fresh cache does not need it. |
+
+`meta-suifleet/classes/suifleet-core-fixes.bbclass` is never inherited by the
+layer. A consumer opts in with `INHERIT += "suifleet-core-fixes"` in a distro or
+local configuration. The integration layer's three bbappends now contain only
+`inherit suifleet-core-fixes`. No login, SSH, network, image, machine or
+QA-suppression policy was moved into the software layer. The remaining
+standalone requirements are OE-Core, meta-oe, the Scarthgap Rust mixin, the
+systemd and usrmerge distro features, and the optional codec artifact directory.
+These are documented in the layer README.
+
+### Offline tests
+
+`scripts/tests/test_yocto_core_fixes.py` (9 tests) runs from
+`make test-yocto-packaging` and checks the following:
+
+- It executes the class's anonymous function against a fake datastore for every
+  recipe, series and variant scope.
+- The layer never enables the class.
+- The class is exported and contains no board, access or QA policy.
+- The integration bbappends only inherit it.
+
+The core-fix, export, runtime-packaging and Pi-image-inspection unit tests all
+pass, as does `check_yocto_profiles.py`.
+
+### Integration-profile signature equivalence
+
+`bitbake -S none openssl libcap xz openssl-native libcap-native xz-native glibc
+systemd suifleet` was run on each pinned series. The configuration used
+`MACHINE = "raspberrypi3-64"`, the kas distro settings and
+`BB_SIGNATURE_HANDLER = "OEBasicHash"`, with the codec and test-component recipes
+masked because their local artifacts are absent. Two layer sets were compared:
+both layers at main `212d989a`, and this branch's layers. Each run wrote 172
+sigdata files for those recipes, and the file names (that is, the task hashes)
+were identical on both Scarthgap and Wrynose. `bitbake-dumpsig` confirmed that
+the Wrynose xz `do_install` depends on `suifleet_xz_interpreter`, and that libcap
+`EXTRA_OEMAKE` carries the install toolchain. The existing kas profiles therefore
+keep their exact task signatures and sstate.
+
+### Exported layer and yocto-check-layer
+
+Two exports of commit `efd1e58c` produced identical 23-member archives, SHA-256
+`67a01d7bcfe15bf4327482ea91facbf94179e42bf429030b228f9fc0044194dc`. The class is
+included. The extracted export was checked without the integration layer, using
+umask 022, `MACHINE = "qemuarm64"`, the systemd/usrmerge distro settings, the
+existing downloads, and the codec artifacts described below:
+
+```
+yocto-check-layer <export>/meta-suifleet --dependency <pinned meta-oe> --no-auto-dependency
+```
+
+- **Scarthgap** (poky `a53cae3d`, meta-oe `ae7dfb12`, meta-lts-mixins `eedcdc74`):
+  exit 0 and `PASS`. 8 tests ran in 404 s, with 2 BSP/Distro skips. The 1
+  unexpected success is the upstream expectedFailure-decorated patch-status
+  test; the layer has no patches.
+- **Wrynose** (OE-Core `0f03c732`, bitbake `51fd94a6`, meta-oe `f28a144a`):
+  exit 0 and `PASS`. 9 tests ran in 550 s, including `test_security`, with 2
+  BSP/Distro skips.
+
+Both runs passed the parse, README, environment, signatures, world and
+world_inherit_class checks. Because the class is not inherited, the unchanged
+baseline signatures confirm that the layer alone alters no other recipe.
+
+### Codec artifacts
+
+Without the five artifacts, every parse of the main-branch codec recipe fails;
+SF-307 tracks parse safety. The artifacts were rebuilt from the pinned source:
+a clean `--shared` clone at `b9bb2ef6210624d732ab2de2075ea1826e5300c1`, with
+`pnpm install --frozen-lockfile` and `scripts/package_walrus_codec.py`, run in
+`suifleet-dev:latest` (Node 22.22.2, pnpm 11.0.8). `--recipe` verification
+matched all five recipe SHA-256 pins: `4bdf599f…`, `649f85e5…`, `91811ce2…`,
+`eb308bd5…` and `dcd292a9…`.
+
+### Standalone recipe and image builds: not yet completed
+
+The planned acceptance build uses a fresh build directory and the extracted
+export above, without the integration layer and with `INHERIT +=
+"suifleet-core-fixes"`. It targets `MACHINE = "qemuarm64"` with
+`bitbake -k suifleet suifleet-node suifleet-walrus-codec core-image-minimal` on
+both series (`xz libcap` are added on Wrynose to force their package QA). The
+build uses read-only sstate mirrors and copies of the existing hash-equivalence
+databases.
+
+So far that build has only been planned, not run. The shared host's root
+filesystem stayed between 1.4 and 16 GB free because of concurrent builds, and
+the build needs about 1,260 tasks on Scarthgap and about 4,740 on Wrynose. Every
+earlier build carried the integration glibc guard, so target sstate keyed on
+stock glibc does not exist. `bitbake -n` plans were:
+
+- **Scarthgap image:** 5016 tasks, 1260 to execute. Sstate matched 1899 of 2277.
+- **Wrynose recipes:** 4738 tasks. Sstate matched 1417 of 2413, and 996 sstate
+  tasks were missed, including glibc, gcc, libstd-rs and linux-yocto.
+
+The Wrynose attempt began at 14:52 with 15 GB free. BitBake attempted 1160
+tasks: 1057 were reused, and the rest executed without any failures, among them `libcap-native` `do_compile`/`do_install` with the class's
+toolchain arguments. BitBake's disk monitor (`STOPTASKS` at 5 GB, set to protect
+the other builds) then stopped the attempt; no target task had executed. Scratch
+space was released afterwards.
+
+This means no standalone recipe or image task execution, package QA or emulated
+boot has yet been established for the extracted export. Rerun the build when
+roughly 40 GB or more is free, and record the results here. Until then, the
+evidence consists of the parse and yocto-check-layer results above, together
+with the integration-profile builds whose openssl, libcap and xz task signatures
+the class reproduces exactly.
+
+
 ## Limits and publication follow-through
 
 No new bootable image, emulated boot, physical programming, public-testnet

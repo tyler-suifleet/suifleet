@@ -8,20 +8,20 @@ are publicly fetchable without credentials and their checks have passed.
 ## Standalone build validation prerequisite
 
 The recorded successful recipe builds used both the software layer and the core
-repository's meta-suifleet-integration layer. That layer supplied Scarthgap
-OpenSSL install serialization (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap
-target-toolchain relink fixes, Wrynose xzmore Bash interpreter/runtime-dependency
-fixes, and the AArch64 glibc usrmerge loader/linker-script guard. None of these
-core-recipe appends is included in the standalone export.
+repository's meta-suifleet-integration layer. That layer's OpenSSL, libcap and xz
+fixes are now the software layer's opt-in `suifleet-core-fixes` class, which the
+integration layer inherits with identical task signatures. Its remaining glibc
+usrmerge guard is local cache hygiene, not an upstream defect.
 
-Standalone consumers must supply equivalent distro fixes/guards and validate
-the resulting builds, or accept unvalidated status and possible build failures.
-The extracted export passed yocto-check-layer on both pinned series, but that
-is not a recipe task-execution build. Before advertising standalone build
-support, build `suifleet`, `suifleet-node` and `suifleet-walrus-codec` from the
+Standalone consumers that hit those OE-Core defects enable
+`INHERIT += "suifleet-core-fixes"`. The extracted export, including the class,
+passed yocto-check-layer on both pinned series, but that is not a recipe
+task-execution build. Before advertising standalone build support, build
+`suifleet`, `suifleet-node`, `suifleet-walrus-codec` and an image from the
 extracted export without meta-suifleet-integration on both pinned series,
-recording any separately supplied distro fixes and package QA results. Do not
-add the integration layer blindly: it also contains board/access/test policy.
+recording package QA. The core repository's
+`docs/YOCTO_STANDALONE_VALIDATION.md` records the current status. Do not add the
+integration layer blindly: it also contains board/access/test policy.
 
 ## Source availability and synchronization
 
