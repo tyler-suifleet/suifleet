@@ -461,6 +461,9 @@ class WriterTest(unittest.TestCase):
         call = fake.calls[0]
         self.assertEqual(call[:3], ("delete", "--raw", "/api/v1/namespaces/suifleet-apps/configmaps/old"))
         self.assertEqual(call[-1]["preconditions"], {"uid": "u1", "resourceVersion": "4"})
+        # Foreground: a pruned Deployment stays listed until its ReplicaSets
+        # and Pods are gone, so readiness covers still-running dependents.
+        self.assertEqual(call[-1]["propagationPolicy"], "Foreground")
         conflict = "Error from server (Conflict): the UID in the precondition (u1) does not match"
         writer, fake = self.writer([obj(name="old", uid="u2", labels={})], [(1, conflict)])
         self.assertFalse(writer.delete("configmaps", obj(name="old")), "a foreign replacement is left alone")

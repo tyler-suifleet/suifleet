@@ -30,7 +30,10 @@ It is deliberately narrow:
   instance. Objects SuiFleet did not create are never adopted, and a field
   held by another manager makes the apply fail instead of being overwritten.
 - Pruning deletes only objects labelled for this component that the current
-  bundle no longer contains.
+  bundle no longer contains, with foreground cascading deletion: a pruned
+  Deployment remains visible (terminating) until its ReplicaSets and Pods are
+  gone, so readiness does not report a retirement or rollback converged while
+  old Pods still run.
 - A multi-object apply is not transactional: if a later write fails, earlier
   objects may already carry the new bundle. Readiness never reports success
   until every object carries this bundle's digest and pruning has converged
@@ -89,6 +92,8 @@ API_PATHS = {
     "configmaps": "/api/v1/namespaces/{namespace}/configmaps/{name}",
     "deployments.apps": "/apis/apps/v1/namespaces/{namespace}/deployments/{name}",
 }
+# Cascading deletion policy for pruning; see Writer.delete.
+PROPAGATION = "Foreground"
 DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 LABEL_VALUE = re.compile(r"^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$")
 IMAGE_DIGEST = re.compile(r"^[a-z0-9]+([._/:-][a-z0-9]+)*@sha256:[0-9a-f]{64}$")
@@ -577,7 +582,13 @@ class Writer:
             metadata = current.get("metadata") or {}
             if metadata.get("uid") != uid or ownership(current, self.component):
                 return False
-            options = {"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": "Background",
+            # Foreground: the owner stays (terminating, still labelled) until
+            # the garbage collector has removed its blocking dependents
+            # (a Deployment's ReplicaSets and their Pods), so readiness's
+            # prune-convergence check also covers workloads that still run.
+            # Background deletion would remove the Deployment first and let
+            # an empty retirement bundle report ready while old Pods serve.
+            options = {"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": PROPAGATION,
                        "preconditions": {"uid": uid, "resourceVersion": metadata["resourceVersion"]}}
             result = self.kubectl("delete", "--raw", path, "-f", "-", stdin=json.dumps(options), namespaced=False)
             if result.returncode == 0:
@@ -622,7 +633,9 @@ def ready(kubectl, objects, component):
     """(ready, reason): every desired object is ready (object_ready) AND prune
     has converged -- no other object labelled for this component remains, so
     an update, rollback or empty retirement bundle is not ready while stale
-    workloads still exist or are still terminating."""
+    workloads still exist or are still terminating. Because pruning uses
+    foreground deletion, a pruned Deployment stays listed until its
+    ReplicaSets and Pods are gone; no Pod/ReplicaSet permission is needed."""
     desired = {}
     for item in objects:
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
