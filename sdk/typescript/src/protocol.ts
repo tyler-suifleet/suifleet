@@ -128,4 +128,3 @@ export function decodeResponse(operation: string, line: Buffer): unknown {
   }
   throw new ProtocolError(operation, 'malformed response');
 }
-
