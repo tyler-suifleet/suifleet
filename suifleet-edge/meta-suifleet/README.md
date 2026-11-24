@@ -25,27 +25,43 @@ The archive runtime's prebuilt Node recipe supports Linux AArch64/glibc only.
 There are no standalone release branches yet; series compatibility is not proof
 that a same-named remote branch exists. No other release/architecture is claimed.
 
-After supplying the distro fixes below, add this directory to BBLAYERS and run
-`bitbake suifleet`; this standalone task-execution path remains unvalidated. Optional archive
+Add this directory to BBLAYERS and run `bitbake suifleet`. Optional archive
 packages are `suifleet-node` and `suifleet-walrus-codec`; the codec requires five
 prebuilt, checksum-pinned files at SUIFLEET_WALRUS_CODEC_DIR **before parsing**.
 See RELEASE.md for source/artifact publication prerequisites.
 
 The separate, core-repository `meta-suifleet-integration` contains Pi image/access
-policy, test components and core-recipe build workarounds. Existing kas profiles
-include both layers. Generic consumers should select their own BSP/distro and
-must not add the integration layer without reviewing its policy.
+policy, test components and a glibc usrmerge layout guard for its reused build
+caches. Existing kas profiles include both layers. Generic consumers should select
+their own BSP/distro and must not add the integration layer without reviewing its
+policy.
 
-All recorded recipe builds on both pinned series included that integration
-layer. They applied Scarthgap OpenSSL install serialization
-(`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap target-toolchain relink fixes,
-Wrynose xzmore Bash interpreter/runtime-dependency fixes, and the AArch64
-glibc usrmerge loader/linker-script guard. These are not in this export.
-Standalone consumers must supply equivalent distro fixes/guards and validate
-their builds, or accept an unvalidated configuration that may fail. The extracted
-export alone passed yocto-check-layer on both series; no recipe task-execution
-build without the integration layer has been validated. See RELEASE.md before
-claiming standalone build support.
+### Opt-in OE-Core fixes
+
+`classes/suifleet-core-fixes.bbclass` carries the OE-Core recipe fixes used by the
+recorded builds; the layer never inherits it. If your distro hits these defects,
+enable it explicitly in your distro configuration or local.conf:
+
+```
+INHERIT += "suifleet-core-fixes"
+```
+
+It changes only these recipes and suppresses no QA:
+
+- `openssl`, all variants: `PARALLEL_MAKEINST = "-j1"`. This works around a
+  recursive `install_sw` relink race. The setting does not change task signatures.
+- `libcap`, Wrynose: passes the cross toolchain to the install-time `capsh`
+  relink, which otherwise falls back to the host gcc.
+- `xz`, Wrynose target: points `xzmore` at `${bindir}/bash` and adds bash to
+  RDEPENDS, which satisfies file-rdeps package QA.
+
+Each was still unfixed on OE-Core scarthgap, wrynose and master on 2026-11-24.
+The integration layer inherits the same class, so the pinned profiles keep
+identical task signatures. Validation, including builds from the extracted
+export without the integration layer, is recorded in the core repository's
+`docs/YOCTO_STANDALONE_VALIDATION.md`. Apart from the class, the standalone
+configuration requires OE-Core, meta-oe, the Scarthgap Rust mixin, and the
+systemd/usrmerge distro features listed above. It needs no other distro setting.
 
 Builds contain examples only: no device keys, enrollment configuration, signer
 PINs or journals. Provision identities at runtime. Preserve /etc/suifleet and
