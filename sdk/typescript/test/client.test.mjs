@@ -242,3 +242,64 @@ test('OutboundBuffer stops on an uncertain delivery until the caller decides', a
   assert.deepEqual(server.requests.map((r) => r.payload), ['a', 'b']);
   await server.close();
 });
+
+test('OutboundBuffer never replays a stream_append that may have been stored', async () => {
+  // request_failed can follow a stored append (e.g. a failed segment cleanup).
+  let generic = true;
+  const server = await serve((r) => {
+    if (r.operation === 'stream_append' && generic) { generic = false; return { version: 1, ok: false, error: 'request_failed' }; }
+    return ok({ sequence: 0 });
+  });
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.append('s', 'a');
+  buffer.append('s', 'b');
+  await assert.rejects(buffer.flush({ retryDelayMs: 1 }),
+    (e) => e instanceof UncertainDeliveryError && e.item.payload === 'a' && e.cause instanceof IpcError && e.cause.code === 'request_failed');
+  assert.equal(buffer.blocked, true);
+  assert.equal(buffer.pending, 2);
+  assert.deepEqual(server.requests.map((r) => r.payload), ['a']);
+  buffer.resolveUncertain('discard');
+  assert.deepEqual(await buffer.flush(), { sent: 1, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => r.payload), ['a', 'b']);
+  await server.close();
+});
+
+test('OutboundBuffer retries transient stream codes and stops at once on permanent ones', async () => {
+  const replies = ['full', 'unavailable', null, 'not-found'];
+  const server = await serve(() => {
+    const code = replies.shift();
+    return code ? { version: 1, ok: false, error: code } : ok({ sequence: 0 });
+  });
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.append('s', 1);
+  buffer.append('missing', 2);
+  const result = await buffer.flush({ maxAttempts: 5, retryDelayMs: 1 });
+  assert.equal(result.sent, 1);
+  assert.equal(result.pending, 1);
+  assert.ok(result.error instanceof IpcError && result.error.code === 'not-found');
+  assert.equal(buffer.blocked, false);
+  assert.deepEqual(server.requests.map((r) => r.payload), [1, 1, 1, 2]);
+  await server.close();
+});
+
+test('OutboundBuffer snapshots payloads at enqueue', async () => {
+  let refuse = 1;
+  const server = await serve((r) => {
+    if (r.operation === 'publish' && refuse > 0) { refuse--; return { version: 1, ok: false, error: 'request_failed' }; }
+    return ok(r.operation === 'publish' ? { delivered: 1, durable: 0, volatile: 0 } : { sequence: 0 });
+  });
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }), { maxBytes: 40 });
+  const reading = { n: 1, tags: ['a'] };
+  buffer.publish('t', reading);
+  buffer.append('s', reading);
+  const bytes = buffer.pendingBytes;
+  reading.n = 2;
+  reading.tags.push('x'.repeat(100));
+  reading.extra = 'y'.repeat(5000);
+  assert.equal(buffer.pendingBytes, bytes);
+  // The first attempt is refused; the retry still sends the enqueue-time value.
+  assert.deepEqual(await buffer.flush({ retryDelayMs: 1 }), { sent: 2, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => [r.operation, r.payload]),
+    [['publish', { n: 1, tags: ['a'] }], ['publish', { n: 1, tags: ['a'] }], ['stream_append', { n: 1, tags: ['a'] }]]);
+  await server.close();
+});

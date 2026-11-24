@@ -5,21 +5,35 @@
  * RejectNewData streams) and short daemon restarts. It is process memory: it
  * does not survive this process. Use a durable stream for data that must.
  *
- * Retry rules follow the protocol's outcome guarantees:
- * - IpcError (the daemon rejected the request): publish backpressure is atomic
- *   and rejected appends store nothing, so resending cannot duplicate.
+ * Retry rules follow the daemon's outcome guarantees:
+ * - publish IpcError: publication is all-or-nothing (inbox and durable spool
+ *   backpressure store nothing), so resending cannot duplicate.
+ * - stream_append IpcError with a stream protocol code: every coded refusal is
+ *   raised before the record is stored. `full` and `unavailable` are retried;
+ *   permanent codes (`invalid`, `retired`, `not-found`, ...) end the flush at
+ *   once with the item still queued.
+ * - stream_append IpcError `request_failed`: generic, and the daemon can return
+ *   it after the record was stored (for example a failed segment cleanup), so
+ *   it is treated like an `unknown` outcome below.
  * - TransportError `not_sent`: nothing reached the daemon; resending is safe.
  * - TransportError `unknown`: the message may already be delivered. The buffer
  *   stops, keeps the item at its head marked uncertain and throws
  *   UncertainDeliveryError. The caller decides with `resolveUncertain`.
+ *
+ * Payloads are snapshotted at enqueue: later changes to the caller's object do
+ * not affect the queued message or the byte accounting.
  */
 import type { Client } from './index.js';
 import type { JsonValue } from './protocol.js';
 import { IpcError, MAX_PUBLISH_PAYLOAD, TransportError } from './protocol.js';
 
+/** A queued item. Its payload is a frozen, detached copy taken at enqueue. */
 export type OutboundItem =
-  | { kind: 'publish'; topic: string; payload: JsonValue }
-  | { kind: 'stream'; stream: string; payload: JsonValue };
+  | { readonly kind: 'publish'; readonly topic: string; readonly payload: JsonValue }
+  | { readonly kind: 'stream'; readonly stream: string; readonly payload: JsonValue };
+
+/** Stream refusals that store nothing and may succeed later. */
+const RETRYABLE_STREAM_CODES = new Set(['full', 'unavailable']);
 
 export interface OutboundBufferOptions {
   /** Maximum queued items. Default 256. */
@@ -54,7 +68,8 @@ export class BufferFullError extends Error {
 
 export class UncertainDeliveryError extends Error {
   readonly item: OutboundItem;
-  constructor(item: OutboundItem, cause: TransportError) {
+  /** TransportError `unknown`, or a stream_append `request_failed` IpcError. */
+  constructor(item: OutboundItem, cause: TransportError | IpcError) {
     super(`delivery of the head item is uncertain: ${cause.message}`, { cause });
     this.name = 'UncertainDeliveryError';
     this.item = item;
@@ -62,6 +77,20 @@ export class UncertainDeliveryError extends Error {
 }
 
 interface Entry { item: OutboundItem; bytes: number }
+
+function deepFreeze(value: JsonValue): JsonValue {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child as JsonValue);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** Serialize once; queue a frozen copy that serializes to exactly these bytes. */
+function snapshot(payload: JsonValue): { payload: JsonValue; bytes: number } {
+  const text = JSON.stringify(payload ?? null);
+  return { payload: deepFreeze(JSON.parse(text) as JsonValue), bytes: Buffer.byteLength(text) };
+}
 
 export class OutboundBuffer {
   readonly maxItems: number;
@@ -87,14 +116,15 @@ export class OutboundBuffer {
 
   /** Queue a publication. Throws BufferFullError instead of growing past the bounds. */
   publish(topic: string, payload: JsonValue): void {
-    const bytes = Buffer.byteLength(JSON.stringify(payload ?? null));
-    if (bytes > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
-    this.push({ item: { kind: 'publish', topic, payload }, bytes });
+    const copy = snapshot(payload);
+    if (copy.bytes > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
+    this.push({ item: { kind: 'publish', topic, payload: copy.payload }, bytes: copy.bytes });
   }
 
   /** Queue a durable stream append. */
   append(stream: string, payload: JsonValue): void {
-    this.push({ item: { kind: 'stream', stream, payload }, bytes: Buffer.byteLength(JSON.stringify(payload ?? null)) });
+    const copy = snapshot(payload);
+    this.push({ item: { kind: 'stream', stream, payload: copy.payload }, bytes: copy.bytes });
   }
 
   private push(entry: Entry): void {
@@ -148,6 +178,14 @@ export class OutboundBuffer {
               throw new UncertainDeliveryError(entry.item, error);
             }
             if (!(error instanceof IpcError || error instanceof TransportError)) throw error;
+            if (entry.item.kind === 'stream' && error instanceof IpcError) {
+              // A generic failure may follow a stored append; never replay it blindly.
+              if (error.code === 'request_failed') {
+                this.uncertain = true;
+                throw new UncertainDeliveryError(entry.item, error);
+              }
+              if (!RETRYABLE_STREAM_CODES.has(error.code)) return { sent, pending: this.entries.length, error };
+            }
             if (attempt >= maxAttempts) return { sent, pending: this.entries.length, error };
             await new Promise<void>((resolve, reject) => {
               const signal = options.signal;
