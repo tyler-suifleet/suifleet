@@ -109,30 +109,15 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   return <div className="max-w-4xl space-y-6 text-sm text-gray-900">
     <header className="space-y-1">
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
-      <p className="text-gray-700">Connect your account, check account fees, create a fleet, arrange device capacity and reporting funds, then register a device and send your first update.</p>
       <p className="text-gray-700">Public testnet evaluation: test SUI pays network fees only. It does not include device capacity, paid storage or production service. Check availability before making a payment.</p>
-      <p className="flex flex-wrap gap-x-4 gap-y-1">
-        <a className={LINK} href={docsUrl("install")}>Install the device client</a>
-        <a className={LINK} href={docsUrl("enrollment")}>Enrollment guide</a>
-        <a className={LINK} href={docsUrl("components")}>Publish and deploy components</a>
-      </p>
     </header>
-
-    <PilotReadiness connected={!!account} capacity={fleet ? { used: fleet.activeDevices, limit: fleet.deviceLimit, administrator: fleet.administrator } : undefined}
-      balance={state.isSuccess ? state.data : undefined} balanceFailed={state.isError}
-      deviceBudget={budget?.balance} budgetChecked={budgets.isSuccess} budgetFailed={budgets.isError} />
-
-    <nav aria-label="Onboarding progress">
-      <ol className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        {steps.map((step, index) => <ProgressItem key={step.id} step={step} index={index} current={step === next} />)}
-      </ol>
-    </nav>
 
     {next && <p role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-950">
       <span className="font-semibold">Next: </span>{missingFleet && next.id === "register" ? fleetNext : nextAction(next, config.enabled)}
     </p>}
 
     <StepCard id="account" index={1} title="Sign in or connect" state={steps[0].state}>
+      <div>{connect}</div>
       {account ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">{accountName ?? "Wallet account"}</span>
         <span className="font-mono text-gray-700" title={account.address}>{shortAddress(account.address)}</span>
@@ -142,7 +127,6 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         {!config.enabled && <p role="status" className="text-gray-700">{config.reason}</p>}
       </>}
       <p className="text-gray-700">Your wallet is the account app that approves changes and payments. SuiFleet asks for approval before submitting an action.</p>
-      <div>{connect}</div>
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
         <p className="font-semibold">You hold this fleet’s keys</p>
         <ul className="mt-1 list-disc space-y-0.5 pl-5">
@@ -158,7 +142,32 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       </Disclosure>
     </StepCard>
 
+    <nav aria-label="Onboarding progress">
+      <ol className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        {steps.map((step, index) => <ProgressItem key={step.id} step={step} index={index} current={step === next} />)}
+      </ol>
+    </nav>
+
+    <nav aria-label="Onboarding guides" className="flex flex-wrap gap-x-4 gap-y-1">
+      <a className={LINK} href={docsUrl("install")}>Install the device client</a>
+      <a className={LINK} href={docsUrl("enrollment")}>Enrollment guide</a>
+      <a className={LINK} href={docsUrl("components")}>Publish and deploy components</a>
+    </nav>
+
     <StepCard id="funding" index={2} title="Add funds" state={steps[1].state}>
+      {account && fleet && capacity && (!capacity.available || !capacity.administrator) &&
+        <p role="status" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+          {!capacity.administrator ? "An organization administrator must register devices." : deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)}{" "}
+          <Link className={LINK} href="/entitlements">Check device capacity</Link>
+        </p>}
+      {account && budgets.isError && <p role="alert" className="text-red-800">
+        Device operating budget could not be verified. Check the <Link className={LINK} href="/budget">Device and storage budgets page</Link> before depositing again.
+      </p>}
+      <Disclosure summary="Before your first device: capacity, fees and budgets">
+        <PilotReadiness connected={!!account} capacity={fleet ? { used: fleet.activeDevices, limit: fleet.deviceLimit, administrator: fleet.administrator } : undefined}
+          balance={state.isSuccess ? state.data : undefined} balanceFailed={state.isError}
+          deviceBudget={budget?.balance} budgetChecked={budgets.isSuccess} budgetFailed={budgets.isError} />
+      </Disclosure>
       {!account ? <p className="text-gray-700">Sign in to check your balance on <strong>{NETWORK}</strong>.</p> : <>
         {state.isPending && <p role="status">Checking deployment and account balance…</p>}
         {state.error && <p role="alert" className="text-red-800">{state.error.message}</p>}
