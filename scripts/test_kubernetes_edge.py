@@ -20,6 +20,9 @@ ServiceAccount credential:
   Service, update, prune and rollback. Readiness includes prune convergence:
   an empty retirement bundle, a same-owner replacement left by a pruning race
   and a finalizer-delayed prune are all reported not ready until gone.
+  Pruning a Deployment is foreground: while a finalizer holds one of its Pods
+  the Deployment stays terminating and a retirement bundle is not ready; it
+  becomes ready only once the Pod, ReplicaSet and Deployment are gone.
 - No adoption of pre-existing objects and no overriding of fields owned by
   another field manager (two controllers do not fight).
 - Races injected between the helper's ownership check and its write (through
@@ -31,7 +34,7 @@ ServiceAccount credential:
 - Optionally (--supervisor) the real SuiFleet supervisor deploys, fails
   readiness on a broken bundle and rolls back, then retires the component
   with an empty bundle whose readiness waits for a finalizer-delayed prune
-  (ignored Rust test).
+  and for a held Pod of the pruned Deployment (ignored Rust test).
 
 Requires Linux, Docker able to run a privileged container, network access to
 pull the pinned k3s and busybox images (or a pre-populated cache), Python 3.9+
@@ -547,11 +550,59 @@ def scenario(cluster, work, supervisor):
     check("workload keeps running after the client stops",
           cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.status.availableReplicas}").stdout == "1")
 
+    # Retirement waits for the pruned Deployment's dependents: a finalizer
+    # holds its Pod, so the ReplicaSet and the (terminating) Deployment remain
+    # and an empty bundle must not report ready while the old workload exists.
+    def web_pods():
+        listed = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=web", "-o", "json").stdout)
+        return [item["metadata"]["name"] for item in listed["items"]]
+
+    def replicasets():
+        listed = json.loads(cluster.admin("get", "replicasets", "-n", NAMESPACE, "-l", "app=web", "-o", "json").stdout)
+        return listed["items"]
+
+    held_pods = [pod for pod in web_pods() if cluster.admin(
+        "patch", "pod", pod, "-n", NAMESPACE, "--type=merge",
+        "-p", '{"metadata":{"finalizers":["example.com/hold"]}}', ok=False).returncode == 0]
+    check("a live web Pod is held before the dependent-held retirement", bool(held_pods), str(held_pods))
+    result = helper("apply", profiles, retire)
+    check("empty retirement bundle issues the Deployment prune while a Pod is held",
+          result.returncode == 0 and "deployments.apps/web" in result.stderr, result.stderr)
+    deployment = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json", ok=False).stdout or "null")
+    check("foreground pruning keeps the Deployment (terminating) while its Pod is held",
+          deployment is not None and deployment["metadata"].get("deletionTimestamp")
+          and "foregroundDeletion" in deployment["metadata"].get("finalizers", []),
+          json.dumps((deployment or {}).get("metadata", {}))[:500])
+    time.sleep(5)  # Give the garbage collector time to act, if it would.
+    result = helper("ready", profiles, retire)
+    check("retirement is not ready while the pruned Deployment's Pod and ReplicaSet remain",
+          result.returncode == 1 and "deployments.apps/web not yet pruned" in result.stderr
+          and set(held_pods) <= set(web_pods()) and replicasets(), result.stderr)
+    result = helper("apply", profiles, retire)
+    check("re-applying the retirement while dependents are held does not re-delete",
+          result.returncode == 0 and "pruned" not in result.stderr, result.stderr)
+    for pod in held_pods:
+        cluster.admin("patch", "pod", pod, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}')
+    wait("retirement ready after the held Pod is released",
+         lambda: helper("ready", profiles, retire).returncode == 0, timeout=180, interval=2)
+    check("retirement is ready once the Pod, ReplicaSet and Deployment are gone",
+          web_pods() == [] and replicasets() == []
+          and cluster.admin("get", "deployment", "web", "-n", NAMESPACE, ok=False).returncode != 0)
+    check("re-apply v1 after the dependent-held retirement", helper("apply", profiles, v1).returncode == 0)
+    wait_ready(profiles, v1, "1.0.0")
+
     # Removal deletes only this component's objects in its namespace.
     result = helper("remove", profiles, extra=("--component", COMPONENT))
-    remaining = cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
-                              f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip()
-    check("remove deletes the component's objects", result.returncode == 0 and remaining == "", result.stderr + remaining)
+
+    def remaining_objects():
+        return cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
+                             f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip()
+
+    wait("removed objects (foreground) to disappear", lambda: remaining_objects() == "" and web_pods() == [],
+         timeout=180, interval=2)
+    remaining = remaining_objects()
+    check("remove deletes the component's objects and their Pods", result.returncode == 0 and remaining == "",
+          result.stderr + remaining)
     check("remove leaves the customer's own object", cluster.admin("get", "configmap", "legacy", "-n", NAMESPACE, ok=False).returncode == 0)
     check("objects in other namespaces were never touched",
           cluster.admin("get", "configmap", "decoy", "-n", "default", ok=False).returncode == 0)
@@ -562,8 +613,37 @@ def scenario(cluster, work, supervisor):
         bad = variant(work, "broken", "broken", extra_configmap="bad-extra", image=MISSING_IMAGE)
         admin = " ".join(shlex.quote(str(part)) for part in
                          (cluster.kubectl, "--kubeconfig", cluster.admin_config, "-n", NAMESPACE))
-        hold = f"""{admin} patch configmap web-content --type=merge -p '{{"metadata":{{"finalizers":["example.com/hold"]}}}}'"""
-        release = f"""{admin} patch configmap web-content --type=json -p '[{{"op":"remove","path":"/metadata/finalizers"}}]'"""
+        # Hold both a deleted bundle object (the ConfigMap) and a dependent of
+        # the pruned Deployment (its Pods) during retirement. A Pod already
+        # terminating cannot gain a finalizer; at least one live Pod must be
+        # held. Traces go to hold.log, reported if the supervisor test fails.
+        trace = work / "hold.log"
+        script = work / "hold.sh"
+        script.write_text(f"""#!/bin/sh
+exec 2>>{shlex.quote(str(trace))}
+set -x
+k() {{ {admin} "$@"; }}
+case "$1" in
+  hold) value='["example.com/hold"]' ;;
+  release) value=null ;;
+  *) exit 2 ;;
+esac
+patch='{{"metadata":{{"finalizers":'"$value"'}}}}'
+k patch configmap web-content --type=merge -p "$patch" >&2 || exit 1
+for pod in $(k get pods -l app=web -o name); do
+  k patch "$pod" --type=merge -p "$patch" >&2 || true
+done
+held=$(k get pods -l app=web -o jsonpath='{{.items[*].metadata.finalizers}}')
+echo "held finalizers: $held" >&2
+case "$1:$held" in
+  hold:*example.com/hold*|release:) exit 0 ;;
+  release:*example.com/hold*) exit 1 ;;
+  release:*) exit 0 ;;
+  *) exit 1 ;;
+esac
+""")
+        script.chmod(0o700)
+        hold, release = f"{shlex.quote(str(script))} hold", f"{shlex.quote(str(script))} release"
         env = dict(os.environ, SF_K8S_HELPER=str(HELPER), SF_K8S_PROFILE_ROOT=str(profiles),
                    SF_K8S_BUNDLE_GOOD=str(v1), SF_K8S_BUNDLE_BAD=str(bad), SF_K8S_BUNDLE_EMPTY=str(retire),
                    SF_K8S_HOLD=hold, SF_K8S_RELEASE=release, RUSTUP_TOOLCHAIN="1.94.0")
@@ -572,13 +652,16 @@ def scenario(cluster, work, supervisor):
                               env=env, capture_output=True, text=True, timeout=1800)
         tail = (test.stdout + test.stderr)[-3000:]
         check("real supervisor deploys, rolls back a broken bundle (readiness includes its prune) and waits "
-              "for a delayed prune before an empty retirement bundle is ready",
-              test.returncode == 0 and "1 passed" in test.stdout, tail)
+              "for a delayed prune and a held Deployment Pod before an empty retirement bundle is ready",
+              test.returncode == 0 and "1 passed" in test.stdout,
+              tail + (("\nhold.log:\n" + trace.read_text()[-2000:]) if trace.exists() else ""))
         check("supervisor rollback pruned the broken bundle's extra object",
               cluster.admin("get", "configmap", "bad-extra", "-n", NAMESPACE, ok=False).returncode != 0)
         remaining = cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
                                   "app.kubernetes.io/managed-by=suifleet", "-o", "name").stdout.strip()
         check("supervised empty retirement bundle removed every SuiFleet object", remaining == "", remaining)
+        check("supervised retirement left no Pod or ReplicaSet of the pruned Deployment",
+              web_pods() == [] and replicasets() == [])
         result = helper("remove", profiles, extra=("--component", "app"))
         check("remove after retirement is a successful no-op", result.returncode == 0, result.stderr)
 

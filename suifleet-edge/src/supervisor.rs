@@ -2874,8 +2874,10 @@ mod tests {
         assert_eq!(f.active()["app"], v1);
         assert_eq!(phase(&s), Phase::Running);
         // Retirement: an empty bundle prunes every object, and its readiness
-        // includes prune convergence. A finalizer holds the deleted ConfigMap,
-        // so readiness must keep failing until the hold is released.
+        // includes prune convergence. Finalizers hold the deleted ConfigMap and
+        // the pruned Deployment's Pods (foreground deletion keeps the
+        // Deployment until they are gone), so readiness must keep failing
+        // until the hold is released.
         let shell = |command: String| {
             let status = std::process::Command::new("sh").arg("-c").arg(&command).status().unwrap();
             assert!(status.success(), "{command}");
