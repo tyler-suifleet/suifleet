@@ -156,6 +156,10 @@ class FakeCollector:
         return Handler
 
 
+def names_of(otlp_metrics):
+    return {m["name"]: m for m in otlp_metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]}
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="sf303-unit-")
@@ -408,6 +412,31 @@ class AdapterTests(Base):
         self.assertTrue(exporter.poll(console))
         self.assertEqual([line for _, _, line in exporter.log_buffer], ["one", "two", "three"])
 
+    def test_otlp_resource_identity_is_stable_across_console_outage(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint=collector.url))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        exporter.poll(console)
+        em.export_once(exporter, transport)
+        self.console.status = "unavailable"
+        exporter.poll(console)
+        em.export_once(exporter, transport)
+        self.console.status = None
+        self.console.health = dict(self.console.health, daemon_version="0.3.0")   # daemon upgrade
+        exporter.poll(console)
+        em.export_once(exporter, transport)
+        sent = [body for path, _, body, _ in collector.received if path == "/v1/metrics"]
+        self.assertEqual(len(sent), 3)
+        resources = [body["resourceMetrics"][0]["resource"] for body in sent]
+        self.assertEqual(resources[0], resources[1])
+        self.assertEqual(resources[0], resources[2])
+        up = [names_of(body)["suifleet_up"]["gauge"]["dataPoints"][0]["asInt"] for body in sent]
+        self.assertEqual(up, ["1", "0", "1"])
+        self.assertNotIn("suifleet_daemon_info", names_of(sent[1]))
+        info = names_of(sent[2])["suifleet_daemon_info"]["gauge"]["dataPoints"][0]["attributes"]
+        self.assertIn({"key": "version", "value": {"stringValue": "0.3.0"}}, info)
+
     def test_wrong_console_token_counts_unauthenticated(self):
         cfg, exporter, _ = self.make()
         self.assertFalse(exporter.poll(em.Console(cfg.console_url, "sfc_" + "B" * 43)))
@@ -464,7 +493,9 @@ class AdapterTests(Base):
         metrics = collector.received[0][2]
         resource = {a["key"]: a["value"]["stringValue"] for a in metrics["resourceMetrics"][0]["resource"]["attributes"]}
         self.assertEqual(resource["suifleet.evidence"], "simulated")
-        self.assertEqual(resource["service.version"], "0.2.9")
+        self.assertNotIn("service.version", resource)
+        info = names_of(metrics)["suifleet_daemon_info"]["gauge"]["dataPoints"][0]
+        self.assertEqual({a["key"]: a["value"]["stringValue"] for a in info["attributes"]}["version"], "0.2.9")
         names = {m["name"]: m for m in metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]}
         self.assertEqual(names["suifleet_device_healthy"]["gauge"]["dataPoints"][0]["asInt"], "0")
         self.assertTrue(names["suifleet_exporter_polls_total"]["sum"]["isMonotonic"])

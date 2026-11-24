@@ -169,8 +169,11 @@ Component names and the daemon version are exported as labels.
 
 OTLP metrics use the same names. Gauges become OTLP gauges; counters become
 cumulative monotonic sums starting at adapter start. The resource carries
-`service.name=suifleet-edge`, `service.version` (daemon version),
-`suifleet.evidence`, `suifleet.device` and `suifleet.monitoring.adapter_version`.
+`service.name=suifleet-edge`, `suifleet.evidence`, `suifleet.device` and
+`suifleet.monitoring.adapter_version`. These stay the same while the console is
+down and across daemon upgrades, so a `suifleet_up` 0 point lands on the same
+series as earlier points. The daemon version is reported only as the
+`suifleet_daemon_info{version}` data point.
 
 ## Logs
 

@@ -633,9 +633,9 @@ class Exporter:
                       _attr("suifleet.monitoring.adapter_version", VERSION)]
         if self.config.device:
             attributes.append(_attr("suifleet.device", self.config.device))
-        with self.lock:
-            if self.up and self.snapshot:
-                attributes.append(_attr("service.version", self.snapshot["version"]))
+        # The resource identity is fixed for the adapter's lifetime: it does not
+        # change with console availability or daemon upgrades. The daemon
+        # version is observation data (suifleet_daemon_info{version}).
         return dict(attributes=attributes)
 
     def otlp_metrics(self):
