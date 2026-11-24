@@ -17,9 +17,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import subprocess
 import tempfile
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -30,7 +32,10 @@ def request_id(deployment):
     return hashlib.sha256(deployment.encode()).hexdigest()
 
 
-def run(binary):
+EXAMPLES = Path(__file__).resolve().parents[1] / "suifleet-edge/examples/platform-installers"
+
+
+def run(binary, installer=None):
     sim = Simulator()
     sim.allow_reports = True
     sim.fail_execution = False
@@ -82,6 +87,43 @@ def run(binary):
             helper_config = root / "firmware.toml"
             helper_config.write_text(f'command = {json.dumps("/bin/sh -c " + chr(39) + "echo ran >> " + str(marker) + chr(39))}\n'
                 f'timeout_seconds = 2\nspool_dir = {json.dumps(str(spool))}\nwork_dir = {json.dumps(str(root / "helper-work"))}\n')
+            calls = root / "installer-calls"
+            if installer:
+                example = (EXAMPLES / f"{installer}.toml").read_text().splitlines()
+                command_line, = (line for line in example if line.startswith("command = "))
+                command = shlex.split(json.loads(command_line.removeprefix("command = ")))
+                expected = {
+                    "swupdate": ["/usr/bin/swupdate", "-k", "/etc/swupdate/signing-public.pem", "-i"],
+                    "rauc": ["/usr/bin/rauc", "install"],
+                }
+                assert command == expected[installer], command
+                # Substitute a recording process for the platform executable
+                # alone. It checks the exact argv and private artifact handoff.
+                stub = root / "record_installer.py"
+                stub.write_text("""import json, os, pathlib, sys, time
+calls, *args, artifact = sys.argv[1:]
+path = pathlib.Path(artifact)
+assert path.parent == pathlib.Path.cwd()
+assert path.parent.stat().st_mode & 0o777 == 0o700
+assert path.stat().st_mode & 0o777 == 0o600
+payload = path.read_text()
+with open(calls, "a") as output:
+    print(json.dumps([os.getpid(), args, payload]), file=output)
+if payload in ("timeout", "interruption"):
+    time.sleep(30)
+sys.exit(7 if payload == "failure" else 0)
+""")
+                overrides = {
+                    "command": shlex.join([sys.executable, str(stub), str(calls), *command[1:]]),
+                    "timeout_seconds": 2,
+                    "spool_dir": str(spool),
+                    "work_dir": str(root / "helper work"),
+                }
+                for index, line in enumerate(example):
+                    key = line.partition(" = ")[0]
+                    if key in overrides:
+                        example[index] = f"{key} = {json.dumps(overrides[key])}"
+                helper_config.write_text("\n".join(example) + "\n")
             journal_path = state_dir / "state.json"
 
             def state():
@@ -106,7 +148,10 @@ def run(binary):
                     subprocess.run([str(binary), "--firmware-helper", str(helper_config)], stdout=log, stderr=log, check=True)
 
                 # On-chain records for reporting; enrollment's baseline skips them.
-                for id in ("0x301", "0x302", "0x303", "0x304", "0x305", "0x306"):
+                deployments = ["0x301", "0x302", "0x303", "0x304", "0x305", "0x306"]
+                if installer:
+                    deployments.extend(["0x307", "0x308", "0x309"])
+                for id in deployments:
                     sim.add(id)
                 # Enrollment creates the journal; then simulate a run interrupted with
                 # firmware updates in flight.
@@ -115,7 +160,9 @@ def run(binary):
                 stop(process)
                 process = None
                 journal = state()
-                for id in ("0x301", "0x302", "0x303", "0x304", "0x305"):
+                for id in deployments:
+                    if id == "0x306":
+                        continue
                     journal["deployments"][id] = {"status": None, "reported": False, "error": None,
                                                   "firmware_request": request_id(id)}
                 journal["deployments"]["0x306"] = {"status": None, "reported": False, "error": None}
@@ -128,21 +175,64 @@ def run(binary):
                     (results / f"{rid}.json").write_text(json.dumps(
                         {"id": rid, "ok": ok, "message": message, "interrupted": interrupted}))
 
-                def stage(id, suffix):
+                def stage(id, suffix, payload=b"image"):
                     rid = request_id(id)
-                    (requests / f"{rid}.artifact").write_bytes(b"image")
+                    (requests / f"{rid}.artifact").write_bytes(payload)
                     (requests / f"{rid}.{suffix}").write_text(json.dumps(
-                        {"id": rid, "sha256": hashlib.sha256(b"image").hexdigest()}))
+                        {"id": rid, "sha256": hashlib.sha256(payload).hexdigest()}))
                     return requests / f"{rid}.{suffix}"
 
-                result("0x301", True, "applied")
+                first_reports = {"0x301": 1, "0x304": 2, "0x305": 2}
+                if installer:
+                    def recorded_calls():
+                        return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+
+                    stage("0x301", "json", b"success")
+                    stage("0x307", "json", b"failure")
+                    stage("0x308", "json", b"timeout")
+                    # A wrong digest must not invoke the configured command.
+                    stage("0x309", "json", b"original")
+                    (requests / f"{request_id('0x309')}.artifact").write_bytes(b"tampered")
+                    helper()
+                    assert json.loads((results / f"{request_id('0x301')}.json").read_text())["ok"]
+                    # Recreate the crash window after publishing a result but
+                    # before removing its claim. Restarting must preserve it.
+                    claim = stage("0x301", "claimed", b"success")
+                    helper()
+                    assert not claim.exists()
+                    assert json.loads((results / f"{request_id('0x301')}.json").read_text())["ok"]
+                    assert "exit code 7" in json.loads((results / f"{request_id('0x307')}.json").read_text())["message"]
+                    timeout = json.loads((results / f"{request_id('0x308')}.json").read_text())
+                    assert timeout["interrupted"] and "timed out" in timeout["message"], timeout
+
+                    stage("0x303", "json", b"interruption")
+                    call = [str(binary), "--firmware-helper", str(helper_config)]
+                    with subprocess.Popen(call, stdout=log, stderr=log) as interrupted:
+                        try:
+                            wait_for(lambda: len(recorded_calls()) == 4, "installer did not start", interrupted)
+                            interrupted.kill()
+                            interrupted.wait(timeout=10)
+                        finally:
+                            if interrupted.poll() is None:
+                                interrupted.kill()
+                            for pid, _, payload in recorded_calls():
+                                if payload == "interruption":
+                                    try:
+                                        os.killpg(pid, signal.SIGKILL)
+                                    except ProcessLookupError:
+                                        pass
+                    assert (requests / f"{request_id('0x303')}.claimed").exists()
+                    assert not (results / f"{request_id('0x303')}.json").exists()
+                    first_reports.update({"0x307": 2, "0x309": 2})
+                else:
+                    result("0x301", True, "applied")
+                    stage("0x303", "claimed")  # Its helper died: nobody holds the lock.
                 live = open(stage("0x302", "claimed"))
                 fcntl.flock(live, fcntl.LOCK_EX)  # A helper still running the updater.
-                stage("0x303", "claimed")  # Its helper died: nobody holds the lock.
                 stage("0x304", "json")  # Published but never claimed.
 
                 process = start()
-                wait_for(lambda: reported() == ["0x301", "0x304", "0x305"],
+                wait_for(lambda: reported() == sorted(first_reports),
                          "startup did not settle and report the definite outcomes", process)
                 assert outcome("0x301")["status"] == 1
                 assert not (results / f"{request_id('0x301')}.json").exists(), "collected result not acknowledged"
@@ -182,8 +272,16 @@ def run(binary):
                 stop(process)
                 process = None
                 assert outcome("0x303")["status"] is None and outcome("0x303")["indeterminate"]
-                assert reported() == ["0x301", "0x302", "0x304", "0x305"], sim.reports
-                assert dict(sim.reports) == {"0x301": 1, "0x302": 1, "0x304": 2, "0x305": 2}
+                expected_reports = {**first_reports, "0x302": 1}
+                assert reported() == sorted(expected_reports), sim.reports
+                assert dict(sim.reports) == expected_reports, sim.reports
+                if installer:
+                    assert outcome("0x308")["status"] is None and outcome("0x308")["indeterminate"]
+                    assert sorted((args, payload) for _, args, payload in recorded_calls()) == [
+                        (command[1:], payload) for payload in ("failure", "interruption", "success", "timeout")
+                    ], recorded_calls()
+                    print(f"PASS: {installer} example argv, private artifact, digest rejection, "
+                          "durable exit results, timeout and interrupted claim without replay")
                 assert not list(requests.iterdir()), list(requests.iterdir())
                 assert not sim.errors, sim.errors
             print("PASS: restart reconciles a written result and a live claim instead of reporting Failed")
@@ -202,4 +300,6 @@ def run(binary):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifleet")
-    run(parser.parse_args().binary.resolve())
+    parser.add_argument("--installer", choices=("swupdate", "rauc"), help="exercise a shipped command profile with a harmless installer process")
+    args = parser.parse_args()
+    run(args.binary.resolve(), args.installer)
