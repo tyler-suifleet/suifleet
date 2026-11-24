@@ -337,6 +337,27 @@ test('OutboundBuffer lets the caller drop a definitively rejected head and resum
   await server.close();
 });
 
+test('OutboundBuffer head inspection cannot change the validated item', async () => {
+  const server = await serve(() => ok({ sequence: 0 }));
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.append('s', { n: 1 });
+  buffer.publish('t', 'second');
+  const bytes = buffer.pendingBytes;
+  const head = buffer.head;
+  assert.ok(Object.isFrozen(head) && Object.isFrozen(head.payload));
+  // Strict-mode JavaScript: writes to the frozen item throw and change nothing.
+  assert.throws(() => { head.payload = 'x'.repeat(MAX_FRAME); }, TypeError);
+  assert.throws(() => { head.stream = 'other'; }, TypeError);
+  assert.throws(() => { head.kind = 'publish'; }, TypeError);
+  assert.throws(() => { head.payload.n = 2; }, TypeError);
+  assert.equal(buffer.pendingBytes, bytes);
+  assert.deepEqual(buffer.head, { kind: 'stream', stream: 's', payload: { n: 1 } });
+  assert.deepEqual(await buffer.flush(), { sent: 2, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => [r.operation, r.topic, r.payload]),
+    [['stream_append', 's', { n: 1 }], ['publish', 't', 'second']]);
+  await server.close();
+});
+
 test('OutboundBuffer keeps uncertain-head discard behind resolveUncertain', async () => {
   const server = await serve((_, socket) => { socket.destroy(); return undefined; });
   const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));

@@ -30,7 +30,11 @@ import type { Client } from './index.js';
 import type { JsonValue } from './protocol.js';
 import { IpcError, MAX_PUBLISH_PAYLOAD, TransportError, encodeRequest } from './protocol.js';
 
-/** A queued item. Its payload is a frozen, detached copy taken at enqueue. */
+/**
+ * A queued item. The item and its payload are frozen, detached copies taken at
+ * enqueue, so `head`, `discardHead` and UncertainDeliveryError expose them
+ * read-only at runtime too.
+ */
 export type OutboundItem =
   | { readonly kind: 'publish'; readonly topic: string; readonly payload: JsonValue }
   | { readonly kind: 'stream'; readonly stream: string; readonly payload: JsonValue };
@@ -84,7 +88,7 @@ export class UncertainDeliveryError extends Error {
   }
 }
 
-interface Entry { item: OutboundItem; bytes: number }
+interface Entry { readonly item: OutboundItem; readonly bytes: number }
 
 function deepFreeze(value: JsonValue): JsonValue {
   if (value !== null && typeof value === 'object') {
@@ -130,17 +134,17 @@ export class OutboundBuffer {
     const copy = snapshot(payload);
     if (copy.bytes > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
     encodeRequest('publish', this.client.component, topic, copy.payload);
-    this.push({ item: { kind: 'publish', topic, payload: copy.payload }, bytes: copy.bytes });
+    this.push(Object.freeze({ item: Object.freeze({ kind: 'publish', topic, payload: copy.payload }), bytes: copy.bytes }));
   }
 
   /** Queue a durable stream append. Throws RangeError (queue unchanged) when the frame exceeds the IPC limit. */
   append(stream: string, payload: JsonValue): void {
     const copy = snapshot(payload);
     encodeRequest('stream_append', this.client.component, stream, copy.payload);
-    this.push({ item: { kind: 'stream', stream, payload: copy.payload }, bytes: copy.bytes });
+    this.push(Object.freeze({ item: Object.freeze({ kind: 'stream', stream, payload: copy.payload }), bytes: copy.bytes }));
   }
 
-  /** The item flush sends next, if any. */
+  /** The item flush sends next, if any. It is frozen: inspecting it cannot change the queue. */
   get head(): OutboundItem | undefined { return this.entries[0]?.item; }
 
   /**
