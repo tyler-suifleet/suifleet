@@ -2,6 +2,7 @@
 """Run the portable daemon and signer as a single foreground service."""
 
 import argparse
+import errno
 import fcntl
 import json
 import os
@@ -71,9 +72,26 @@ def run(args, daemon_user, signer_user):
         task = os.open(f"/proc/{daemon.pid}", os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             with socket.socket(socket.AF_UNIX) as listener:
-                listener.bind(str(args.socket))
+                # Linux creates pathname sockets with 0777 filtered by umask.
+                # Allow only root and the daemon group to connect. Assign
+                # the group before listening and restore the private file mask.
+                previous_mask = os.umask(0o117)
+                try:
+                    listener.bind(str(args.socket))
+                finally:
+                    os.umask(previous_mask)
+                # A directory default ACL can override the bind-time mask.
+                # Reject inherited extended access and unexpected mode bits.
+                try:
+                    os.getxattr(args.socket, "system.posix_acl_access")
+                except OSError as error:
+                    if error.errno not in (errno.ENODATA, errno.EOPNOTSUPP):
+                        raise
+                else:
+                    raise RuntimeError("portable signer socket must not inherit an access ACL")
+                if stat.S_IMODE(args.socket.stat().st_mode) != 0o660:
+                    raise RuntimeError("portable signer socket requires mode 0660")
                 os.chown(args.socket, 0, daemon_user.pw_gid)
-                os.chmod(args.socket, 0o660)
                 listener.listen(32)
                 signer = subprocess.Popen(
                     [args.binary, "--portable-signer-child", args.signer_config,

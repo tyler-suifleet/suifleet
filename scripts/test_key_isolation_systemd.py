@@ -233,7 +233,12 @@ with socket.socket(socket.AF_UNIX) as conn:
     process = start()
     try:
         report("0x911", process)
-        check("real daemon produced a signer-backed status report verified by the simulator")
+        socket_stat = sock.stat()
+        assert socket_stat.st_uid == 0
+        assert socket_stat.st_gid == daemon_user.pw_gid
+        assert socket_stat.st_mode & 0o777 == 0o660
+        assert subprocess.run(["test", "-w", sock], **signer_account).returncode == 1
+        check("real daemon produced a verified signer-backed report through the daemon-group-only socket")
         assert probe({"op": "address"})["address"] == ADDRESS
         assert "may not request signatures" in probe({"op": "sign", "tx": ""})["error"]
         assert "may not request telemetry" in probe({"op": "sign_telemetry", "message": ""})["error"]

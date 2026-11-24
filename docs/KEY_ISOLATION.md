@@ -95,7 +95,10 @@ no-new-privileges. It enters the daemon UID inside the already running
 binary before creating runtime threads. A component shares the daemon UID,
 so users of this mode must keep the procfs, binary, socket parent, runtime
 account definitions, launcher, and its parameters under trusted platform
-control. The socket is root-owned and accessible to the daemon group.
+control. The root-owned signing socket grants access to the daemon group
+with mode 0660. Startup refuses inherited extended access ACLs or a mode
+other than 0660. Components inherit no-new-privileges, which prevents them
+from gaining privileges through setuid programs or file capabilities.
 Components can signal the daemon or flood the signing socket,
 which can deny service. They cannot acquire its process identity or
 read the signer's private files. As in systemd mode, a compromised
