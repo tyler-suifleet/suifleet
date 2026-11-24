@@ -47,9 +47,10 @@ class SiteTest(unittest.TestCase):
         self.assertIn(acknowledgment, action)
         self.assertLess(action.index(acknowledgment), action.index('click Download credentials'))
         self.assertIn('Tick', action)
-        notice = next(s for s in step['before'] if 'retained video' in s)
-        self.assertIn('before the download acknowledgment checkbox was added', notice)
-        self.assertIn('Follow the written checkbox step', notice)
+        notice = next(s for s in step['before'] if 'acknowledge' in s)
+        self.assertIn('only copy', notice)
+        self.assertIn('recording does not show that checkbox', notice)
+        self.assertIn('Follow the written acknowledgment step', notice)
         guide = (self.out / 'guide/index.html').read_text()
         self.assertIn(acknowledgment, guide)
         self.assertIn(notice, guide)
@@ -148,13 +149,15 @@ class SiteTest(unittest.TestCase):
         ids = [s['id'] for s in steps]
         self.assertLess(ids.index('access-policy'), ids.index('publish-version'))
         by_id = {s['id']: s for s in steps}
-        self.assertIn('First device:', by_id['sign-in']['summary'])
-        self.assertIn('Skip batch enrollment and staged rollout', by_id['sign-in']['summary'])
-        self.assertIn('unencrypted', by_id['publish-version']['summary'])
+        self.assertIn('first update', by_id['sign-in']['summary'])
+        self.assertIn('steps marked optional can wait', by_id['sign-in']['summary'])
+        self.assertIn('private access first', by_id['sign-in']['summary'])
+        self.assertIn('not encrypted and can be read by anyone', by_id['publish-version']['summary'])
         self.assertNotIn('A catalog version deploys once', ' '.join(by_id['deploy-group']['actions']))
         self.assertIn('Library versions support', ' '.join(by_id['deploy-group']['actions']))
         self.assertIn('Desired state supports groups only', ' '.join(by_id['deploy-group']['actions']))
-        self.assertIn('no unattended advancement', by_id['staged-rollout']['summary'])
+        self.assertIn('must return and approve each next batch', by_id['staged-rollout']['summary'])
+        self.assertIn('does not advance on its own', by_id['staged-rollout']['summary'])
         self.assertIn('closing the browser stops coordination', ' '.join(by_id['staged-rollout']['actions']))
         # Published lesson cards use the same sequence, including the moved policy.
         lessons = build.load_json(SITE / 'guide/lessons.json')['lessons']
