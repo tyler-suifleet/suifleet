@@ -21,8 +21,8 @@ See [Validation](#validation) for what actually ran.
 
 | Owner | Owns | Does not own |
 |---|---|---|
-| Cluster administrator (customer) | The cluster, nodes, the delegated namespace and its Pod Security level, `ResourceQuota`/`LimitRange`, the publisher's ServiceAccount, Role and RoleBinding, token issue and rotation, and registry pull credentials | The delegated workload objects SuiFleet creates. The administrator can still delete them, which is how it takes them back. |
-| SuiFleet (one component on one publisher device) | Only `Deployment`, `ConfigMap` and `ClusterIP Service` objects in the delegated namespace. Each carries `app.kubernetes.io/managed-by=suifleet` and `suifleet.io/component=NAME`. | Anything else, including objects it did not create, other components' objects and other namespaces |
+| Cluster administrator (customer) | The cluster, nodes, the dedicated delegated namespace and its Pod Security level, the admission policy, `ResourceQuota`/`LimitRange`, the publisher's ServiceAccount, Role and RoleBinding, token issue and rotation, registry pull credentials, and all networking (`Service`, `Ingress`, `NetworkPolicy`) that exposes the delegated workloads | The delegated workload objects SuiFleet creates. The administrator can still delete them, which is how it takes them back. |
+| SuiFleet (one component on one publisher device) | Only `Deployment` and `ConfigMap` objects in the delegated namespace. Each carries `app.kubernetes.io/managed-by=suifleet` and `suifleet.io/component=NAME`. | Anything else, including Services, objects it did not create, other components' objects and other namespaces |
 | Customer GitOps/Helm/other controllers | Everything they create | SuiFleet-labelled objects. Do not point a second controller at them. |
 
 The authoritative desired state for delegated objects is the SuiFleet deployment.
@@ -33,10 +33,24 @@ cluster holds runtime state only.
 
 How the helper keeps two controllers from fighting:
 
-1. **No adoption.** Before it applies anything, the helper reads every target
-   object. An existing object without SuiFleet's ownership labels, or owned by
-   another SuiFleet component, aborts the whole apply with exit code 3, and
-   nothing is changed.
+1. **No adoption, and every write is bound to the object that was checked.**
+   For each object the helper reads it and checks its ownership labels. An
+   existing object without SuiFleet's ownership labels, or owned by another
+   SuiFleet component, stops the apply with exit code 3 and is not changed.
+   The write that follows cannot reach a different instance:
+   - An absent object is created with **create-only** semantics. If someone
+     else created it after the read, the create fails, and the helper re-reads
+     it and refuses to adopt it.
+   - An existing owned object is updated by server-side apply that carries the
+     observed `metadata.uid` and `metadata.resourceVersion` as preconditions.
+     If the object was replaced, relabelled or otherwise changed after the
+     check, the API server rejects the write. The helper then re-reads the
+     object and re-checks ownership, a bounded number of times, and never
+     writes blindly.
+   - Right after its own create, the helper converts that create's field
+     ownership into its server-side apply ownership with a merge patch carrying
+     the same UID/resourceVersion preconditions. Otherwise later applies would
+     conflict with SuiFleet's own creation.
 2. **Server-side apply, one field manager, never forced.** Every apply uses
    field manager `suifleet` without `--force-conflicts`. Suppose another manager
    (`kubectl edit`, a GitOps tool, an autoscaler) has taken a field that the
@@ -44,11 +58,14 @@ How the helper keeps two controllers from fighting:
    the other value in place. It reports the problem and does not overwrite the
    value. To recover, the other controller relinquishes the field, or the
    administrator deletes the object. The next apply then succeeds.
-3. **Pruning is label-scoped.** After a successful apply, the helper deletes
-   only objects that carry this component's labels in the delegated namespace
-   and are absent from the current bundle. Updates and rollbacks remove the
-   other version's extra objects. Customer objects, other components and other
-   namespaces are never listed or deleted.
+3. **Pruning is label-scoped and preconditioned.** After every object has been
+   applied, the helper lists objects that carry this component's labels in the
+   delegated namespace and are absent from the current bundle. It deletes each
+   one with the listed UID and resourceVersion as delete preconditions. If an
+   object was relabelled or replaced after the listing, the delete fails; the
+   helper re-reads it and leaves it alone unless it is still this component's
+   object. Updates and rollbacks remove the other version's extra objects.
+   Customer objects, other components and other namespaces are never deleted.
 4. **Autoscalers.** If a `HorizontalPodAutoscaler` (created by the administrator)
    scales a SuiFleet Deployment, omit `spec.replicas` from the bundle. Otherwise
    the two managers would conflict, as in item 2.
@@ -56,6 +73,13 @@ How the helper keeps two controllers from fighting:
    component and namespace from two SuiFleet devices. They would both claim
    ownership and could apply different versions. This is unsupported, and the
    labels cannot detect it.
+6. **A multi-object apply is not transactional.** Objects are written one at a
+   time, in bundle order. If a later write fails (a conflict, a rejection or a
+   cluster error), earlier objects may already carry the new bundle, and
+   nothing is pruned in that run. `ready` keeps failing until every object
+   carries the new bundle's digest, so the supervisor does not see a partial
+   apply as ready. A later successful apply converges, and a supervisor
+   rollback re-applies the previous bundle.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. To retire the workload, deploy a
@@ -81,18 +105,38 @@ version whose bundle has an empty `resources` list, or have the operator run
   and kubectl runs with a private temporary cache.
 - **Authorization.** [`scripts/kubernetes/cluster-setup.yaml`](../scripts/kubernetes/cluster-setup.yaml)
   grants a namespaced Role with `get, list, create, patch, delete` on
-  `configmaps`, `services` and `apps/deployments`. Nothing else is granted: no
-  Secrets, Pods, `exec`/`attach`/logs, ServiceAccounts or tokens, RBAC, quotas,
-  namespaces, nodes, CRDs or cluster-scoped objects.
-- **Pods.** The namespace enforces Pod Security Admission `restricted`. This is
-  the authoritative pod boundary: the API server rejects privileged, root,
-  host-namespace, hostPath and added-capability pods, even if someone bypasses
-  the helper with the same credential. A `ResourceQuota` and `LimitRange` bound
-  what can be scheduled and forbid NodePorts and LoadBalancers.
+  `configmaps` and `apps/deployments`. Nothing else is granted: no Services or
+  other networking objects, Secrets, Pods, `exec`/`attach`/logs,
+  ServiceAccounts or tokens, RBAC, quotas, namespaces, nodes, CRDs or
+  cluster-scoped objects. Services stay administrator-owned, so the publisher
+  credential cannot redirect or expose traffic in the namespace.
+- **Trust boundary: a dedicated namespace.** Whoever holds the publisher
+  credential can create or change Deployments in the namespace directly,
+  without the helper. The helper's checks therefore protect nothing against
+  that holder. The cluster enforces the boundary:
+  - The namespace must be **dedicated** to the publisher. Do not put unrelated
+    Secrets, other workloads, privileged ServiceAccounts or RoleBindings for
+    the namespace's `default` ServiceAccount in it. Anything a pod in the
+    namespace can reach through its spec is within the publisher's reach.
+  - Pod Security Admission `restricted` rejects privileged, root,
+    host-namespace, hostPath and added-capability pods.
+  - The `ValidatingAdmissionPolicy` in the setup file enforces the
+    credential-level restrictions that PSA does not cover, for every
+    Deployment and pod in the namespace. It requires the `default`
+    ServiceAccount, `automountServiceAccountToken: false`, no
+    `imagePullSecrets`, only `configMap`/`emptyDir` volumes, no Secret
+    references in `env`/`envFrom`, and `@sha256`-pinned images. It needs
+    Kubernetes 1.30 or later. On a cluster without it, the
+    administrator must enforce the same rules with another admission
+    controller. Otherwise, Secret and ServiceAccount isolation rests only on
+    the namespace really being dedicated.
+  - A `ResourceQuota` and `LimitRange` bound what can be scheduled and forbid
+    NodePorts and LoadBalancers.
 - **Helper validation.** This is early, explainable failure on top of the
   cluster's boundary, not a replacement for it. The helper accepts only
-  Deployments, ConfigMaps and ClusterIP Services, at most 64 objects in a
-  bundle of at most 1 MiB. It rejects any of the following:
+  Deployments and ConfigMaps, at most 64 objects in a bundle of at most
+  1 MiB. Malformed field types are rejected (exit code 2) like any other
+  invalid bundle. It rejects any of the following:
   - a namespace chosen by the bundle, or reserved ownership labels
   - host networking, PID or IPC, `nodeName`, host ports or `volumeDevices`
   - volumes other than `configMap`/`emptyDir`
@@ -128,8 +172,10 @@ attestation of the pods is out of scope.
 ## Recipe and setup
 
 1. With the **administrator's** credentials, apply
-   `scripts/kubernetes/cluster-setup.yaml`, after adjusting the namespace and
-   quota.
+   `scripts/kubernetes/cluster-setup.yaml`, after adjusting the namespace
+   (everywhere, including the policy binding's namespace selector) and quota.
+   Create any `Service` that should expose the workloads yourself, for
+   example a ClusterIP Service selecting `app=web` on port `http`.
 2. Mint a token, for example
    `kubectl create token suifleet-publisher -n suifleet-apps --duration=24h`,
    and write a kubeconfig with the CA data, server and token. Install it as
@@ -163,8 +209,12 @@ attestation of the pods is out of scope.
 `run` applies, prunes, then re-applies every interval, so an owned object that
 someone deletes is recreated. It exits non-zero on a conflict, rejection or
 cluster error, and the supervisor's restart budget then applies. `ready`
-succeeds only when every Deployment rolled out from *this* bundle digest is
-observed, updated and available. A replacement that never becomes ready
+succeeds only when every object in the bundle exists, is not being deleted, is
+owned by this component and carries *this* bundle's digest, version and
+labels. ConfigMaps must also hold the bundle's data, and Deployments must be
+observed, updated and available. A pre-existing foreign object with the right
+name, an object of another component and an object from a stale bundle are
+all not ready, also for ConfigMap-only bundles. A replacement that never becomes ready
 fails, and the supervisor restores the previous version. That version's `run`
 re-applies its bundle and prunes the failed version's extra objects.
 
@@ -176,8 +226,12 @@ credential or cluster error), `3` ownership or field-manager conflict.
 - Running or updating the SuiFleet client in Kubernetes, or using the device key
   from a pod.
 - Cluster-scoped objects, CRDs, multiple namespaces per profile, and kinds other
-  than Deployment, ConfigMap and ClusterIP Service. This includes DaemonSets,
-  Jobs, StatefulSets, PVCs, Ingress, NetworkPolicy, RBAC and Secrets.
+  than Deployment and ConfigMap. This includes Services, DaemonSets, Jobs,
+  StatefulSets, PVCs, Ingress, NetworkPolicy, RBAC and Secrets. Networking is
+  administrator-owned.
+- Sharing the delegated namespace with unrelated Secrets, workloads or
+  privileged ServiceAccounts, or running without the admission policy (or an
+  equivalent administrator admission control).
 - Helm charts, Kustomize or YAML bundles. Render them to the JSON bundle
   offline, then publish that.
 - Adopting existing objects, or forcing ownership of fields held by another
@@ -190,7 +244,9 @@ credential or cluster error), `3` ownership or field-manager conflict.
 ## Validation
 
 Offline unit tests run in normal CI. They cover bundle, profile and credential
-validation, rendering, ownership, pruning and readiness decisions:
+validation (including every nested field replaced by every JSON type),
+rendering, ownership, pruning and readiness decisions, and the
+precondition-bound write protocol against a scripted fake kubectl:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_suifleet_k8s_apply.py -v
@@ -208,16 +264,31 @@ python3 scripts/test_kubernetes_edge.py --supervisor --report /tmp/k8s-edge-repo
 
 It checks the following:
 
-- RBAC allows and denies the expected operations, including cluster-wide `*`.
+- RBAC allows and denies the expected operations, including Services and
+  other networking objects and cluster-wide `*`.
 - Pod Security Admission rejects a privileged pod applied directly with the
   publisher credential.
+- The admission policy denies Deployments applied directly with the publisher
+  credential that reference a Secret (`env`, `envFrom`, volume), use a
+  non-default ServiceAccount, automount a token, use `imagePullSecrets` or an
+  unpinned image.
 - The helper refuses insecure and group-readable kubeconfigs, and rejects a bad
   bundle offline.
-- Apply, rollout readiness and the content the Service actually serves work.
-- Ownership labels are set, and the field manager is single.
+- Apply, rollout readiness and the content an administrator-owned Service
+  actually serves work.
+- Readiness of a ConfigMap-only bundle fails while the object is missing, is a
+  pre-existing foreign object with matching data, belongs to another
+  component or comes from a stale bundle digest, and succeeds once applied.
+- Ownership labels are set, the field manager is single, and the creation's
+  ownership was transferred to server-side apply.
 - The helper does not adopt an existing object, and does not override a field
   owned by another manager. Recovery works after that manager relinquishes the
   field.
+- A kubectl wrapper injects administrator actions between the helper's
+  ownership check and its write. A competing creation, a replacement by a
+  customer object and a relabel are each refused (exit code 3) and left
+  unchanged. Pruning leaves a prune candidate alone when it is relabelled or
+  replaced between the listing and the delete.
 - An update followed by a rollback prunes the extra object.
 - Run mode re-creates a deleted object, stops on SIGTERM and leaves the
   workload running.
@@ -227,9 +298,9 @@ It checks the following:
 - Removal deletes only this component's objects. A decoy object in another
   namespace is never touched.
 
-Recorded run (2026-11-24, SF-305): `--supervisor` passed all 53 checks in
-114 s. It ran on x86-64 WSL2 with Docker, k3s v1.31.4+k3s1 and Rust 1.94.0.
-The offline unit tests passed 18 of 18. This run is a point-in-time record,
+Recorded run (2026-11-24, SF-305, after the review repair): `--supervisor`
+passed all 83 checks in 156 s. It ran on x86-64 WSL2 with Docker,
+k3s v1.31.4+k3s1 and Rust 1.94.0. The offline unit tests passed 29 of 29. This run is a point-in-time record,
 not a substitute for rerunning the tests after changes.
 
 The test node uses absolute 512 MiB kubelet eviction thresholds, which relaxes
