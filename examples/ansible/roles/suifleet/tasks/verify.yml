@@ -1,0 +1,49 @@
+---
+# Read-only health checks. They run in check mode too once a host is
+# configured. Daemon health is not platform boot or firmware health.
+- name: Read the configured state
+  ansible.builtin.stat:
+    path: /etc/suifleet/config.toml
+  register: suifleet_configured
+
+- name: Check daemon health
+  when: suifleet_enrollment is defined and suifleet_configured.stat.exists
+  block:
+    - name: Wait for the daemon to be active
+      ansible.builtin.command: systemctl is-active suifleet.service
+      register: suifleet_active
+      until: suifleet_active.stdout == 'active'
+      retries: "{{ suifleet_health_retries }}"
+      delay: "{{ suifleet_health_delay }}"
+      changed_when: false
+      check_mode: false
+
+    # The journal stays on the host; only the exit status is reported.
+    - name: Wait for the daemon journal to initialize
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("initialized") else 1)
+          - /var/lib/suifleet/state.json
+      register: suifleet_journal
+      until: suifleet_journal.rc == 0
+      retries: "{{ suifleet_health_retries }}"
+      delay: "{{ suifleet_health_delay }}"
+      failed_when: false
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse an uninitialized journal
+      ansible.builtin.assert:
+        that: suifleet_journal.rc == 0
+        quiet: true
+        fail_msg: >-
+          The daemon on {{ inventory_hostname }} did not initialize its journal;
+          see journalctl -u suifleet.service on the host.
+
+    - name: Check configuration, identity and journal binding as the daemon user
+      ansible.builtin.command:
+        argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
+      changed_when: false
+      check_mode: false

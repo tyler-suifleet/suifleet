@@ -1,0 +1,44 @@
+---
+- name: Create the private package staging directory
+  ansible.builtin.file:
+    path: /var/cache/suifleet
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Stage the authenticated package
+  ansible.builtin.copy:
+    src: "{{ suifleet_deb_src }}"
+    dest: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
+    owner: root
+    group: root
+    mode: "0600"
+  register: suifleet_deb_staged
+
+- name: Check the staged package on the host
+  ansible.builtin.stat:
+    path: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_deb_remote
+  check_mode: false
+
+- name: Refuse a staged package that differs from the pinned SHA-256
+  ansible.builtin.assert:
+    that: suifleet_deb_remote.stat.checksum == suifleet_deb_sha256
+    quiet: true
+    fail_msg: The staged package on the host does not match the pinned SHA-256.
+  when: suifleet_deb_remote.stat.exists
+
+# The package starts nothing and stops running units before an upgrade
+# (docs/DEBIAN_PACKAGING.md); the service tasks start them again afterwards.
+- name: Install or upgrade the package
+  ansible.builtin.apt:
+    deb: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
+  register: suifleet_package
+  when: suifleet_deb_remote.stat.exists
+
+- name: Record whether the client code changed
+  ansible.builtin.set_fact:
+    suifleet_code_changed: "{{ suifleet_package is changed }}"

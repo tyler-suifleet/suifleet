@@ -1,0 +1,39 @@
+---
+# suifleet.service is not enabled itself: suifleet-enrollment.path starts it
+# whenever /etc/suifleet/config.toml exists, including at boot. SuiFleet never
+# reboots the host; reboot and firmware decisions stay with the platform.
+- name: Start services on enrolled devices
+  when: suifleet_enrollment is defined
+  vars:
+    suifleet_inputs_changed: >-
+      {{ (suifleet_code_changed | default(false) | bool)
+         or suifleet_manifest_file is changed
+         or suifleet_signer_file is changed
+         or suifleet_config_file is changed }}
+  block:
+    - name: Enable and start the signing socket and the configuration trigger
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: [suifleet-signer.socket, suifleet-enrollment.path]
+
+    - name: Restart the signing service after code, manifest or signer changes
+      ansible.builtin.systemd_service:
+        name: suifleet-signer.service
+        state: restarted
+      when: >-
+        (suifleet_code_changed | default(false) | bool)
+        or suifleet_manifest_file is changed or suifleet_signer_file is changed
+
+    - name: Restart the daemon after code or configuration changes
+      ansible.builtin.systemd_service:
+        name: suifleet.service
+        state: restarted
+      when: suifleet_inputs_changed | bool
+
+    - name: Keep the daemon running
+      ansible.builtin.systemd_service:
+        name: suifleet.service
+        state: started
+      when: not suifleet_inputs_changed | bool
