@@ -332,6 +332,29 @@ class ConsoleError(Exception):
 _IO_ERRORS = (OSError, ValueError, http.client.HTTPException)
 
 
+def _read_body(response, limit):
+    """Reads at most limit + 1 bytes and rejects a body cut short by EOF.
+
+    http.client raises IncompleteRead for a truncated chunked body, but a
+    Content-Length body that ends early is returned short without an error.
+    The undelivered byte count is left in the response's ``length``.
+    """
+    data = response.read(limit + 1)
+    remaining = getattr(response, "length", None)
+    if len(data) <= limit and type(remaining) is int and remaining > 0:
+        raise http.client.IncompleteRead(data, remaining)
+    return data
+
+
+def _retry_after(value, cap):
+    """Parses a delay-seconds Retry-After header, bounded by cap seconds."""
+    value = value.strip() if value else ""
+    if not (value.isascii() and value.isdigit()):
+        return None
+    # Bound the text before int(): a huge value means "wait as long as allowed".
+    return int(value) if len(value) <= 9 else cap
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -348,10 +371,10 @@ class Console:
             "Content-Type": "application/json", "Authorization": "Bearer " + self.token})
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
-                data = response.read(MAX_CONSOLE_RESPONSE + 1)
+                data = _read_body(response, MAX_CONSOLE_RESPONSE)
         except urllib.error.HTTPError as error:
             try:
-                data = error.read(MAX_CONSOLE_RESPONSE + 1)
+                data = _read_body(error, MAX_CONSOLE_RESPONSE)
             except _IO_ERRORS:
                 raise ConsoleError("unreachable") from None
             finally:
@@ -713,12 +736,11 @@ class Transport:
         retry_after = None
         try:
             with self.opener.open(request, timeout=self.cfg["timeout"]) as response:
-                status, data = response.status, response.read(MAX_OTLP_RESPONSE + 1)
+                status, data = response.status, _read_body(response, MAX_OTLP_RESPONSE)
         except urllib.error.HTTPError as error:
             status, data = error.code, b""
             value = error.headers.get("Retry-After") if error.headers else None
-            if value and value.strip().isdigit():
-                retry_after = int(value.strip())
+            retry_after = _retry_after(value, self.cfg["max_backoff"])
             error.close()
         except _IO_ERRORS:
             status, data = None, b""

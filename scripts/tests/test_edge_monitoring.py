@@ -27,18 +27,32 @@ import edge_monitoring as em  # noqa: E402
 CONSOLE_TOKEN = "sfc_" + "A" * 43
 
 
-def send_truncated(handler, status):
-    """Start a chunked reply, then close mid-chunk so the client's body read
-    raises http.client.IncompleteRead (a transient transport failure)."""
+def send_truncated(handler, truncation):
+    """Start a reply, then close mid-body (a transient transport failure).
+
+    truncation is an HTTP status (chunked framing: urllib raises IncompleteRead)
+    or (status, "length"): a Content-Length body cut short by EOF, which
+    http.client returns short without raising.
+    """
+    status, framing = truncation if isinstance(truncation, tuple) else (truncation, "chunked")
     handler.protocol_version = "HTTP/1.1"
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
-    handler.send_header("Transfer-Encoding", "chunked")
+    if framing == "chunked":
+        handler.send_header("Transfer-Encoding", "chunked")
+        prefix = b"100\r\n"
+    else:
+        handler.send_header("Content-Length", "100")
+        prefix = b""
     handler.send_header("Connection", "close")
     handler.end_headers()
-    handler.wfile.write(b"100\r\n{\"version\":1")
+    handler.wfile.write(prefix + b"{\"version\":1,\"partialSuccess\":")
     handler.wfile.flush()
     handler.close_connection = True
+
+
+# Every truncation shape: chunked and length-delimited, success and error status.
+TRUNCATIONS = (200, 503, (200, "length"), (503, "length"))
 
 
 class FakeConsole:
@@ -381,36 +395,39 @@ class AdapterTests(Base):
     def test_truncated_console_response_withdraws_health_and_recovers(self):
         cfg, exporter, console = self.make()
         self.assertTrue(exporter.poll(console))
-        for status in (200, 503):                       # success body and HTTPError body paths
-            self.console.truncate = [status]
+        for truncation in TRUNCATIONS:                  # success body and HTTPError body paths
+            self.console.truncate = [truncation]
             self.assertFalse(exporter.poll(console))
             text = exporter.render_prometheus().decode()
             self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 0', text)
             self.assertNotIn("suifleet_device_healthy", text)
-        self.assertEqual(exporter.polls["unreachable"], 2)
+        self.assertEqual(exporter.polls["unreachable"], len(TRUNCATIONS))
         self.assertTrue(exporter.poll(console))         # console recovers on the next poll
         self.assertIn('suifleet_device_healthy{evidence="simulated",device="sim-1"} 0',
                       exporter.render_prometheus().decode())
 
     def test_truncated_log_response_is_counted(self):
-        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
-                                           logs=dict(components=["svc"], max_lines=10))
-        self.assertTrue(exporter.poll(console))
-        self.console.logs["svc"] = ["one", "two", "three"]
-        real_call = console.call
-        calls = []
+        for truncation in (200, (200, "length")):
+            with self.subTest(truncation=truncation):
+                cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
+                                                   logs=dict(components=["svc"], max_lines=10))
+                self.console.logs["svc"] = ["one", "two"]
+                self.assertTrue(exporter.poll(console))
+                self.console.logs["svc"] = ["one", "two", "three"]
+                real_call = console.call
+                calls = []
 
-        def call(operation, **fields):
-            if operation == "logs" and not calls:
-                calls.append(operation)
-                self.console.truncate = [200]
-            return real_call(operation, **fields)
-        console.call = call
-        self.assertTrue(exporter.poll(console))
-        self.assertEqual(exporter.polls["logs-unreachable"], 1)
-        self.assertEqual(len(exporter.log_buffer), 2)   # nothing new buffered from the truncated read
-        self.assertTrue(exporter.poll(console))
-        self.assertEqual([line for _, _, line in exporter.log_buffer], ["one", "two", "three"])
+                def call(operation, **fields):
+                    if operation == "logs" and not calls:
+                        calls.append(operation)
+                        self.console.truncate = [truncation]
+                    return real_call(operation, **fields)
+                console.call = call
+                self.assertTrue(exporter.poll(console))
+                self.assertEqual(exporter.polls["logs-unreachable"], 1)
+                self.assertEqual(len(exporter.log_buffer), 2)   # nothing new buffered from the truncated read
+                self.assertTrue(exporter.poll(console))
+                self.assertEqual([line for _, _, line in exporter.log_buffer], ["one", "two", "three"])
 
     def test_otlp_resource_identity_is_stable_across_console_outage(self):
         collector = FakeCollector()
@@ -545,20 +562,49 @@ class AdapterTests(Base):
         now = [0.0]
         transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
         exporter.poll(console)
-        for status in (200, 503):                       # success body and HTTPError paths
-            collector.truncate = [status, status]
+        for truncation in TRUNCATIONS:                  # success body and HTTPError paths
+            collector.truncate = [truncation, truncation]
             em.export_once(exporter, transport)
             self.assertFalse(transport.ready("metrics"))
             self.assertFalse(transport.ready("logs"))
             self.assertEqual(len(exporter.log_buffer), 2)   # retained for retry
+            self.assertEqual(exporter.log_records["exported"], 0)
             now[0] += 100
         self.assertEqual(exporter.otlp_results[("metrics", "unreachable")]
-                         + exporter.otlp_results[("metrics", "retry")], 2)
-        self.assertEqual(transport.failures["logs"], 2)
+                         + exporter.otlp_results[("metrics", "retry")], len(TRUNCATIONS))
+        # A short 2xx body is a transport failure, never a delivered batch.
+        self.assertEqual(exporter.otlp_results[("logs", "ok")], 0)
+        self.assertEqual(transport.failures["logs"], len(TRUNCATIONS))
         em.export_once(exporter, transport)             # collector recovers
         self.assertEqual(len(exporter.log_buffer), 0)
         self.assertEqual(exporter.log_records["exported"], 2)
         self.assertEqual(exporter.backoff["metrics"], 0.0)
+
+    def test_oversized_retry_after_is_capped_and_keeps_logs(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=1, max_backoff_seconds=8),
+            logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        now = [0.0]
+        transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
+        exporter.poll(console)
+        for value in ("9" * 400, "9" * 5000, "1" * 10, "\u00b2", "-5", "Wed, 21 Oct 2015 07:28:00 GMT"):
+            with self.subTest(retry_after=value[:20]):
+                collector.responses = [(429, {"Retry-After": value}, b""), (429, {"Retry-After": value}, b"")]
+                em.export_once(exporter, transport)    # must not raise
+                expected = 8.0 if value.isascii() and value.isdigit() else 1.0
+                self.assertEqual(exporter.backoff["metrics"], expected)
+                self.assertEqual(len(exporter.log_buffer), 2)   # retained for retry
+                transport._success("metrics")
+                transport._success("logs")
+        self.assertEqual(exporter.otlp_results[("metrics", "retry")], 6)
+        self.assertEqual(em._retry_after(" 7 ", 8), 7)
+        self.assertEqual(em._retry_after("123456789", 8), 123456789)   # capped later by _failure
+        self.assertIsNone(em._retry_after(None, 8))
+        em.export_once(exporter, transport)             # collector recovers
+        self.assertEqual(len(exporter.log_buffer), 0)
+        self.assertEqual(exporter.log_records["exported"], 2)
 
     def test_otlp_unauthorized_backs_off(self):
         collector = FakeCollector(require="Bearer right")
