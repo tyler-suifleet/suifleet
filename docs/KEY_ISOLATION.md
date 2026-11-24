@@ -1,4 +1,4 @@
-# Device key isolation (SF-053)
+# Device key isolation (SF-053, SF-292)
 
 Component lifecycle commands run as the daemon user, `suifleet`: install, run, shutdown, readiness, recovery, and the direct `apply.command`. File permissions under that same UID cannot protect a key the daemon itself reads. So the device key is held by a separate signing service under its own user, and the daemon only asks it for signatures.
 
@@ -38,6 +38,81 @@ The service is not a signing oracle. It decodes every request itself, independen
 - **Gas draws** (SF-083, only when `signer.toml` has `[budget]`, see [FLEET_BUDGET.md](FLEET_BUDGET.md)): exactly one `fleet_budget::draw_gas` on the manifest's package, with the configured budget as an immutable input (draws never write the fleet budget), a shared gas account (the contract binds it to this device and budget), the manifest's registry, this device's cap and the Clock, for at most `max_draw_mist`, sent and paid by the device within `max_gas_budget`. Signed only for the daemon's main process, by the same rule as status reports. The contract bounds draws again (float cap, period allowance, rate, pause, suspension, revocation), so a compromised daemon can take at most what the device itself is allowed to draw.
 
 Any process may read the device's public address. There is no export, arbitrary-bytes or arbitrary personal-message operation; the only personal messages signed are telemetry snapshots, client-device CA bindings and the Seal session certificate above.
+
+## Portable Linux signer
+
+On Linux systems without systemd or `SO_PEERPIDFD`, run the daemon and signer
+as one foreground service under the root-owned
+[`suifleet-portable-signer`](../scripts/suifleet-portable-signer) launcher.
+The launcher requires Python 3.9 or later, Linux Unix-domain sockets with
+`SO_PEERCRED`, and a procfs mount for its own PID namespace that lets the
+signer read the daemon's pinned task `stat`. It also requires
+`fs.suid_dumpable=0`. Keep that sysctl at zero while starting the service.
+The kernel and libc must also satisfy the daemon's requirements for the
+features you configure.
+
+1. Follow the same key, user, and state ownership rules as the systemd
+   installation. Use separate non-root primary accounts and groups
+   `suifleet` and `suifleet-signer`. Allow each account to traverse the
+   directories it needs. Use a root-owned installed binary, configurations,
+   and manifest. Keep the private signer configuration and device key
+   inaccessible to the daemon account.
+2. In `signer.toml`, set `portable = true` in place of `caller_unit`. Keep
+   the same manifest, device cap, and key or PKCS#11 configuration. Set
+   `[device.signer]` in the daemon to `kind = "service"` and
+   `socket = "/run/suifleet-portable/signer.sock"`. The launcher supplies
+   the listening socket. Use the same socket in any root enrollment
+   configuration.
+3. Install the launcher as root with mode 0755. Configure your init system to
+   start it as root in the foreground, with neither of the separate systemd
+   daemon/signer units running. The launcher takes optional `--binary`,
+   `--socket`, `--daemon-config`, and `--signer-config` paths. It drops all
+   supplementary groups from both child processes, so grant required
+   accesses to their primary group or UID. If an init system forcibly
+   terminates the launcher, configure it to stop both children too.
+4. The launcher waits for signer readiness and then starts normal daemon
+   operation. Requests open new connections throughout that daemon's
+   lifetime. If either child exits, the launcher shuts down the other and
+   exits so the init system can restart the pair. Restart the pair for
+   configuration and binary changes. Keep daemon self-update disabled with
+   the service signer. Platform scripts still own reboot and firmware
+   recovery.
+
+The root launcher executes the trusted binary as root and holds it at a
+startup gate. It opens the child's procfs task directory before creating a
+fresh Unix listener. The signer inherits the listener and that directory
+descriptor. For each eligible request it compares the kernel's connection
+PID and UID to the expected daemon and checks that the pinned task is
+still live. A lookup through the held directory can only resolve the
+original kernel task. Once that task dies, reusing its numeric PID
+cannot make the original directory refer to a different task. The fresh
+listener also prevents connections made before the original task was
+pinned from being checked against that pin. A previous socket or any file claiming a main
+PID supplies no authority in this mode.
+
+Before it drops privileges, the daemon makes itself non-dumpable and sets
+no-new-privileges. It enters the daemon UID inside the already running
+binary before creating runtime threads. A component shares the daemon UID,
+so users of this mode must keep the procfs, binary, socket parent, runtime
+account definitions, launcher, and its parameters under trusted platform
+control. The socket is root-owned and accessible to the daemon group.
+Components can signal the daemon or flood the signing socket,
+which can deny service. They cannot acquire its process identity or
+read the signer's private files. As in systemd mode, a compromised
+daemon can request only policy-authorized intents. Root remains trusted.
+
+Systemd mode continues to use the unit's main-process record and cgroup.
+It requires working `SO_PEERPIDFD` and fails with a diagnostic if the
+kernel does not provide it. Neither production mode switches to
+`caller_uid` on failure.
+
+To validate the portable path, stage the daemon, the `grpc_sim_shim`
+example, and the checkout in a disposable Linux guest at `/workspace`.
+Run `python3 scripts/test_key_isolation_systemd.py --inside --portable`
+as root in the guest. To test actual PID reuse, boot a disposable VM
+with `suifleet_sf292_test=1` on the kernel command line and add
+`--force-pid-reuse`. Record the booted kernel, architecture, libc, init
+system and Cargo features. A container observes the host kernel.
 
 ## Migration
 

@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Run the portable daemon and signer as a single foreground service."""
+
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import pwd
+import signal
+import socket
+import stat
+import subprocess
+import time
+
+
+def trusted_directory(directory):
+    for parent in (directory, *directory.parents):
+        metadata = parent.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid or metadata.st_mode & 0o022:
+            raise RuntimeError(f"expected a root-owned directory without group/other writes: {parent}")
+
+
+def wait_for_signer(path, signer, daemon):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if signer.poll() is not None or daemon.poll() is not None:
+            raise RuntimeError("portable signer or gated daemon exited before readiness")
+        try:
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(1)
+                probe.connect(str(path))
+                probe.sendall(b'{"op":"address"}\n')
+                with probe.makefile("rb") as response:
+                    if isinstance(json.loads(response.readline(1024)).get("address"), str):
+                        return
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.1)
+    raise RuntimeError("portable signer readiness timed out")
+
+
+def stop(children):
+    for child in children:
+        if child.poll() is None:
+            child.terminate()
+    deadline = time.monotonic() + 10
+    for child in children:
+        try:
+            child.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+
+
+def run(args, daemon_user, signer_user):
+    if args.socket.exists() or args.socket.is_symlink():
+        if not stat.S_ISSOCK(args.socket.lstat().st_mode):
+            raise RuntimeError(f"refusing to replace non-socket path {args.socket}")
+        args.socket.unlink()
+    children = []
+    try:
+        daemon = subprocess.Popen(
+            [args.binary, "--portable-daemon-child", str(daemon_user.pw_uid), str(daemon_user.pw_gid), args.socket],
+            stdin=subprocess.PIPE,
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "EDGE_CONFIG": str(args.daemon_config)},
+        )
+        children.append(daemon)
+        # The child is alive and root, blocked on the gate. Do not reap it
+        # before pinning its task directory and creating a fresh socket.
+        task = os.open(f"/proc/{daemon.pid}", os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(args.socket))
+                os.chown(args.socket, 0, daemon_user.pw_gid)
+                os.chmod(args.socket, 0o660)
+                listener.listen(32)
+                signer = subprocess.Popen(
+                    [args.binary, "--portable-signer-child", args.signer_config,
+                     str(listener.fileno()), str(task), str(daemon_user.pw_uid)],
+                    pass_fds=(listener.fileno(), task),
+                    user=signer_user.pw_uid,
+                    group=signer_user.pw_gid,
+                    extra_groups=[],
+                    stdin=subprocess.DEVNULL,
+                    env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+                )
+                children.append(signer)
+        finally:
+            os.close(task)
+        wait_for_signer(args.socket, signer, daemon)
+        daemon.stdin.write(b"\1")
+        daemon.stdin.close()
+        while all(child.poll() is None for child in children):
+            time.sleep(0.1)
+        raise RuntimeError("portable signer or daemon exited; restart the paired service")
+    finally:
+        stop(children)
+        args.socket.unlink(missing_ok=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, default=Path("/usr/bin/suifleet"))
+    parser.add_argument("--socket", type=Path, default=Path("/run/suifleet-portable/signer.sock"))
+    parser.add_argument("--daemon-config", type=Path, default=Path("/etc/suifleet/config.toml"))
+    parser.add_argument("--signer-config", type=Path, default=Path("/etc/suifleet/signer.toml"))
+    args = parser.parse_args()
+    if os.geteuid():
+        raise RuntimeError("portable signer launcher requires root")
+    os.umask(0o077)
+    if not os.path.samefile("/proc/1/ns/pid", "/proc/self/ns/pid"):
+        raise RuntimeError("portable signer launcher requires procfs mounted for its own PID namespace")
+    daemon = pwd.getpwnam("suifleet")
+    signer = pwd.getpwnam("suifleet-signer")
+    if not daemon.pw_uid or not signer.pw_uid or daemon.pw_uid == signer.pw_uid:
+        raise RuntimeError("daemon and signer require separate non-root accounts")
+    if not daemon.pw_gid or not signer.pw_gid or daemon.pw_gid == signer.pw_gid:
+        raise RuntimeError("daemon and signer require separate non-root primary groups")
+    binary = args.binary.resolve(strict=True)
+    trusted_directory(binary.parent)
+    metadata = binary.stat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid or metadata.st_mode & 0o6022:
+        raise RuntimeError("portable daemon binary must be root-owned and free of set-ID and group/other writes")
+    args.binary = binary
+    if not args.socket.is_absolute() or args.socket.name == "" or ".." in args.socket.parts:
+        raise RuntimeError("portable signer socket must use a canonical absolute path")
+    trusted_directory(args.socket.parent.parent)
+    if not args.socket.parent.exists():
+        args.socket.parent.mkdir(mode=0o755)
+        args.socket.parent.chmod(0o755)
+    trusted_directory(args.socket.parent)
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, request_stop)
+    lock = args.socket.with_suffix(args.socket.suffix + ".lock")
+    with lock.open("a") as lease:
+        fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        run(args, daemon, signer)
+
+
+def request_stop(_signum, _frame):
+    raise SystemExit(0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (KeyError, OSError, RuntimeError) as error:
+        raise SystemExit(f"suifleet-portable-signer: {error}")
