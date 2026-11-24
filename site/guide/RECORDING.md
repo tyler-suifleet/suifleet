@@ -1,5 +1,7 @@
 # Testnet guide recording (SF-175)
 
+For the separate deployed-app workflow, see [Mainnet guide capture](MAINNET_CAPTURE.md).
+
 The recorder drives the actual console static export with a scripted Wallet
 Standard wallet, standing in for an extension wallet. It does not establish
 manual Slush, Google, extension, production-provider, physical-device or mainnet
