@@ -1,67 +1,92 @@
-"""Report whether running SuiFleet services still use replaced inputs (SF-304).
+"""Report whether active SuiFleet units still use replaced inputs (SF-304).
 
-Usage: running_inputs.py UNIT=PATH[,PATH...] [UNIT=...]
+Usage: running_inputs.py [--since] APPLIED UNIT=PATH[,PATH...] [UNIT=...]
 
-For each unit, prints whether its main process predates the inputs on disk:
-its executable was replaced (deleted inode), systemd has unloaded unit
-changes, or a listed file or the unit's own files changed after the process
-started. Read-only; prints one JSON object. An interrupted rollout that
-installed new files but never restarted is detected on the next run.
+APPLIED is the root-owned JSON record ({unit: digest}) that the role writes
+only after the units were restarted onto, or verified against, those inputs.
+For each unit this prints a SHA-256 digest over its listed input files and its
+own unit files (fragment and drop-ins), and whether the active unit is stale:
+the digest differs from the applied record (or there is none), systemd has
+unloaded unit changes, or its main process runs a replaced executable. A
+rollout interrupted after its files landed but before the restarts is
+therefore detected on the next run, however quickly the files changed. No
+timestamps are compared. Read-only; prints one JSON object.
+
+With --since, an earlier report of the same units is read from stdin and each
+unit also reports "changed_since" (its digest differs from that report) and
+"not_restarted" (it was active and stale then and still runs the same
+invocation), which the role's verification requires to be false.
 """
-import datetime
+import hashlib
 import json
 import os
 import subprocess
 import sys
 
-# Kernel file timestamps are coarse; allow for that rounding.
-TOLERANCE = 1.0
-
 
 def show(unit):
-    # systemd records the start time from the realtime clock when the process
-    # starts, like a file's mtime when it is written, so later clock steps
-    # affect neither.
-    out = subprocess.run(["systemctl", "show", unit, "--timestamp=us+utc", "-p", "MainPID", "-p", "NeedDaemonReload",
-                          "-p", "FragmentPath", "-p", "DropInPaths", "-p", "ExecMainStartTimestamp"],
+    out = subprocess.run(["systemctl", "show", unit, "-p", "ActiveState", "-p", "MainPID", "-p", "InvocationID",
+                          "-p", "NeedDaemonReload", "-p", "FragmentPath", "-p", "DropInPaths"],
                          check=True, capture_output=True, text=True).stdout
     return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
 
 
-def started(props):
-    # "Tue 2026-11-24 21:35:24.123456 UTC"
-    stamp = props.get("ExecMainStartTimestamp", "").split(" ", 1)[-1]
-    moment = datetime.datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S.%f UTC")
-    return moment.replace(tzinfo=datetime.timezone.utc).timestamp()
+def digest(paths):
+    hasher = hashlib.sha256()
+    for path in sorted(set(filter(None, paths))):
+        hasher.update(path.encode() + b"\0")
+        try:
+            with open(path, "rb") as handle:
+                hasher.update(hashlib.sha256(handle.read()).digest())
+        except FileNotFoundError:
+            hasher.update(b"missing")
+    return hasher.hexdigest()
 
 
-def check(unit, inputs):
+def check(unit, inputs, applied):
     props = show(unit)
     pid = int(props.get("MainPID") or 0)
-    if pid == 0:
-        return dict(running=False, stale=False, reason="not running")
-    if props.get("NeedDaemonReload") == "yes":
-        return dict(running=True, stale=True, reason="unit files changed and are not loaded")
-    exe = os.readlink(f"/proc/{pid}/exe")
-    if exe.endswith(" (deleted)"):
-        return dict(running=True, stale=True, reason="its executable was replaced")
-    start = started(props)
-    paths = [*inputs, props.get("FragmentPath", ""), *props.get("DropInPaths", "").split()]
-    for path in filter(None, paths):
-        try:
-            modified = os.stat(path).st_mtime
-        except FileNotFoundError:
-            continue
-        if modified > start + TOLERANCE:
-            return dict(running=True, stale=True, reason=f"{path} changed after it started")
-    return dict(running=True, stale=False, reason="current")
+    # A service is current only while its main process runs; a socket or path
+    # unit while it is active (it holds the socket or watch it was started with).
+    active = pid != 0 if unit.endswith(".service") else props.get("ActiveState") in ("active", "reloading")
+    report = dict(active=active, invocation=props.get("InvocationID", ""),
+                  digest=digest([*inputs, props.get("FragmentPath", ""), *props.get("DropInPaths", "").split()]),
+                  applied=applied.get(unit), stale=False, reason="current",
+                  reload_needed=props.get("NeedDaemonReload") == "yes",
+                  exe_replaced=bool(pid) and os.readlink(f"/proc/{pid}/exe").endswith(" (deleted)"))
+    if not active:
+        report["reason"] = "not active"
+    elif report["reload_needed"]:
+        report.update(stale=True, reason="unit files changed and are not loaded")
+    elif report["exe_replaced"]:
+        report.update(stale=True, reason="its executable was replaced")
+    elif report["applied"] is None:
+        report.update(stale=True, reason="no record that it was started on the installed inputs")
+    elif report["applied"] != report["digest"]:
+        report.update(stale=True, reason="its inputs changed since they were applied")
+    return report
 
 
 def main():
+    arguments = sys.argv[1:]
+    since = arguments[:1] == ["--since"]
+    if since:
+        arguments = arguments[1:]
+        previous = json.load(sys.stdin)
+    try:
+        with open(arguments[0]) as handle:
+            applied = json.load(handle)
+    except FileNotFoundError:
+        applied = {}
     report = {}
-    for argument in sys.argv[1:]:
+    for argument in arguments[1:]:
         unit, _, files = argument.partition("=")
-        report[unit] = check(unit, [f for f in files.split(",") if f])
+        report[unit] = current = check(unit, [f for f in files.split(",") if f], applied)
+        if since:
+            before = previous[unit]
+            current["changed_since"] = before["digest"] != current["digest"]
+            current["not_restarted"] = (before["stale"] and before["active"] and current["active"]
+                                        and before["invocation"] == current["invocation"])
     print(json.dumps(report, sort_keys=True))
 
 

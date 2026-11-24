@@ -65,13 +65,18 @@ suifleet_signer_extra: ""
 suifleet_health_retries: 30
 suifleet_health_delay: 2
 
-# Files each service reads at startup. A running service whose process
-# predates any of them (or whose executable or unit was replaced) is
-# restarted, including after an interrupted earlier run.
+# Files each unit reads when it starts, besides its own unit files. After the
+# services are verified, the role records a digest of these per unit in
+# suifleet_applied_record. An active unit whose inputs differ from that record
+# (or that has no record) is restarted, including after an interrupted run.
 suifleet_signer_inputs:
+  - /usr/bin/suifleet
   - /etc/suifleet/deployment.json
   - /etc/suifleet/signer.toml
 suifleet_daemon_inputs:
+  - /usr/bin/suifleet
+  - /usr/libexec/suifleet-provision
   - /etc/suifleet/deployment.json
   - /etc/suifleet/signer.toml
   - /etc/suifleet/config.toml
+suifleet_applied_record: /var/lib/suifleet-ansible/applied.json
