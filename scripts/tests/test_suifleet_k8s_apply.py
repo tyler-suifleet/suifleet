@@ -475,11 +475,79 @@ class WriterTest(unittest.TestCase):
         with self.assertRaises(k8s.Rejected):
             writer.delete("configmaps", obj(name="old"))
 
+    def test_delete_never_follows_a_same_owner_replacement(self):
+        # The listed object (u1@4) is replaced by a NEW object that still
+        # carries this component's labels. Only the listed UID may be deleted.
+        conflict = "Error from server (Conflict): the UID in the precondition (u1) does not match"
+        writer, fake = self.writer([obj(name="old", uid="u2", rv="5")], [(1, conflict)])
+        self.assertFalse(writer.delete("configmaps", obj(name="old", rv="4")))
+        deletes = [call for call in fake.calls if call[0] == "delete"]
+        self.assertEqual([call[-1]["preconditions"] for call in deletes], [{"uid": "u1", "resourceVersion": "4"}])
+        # A refreshed resourceVersion is retried only for the original UID.
+        writer, fake = self.writer([obj(name="old", rv="5"), obj(name="old", uid="u2", rv="6")],
+                                   [(1, "the object has been modified"), (1, conflict)])
+        self.assertFalse(writer.delete("configmaps", obj(name="old", rv="4")))
+        deletes = [call[-1]["preconditions"] for call in fake.calls if call[0] == "delete"]
+        self.assertEqual(deletes, [{"uid": "u1", "resourceVersion": "4"}, {"uid": "u1", "resourceVersion": "5"}])
+
     def test_prune_reports_only_deleted(self):
         listed = {"items": [obj(name="keep"), obj(name="old")]}
         fake = FakeKubectl([listed, {"items": []}], [(0, "")])
         removed = k8s.prune(fake, "web-app", {"configmaps": {"keep"}}, k8s.Writer(fake, "web-app", pause=0))
         self.assertEqual(removed, ["configmaps/old"])
+
+    def test_prune_does_not_redelete_a_terminating_object(self):
+        held = obj(name="old")
+        held["metadata"]["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+        fake = FakeKubectl([{"items": [held]}, {"items": []}], [])
+        self.assertEqual(k8s.prune(fake, "web-app", {}, k8s.Writer(fake, "web-app", pause=0)), [])
+        self.assertNotIn("delete", [call[0] for call in fake.calls])
+
+
+class ReadyTest(unittest.TestCase):
+    """ready() requires every desired object ready AND prune convergence."""
+
+    def setUp(self):
+        self.objects = k8s.render({"resources": [example()["resources"][0]]}, "suifleet-apps", "web-app", "1", "d" * 64)
+
+    def live(self, item, **metadata):
+        current = copy.deepcopy(item)
+        current["metadata"].update(uid="u1", resourceVersion="1", **metadata)
+        return current
+
+    def test_empty_retirement_bundle_waits_for_stale_objects(self):
+        stale = {"items": [obj(name="old-web")]}
+        fake = FakeKubectl([stale, {"items": []}], [])
+        ok, reason = k8s.ready(fake, [], "web-app")
+        self.assertFalse(ok)
+        self.assertIn("configmaps/old-web not yet pruned", reason)
+        self.assertTrue(fake.calls, "an empty bundle still queries the cluster")
+        fake = FakeKubectl([{"items": []}, {"items": [obj(name="old-deploy")]}], [])
+        ok, reason = k8s.ready(fake, [], "web-app")
+        self.assertFalse(ok)
+        self.assertIn("deployments.apps/old-deploy", reason)
+        fake = FakeKubectl([{"items": []}, {"items": []}], [])
+        self.assertEqual(k8s.ready(fake, [], "web-app"), (True, "ready"))
+        selectors = [call[call.index("-l") + 1] for call in fake.calls]
+        self.assertEqual(selectors, ["app.kubernetes.io/managed-by=suifleet,suifleet.io/component=web-app"] * 2)
+
+    def test_replacement_bundle_waits_for_incomplete_prune(self):
+        item = self.objects[0]
+        current = self.live(item)
+        terminating = obj(name="old-web")
+        terminating["metadata"]["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+        fake = FakeKubectl([current, {"items": [current, terminating]}, {"items": []}], [])
+        ok, reason = k8s.ready(fake, self.objects, "web-app")
+        self.assertFalse(ok)
+        self.assertIn("old-web not yet pruned", reason)
+        fake = FakeKubectl([current, {"items": [current]}, {"items": []}], [])
+        self.assertEqual(k8s.ready(fake, self.objects, "web-app"), (True, "ready"))
+
+    def test_desired_object_problems_are_reported_first(self):
+        fake = FakeKubectl([None], [])
+        ok, reason = k8s.ready(fake, self.objects, "web-app")
+        self.assertFalse(ok)
+        self.assertIn("missing", reason)
 
 
 class CliTest(unittest.TestCase):

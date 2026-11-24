@@ -33,7 +33,8 @@ It is deliberately narrow:
   bundle no longer contains.
 - A multi-object apply is not transactional: if a later write fails, earlier
   objects may already carry the new bundle. Readiness never reports success
-  until every object carries this bundle's digest, and the next apply
+  until every object carries this bundle's digest and pruning has converged
+  (no other object labelled for the component remains), and the next apply
   converges.
 
 It manages workloads inside a cluster. It does not install, configure or
@@ -48,7 +49,8 @@ SUIFLEET_COMPONENT / SUIFLEET_COMPONENT_VERSION environment):
                                               --interval seconds (foreground)
   ready    --bundle FILE --profile NAME        exit 0 when every bundle object
                                               is owned, applied from this
-                                              bundle and Deployments rolled out
+                                              bundle, Deployments rolled out and
+                                              no stale component object remains
   remove   --profile NAME --component NAME     delete the component's objects
 """
 import argparse
@@ -564,17 +566,19 @@ class Writer:
     def delete(self, resource, current):
         """Delete one listed object only while it is the same owned instance.
         Returns True when deleted or already gone, False when left alone
-        because it was relabelled or replaced by someone else."""
+        because it was relabelled or replaced (even by an object that carries
+        this component's labels: only the listed UID is ever deleted)."""
         name = current["metadata"]["name"]
+        uid = current["metadata"]["uid"]
         path = API_PATHS[resource].format(namespace=self.namespace, name=name)
         for attempt in range(WRITE_ATTEMPTS):
             if current is None:
                 return True
-            if ownership(current, self.component):
+            metadata = current.get("metadata") or {}
+            if metadata.get("uid") != uid or ownership(current, self.component):
                 return False
-            metadata = current["metadata"]
             options = {"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": "Background",
-                       "preconditions": {"uid": metadata["uid"], "resourceVersion": metadata["resourceVersion"]}}
+                       "preconditions": {"uid": uid, "resourceVersion": metadata["resourceVersion"]}}
             result = self.kubectl("delete", "--raw", path, "-f", "-", stdin=json.dumps(options), namespaced=False)
             if result.returncode == 0:
                 return True
@@ -605,6 +609,8 @@ def prune(kubectl, component, desired, writer=None):
         listed = kubectl.json("get", resource, "-l", selector) or {}
         items = {item["metadata"]["name"]: item for item in listed.get("items") or []}
         for name in prune_candidates(list(items.values()), desired.get(resource, set())):
+            if items[name]["metadata"].get("deletionTimestamp"):
+                continue  # Already deleted, held by a finalizer; readiness waits for it.
             if writer.delete(resource, items[name]):
                 removed.append(f"{resource}/{name}")
             else:
@@ -613,12 +619,24 @@ def prune(kubectl, component, desired, writer=None):
 
 
 def ready(kubectl, objects, component):
+    """(ready, reason): every desired object is ready (object_ready) AND prune
+    has converged -- no other object labelled for this component remains, so
+    an update, rollback or empty retirement bundle is not ready while stale
+    workloads still exist or are still terminating."""
+    desired = {}
     for item in objects:
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
+        desired.setdefault(resource, set()).add(item["metadata"]["name"])
         current = kubectl.json("get", resource, item["metadata"]["name"], "--ignore-not-found")
         ok, reason = object_ready(current, item, component)
         if not ok:
             return False, reason
+    selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
+    for resource in ALLOWED_KINDS.values():
+        listed = kubectl.json("get", resource, "-l", selector) or {}
+        stale = prune_candidates(listed.get("items") or [], desired.get(resource, set()))
+        if stale:
+            return False, f"stale {resource}/{stale[0]} not yet pruned ({len(stale)} remaining)"
     return True, "ready"
 
 
