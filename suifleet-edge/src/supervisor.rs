@@ -2835,4 +2835,48 @@ mod tests {
 
     }
 
+    /// SF-305: the optional Kubernetes workload publisher under the real
+    /// supervisor. Requires the disposable k3s cluster, narrow-RBAC profile and
+    /// bundles prepared by scripts/test_kubernetes_edge.py; no chain, wallet or
+    /// production credentials.
+    #[tokio::test]
+    #[ignore = "requires the disposable cluster prepared by scripts/test_kubernetes_edge.py"]
+    async fn kubernetes_publisher_real_cluster_rollout_and_rollback() {
+        let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("set {name}"));
+        let (helper, root) = (var("SF_K8S_HELPER"), var("SF_K8S_PROFILE_ROOT"));
+        let (good, bad) = (PathBuf::from(var("SF_K8S_BUNDLE_GOOD")), PathBuf::from(var("SF_K8S_BUNDLE_BAD")));
+        let mut f = Fixture::new("kubernetes");
+        let mut s = Supervisor::open(&f.dir, Settings {
+            startup: Duration::from_secs(1),
+            ready_timeout: Duration::from_secs(60),
+            stop_timeout: Duration::from_secs(5),
+            max_restarts: 3,
+            max_memory_bytes: None,
+            overlay_dir: f.dir.join("overlay"),
+        }).unwrap();
+        let command = |sub: &str| format!(
+            "exec /usr/bin/python3 {} {sub} --profile edge --profile-root {} --bundle {{artifact}}",
+            shell_words::quote(&helper), shell_words::quote(&root));
+        let spec = |f: &mut Fixture, version: &str| {
+            let mut spec = f.spec(version, &format!("{} --interval 2", command("run")));
+            spec.readiness = Some(command("ready"));
+            spec
+        };
+        let v1 = spec(&mut f, "1.0.0");
+        s.deploy(v1.clone(), &good, None, &f.runner, "kubernetes", &configuration::Record::default()).await.unwrap();
+        assert_eq!(phase(&s), Phase::Running);
+        // A bundle whose rollout never becomes available fails readiness; the
+        // supervisor restores 1.0.0, whose run re-applies it and prunes 2.0.0's
+        // extra object.
+        let v2 = spec(&mut f, "2.0.0");
+        let error = s.deploy(v2, &bad, None, &f.runner, "kubernetes", &configuration::Record::default()).await.unwrap_err();
+        assert!(format!("{error:#}").contains("rolled back to 1.0.0 (ready)"), "{error:#}");
+        assert_eq!(f.active()["app"], v1);
+        assert_eq!(phase(&s), Phase::Running);
+        // Stopping the client leaves the cluster workload running.
+        s.stop_all().await;
+        let log = std::fs::read_to_string(f.dir.join("supervised/app/component.log")).unwrap();
+        assert!(log.contains("pruned ['configmaps/bad-extra']"), "{log}");
+    }
+
 }
