@@ -2671,6 +2671,218 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[ignore = "requires local Docker Engine and SF_OCI_TEST_IMAGE"]
+    async fn oci_real_engine_grants_retain_data_and_preserve_ipc_identity() {
+        use crate::ipc;
+        let image = std::env::var("SF_OCI_TEST_IMAGE").unwrap();
+        let mut f = Fixture::new("oci-grants");
+        let mut supervisor = f.open();
+        let data = f.dir.join("oci-data");
+        let app_data = data.join("app");
+        std::fs::create_dir_all(&app_data).unwrap();
+        std::fs::set_permissions(&app_data, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // Provision exactly the isolated fixture directory as a host operator
+        // would. The Docker engine must see the fixture paths at the same path.
+        let mut provision = std::process::Command::new("/usr/bin/docker");
+        provision.args([
+                "--host",
+                "unix:///var/run/docker.sock",
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "--network",
+                "none",
+                "--read-only",
+                "--cap-drop",
+                "ALL",
+                "--cap-add",
+                "CHOWN",
+                "--mount",
+            ])
+            .arg(format!(
+                "type=bind,source={},target=/data,bind-recursive=disabled",
+                app_data.display()
+            ))
+            .args([&image, "sh", "-ec", "chown 31001:31001 /data"]);
+        let mut child = spawn_std_tracked(&mut provision).unwrap();
+        let pid = child.id();
+        let status = child.wait().unwrap();
+        forget_std_tracked(pid);
+        assert!(status.success(), "OCI fixture provisioning exited with {status}");
+
+        let ipc: ipc::Settings = serde_json::from_value(serde_json::json!({
+            "socket": f.dir.join("ipc.sock"),
+            "components": {
+                "app": {"uid":31001,"operations":["health"]},
+                "other": {"uid":31002,"operations":["health"]}
+            }
+        }))
+        .unwrap();
+        let mut server = ipc::bind(&ipc).unwrap();
+        let grants = serde_json::from_value(serde_json::json!({
+            "app": {"uid":31001,"persistence":true,"devices":["full"],"ipc":true}
+        }))
+        .unwrap();
+        let policy = crate::oci::Policy {
+            grants,
+            ipc: Some(ipc.clone()),
+        };
+        policy.validate().unwrap();
+        supervisor.configure_oci(policy.clone());
+        let serving = tokio::spawn(async move {
+            while let Some(pending) = server.requests.recv().await {
+                assert_eq!(pending.uid, 31001);
+                let result = ipc
+                    .authorize(pending.uid, &pending.request)
+                    .map(|principal| serde_json::json!(principal));
+                let _ = pending.reply.send(ipc::response(result));
+            }
+        });
+        let descriptor = |command: &str| {
+            serde_json::json!({
+                "version":2, "image":image, "platform":crate::oci::host_platform(), "user":"31001:31001",
+                "memoryBytes":67108864u64, "cpus":1, "pidsLimit":32, "network":"none", "tmpfsBytes":1048576,
+                "persistence":"retain", "ipc":true, "devices":["full"],
+                "command":["sh","-ec",command], "readiness":["test","-f","/tmp/ready"]
+            })
+        };
+        let artifact = f.dir.join("descriptor");
+        let record = configuration::Record::default();
+        let write = |value: serde_json::Value| {
+            std::fs::write(&artifact, serde_json::to_vec(&value).unwrap()).unwrap()
+        };
+        write(descriptor(
+            r#"
+            test "$(id -u):$(id -g)" = 31001:31001
+            test ! -e /dev/suifleet-ttyUSB0
+            test ! -e /var/run/docker.sock
+            test ! -e /etc/suifleet
+            test ! -e /var/lib/suifleet
+            test -c /dev/suifleet-full
+            head -c 1 /dev/suifleet-full > /tmp/device-byte
+            test "$(wc -c < /tmp/device-byte)" = 1
+            request() {
+                printf '{"version":1,"component":"%s","operation":"%s","payload":"healthy"}\n' "$1" "$2" |
+                    nc -w 2 local:/run/suifleet-ipc.sock
+            }
+            request app health | grep -F '"ok":true'
+            request other health | grep -F '"ok":false'
+            request app start | grep -F '"ok":false'
+            echo retained > /var/lib/suifleet-data/value
+            touch /tmp/ready
+            exec sleep 300
+        "#,
+        ));
+        let first = f.spec("1", crate::oci::RUN);
+        supervisor
+            .deploy(first, &artifact, None, &f.runner, "first", &record)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{error:#}; {}",
+                    std::fs::read_to_string(f.dir.join("supervised/app/component.log"))
+                        .unwrap_or_default()
+                )
+            });
+        // A writable mount parent would let another process substitute a
+        // component directory. Admission must fail before replacing the run.
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o777)).unwrap();
+        write(descriptor("false"));
+        let unsafe_data = f.spec("unsafe-data", crate::oci::RUN);
+        let result = supervisor
+            .deploy(
+                unsafe_data,
+                &artifact,
+                None,
+                &f.runner,
+                "unsafe-data",
+                &record,
+            )
+            .await;
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.unwrap_err().to_string().contains("unsafe ownership"));
+        assert_eq!(supervisor.status()["app"].version, "1");
+
+        let mut denied = descriptor("false");
+        denied["user"] = serde_json::json!("31002:31002");
+        write(denied);
+        let wrong_user = f.spec("wrong-user", crate::oci::RUN);
+        assert!(supervisor
+            .deploy(
+                wrong_user,
+                &artifact,
+                None,
+                &f.runner,
+                "wrong-user",
+                &record
+            )
+            .await
+            .is_err());
+        assert_eq!(supervisor.status()["app"].version, "1");
+        write(descriptor("false"));
+        let mut sibling = f.spec("denied", crate::oci::RUN);
+        sibling.name = "other".into();
+        assert!(supervisor
+            .deploy(
+                sibling.clone(),
+                &artifact,
+                None,
+                &f.runner,
+                "denied",
+                &record
+            )
+            .await
+            .is_err());
+        let mut ungranted = descriptor(
+            r#"
+            test ! -e /dev/suifleet-full
+            test ! -e /run/suifleet-ipc.sock
+            test ! -e /var/lib/suifleet-data/value
+            touch /tmp/ready
+            exec sleep 300
+        "#,
+        );
+        let fields = ungranted.as_object_mut().unwrap();
+        for key in ["persistence", "ipc", "devices"] {
+            fields.remove(key);
+        }
+        fields.insert("version".into(), 1.into());
+        // Even an ungranted container with the same numeric user has neither
+        // the private data mount nor the socket through which to claim that UID.
+        write(ungranted);
+        supervisor
+            .deploy(sibling, &artifact, None, &f.runner, "sibling", &record)
+            .await
+            .unwrap();
+        supervisor.retire("other").await.unwrap();
+
+        write(descriptor(
+            r#"
+            grep -Fx retained /var/lib/suifleet-data/value
+            touch /tmp/ready
+            exec sleep 300
+        "#,
+        ));
+        let second = f.spec("2", crate::oci::RUN);
+        supervisor
+            .deploy(second, &artifact, None, &f.runner, "second", &record)
+            .await
+            .unwrap();
+        supervisor.local_control("app", "restart").await.unwrap();
+        supervisor.stop_all().await;
+        let mut successor = f.open();
+        successor.configure_oci(policy);
+        successor.bootstrap().await;
+        assert_eq!(phase(&successor), Phase::Running);
+        successor.retire("app").await.unwrap();
+        assert!(app_data.is_dir(), "retirement must retain application data");
+        serving.abort();
+    }
+
     /// Requires a local Linux Docker Engine and a pre-cached immutable Alpine
     /// image; does not pull, build, contact a registry or use chain credentials.
     #[tokio::test]

@@ -106,12 +106,16 @@ jobs:
         run: |
           oci_image=docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
           docker pull "$oci_image"
+          oci_tmp=$(mktemp -d /tmp/sfo.XXXXXXXX)
+          chmod 1777 "$oci_tmp"
+          trap 'rm -rf "$oci_tmp"' EXIT
           docker run --rm --network host --group-add "$(stat -c %g /var/run/docker.sock)" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v /usr/bin/docker:/usr/bin/docker:ro \
             -v "$PWD:/workspace" -w /workspace \
             -v "$PWD/.ci-cache/cargo-registry:/home/dev/.cargo/registry" \
             -v "$PWD/.ci-cache/cargo-git:/home/dev/.cargo/git" \
+            -v "$oci_tmp:$oci_tmp" -e SF_OCI_TEST_TMPDIR="$oci_tmp" \
             -e SF_OCI_TEST_IMAGE="$oci_image" \
             suifleet-dev:ci python3 scripts/test_oci.py
 
