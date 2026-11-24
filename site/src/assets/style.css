@@ -1821,7 +1821,7 @@ td.num,th.num {
 .guide-instruction-card h3 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#1769d2; margin:0; }
 .guide-copy { min-height:0; overflow:hidden; }
 .guide-copy p { margin:0; color:#415b78; font-size:clamp(14px,1.3vw,17px); line-height:1.65; overflow-wrap:anywhere; }
-.guide-instruction-meta { display:grid; grid-template-rows:34px 18px; gap:5px; align-content:end; font-size:10px; color:#60758f; }
+.guide-instruction-meta { display:grid; grid-template-rows:44px 18px; gap:5px; align-content:end; font-size:10px; color:#60758f; }
 .guide-instruction-meta a { font-size:12px; font-weight:600; }
 .guide-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:2px; }
 .guide-controls button { min-height:42px; border:1px solid #ccdcef; border-radius:10px; padding:10px 20px; background:white; color:#234b78; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
@@ -1857,7 +1857,7 @@ td.num,th.num {
  .guide-toolbar .eyebrow, .guide-stage-picker > span { display:none; }
  .guide-toolbar h1 { font-size:17px; }
  .guide-stage-picker { font-size:0; }
- .guide-stage-picker select { margin:0; font-size:12px; padding:6px; }
+ .guide-stage-picker select { margin:0; min-height:44px; font-size:12px; padding:6px; }
 
  .guide-media figcaption { display:none; }
  .guide-instruction-card { padding:12px; gap:8px; }
@@ -1873,13 +1873,15 @@ td.num,th.num {
 }
 
 .guide-instruction-paging { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; }
-.guide-instruction-paging button { border:1px solid #d7e2f0; border-radius:8px; background:#f8fbff; color:#1769d2; min-width:32px; height:32px; font-size:22px; cursor:pointer; }
+.guide-instruction-paging button { border:1px solid #d7e2f0; border-radius:8px; background:#f8fbff; color:#1769d2; min-width:44px; height:44px; font-size:22px; cursor:pointer; }
 .guide-instruction-paging button:disabled { opacity:.35; cursor:not-allowed; }
 .guide-instruction-paging span { text-align:center; font-size:10px; }
 @media(max-width:700px) {
  .guide-page .site-header nav { display:none; }
  .guide-page .header-row { min-height:64px; padding-top:10px; padding-bottom:10px; }
  .guide-toolbar .eyebrow { display:none; }
+ .guide-stage-picker select { min-height:44px; }
+ .guide-controls button { min-height:44px; }
 }
 
 .guide-media video[hidden] { display:none; }
@@ -1910,3 +1912,12 @@ td.num,th.num {
 /* Separate visual-direction sample; the current overview remains independent. */
 .motion-sample{margin:2rem 0}.motion-sample video{display:block;width:100%;height:auto;border:1px solid #e0e7f1;border-radius:18px;background:#f6f8fc;box-shadow:0 18px 50px #19345b12}.motion-sample .sample-portrait{display:none}.motion-sample .sample-note{margin:.9rem 0;font-size:.9rem;color:#52677c}.motion-sample details{margin:1.1rem 0}.sample-page h1{margin-bottom:.65rem}
 @media(max-width:700px){.motion-sample .sample-landscape{display:none}.motion-sample .sample-portrait{display:block;max-width:420px;margin:auto}.motion-sample{margin:1.2rem 0}}
+
+/* Keep touch controls usable without crowding out instructions in landscape. */
+@media (max-height:430px) and (min-width:600px) {
+ .guide-page .header-row { min-height:48px; padding-top:4px; padding-bottom:4px; }
+ .guide-player { gap:4px; padding-top:4px; padding-bottom:4px; }
+ .guide-progress { min-height:14px; }
+ .guide-instruction-card { padding:8px; gap:6px; }
+ .guide-controls button { min-height:44px; }
+}
