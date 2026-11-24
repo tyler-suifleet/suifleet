@@ -27,6 +27,10 @@ require suifleet-crates.inc
 SUIFLEET_LOCK_SHA256 = "c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6"
 # The daemon crate version at SRCREV; recorded in build-info and checked below.
 SUIFLEET_CRATE_VERSION = "0.2.3"
+# The package version is the crate version. PE keeps it newer than the
+# former filename-derived 1.0 so package managers still treat it as an upgrade.
+PE = "1"
+PV = "${SUIFLEET_CRATE_VERSION}"
 CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"
 CARGO_BUILD_FLAGS:append = " --bin suifleet --features systemd"
 # Every compile uses the dependency graph fetched and verified by BitBake.
