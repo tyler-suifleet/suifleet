@@ -1,34 +1,133 @@
-# Build a Yocto client image
+# Integrate SuiFleet into an OpenEmbedded image
 
-Integrate the daemon, isolated signer and runtime provisioning into your own Yocto image.
+Use the [public meta-suifleet repository](https://github.com/tyler-suifleet/meta-suifleet)
+for the standalone software layer. It supplies the edge client, isolated signer,
+systemd units and first-boot key provisioning. Your product supplies the BSP,
+kernel, storage layout, distro policy, network and access configuration.
+
+Repository access, supported release refs and an OpenEmbedded Layer Index
+listing are separate milestones. Use a full layer commit backed by successful
+fetch, build and image checks for your series. Check the repository's
+[release checklist](https://github.com/tyler-suifleet/meta-suifleet/blob/main/RELEASE.md)
+and ask your release operator for that commit and evidence. Availability of
+`main` or a source archive alone does not establish a validated release.
 
 ## Prerequisites
 
-Use a reviewed source checkout, Ubuntu 22.04 and kas 4.7 with the pinned profiles. Obtain build resources and storage for BitBake. No standalone public layer repository or Layer Index listing is offered yet; use the layer in this checkout.
+Start with a clean build directory on a host supported by your OE release.
+Select matching OE-Core and `meta-openembedded/meta-oe` revisions. Scarthgap
+also needs the `meta-lts-mixins` Rust layer from `scarthgap/rust`. Wrynose uses
+core Rust. The [pinned engineering profiles](../kas/) record exact upstream
+revisions in `packaging.yml` and `packaging-wrynose.yml`. Keep the series in
+separate build directories and TMPDIRs.
 
-## Steps
+## Add the software layer
 
-1. Keep build work outside the checkout and select the Scarthgap recipe profile:
+From an initialized product build shell, set `SUIFLEET_LAYER_COMMIT` to the
+verified full commit from your operator and `SUIFLEET_LAYER_DIR` to an absolute
+path outside the build directory. Then run:
 
 ```sh
-export KAS_WORK_DIR=/absolute/path/to/yocto-work
-export KAS_BUILD_DIR="$KAS_WORK_DIR/build-packaging"
-kas build kas/packaging.yml
+git clone https://github.com/tyler-suifleet/meta-suifleet.git "$SUIFLEET_LAYER_DIR"
+git -C "$SUIFLEET_LAYER_DIR" checkout --detach "${SUIFLEET_LAYER_COMMIT:?set the verified layer commit}"
+test "$(git -C "$SUIFLEET_LAYER_DIR" rev-parse HEAD)" = "$SUIFLEET_LAYER_COMMIT"
+bitbake-layers add-layer "$SUIFLEET_LAYER_DIR"
+bitbake-layers show-layers
 ```
 
-2. For Wrynose use `kas/packaging-wrynose.yml` in separate work/build trees. Preserve the pinned daemon source revision; source updates must regenerate the crate include and lock digest together.
-3. For a custom image, add `suifleet-edge/meta-suifleet` and the `suifleet` package. Pi image/test integration also needs `suifleet-edge/meta-suifleet-integration`; the committed kas profiles include it.
-4. Inspect the package manifest and root filesystem. Builds must contain no device keys, enrollment credentials or journals.
-5. At first boot provision a new key, then complete [device setup](INSTALL_DEVICE_CLIENT.md). Supply the manifest, Linux signer configuration and daemon configuration in that order.
+Confirm `BBLAYERS` includes core, `meta-oe`, the Scarthgap mixin where
+required, your product layers and the root of the standalone checkout.
+For the generic example omit `meta-suifleet-integration`. Use any
+series-specific distro fixes documented and validated for the selected
+layer revision. The standalone layer does not select your distro policy.
 
-## Expected result
+## Generic ARM64 QEMU example
 
-BitBake produces packages for the selected profile. The provisioning service creates a target-local identity; the daemon waits for runtime configuration.
+In a disposable stock OE build with the matching layers, put this in
+`conf/local.conf`. Keep your product's own machine and image recipe when
+applying the same package selection to a product build.
+
+```bitbake
+MACHINE = "qemuarm64"
+INIT_MANAGER = "systemd"
+DISTRO_FEATURES:append = " usrmerge"
+IMAGE_INSTALL:append = " suifleet"
+IMAGE_FSTYPES:append = " ext4"
+```
+
+Use glibc and persistent writable storage for `/etc/suifleet` and
+`/var/lib/suifleet`. For a product image, put the `IMAGE_INSTALL` line in
+the image recipe or use the product's existing packagegroup. The
+`suifleet` package includes the signer and provisioning units. Add
+`suifleet-walrus-codec` only for Walrus archive workflows. It pulls in
+`suifleet-node` and requires ARM64/glibc. Neither is needed for the minimal image.
+
+```sh
+bitbake -p
+bitbake -c fetch suifleet
+bitbake suifleet
+oe-pkgdata-util list-pkg-files suifleet
+bitbake core-image-minimal
+runqemu qemuarm64 core-image-minimal ext4 nographic
+```
+
+If you need passwordless console access during emulation, configure it in
+a disposable test image using the option documented by your OE series.
+Apply your production login policy before distribution.
+
+## Raspberry Pi 3 Model B+ example
+
+Use the separate [Pi image guide](CUSTOMER_PI_IMAGE.md) for the committed kas
+profile with the Raspberry Pi BSP, SD image settings and access overlay. That
+profile is built from the core checkout and includes the integration layer. Its
+BSP and distro settings do not carry over to QEMU or a new board. New boards
+need their own BSP and runtime validation. Physical Pi acceptance remains open.
+Userspace vintage and the running kernel are independent. Record `uname -r`
+and check systemd and kernel prerequisites against the runtime guidance
+before claiming a new target works.
+
+## Expected result and first-boot enrollment
+
+1. Record your layer commits, toolchain version and the recipe selected by
+   `bitbake-layers show-recipes suifleet`. Compare the source revision,
+   Cargo lock digest and client version in `/usr/share/suifleet/build-info`
+   with the recipe and the fleet manifest's supported client range. Keep
+   the source pin, generated crate include and lock digest synchronized.
+2. Inspect the deployed image manifest for `suifleet`. Check the rootfs
+   contains `/usr/bin/suifleet`, the daemon and provisioning services, the
+   signer socket and service, the enrollment path unit and configuration
+   templates. Confirm there is no device key, live configuration, enrollment
+   credential or journal in the image.
+3. On the target, first-boot provisioning generates the device key. Run
+   `systemctl status suifleet-provision.service` and obtain only the public
+   address from `journalctl -u suifleet-provision.service`. Follow the
+   [device setup guide](INSTALL_DEVICE_CLIENT.md#find-the-device-address)
+   to register or enroll that address on the correct network.
+4. On the running target install the authenticated `deployment.json`, then
+   install the signer configuration as `root:suifleet-signer` mode `0640`.
+   Install `config.toml` last as `root:suifleet` mode `0640`. Use the
+   packaged examples and the installation guide's exact paths and fields.
+   Check `systemctl status suifleet.service suifleet-signer.socket` and the
+   daemon journal for successful startup. Confirm the console sees the
+   registered device on the selected network.
+5. Preserve `/etc/suifleet` and `/var/lib/suifleet` with their owner and mode
+   across image replacement and rollback. Verify the address and journals
+   survive an emulated restart or update. Your platform owns updater selection,
+   OS installation, reboot, boot confirmation and firmware rollback.
 
 ## Recovery and limits
 
-For missing dependencies, reproduce with the pinned layers rather than substituting arbitrary revisions. Keep Scarthgap and Wrynose TMPDIRs separate. QEMU test profiles allow passwordless console login and are disposable validation only. A package or QEMU boot is not a physical Pi, power-loss or firmware recovery result.
+If a build fails, record the layer and source pins with the failing task.
+Check that the layer matches the series and that all pinned sources are
+available. If startup fails after enrollment, check unit status, configuration
+permissions and manifest compatibility before changing device state.
 
+Record parse, source fetch, package QA, image build and boot separately.
+An emulated boot establishes behavior for that emulated image. Physical boot,
+power-loss and board-level acceptance are tracked in
+[physical target acceptance](https://github.com/tyler-suifleet/suifleet/issues/32).
 ## Technical reference
 
-For integrators and auditors: [implementation details, API and validation provenance](YOCTO_PACKAGING.md). This reference includes engineering history; it is not an installation shortcut or a claim of production acceptance.
+See [packaging and validation details](YOCTO_PACKAGING.md) for provenance and
+[standalone layer release tracking](https://github.com/tyler-suifleet/suifleet/issues/820) for release-ref
+and Layer Index readiness.

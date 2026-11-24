@@ -50,10 +50,9 @@ repository. Each device generates its own at first boot or install.
 
 ## Yocto image and recipe
 
-A standalone public `meta-suifleet` repository and OpenEmbedded Layer Index
-listing are not published yet. Do not guess a clone URL. Until those destinations
-are published, obtain the pinned layer and kas profiles from your fleet operator
-or a reviewed public source checkout. The commands below run from that checkout.
+For an existing OE product, follow the [OpenEmbedded integration guide](CUSTOMER_YOCTO.md)
+to select a verified standalone layer commit and add the client to your image.
+The Pi example below runs from a reviewed core checkout.
 
 The `meta-suifleet` layer packages the client as the `suifleet` recipe, with
 first-boot key provisioning and systemd services. Build a Raspberry Pi 3 Model
@@ -66,10 +65,7 @@ kas build kas/pi-image.yml:/absolute/path/to/private-access.yml
 ```
 
 The private overlay adds your SSH public key; see [Pi image guide](CUSTOMER_PI_IMAGE.md)
-for it, flashing and first login. To add only the client to your own image,
-add `suifleet-edge/meta-suifleet` to your layers and `suifleet` to the image's
-packages; [Yocto guide](CUSTOMER_YOCTO.md) lists the pinned inputs and
-package-only builds.
+for it, flashing and first login.
 
 The recipe now pins client 0.2.3, compatible with the committed Seal testnet
 profile. Older evaluation images contain client 0.2.1 and cannot use a manifest

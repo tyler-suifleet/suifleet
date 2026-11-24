@@ -112,7 +112,7 @@ Contracts are in `contracts/`; the app is in `dapp/`; the daemon and Yocto layer
 
 `scripts/redeploy.sh` publishes or upgrades the contracts on the active Sui CLI environment after verifying the chain, account and UpgradeCap. It records each release and generates both client configs ([docs/DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md)). No package is published automatically by tests. Calls use the latest package ID; types use the package that introduced them (per-type origins in the manifest).
 
-The Yocto layer installs the daemon and systemd unit. Add your updater separately. The recipe has not been validated by an actual BitBake build; source pinning and cargo dependency integration remain necessary before a production image.
+The Yocto layer installs the edge client, isolated signer and systemd services. Follow the [OpenEmbedded integration guide](docs/CUSTOMER_YOCTO.md) for the public software layer, source verification and image profiles. Your platform supplies any OS updater and owns reboot and recovery.
 
 ## Agent collaboration and tracking
 
