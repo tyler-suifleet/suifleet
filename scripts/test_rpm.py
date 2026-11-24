@@ -182,7 +182,9 @@ def main():
         return
     first = f"/first/{args.first.name}"
     second = f"/second/{args.second.name}"
-    container = output("docker", "run", "-d", "--network", "none", "--privileged", "--cgroupns=private",
+    # Systemd and the package manager need root inside the disposable QA container.
+    container = output("docker", "run", "-d", "--user", "0:0", "--network", "none",
+                       "--privileged", "--cgroupns=private",
                        "--tmpfs", "/run", "--tmpfs", "/run/lock",
                        "-v", f"{ROOT}:/src:ro", "-v", f"{args.first.resolve().parent}:/first:ro",
                        "-v", f"{args.second.resolve().parent}:/second:ro", args.image, "/sbin/init")
