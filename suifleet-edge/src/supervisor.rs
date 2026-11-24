@@ -193,6 +193,7 @@ pub struct Supervisor {
     status: Arc<Mutex<BTreeMap<String, Status>>>,
     record: Record,
     recovery_commands: BTreeMap<String, String>,
+    oci_policy: Arc<crate::oci::Policy>,
     previous: BTreeMap<String, Spec>,
     recovered: BTreeMap<String, String>,
 }
@@ -288,11 +289,16 @@ impl Supervisor {
             status: Arc::new(Mutex::new(BTreeMap::new())),
             record,
             recovery_commands: BTreeMap::new(),
+            oci_policy: Arc::default(),
             previous: previous_versions,
             recovered,
         };
         write_status(&supervisor.root, &supervisor.status)?;
         Ok(supervisor)
+    }
+
+    pub fn configure_oci(&mut self, policy: crate::oci::Policy) {
+        self.oci_policy = Arc::new(policy);
     }
 
     pub fn configure_recovery(&mut self, commands: BTreeMap<String, String>) {
@@ -418,7 +424,7 @@ impl Supervisor {
         // including paths that return early or are interrupted.
         if spec.run == crate::oci::RUN {
             anyhow::ensure!(install.is_none() && spec.shutdown.is_none() && spec.readiness.is_none(), "OCI lifecycle is adapter-owned");
-            crate::oci::prepare(artifact).await?;
+            crate::oci::prepare(artifact, &self.root, &spec.name, &self.oci_policy).await?;
         }
         self.begin_install(&spec.name)?;
         let workspace = self.workspace(&spec);
@@ -696,6 +702,7 @@ impl Supervisor {
             status: self.status.clone(),
             record: self.record.clone(),
             phase: phase_tx,
+            oci_policy: self.oci_policy.clone(),
             spec: spec.clone(),
         };
         let task = tokio::spawn(supervise(context, stop_rx));
@@ -802,6 +809,7 @@ struct Context {
     status: Arc<Mutex<BTreeMap<String, Status>>>,
     record: Record,
     phase: watch::Sender<Phase>,
+    oci_policy: Arc<crate::oci::Policy>,
 }
 impl Context {
     fn set(&self, phase: Phase, pid: Option<u32>, restarts: u32, last_exit: Option<String>) {
@@ -918,7 +926,7 @@ impl Context {
         self.record.arm()?;
         let log = open_log(&self.component.join("component.log"))?;
         let mut command = if self.spec.run == crate::oci::RUN {
-            let mut command = crate::oci::start(&self.root, &self.workspace).await?;
+            let mut command = crate::oci::start(&self.root, &self.workspace, &self.oci_policy).await?;
             command.env(MARKER, marker(&self.root));
             command
         } else { self.command(&self.spec.run, None) };
@@ -2716,7 +2724,7 @@ mod tests {
         let mut tampered = descriptor(&[]);
         tampered["memoryBytes"] = serde_json::json!(33554432u64);
         std::fs::write(workspace.join("artifact"), serde_json::to_vec(&tampered).unwrap()).unwrap();
-        assert!(crate::oci::start(&f.dir.join("supervised"), &workspace).await.err().unwrap().to_string().contains("descriptor digest mismatch"));
+        assert!(crate::oci::start(&f.dir.join("supervised"), &workspace, &s.oci_policy).await.err().unwrap().to_string().contains("descriptor digest mismatch"));
         std::fs::write(workspace.join("artifact"), saved).unwrap();
         assert!(engine(&["kill", &id]).status.success());
         tokio::time::timeout(Duration::from_secs(15), async {
@@ -2812,7 +2820,7 @@ mod tests {
         s.stop_all().await;
         // An engine-owned container outlives a killed attached client. The
         // next open must remove that orphan before bootstrap can start again.
-        let mut command = crate::oci::start(&f.dir.join("supervised"), &workspace).await.unwrap();
+        let mut command = crate::oci::start(&f.dir.join("supervised"), &workspace, &s.oci_policy).await.unwrap();
         let mut abandoned = spawn_tracked(&mut command).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             while crate::oci::ready(&workspace).await.is_err() { tokio::time::sleep(Duration::from_millis(100)).await; }
