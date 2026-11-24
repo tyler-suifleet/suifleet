@@ -21,29 +21,62 @@
     - {name: suifleet, home: /var/lib/suifleet}
     - {name: suifleet-signer, home: /nonexistent}
 
-- name: Install the authenticated binary
+# The binary is staged and its SHA-256 checked on the host before it replaces
+# /usr/bin/suifleet (an atomic rename by the copy module).
+- name: Create the private staging directory
+  ansible.builtin.file:
+    path: /var/cache/suifleet
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Stage the authenticated binary
   ansible.builtin.copy:
     src: "{{ suifleet_binary_src }}"
+    dest: /var/cache/suifleet/suifleet.staged
+    owner: root
+    group: root
+    mode: "0700"
+  register: suifleet_binary_staged
+
+# In check mode a pending copy leaves the old staged bytes in place, so the
+# host-side checks run only on bytes actually present; the controller-side
+# digest was already verified in preflight.
+- name: Check the staged binary on the host
+  ansible.builtin.stat:
+    path: /var/cache/suifleet/suifleet.staged
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_binary_remote
+  check_mode: false
+  when: not (ansible_check_mode and suifleet_binary_staged is changed)
+
+- name: Refuse a staged binary that differs from the pinned SHA-256
+  ansible.builtin.assert:
+    that:
+      - suifleet_binary_remote.stat.exists
+      - suifleet_binary_remote.stat.checksum == suifleet_binary_sha256
+    quiet: true
+    fail_msg: The staged binary on the host does not match the pinned SHA-256.
+  when: suifleet_binary_remote is not skipped
+
+- name: Report the pending binary installation
+  ansible.builtin.debug:
+    msg: Would install the staged binary as /usr/bin/suifleet.
+  changed_when: true
+  when: ansible_check_mode and suifleet_binary_staged is changed
+
+- name: Install the verified binary
+  ansible.builtin.copy:
+    src: /var/cache/suifleet/suifleet.staged
+    remote_src: true
     dest: /usr/bin/suifleet
     owner: root
     group: root
     mode: "0755"
   register: suifleet_binary_copy
-
-- name: Check the installed binary on the host
-  ansible.builtin.stat:
-    path: /usr/bin/suifleet
-    get_checksum: true
-    checksum_algorithm: sha256
-  register: suifleet_binary_remote
-  check_mode: false
-
-- name: Refuse an installed binary that differs from the pinned SHA-256
-  ansible.builtin.assert:
-    that: suifleet_binary_remote.stat.checksum == suifleet_binary_sha256
-    quiet: true
-    fail_msg: /usr/bin/suifleet on the host does not match the pinned SHA-256.
-  when: suifleet_binary_remote.stat.exists
+  when: not (ansible_check_mode and suifleet_binary_staged is changed)
 
 - name: Install the provisioning helper
   ansible.builtin.copy:
@@ -104,5 +137,6 @@
 - name: Record whether the client code changed
   ansible.builtin.set_fact:
     suifleet_code_changed: >-
-      {{ suifleet_binary_copy is changed or suifleet_helper_copy is changed
+      {{ suifleet_binary_staged is changed or suifleet_binary_copy is changed
+         or suifleet_helper_copy is changed
          or suifleet_units_copy is changed }}

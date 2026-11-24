@@ -16,6 +16,9 @@
     mode: "0600"
   register: suifleet_deb_staged
 
+# In check mode a pending copy leaves the old staged bytes in place, so the
+# host-side checks and apt run only on bytes actually present; the
+# controller-side digest was already verified in preflight.
 - name: Check the staged package on the host
   ansible.builtin.stat:
     path: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
@@ -23,13 +26,22 @@
     checksum_algorithm: sha256
   register: suifleet_deb_remote
   check_mode: false
+  when: not (ansible_check_mode and suifleet_deb_staged is changed)
 
 - name: Refuse a staged package that differs from the pinned SHA-256
   ansible.builtin.assert:
-    that: suifleet_deb_remote.stat.checksum == suifleet_deb_sha256
+    that:
+      - suifleet_deb_remote.stat.exists
+      - suifleet_deb_remote.stat.checksum == suifleet_deb_sha256
     quiet: true
     fail_msg: The staged package on the host does not match the pinned SHA-256.
-  when: suifleet_deb_remote.stat.exists
+  when: suifleet_deb_remote is not skipped
+
+- name: Report the pending package installation
+  ansible.builtin.debug:
+    msg: Would install or upgrade the staged package.
+  changed_when: true
+  when: ansible_check_mode and suifleet_deb_staged is changed
 
 # The package starts nothing and stops running units before an upgrade
 # (docs/DEBIAN_PACKAGING.md); the service tasks start them again afterwards.
@@ -37,8 +49,8 @@
   ansible.builtin.apt:
     deb: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
   register: suifleet_package
-  when: suifleet_deb_remote.stat.exists
+  when: suifleet_deb_remote is not skipped and suifleet_deb_remote.stat.exists
 
 - name: Record whether the client code changed
   ansible.builtin.set_fact:
-    suifleet_code_changed: "{{ suifleet_package is changed }}"
+    suifleet_code_changed: "{{ suifleet_deb_staged is changed or suifleet_package is changed }}"
