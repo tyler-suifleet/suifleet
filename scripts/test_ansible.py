@@ -15,13 +15,19 @@ only loopback (the chain container is started with --network none):
 
 Phases: release/profile preflight cases with injected facts (Ubuntu 24.10 and
 Debian 13 refused for deb unless explicitly allowed), refusal, check mode on
-fresh hosts (no change), install + on-device identity + claim enrollment +
+fresh hosts (no change), a claim transfer interrupted after staging (plain
+and Vault claims only in tmpfs, none on host persistent storage or controller
+files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
 (changed=0), package/binary upgrade preview in check mode (bytes, package
 versions and service PIDs untouched), package/binary upgrade, rerun
 (changed=0), an interrupted binary/config rollout (files land, restarts never
 run) followed by a retry that must restart the stale services onto the new
-inputs, rerun (changed=0), rolling restart. It checks preserved identity and
+inputs, rerun (changed=0), a configuration-only change timestamped within a
+second of the daemon's start (detected; retry restarts; rerun changed=0), an
+interrupted signing-socket unit-only update on the binary host (retry
+recreates the socket with its new mode and restarts signer and daemon; rerun
+changed=0), rolling restart. It checks preserved identity and
 enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
 cap owners), claim erasure, and that no device or claim key appears in
 Ansible output, controller files or host journals (keys are passed to the
@@ -36,6 +42,7 @@ dpkg-deb, Docker, a Move dependency cache volume owned by uid 1001 and network
 access once to build the test images (pip/apt).
 """
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -131,10 +138,49 @@ INTERRUPTED_PLAY = """- hosts: suifleet_devices
     - ansible.builtin.include_role: {name: suifleet, tasks_from: enroll.yml}
     - ansible.builtin.include_role: {name: suifleet, tasks_from: configure.yml}
 """
+# Stages each host's claim exactly as enrollment does, then stops before the
+# enrollment and its cleanup run: an interrupted claim transfer.
+CLAIM_INTERRUPT_PLAY = """- hosts: suifleet_devices
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_role: {name: suifleet, tasks_from: stage_claim.yml}
+      vars:
+        suifleet_claim_file: "/chain/batch/enrollment/{{ suifleet_serial }}/claim.key"
+        suifleet_claim_owner: nobody
+        suifleet_claim_group: nogroup
+    - ansible.builtin.fail: {msg: interrupted after the claim transfer}
+"""
+# Lists files under the roots that contain any secret read from stdin. With
+# --one-filesystem it stays on each root's filesystem (here: skips the tmpfs
+# /run, /proc and /sys). Prints a JSON list of paths, never the secrets.
+DISK_SCAN = """import json, os, sys
+one = sys.argv[1] == "--one-filesystem"
+roots = sys.argv[2:]
+secrets = [s.encode() for s in sys.stdin.read().split()]
+hits = []
+for root in roots:
+    device = os.lstat(root).st_dev
+    for top, dirs, files in os.walk(root):
+        if one:
+            dirs[:] = [d for d in dirs if os.lstat(os.path.join(top, d)).st_dev == device]
+        for name in files:
+            path = os.path.join(top, name)
+            try:
+                if not os.path.isfile(path) or os.path.islink(path):
+                    continue
+                with open(path, "rb") as handle:
+                    data = handle.read()
+            except OSError:
+                continue
+            if any(s in data for s in secrets):
+                hits.append(path)
+print(json.dumps(hits))
+"""
 # Counts how many of the secrets on stdin appear in the host journal.
 JOURNAL_SCAN = ("import subprocess, sys; secrets = sys.stdin.read().split(); "
                 "data = subprocess.run(['journalctl', '--no-pager', '-o', 'cat'], capture_output=True, text=True).stdout; "
                 "print(sum(s in data for s in secrets))")
+APPLIED_RECORD = "/var/lib/suifleet-ansible/applied.json"
 RECAP = re.compile(r"^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)", re.M)
 
 
@@ -410,6 +456,8 @@ class Harness:
                    "-v", f"{EXAMPLES}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
                    "-v", f"{self.work / 'artifacts'}:/artifacts:ro", "-v", f"{UNITS}:/units:ro",
                    "-w", "/ansible", "-e", "ANSIBLE_CONFIG=/ansible/ansible.cfg", "-e", "ANSIBLE_FORCE_COLOR=0",
+                   # Ansible's controller temporary files land in the scanned work directory.
+                   "-e", "ANSIBLE_HOME=/work/ansible-home",
                    "-e", "ANSIBLE_NOCOLOR=1", self.controller, tool]
         if tool == "ansible-playbook":
             command += [*(["-i", "/work/inventory.yml"] if inventory else []), playbook]
@@ -431,8 +479,8 @@ class Harness:
         print(f"PASS {phase}: rc={result.returncode} recap={json.dumps(recap, sort_keys=True)}")
         return output, recap
 
-    def unchanged(self, recap, phase):
-        assert set(recap) == set(self.hosts), (phase, recap)
+    def unchanged(self, recap, phase, hosts=None):
+        assert set(recap) == set(hosts or self.hosts), (phase, recap)
         if any(c["changed"] for c in recap.values()):
             print("\n".join(line for line in self.outputs[-1].splitlines() if "will restart" in line or "changed:" in line))
         for name, counts in recap.items():
@@ -461,6 +509,10 @@ class Harness:
                                  " | cut -d' ' -f1"),
             signer_exe_sha256=sh(f"sha256sum /proc/{signer_pid}/exe 2>/dev/null | cut -d' ' -f1") if signer_pid != "0" else "",
             poll_seconds=sh("sed -n 's/^poll_seconds = //p' /etc/suifleet/config.toml"),
+            socket_mode=sh("stat -c '%a' /run/suifleet-signer/sign.sock 2>/dev/null || true"),
+            invocations={unit: sh(f"systemctl show -p InvocationID --value {unit}") for unit in
+                         ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket", "suifleet-enrollment.path")},
+            applied=sh(f"cat {APPLIED_RECORD} 2>/dev/null || true"),
             binary_sha256=sh("sha256sum /usr/bin/suifleet | cut -d' ' -f1"),
             package=sh("dpkg-query -W -f='${Version}' suifleet 2>/dev/null || true"),
             claims_left=sh("find / -xdev \\( -name claim.key -o -name '*.enrollment.json.partial' \\) 2>/dev/null; "
@@ -484,8 +536,12 @@ class Harness:
         assert not state["claims_left"], (name, "claim material left on host", state["claims_left"])
         assert not state["ansible_tmp"], (name, "Ansible temporary files left", state["ansible_tmp"])
         assert state["journal_key_hits"] == 0, (name, "device key in the host journal")
+        assert state["applied"], (name, "no applied-inputs record")
         for unit, report in state["running_inputs"].items():
             assert not report["stale"], (name, unit, "running replaced inputs", report["reason"])
+            assert report["applied"] == report["digest"], (name, unit, "applied record differs from the installed inputs")
+        for unit in ("suifleet.service", "suifleet-signer.socket", "suifleet-enrollment.path"):
+            assert state["running_inputs"][unit]["active"], (name, unit, "not active")
         if host["profile"] == "deb":
             assert state["package"], (name, "package not installed")
         else:
@@ -498,9 +554,24 @@ class Harness:
     def running_inputs(self, name):
         container = self.hosts[name]["container"]
         script = (EXAMPLES / "roles/suifleet/files/running_inputs.py").read_text()
-        units = ["suifleet-signer.service=/etc/suifleet/deployment.json,/etc/suifleet/signer.toml",
-                 "suifleet.service=/etc/suifleet/deployment.json,/etc/suifleet/signer.toml,/etc/suifleet/config.toml"]
-        return json.loads(self.exec(container, "python3", "-", *units, input=script).stdout)
+        units = ["suifleet-signer.socket=", "suifleet-enrollment.path=",
+                 "suifleet-signer.service=/usr/bin/suifleet,/etc/suifleet/deployment.json,/etc/suifleet/signer.toml",
+                 "suifleet.service=/usr/bin/suifleet,/usr/libexec/suifleet-provision,/etc/suifleet/deployment.json,"
+                 "/etc/suifleet/signer.toml,/etc/suifleet/config.toml"]
+        return json.loads(self.exec(container, "python3", "-", APPLIED_RECORD, *units, input=script).stdout)
+
+    def disk_hits(self, container, secrets, *roots, one_filesystem=True):
+        # The secrets travel on stdin: never in a process argument list.
+        flag = "--one-filesystem" if one_filesystem else "--all"
+        return json.loads(self.exec(container, "python3", "-c", DISK_SCAN, flag, *roots,
+                                    input="\n".join(secrets) + "\n").stdout)
+
+    def controller_hits(self, secrets):
+        """Files in the controller work directory (inventory, SSH, Ansible home and temp) holding a secret."""
+        result = subprocess.run(["docker", "run", "--rm", "-i", "--network", "none", "-v", f"{self.work / 'ctl'}:/work:ro",
+                                 self.controller, "python3", "-c", DISK_SCAN, "--all", "/work"],
+                                text=True, capture_output=True, input="\n".join(secrets) + "\n", check=True)
+        return json.loads(result.stdout)
 
     def scan_secrets(self, keys):
         secrets = [*keys, *self.claim_secrets.values()]
@@ -508,14 +579,15 @@ class Harness:
         for output in self.outputs:
             for secret in secrets:
                 assert secret not in output, "a key appeared in Ansible output"
-        for path in (self.work / "ctl").rglob("*"):
-            if path.is_file():
-                data = path.read_text(errors="replace")
-                for secret in secrets:
-                    assert secret not in data, f"a device or claim key appeared in controller file {path.name}"
+        hits = self.controller_hits(secrets)
+        assert not hits, ("a device or claim key in controller files", hits)
+        claims = list(self.claim_secrets.values())
         for name, host in self.hosts.items():
             assert self.journal_hits(host["container"], secrets) == 0, (name, "a device or claim key in the host journal")
-        print(f"PASS no device or claim key in {len(self.outputs)} Ansible runs, controller files or host journals")
+            hits = self.disk_hits(host["container"], claims, "/")
+            assert not hits, (name, "a claim key on persistent storage", hits)
+        print(f"PASS no device or claim key in {len(self.outputs)} Ansible runs, controller files or host journals;"
+              " no claim on any host's persistent storage")
 
     def preflight_cases(self):
         (self.work / "ctl/preflight.yml").write_text(PREFLIGHT_PLAY)
@@ -570,7 +642,94 @@ class Harness:
         print("PASS retry restarted the stale services onto the installed binary and configuration")
         _, recap = self.ansible("rerun after the retry", "site.yml", *vault, *rollout)
         self.unchanged(recap, "rerun after the retry")
-        return after
+        return after, rollout
+
+    def interrupted_claim_transfer(self, vault):
+        """Enrollment stops right after the claim transfer, before its cleanup."""
+        (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
+        output, _ = self.ansible("interrupted claim transfer (plain and Vault claims)", "/work/claim-interrupt.yml", *vault,
+                                 expect_rc="nonzero")
+        assert "interrupted after the claim transfer" in output, "the play stopped elsewhere"
+        for name, host in self.hosts.items():
+            container, secret = host["container"], self.claim_secrets[host["serial"]]
+            # The scanner finds the claim where it was staged, so its other results are meaningful.
+            staged = self.disk_hits(container, [secret], "/run/suifleet-enroll", one_filesystem=False)
+            assert staged == ["/run/suifleet-enroll/claim.key"], (name, "claim not staged", staged)
+            assert self.exec(container, "stat", "-f", "-c", "%T", "/run/suifleet-enroll").stdout.strip() == "tmpfs", name
+            meta = self.exec(container, "stat", "-c", "%U:%G %a", "/run/suifleet-enroll/claim.key").stdout.strip()
+            assert meta == "nobody:nogroup 600", (name, meta)
+            hits = self.disk_hits(container, [secret], "/")
+            assert not hits, (name, "the claim reached persistent storage", hits)
+        hits = self.controller_hits(list(self.claim_secrets.values()))
+        assert not hits, ("a claim in controller files", hits)
+        print("PASS interrupted claim transfer left the claim only in tmpfs staging: none on host persistent storage"
+              " (including Ansible remote temp) or in controller files (including Vault decryption)")
+
+    def rapid_config_rollout(self, vault, rollout, previous):
+        """A configuration-only change lands within a second of the daemon's start and is never applied."""
+        rollout = [*rollout, "-e", "suifleet_poll_seconds=12"]
+        self.ansible("config-only rollout: files only", "/work/interrupted.yml", *vault, *rollout)
+        for name, host in self.hosts.items():
+            container = host["container"]
+            stamp = self.exec(container, "systemctl", "show", "--timestamp=us+utc", "-p", "ExecMainStartTimestamp",
+                              "--value", "suifleet.service").stdout.strip()
+            start = datetime.datetime.strptime(stamp.split(" ", 1)[1], "%Y-%m-%d %H:%M:%S.%f UTC")
+            start = start.replace(tzinfo=datetime.timezone.utc).timestamp()
+            # Indistinguishable by timestamp from a file the daemon read at startup.
+            self.exec(container, "touch", "-d", f"@{start + 0.5:.6f}", "/etc/suifleet/config.toml")
+            state, _ = self.host_state(name)
+            assert state["poll_seconds"] == "12", (name, "configuration not installed")
+            assert state["main_pid"] == previous[name]["main_pid"], (name, "the interruption restarted the daemon")
+            report = state["running_inputs"]["suifleet.service"]
+            assert report["stale"] and report["reason"] == "its inputs changed since they were applied", (name, report)
+        print("PASS a configuration change made within a second of the daemon's start was detected")
+        _, recap = self.ansible("retry after the config-only rollout", "site.yml", *vault, *rollout)
+        after = {}
+        for name in self.hosts:
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert recap[name]["changed"] > 0, (name, "retry restarted nothing")
+            assert state["invocations"]["suifleet.service"] != previous[name]["invocations"]["suifleet.service"], name
+            assert state["main_pid"] != previous[name]["main_pid"], (name, "daemon not restarted onto the configuration")
+            after[name] = state
+        print("PASS retry restarted the daemon onto the configuration")
+        _, recap = self.ansible("rerun after the config-only retry", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the config-only retry")
+        return after, rollout
+
+    def socket_unit_update(self, vault, rollout, previous):
+        """Only the signing socket unit changes; the interrupted rollout reloads systemd but restarts nothing."""
+        name = next(n for n, h in self.hosts.items() if h["profile"] == "systemd-binary")
+        units = self.work / "artifacts/units-2"
+        shutil.copytree(UNITS, units)
+        socket = units / "suifleet-signer.socket"
+        text = socket.read_text()
+        assert "SocketMode=0660\n" in text
+        # Still lets the daemon's group connect (connecting needs write permission only).
+        socket.write_text(text.replace("SocketMode=0660\n", "SocketMode=0620\n"))
+        rollout = [*rollout, "-e", "suifleet_units_src=/artifacts/units-2"]
+        assert previous[name]["socket_mode"] == "660", previous[name]["socket_mode"]
+        self.ansible("socket unit update: files only", "/work/interrupted.yml", "--limit", name, *vault, *rollout)
+        state, _ = self.host_state(name)
+        assert state["socket_mode"] == "660", (name, "the interruption recreated the socket")
+        assert state["invocations"] == previous[name]["invocations"], (name, "the interruption restarted a unit")
+        report = state["running_inputs"]["suifleet-signer.socket"]
+        assert report["stale"] and not report["reload_needed"], (name, report)
+        print("PASS interrupted socket unit update left the old socket active and it was detected")
+        _, recap = self.ansible("retry after the socket unit update", "site.yml", "--limit", name, *vault, *rollout)
+        state, _ = self.host_state(name)
+        self.assert_converged(name, state)
+        assert state["socket_mode"] == "620", (name, "socket not recreated with the installed unit", state["socket_mode"])
+        for unit in ("suifleet-signer.socket", "suifleet-signer.service", "suifleet.service"):
+            assert state["invocations"][unit] != previous[name]["invocations"][unit], (name, unit, "not restarted")
+        assert state["invocations"]["suifleet-enrollment.path"] == previous[name]["invocations"]["suifleet-enrollment.path"]
+        for field in ("key_sha256", "address", "enrollment_sha256"):
+            assert state[field] == previous[name][field], (name, field)
+        print("PASS retry recreated the signing socket, then restarted the signer and the daemon")
+        _, recap = self.ansible("rerun after the socket retry", "site.yml", "--limit", name, *vault, *rollout)
+        self.unchanged(recap, "rerun after the socket retry", hosts=[name])
+        previous = dict(previous, **{name: state})
+        return previous, rollout
 
     def main(self):
         self.packages()
@@ -594,6 +753,7 @@ class Harness:
             assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
             assert self.exec(host["container"], "test", "-e", "/usr/bin/suifleet", check=False).returncode != 0, name
             assert self.exec(host["container"], "test", "-e", "/etc/suifleet/device.key", check=False).returncode != 0, name
+        self.interrupted_claim_transfer(vault)
 
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
         batches = output.count("PLAY [SuiFleet device client]")
@@ -644,7 +804,9 @@ class Harness:
         print("PASS upgrade preserved key, address and enrollment; daemons restarted on the new code")
         _, recap = self.ansible("rerun after upgrade", "site.yml", *vault, *upgrade)
         self.unchanged(recap, "rerun after upgrade")
-        after = self.interrupted_rollout(vault, upgrade, after)
+        after, rollout = self.interrupted_rollout(vault, upgrade, after)
+        after, rollout = self.rapid_config_rollout(vault, rollout, after)
+        after, rollout = self.socket_unit_update(vault, rollout, after)
 
         self.ansible("rolling restart", "restart.yml")
         for name in self.hosts:
