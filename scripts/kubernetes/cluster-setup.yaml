@@ -2,9 +2,19 @@
 # SuiFleet Kubernetes workload publisher (docs/KUBERNETES_EDGE.md).
 #
 # Apply this with the CLUSTER ADMINISTRATOR's own credentials. SuiFleet never
-# receives these credentials or cluster-admin. Rename the namespace and adjust
-# the quota for the workloads you delegate. The administrator, not SuiFleet,
-# owns this namespace, its Pod Security level, its quota and the Role below.
+# receives these credentials or cluster-admin. The administrator, not SuiFleet,
+# owns this namespace, its Pod Security level, its quota, the admission policy
+# and the Role below. Requires Kubernetes >= 1.30 (ValidatingAdmissionPolicy).
+#
+# TRUST BOUNDARY: the namespace must be DEDICATED to the publisher. Whoever
+# holds the publisher credential can create Deployments directly, bypassing the
+# helper, so put no unrelated Secrets, privileged ServiceAccounts, RoleBindings
+# to the namespace's `default` ServiceAccount, or other workloads in it. The
+# admission policy below enforces the helper's credential-level restrictions
+# (no Secret references, no non-default ServiceAccount, no token automount,
+# digest-pinned images) for every pod and Deployment in the namespace. If you
+# rename the namespace, rename it everywhere here, including the policy
+# binding's namespace selector.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -26,7 +36,8 @@ metadata:
 # The publisher's own credential is not mounted into any pod.
 automountServiceAccountToken: false
 ---
-# Namespaced Role: only the three kinds the helper accepts. No Secrets, Pods,
+# Namespaced Role: only the two kinds the helper accepts. No Services or
+# other networking objects (administrator-owned), Secrets, Pods,
 # exec/attach/port-forward, RBAC, quotas, namespaces or cluster-scoped objects.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -35,7 +46,7 @@ metadata:
   namespace: suifleet-apps
 rules:
   - apiGroups: [""]
-    resources: ["configmaps", "services"]
+    resources: ["configmaps"]
     verbs: ["get", "list", "create", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -83,3 +94,62 @@ spec:
     - type: Container
       default: {cpu: 200m, memory: 64Mi}
       defaultRequest: {cpu: 50m, memory: 32Mi}
+---
+# Credential-level restrictions enforced by the API server for every pod and
+# Deployment in the dedicated namespace, including objects created directly
+# with the publisher credential. Pod Security Admission `restricted` (above)
+# covers privilege, host access and root; this policy covers what PSA does not.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: suifleet-publisher-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: spec
+      expression: "object.kind == 'Pod' ? object.spec : object.spec.template.spec"
+    - name: containers
+      expression: >-
+        variables.spec.containers
+        + (has(variables.spec.initContainers) ? variables.spec.initContainers : [])
+        + (has(variables.spec.ephemeralContainers) ? variables.spec.ephemeralContainers : [])
+  validations:
+    - expression: "!has(variables.spec.serviceAccountName) || variables.spec.serviceAccountName == 'default'"
+      message: "SuiFleet-delegated pods must use the namespace's default ServiceAccount"
+    - expression: "!has(variables.spec.serviceAccount) || variables.spec.serviceAccount == 'default'"
+      message: "SuiFleet-delegated pods must use the namespace's default ServiceAccount"
+    - expression: "has(variables.spec.automountServiceAccountToken) && variables.spec.automountServiceAccountToken == false"
+      message: "SuiFleet-delegated pods must set automountServiceAccountToken: false"
+    - expression: "!has(variables.spec.imagePullSecrets) || size(variables.spec.imagePullSecrets) == 0"
+      message: "SuiFleet-delegated pods must not reference imagePullSecrets"
+    - expression: "!has(variables.spec.volumes) || variables.spec.volumes.all(v, has(v.configMap) || has(v.emptyDir))"
+      message: "SuiFleet-delegated pods may only use configMap and emptyDir volumes"
+    - expression: >-
+        variables.containers.all(c,
+          (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef)))
+          && (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef))))
+      message: "SuiFleet-delegated pods must not reference Secrets"
+    - expression: "variables.containers.all(c, c.image.matches('@sha256:[0-9a-f]{64}$'))"
+      message: "SuiFleet-delegated pods must use images pinned by @sha256 digest"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: suifleet-publisher-pods
+spec:
+  policyName: suifleet-publisher-pods
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: suifleet-apps

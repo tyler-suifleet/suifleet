@@ -7,15 +7,22 @@ administrator credential, mints a short-lived ServiceAccount token, writes a
 narrow profile and then exercises scripts/suifleet_k8s_apply.py with ONLY that
 ServiceAccount credential:
 
-- RBAC: the publisher can manage Deployments/ConfigMaps/Services in its own
-  namespace and nothing else (Secrets, Pods, exec, RBAC, quotas, namespaces,
-  nodes, other namespaces, cluster-scoped objects).
-- Pod Security Admission rejects a privileged pod even when the helper is
-  bypassed with the same credential.
+- RBAC: the publisher can manage Deployments/ConfigMaps in its own namespace
+  and nothing else (Services/networking, Secrets, Pods, exec, RBAC, quotas,
+  namespaces, nodes, other namespaces, cluster-scoped objects).
+- Pod Security Admission rejects a privileged pod, and the administrator's
+  ValidatingAdmissionPolicy rejects Secret references, non-default
+  ServiceAccounts, token automount, pull Secrets and unpinned images, even
+  when the helper is bypassed with the same credential.
 - Profile/credential hygiene and offline bundle rejection.
-- Apply, rollout readiness, served content, update, prune and rollback.
+- Apply, ownership-checked readiness (including ConfigMap-only bundles and
+  foreign or stale objects), content served through an administrator-owned
+  Service, update, prune and rollback.
 - No adoption of pre-existing objects and no overriding of fields owned by
   another field manager (two controllers do not fight).
+- Races injected between the helper's ownership check and its write (through
+  a kubectl wrapper): a competing creation, a replacement and a relabel are
+  not mutated, and pruning leaves relabelled or replaced objects alone.
 - Foreground run mode re-creates a deleted object, exits on SIGTERM and leaves
   the workload running.
 - Optionally (--supervisor) the real SuiFleet supervisor deploys, fails
@@ -121,7 +128,7 @@ class Cluster:
             print(f"WARNING: container {self.name} (label io.suifleet.test=sf305) was not removed; remove it manually", flush=True)
 
 
-def write_profile(cluster, profile_root, name, token, insecure=False):
+def write_profile(cluster, profile_root, name, token, insecure=False, kubectl=None):
     view = json.loads(cluster.admin("config", "view", "--raw", "--minify", "-o", "json").stdout)
     server = view["clusters"][0]["cluster"]["server"]
     cluster_entry = {"server": server}
@@ -140,9 +147,48 @@ def write_profile(cluster, profile_root, name, token, insecure=False):
     path.chmod(0o600)
     profile = directory / "profile.json"
     profile.write_text(json.dumps({"version": 1, "namespace": NAMESPACE, "kubeconfig": "kubeconfig",
-                                   "kubectl": [str(cluster.kubectl)]}))
+                                   "kubectl": [str(kubectl or cluster.kubectl)]}))
     profile.chmod(0o644)
     return directory
+
+
+RACE_WRAPPER = """#!{python}
+# Test-only kubectl wrapper: runs the queued administrator actions immediately
+# before the first matching helper kubectl call, then forwards to kubectl.
+import json, os, subprocess, sys
+hook, real = {hook!r}, {real!r}
+args = sys.argv[1:]
+try:
+    with open(hook) as handle:
+        queued = json.load(handle)
+except FileNotFoundError:
+    queued = None
+if queued and all(token in args for token in queued["match"]):
+    os.unlink(hook)
+    for command in queued["commands"]:
+        subprocess.run(command, check=True, capture_output=True, timeout=120)
+    with open(hook + ".fired", "w") as handle:
+        handle.write(" ".join(args))
+os.execv(real, [real] + args)
+"""
+
+
+class Race:
+    """Queue administrator actions to run inside the helper's read-check-write window."""
+
+    def __init__(self, cluster, work):
+        self.cluster, self.hook = cluster, work / "race-hook.json"
+        self.wrapper = work / "race-kubectl"
+        self.wrapper.write_text(RACE_WRAPPER.format(python=sys.executable, hook=str(self.hook), real=str(cluster.kubectl)))
+        self.wrapper.chmod(0o700)
+
+    def arm(self, match, *commands):
+        admin = [str(self.cluster.kubectl), "--kubeconfig", str(self.cluster.admin_config), "-n", NAMESPACE]
+        Path(str(self.hook) + ".fired").unlink(missing_ok=True)
+        self.hook.write_text(json.dumps({"match": list(match), "commands": [admin + list(c) for c in commands]}))
+
+    def fired(self):
+        return Path(str(self.hook) + ".fired").exists() and not self.hook.exists()
 
 
 def helper(command, profile_root, bundle=None, profile="edge", extra=(), component=COMPONENT, version="1.0.0"):
@@ -188,13 +234,21 @@ def scenario(cluster, work, supervisor):
     profiles = work / "profiles"
     profiles.mkdir(mode=0o700)
     cluster.admin("apply", "-f", str(SETUP))
+    # Networking is administrator-owned: the admin, not SuiFleet, exposes the workload.
+    cluster.admin("apply", "-f", "-", stdin=json.dumps({
+        "apiVersion": "v1", "kind": "Service", "metadata": {"name": "web", "namespace": NAMESPACE},
+        "spec": {"selector": {"app": "web"}, "ports": [{"name": "http", "port": 80, "targetPort": "http"}]}}))
     token = cluster.admin("create", "token", ACCOUNT, "-n", NAMESPACE, "--duration=1h").stdout.strip()
     edge = write_profile(cluster, profiles, "edge", token)
     write_profile(cluster, profiles, "insecure", token, insecure=True)
+    race = Race(cluster, work)
+    write_profile(cluster, profiles, "race", token, kubectl=race.wrapper)
 
     # RBAC: narrow namespaced Role, no cluster-admin shortcut.
-    allowed = [("patch", "deployments.apps"), ("create", "configmaps"), ("delete", "services"), ("list", "deployments.apps")]
-    denied = [("get", "secrets"), ("create", "pods"), ("create", "pods/exec"), ("get", "pods/log"),
+    allowed = [("patch", "deployments.apps"), ("create", "configmaps"), ("delete", "configmaps"), ("list", "deployments.apps")]
+    denied = [("create", "services"), ("patch", "services"), ("delete", "services"),
+              ("create", "ingresses.networking.k8s.io"), ("create", "networkpolicies.networking.k8s.io"),
+              ("get", "secrets"), ("create", "pods"), ("create", "pods/exec"), ("get", "pods/log"),
               ("create", "roles.rbac.authorization.k8s.io"), ("create", "rolebindings.rbac.authorization.k8s.io"),
               ("patch", "resourcequotas"), ("patch", "limitranges"), ("create", "serviceaccounts/token"),
               ("patch", "serviceaccounts"), ("create", "daemonsets.apps"), ("create", "persistentvolumeclaims")]
@@ -222,6 +276,7 @@ def scenario(cluster, work, supervisor):
     container = pod["spec"]["containers"][0]
     container.pop("volumeMounts")
     container["securityContext"] = {"privileged": True}
+    pod["spec"]["automountServiceAccountToken"] = False  # passes the admission policy; PSA must still reject
     bypass = cluster.publisher("apply", "--server-side", "--field-manager=bypass-test", "-f", "-", stdin=json.dumps(privileged), ok=False)
     check("PSA warns on a privileged pod template applied with the publisher credential",
           bypass.returncode == 0 and "would violate PodSecurity" in bypass.stderr, bypass.stderr[-500:])
@@ -234,6 +289,32 @@ def scenario(cluster, work, supervisor):
     check("PSA admitted no privileged pod", json.loads(pods)["items"] == [])
     cluster.publisher("delete", "deployment", "bypass")
 
+    # The administrator's admission policy enforces the credential-level
+    # restrictions that PSA does not, also when the helper is bypassed.
+    def bypass_variant(mutate):
+        item = json.loads(BUNDLE.read_text())["resources"][1]
+        item["metadata"] = {"name": "policy-bypass", "namespace": NAMESPACE}
+        item["spec"]["template"]["spec"]["automountServiceAccountToken"] = False
+        mutate(item["spec"]["template"]["spec"])
+        return cluster.publisher("apply", "--server-side", "--field-manager=bypass-test", "-f", "-",
+                                 stdin=json.dumps(item), ok=False)
+    first = lambda spec: spec["containers"][0]
+    cases = {
+        "a Secret env reference": lambda spec: first(spec).update(env=[{"name": "T", "valueFrom": {"secretKeyRef": {"name": "any", "key": "k"}}}]),
+        "a Secret envFrom reference": lambda spec: first(spec).update(envFrom=[{"secretRef": {"name": "any"}}]),
+        "a Secret volume": lambda spec: spec["volumes"].append({"name": "s", "secret": {"secretName": "any"}}),
+        "a non-default ServiceAccount": lambda spec: spec.update(serviceAccountName=ACCOUNT),
+        "ServiceAccount token automount": lambda spec: spec.update(automountServiceAccountToken=True),
+        "imagePullSecrets": lambda spec: spec.update(imagePullSecrets=[{"name": "any"}]),
+        "an unpinned image": lambda spec: first(spec).update(image="docker.io/library/busybox:latest"),
+    }
+    for name, mutate in cases.items():
+        result = bypass_variant(mutate)
+        check(f"admission policy denies {name} applied directly with the publisher credential",
+              result.returncode != 0 and "ValidatingAdmissionPolicy" in result.stderr, result.stderr[-500:])
+    check("admission policy admitted no bypass Deployment",
+          cluster.admin("get", "deployment", "policy-bypass", "-n", NAMESPACE, ok=False).returncode != 0)
+
     # Profile and credential hygiene.
     insecure = helper("apply", profiles, BUNDLE, profile="insecure")
     check("helper refuses a kubeconfig without TLS verification", insecure.returncode == 2 and "verify TLS" in insecure.stderr, insecure.stderr)
@@ -242,7 +323,7 @@ def scenario(cluster, work, supervisor):
     check("helper refuses a group/other-readable kubeconfig", loose.returncode == 2 and "0600" in loose.stderr, loose.stderr)
     (edge / "kubeconfig").chmod(0o600)
     check("insecure/loose profile attempts created nothing",
-          cluster.admin("get", "deployments,configmaps,services", "-n", NAMESPACE, "-l", f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip() == "")
+          cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l", f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip() == "")
 
     # Offline validation before any cluster contact.
     bad = json.loads(BUNDLE.read_text())
@@ -262,12 +343,42 @@ def scenario(cluster, work, supervisor):
           labels["metadata"]["labels"].get("app.kubernetes.io/managed-by") == "suifleet"
           and labels["metadata"]["labels"].get("suifleet.io/component") == COMPONENT
           and labels["metadata"]["annotations"].get("suifleet.io/version") == "1.0.0")
-    managers = {entry["manager"] for entry in labels["metadata"]["managedFields"] if entry.get("operation") == "Apply"}
+    entries = labels["metadata"]["managedFields"]
+    managers = {entry["manager"] for entry in entries if entry.get("operation") == "Apply"}
     check("server-side apply uses the single suifleet field manager", managers == {"suifleet"}, str(managers))
+    check("create-only ownership was transferred to server-side apply",
+          not any(e["manager"] == "suifleet" and e.get("operation") == "Update" and not e.get("subresource") for e in entries),
+          str([(e["manager"], e.get("operation")) for e in entries]))
     check("pods do not mount a ServiceAccount token",
           labels["spec"]["template"]["spec"].get("automountServiceAccountToken") is False)
     wait("v1 content", lambda: "SuiFleet v1" in served(cluster), timeout=60)
-    check("service serves v1 content", True)
+    check("administrator-owned service serves v1 content", True)
+
+    # Readiness checks ownership, digest and content for every kind, including
+    # ConfigMap-only bundles (no Deployment rollout to wait for).
+    config_only = work / "config-only.json"
+    config_only.write_text(json.dumps({"version": 1, "resources": [
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "settings"}, "data": {"mode": "v1"}}]}))
+    result = helper("ready", profiles, config_only, component="settings-app")
+    check("ConfigMap-only readiness fails while the object is missing", result.returncode == 1 and "missing" in result.stderr, result.stderr)
+    cluster.admin("create", "configmap", "settings", "-n", NAMESPACE, "--from-literal=mode=v1")
+    result = helper("ready", profiles, config_only, component="settings-app")
+    check("readiness rejects a pre-existing foreign ConfigMap even with matching data",
+          result.returncode == 1 and "does not adopt" in result.stderr, result.stderr)
+    cluster.admin("delete", "configmap", "settings", "-n", NAMESPACE)
+    check("ConfigMap-only bundle applies", helper("apply", profiles, config_only, component="settings-app").returncode == 0)
+    result = helper("ready", profiles, config_only, component="settings-app")
+    check("ConfigMap-only readiness succeeds once applied from this bundle", result.returncode == 0, result.stderr)
+    result = helper("ready", profiles, config_only, component="web-app")
+    check("readiness rejects an object owned by another component", result.returncode == 1 and "component 'settings-app'" in result.stderr, result.stderr)
+    newer = work / "config-only-v2.json"
+    newer.write_text(json.dumps({"version": 1, "resources": [
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "settings"}, "data": {"mode": "v2"}}]}))
+    result = helper("ready", profiles, newer, component="settings-app", version="2.0.0")
+    check("readiness rejects an object from a stale bundle digest", result.returncode == 1 and "not yet applied" in result.stderr, result.stderr)
+    check("remove deletes the ConfigMap-only component",
+          helper("remove", profiles, extra=("--component", "settings-app")).returncode == 0
+          and cluster.admin("get", "configmap", "settings", "-n", NAMESPACE, ok=False).returncode != 0)
 
     # Objects in another namespace are never touched (namespaced credential).
     cluster.admin("create", "configmap", "decoy", "-n", "default", "--from-literal=k=v")
@@ -295,12 +406,63 @@ def scenario(cluster, work, supervisor):
     result = helper("apply", profiles, v1)
     check("apply succeeds after the other manager relinquishes the field", result.returncode == 0, result.stderr)
 
-    # Update with an extra object, then roll back and prune it.
+    def labels_of(name):
+        item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
+        return item["metadata"].get("labels") or {}, item.get("data") or {}
+
+    def restore():
+        cluster.admin("delete", "configmap", "web-content", "-n", NAMESPACE, "--ignore-not-found")
+        result = helper("apply", profiles, v1)
+        check("apply restores the owned object after the race", result.returncode == 0, result.stderr)
+
+    # Race: a competing creation between the read (absent) and the create.
+    racing = variant(work, "race-create", "hello from SuiFleet v1", extra_configmap="race-new")
+    race.arm(["create", "--field-manager=suifleet"], ["create", "configmap", "race-new", "--from-literal=k=customer"])
+    result = helper("apply", profiles, racing, profile="race")
+    found, data = labels_of("race-new")
+    check("a competing creation after the ownership check is not adopted",
+          race.fired() and result.returncode == 3 and "does not adopt" in result.stderr
+          and "app.kubernetes.io/managed-by" not in found and data == {"k": "customer"}, result.stderr)
+    cluster.admin("delete", "configmap", "race-new", "-n", NAMESPACE)
+
+    # Race: the owned object is replaced by a customer object after the check.
+    race.arm(["apply", "--server-side"], ["delete", "configmap", "web-content", "--wait=true"],
+             ["create", "configmap", "web-content", "--from-literal=index.html=customer replacement"])
+    result = helper("apply", profiles, variant(work, "race-replace", "hello from SuiFleet race"), profile="race")
+    found, data = labels_of("web-content")
+    check("a replacement after the ownership check is not mutated",
+          race.fired() and result.returncode == 3 and "does not adopt" in result.stderr
+          and "app.kubernetes.io/managed-by" not in found and data == {"index.html": "customer replacement"}, result.stderr)
+    restore()
+
+    # Race: the customer relabels (takes back) the object after the check.
+    race.arm(["apply", "--server-side"], ["label", "configmap", "web-content", "app.kubernetes.io/managed-by-", "suifleet.io/component-"])
+    result = helper("apply", profiles, variant(work, "race-relabel", "hello from SuiFleet race"), profile="race")
+    found, data = labels_of("web-content")
+    check("a relabel after the ownership check is not mutated",
+          race.fired() and result.returncode == 3 and "does not adopt" in result.stderr
+          and "app.kubernetes.io/managed-by" not in found and "race" not in data["index.html"], result.stderr)
+    restore()
+
+    # Race: a prune candidate is relabelled, then replaced, between list and delete.
     v2 = variant(work, "v2", "hello from SuiFleet v2", extra_configmap="v2-extra")
+    for name, commands, expected in (
+            ("relabelled", [["label", "configmap", "v2-extra", "app.kubernetes.io/managed-by=customer", "--overwrite"]], {"k": "hello from SuiFleet v2"}),
+            ("replaced", [["delete", "configmap", "v2-extra", "--wait=true"], ["create", "configmap", "v2-extra", "--from-literal=k=customer"]], {"k": "customer"})):
+        check(f"apply v2 before the {name}-prune race", helper("apply", profiles, v2, version="2.0.0").returncode == 0)
+        race.arm(["delete", "--raw"], *commands)
+        result = helper("apply", profiles, v1, profile="race")
+        found, data = labels_of("v2-extra")
+        check(f"pruning leaves a {name} object alone",
+              race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
+              and found.get("app.kubernetes.io/managed-by") != "suifleet" and data == expected, result.stderr)
+        cluster.admin("delete", "configmap", "v2-extra", "-n", NAMESPACE)
+
+    # Update with an extra object, then roll back and prune it.
     check("helper applies v2", helper("apply", profiles, v2, version="2.0.0").returncode == 0)
     wait_ready(profiles, v2, "2.0.0")
     wait("v2 content", lambda: "SuiFleet v2" in served(cluster), timeout=90)
-    check("service serves v2 content", True)
+    check("administrator-owned service serves v2 content", True)
     result = helper("apply", profiles, v1)
     check("rollback to v1 prunes the v2-only object",
           result.returncode == 0 and "v2-extra" in result.stderr
@@ -315,9 +477,9 @@ def scenario(cluster, work, supervisor):
                                 "--bundle", str(v1), "--interval", "1"], env=env, stderr=subprocess.PIPE, text=True)
     try:
         time.sleep(3)
-        cluster.admin("delete", "service", "web", "-n", NAMESPACE)
-        wait("run mode re-creates the deleted Service",
-             lambda: cluster.admin("get", "service", "web", "-n", NAMESPACE, ok=False).returncode == 0, timeout=30)
+        cluster.admin("delete", "configmap", "web-content", "-n", NAMESPACE)
+        wait("run mode re-creates the deleted ConfigMap",
+             lambda: cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, ok=False).returncode == 0, timeout=30)
         check("run mode re-creates a deleted owned object", True)
     finally:
         process.send_signal(signal.SIGTERM)
@@ -328,7 +490,7 @@ def scenario(cluster, work, supervisor):
 
     # Removal deletes only this component's objects in its namespace.
     result = helper("remove", profiles, extra=("--component", COMPONENT))
-    remaining = cluster.admin("get", "deployments,configmaps,services", "-n", NAMESPACE, "-l",
+    remaining = cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
                               f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip()
     check("remove deletes the component's objects", result.returncode == 0 and remaining == "", result.stderr + remaining)
     check("remove leaves the customer's own object", cluster.admin("get", "configmap", "legacy", "-n", NAMESPACE, ok=False).returncode == 0)
@@ -353,7 +515,7 @@ def scenario(cluster, work, supervisor):
         check("service serves v1 content after supervisor rollback", True)
 
         result = helper("remove", profiles, extra=("--component", "app"))
-        remaining = cluster.admin("get", "deployments,configmaps,services", "-n", NAMESPACE, "-l",
+        remaining = cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l",
                                   "app.kubernetes.io/managed-by=suifleet", "-o", "name").stdout.strip()
         check("remove deletes the supervised component's objects", result.returncode == 0 and remaining == "", remaining)
 
