@@ -62,7 +62,7 @@ function audit() {
     const screenshots = process.env.SCREENSHOT_DIR;
     // Every width: no horizontal overflow, controls inside the viewport and WCAG AA text contrast.
     async function layout(name) {
-      for (const width of [375, 768, 1280]) {
+      for (const width of [320, 390, 768, 1280]) {
         await page.setViewportSize({ width, height: 900 });
         const result = await page.evaluate(audit);
         assert.deepEqual(result.overflow, [], `${name} ${width}px overflow`);
@@ -82,6 +82,19 @@ function audit() {
     await page.waitForFunction(() => window.acceptance.wallets().some((name) => name.includes("Slush")));
     if (manifest.network === "testnet") await page.waitForFunction(() => window.acceptance.wallets().includes("Sign in with Google"));
     else assert.equal(await page.evaluate(() => window.acceptance.wallets().includes("Sign in with Google")), false);
+
+    const connect = page.getByRole("button", { name: "Connect Wallet", exact: true });
+    const readiness = page.getByRole("region", { name: "Pilot readiness", exact: true });
+    const readinessSummary = page.getByText("Before your first device: capacity, fees and budgets", { exact: true });
+    await connect.waitFor();
+    for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 640 }, { width: 1280, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      assert.equal(await readiness.isVisible(), false, "Budget details start collapsed");
+      const box = await connect.boundingBox();
+      assert.ok(box && box.y >= 0 && box.y + box.height <= viewport.height, `Connect Wallet is in the first ${viewport.width}px viewport`);
+      if (screenshots) await page.screenshot({ path: path.join(screenshots, `onboarding-${manifest.network}-${cold ? "cold-" : ""}first-viewport-${viewport.width}.png`) });
+    }
 
     if (cold) {
       assert.equal(await page.evaluate(() => window.acceptance.wallets().includes("Sign in with Google")), false);
@@ -133,23 +146,28 @@ function audit() {
     await page.getByText("You hold this fleet’s keys", { exact: true }).waitFor();
     await layout("disconnected");
 
-    // Keyboard: public guides and readiness links precede progress navigation; every link has visible focus.
-    for (const [name, slug] of [["Install the device client", "install"], ["Enrollment guide", "enrollment"], ["Publish and deploy components", "components"]]) {
-      await page.keyboard.press("Tab");
-      assert.equal(await page.evaluate(() => document.activeElement?.textContent), name);
-      assert.equal(await page.evaluate(() => document.activeElement?.href), `https://docs.suifleet.io/${slug}/`);
-      assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
-    }
-    for (const [name, href] of [["Check device capacity →", "/entitlements"], ["Check account approval fees →", "#funding"], ["Check device operating budget →", "/budget"]]) {
+    // The funding section keeps capacity and budget details reachable by keyboard.
+    await readinessSummary.focus();
+    assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
+    await page.keyboard.press("Enter");
+    await readiness.getByText("The storage budget funds files and logs separately.", { exact: false }).waitFor();
+    for (const [name, href] of [["Check device capacity →", "/entitlements"], ["Check account approval fees →", "#step-funding"], ["Check device operating budget →", "/budget"]]) {
       await page.keyboard.press("Tab");
       assert.equal(await page.evaluate(() => document.activeElement?.textContent), name);
       assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), href);
       assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
       assert.ok(await page.evaluate(() => parseFloat(getComputedStyle(document.activeElement).outlineWidth) > 0), `${name} has a visible focus outline`);
     }
-    await page.keyboard.press("Tab");
-    assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Sign in");
-    assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
+    assert.equal(await page.locator("#step-funding").count(), 1);
+    await layout("readiness-expanded");
+    await readinessSummary.focus();
+    await page.keyboard.press("Space");
+    assert.equal(await readiness.isVisible(), false);
+
+    for (const [name, slug] of [["Install the device client", "install"], ["Enrollment guide", "enrollment"], ["Publish and deploy components", "components"]]) {
+      const guide = page.getByRole("link", { name, exact: true });
+      assert.equal(await guide.getAttribute("href"), `https://docs.suifleet.io/${slug}/`);
+    }
 
     await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
     await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
@@ -163,7 +181,10 @@ function audit() {
     const technical = page.getByText("Technical details", { exact: true });
     await technical.click();
     await page.getByText("0 SUI (0 MIST)", { exact: true }).waitFor();
+    await readinessSummary.click();
+    await readiness.getByText("This account needs SUI for the network fee when you register or deploy.", { exact: true }).waitFor();
     await layout("zero-balance");
+    await readinessSummary.click();
 
     // Ownership transfer is progressive disclosure with its warnings intact, and opens by keyboard.
     const handover = page.getByRole("link", { name: "Open fleet handover", exact: true });
@@ -288,7 +309,7 @@ function audit() {
     await progress.getByText("Not connected", { exact: true }).waitFor();
     assert.deepEqual(externalSlushRequests, [], "No external Slush metadata requests");
     assert.deepEqual(errors, []);
-    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard (including past the pending timeout), insufficient-budget race message, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
+    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard (including past the pending timeout), insufficient-budget race message, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 320/390/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));

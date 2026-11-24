@@ -12,9 +12,8 @@ export function PilotReadiness({ connected, capacity, balance, balanceFailed, de
   budgetFailed: boolean;
 }) {
   const link = "mt-2 inline-block font-medium text-blue-700 underline underline-offset-2";
-  return <section aria-label="Pilot readiness" className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-3">
-    <div><h2 className="text-lg font-semibold">Before your first device</h2>
-      <p className="text-slate-600">Check capacity before adding funds. These are three separate requirements; paying one does not complete the others.</p></div>
+  return <section aria-label="Pilot readiness" className="space-y-3">
+    <p className="text-slate-600">Check capacity before adding funds. Device capacity, account fees, device reporting funds and storage funds are separate.</p>
     <div className="grid gap-3 md:grid-cols-3">
       <article className="rounded-lg border border-slate-200 bg-white p-4"><h3 className="font-semibold">1. Device capacity</h3>
         <p>{!connected ? "Connect and choose a fleet to check your organization’s device limit." : !capacity ? "Check the device limit enabled for this workspace." : `${capacity.used} of ${capacity.limit} device places used.`}</p>
@@ -24,7 +23,7 @@ export function PilotReadiness({ connected, capacity, balance, balanceFailed, de
       </article>
       <article className="rounded-lg border border-slate-200 bg-white p-4"><h3 className="font-semibold">2. Account approval fees</h3>
         <p>{!connected ? "Connect to check the account used to approve changes." : balanceFailed ? "Account balance could not be verified. Refresh before sending funds." : balance === undefined ? "Checking account balance…" : BigInt(balance) === BigInt(0) ? "This account needs SUI for the network fee when you register or deploy." : `${displaySui(balance)} available for actions you approve.`}</p>
-        <a className={link} href="#funding">Check account approval fees →</a>
+        <a className={link} href="#step-funding">Check account approval fees →</a>
         <p className="mt-1 text-xs text-slate-600">The wallet shows the actual fee before approval. Testnet uses free test tokens.</p>
       </article>
       <article className="rounded-lg border border-slate-200 bg-white p-4"><h3 className="font-semibold">3. Device operating budget</h3>
