@@ -66,7 +66,7 @@
         "Later deposits use the Deposit button. Open Device balances, spending limits and withdrawals to cap or withdraw per-device funds.",
         "Optionally click Create storage budget under Storage funding to prepay Walrus storage for uploads and log archives."
       ],
-      "result": "A Confirmed message and an updated balance show that the deposit succeeded. You can open the confirmation to view its reference.",
+      "result": "The Confirmed message shows the transaction reference. The updated balance under Keep devices reporting includes your deposit.",
       "docs": [
         {
           "label": "Device and storage budgets",
