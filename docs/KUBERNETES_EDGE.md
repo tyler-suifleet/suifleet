@@ -63,8 +63,12 @@ How the helper keeps two controllers from fighting:
    delegated namespace and are absent from the current bundle. It deletes each
    one with the listed UID and resourceVersion as delete preconditions. If an
    object was relabelled or replaced after the listing, the delete fails; the
-   helper re-reads it and leaves it alone unless it is still this component's
-   object. Updates and rollbacks remove the other version's extra objects.
+   helper re-reads it and retries with a refreshed resourceVersion only while
+   it is the same instance (the listed UID) and still this component's
+   object. A replacement is left alone, even one that carries this
+   component's labels. An object that is already terminating (for example,
+   held by a finalizer) is not deleted again. Updates and rollbacks remove the
+   other version's extra objects.
    Customer objects, other components and other namespaces are never deleted.
 4. **Autoscalers.** If a `HorizontalPodAutoscaler` (created by the administrator)
    scales a SuiFleet Deployment, omit `spec.replicas` from the bundle. Otherwise
@@ -77,14 +81,15 @@ How the helper keeps two controllers from fighting:
    time, in bundle order. If a later write fails (a conflict, a rejection or a
    cluster error), earlier objects may already carry the new bundle, and
    nothing is pruned in that run. `ready` keeps failing until every object
-   carries the new bundle's digest, so the supervisor does not see a partial
-   apply as ready. A later successful apply converges, and a supervisor
-   rollback re-applies the previous bundle.
+   carries the new bundle's digest and pruning has converged, so the
+   supervisor does not see a partial apply as ready. A later successful apply
+   converges, and a supervisor rollback re-applies the previous bundle.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. To retire the workload, deploy a
 version whose bundle has an empty `resources` list, or have the operator run
-`suifleet_k8s_apply.py remove --profile NAME --component NAME`.
+`suifleet_k8s_apply.py remove --profile NAME --component NAME`. A retirement
+bundle is ready only once no object labelled for the component remains.
 
 ## Security model
 
@@ -100,6 +105,10 @@ version whose bundle has an empty `resources` list, or have the operator run
   - It skips TLS verification or lacks a pinned certificate authority.
   - It uses `exec`/`auth-provider` plugins, impersonation or basic
     authentication.
+  - It does not use exactly one credential method: a token (`token` or
+    `tokenFile`, not both) or a complete client certificate and key pair
+    (inline data or file, each set once). Mixed and incomplete credentials
+    are rejected.
 
   `KUBECONFIG`, contexts and home-directory credentials are never inherited,
   and kubectl runs with a private temporary cache.
@@ -214,7 +223,11 @@ owned by this component and carries *this* bundle's digest, version and
 labels. ConfigMaps must also hold the bundle's data, and Deployments must be
 observed, updated and available. A pre-existing foreign object with the right
 name, an object of another component and an object from a stale bundle are
-all not ready, also for ConfigMap-only bundles. A replacement that never becomes ready
+all not ready, also for ConfigMap-only bundles. `ready` also requires prune
+convergence: while any other object labelled for this component remains in
+the namespace, including one still terminating, it reports that object as not
+yet pruned. This applies to updates, rollbacks and empty retirement bundles.
+A replacement that never becomes ready
 fails, and the supervisor restores the previous version. That version's `run`
 re-applies its bundle and prunes the failed version's extra objects.
 
@@ -288,19 +301,28 @@ It checks the following:
   ownership check and its write. A competing creation, a replacement by a
   customer object and a relabel are each refused (exit code 3) and left
   unchanged. Pruning leaves a prune candidate alone when it is relabelled or
-  replaced between the listing and the delete.
+  replaced between the listing and the delete, including by a replacement
+  that carries this component's labels. Readiness then reports the surviving
+  object as not yet pruned.
+- A finalizer-delayed prune keeps `ready` failing until the object is gone,
+  and re-applying meanwhile does not re-delete it. An empty retirement bundle
+  is not ready before its apply and is ready once pruning has converged.
 - An update followed by a rollback prunes the extra object.
 - Run mode re-creates a deleted object, stops on SIGTERM and leaves the
   workload running.
 - With `--supervisor`, the real SuiFleet supervisor deploys a bundle, fails
-  readiness on a broken image and rolls back with pruning. This is an ignored
-  Rust test, `kubernetes_publisher_real_cluster_rollout_and_rollback`.
+  readiness on a broken image and rolls back with pruning. It then retires the
+  component with an empty bundle while a finalizer holds one deleted object,
+  and the deployment becomes ready only after the hold is released. This is
+  an ignored Rust test,
+  `kubernetes_publisher_real_cluster_rollout_rollback_and_retirement`.
 - Removal deletes only this component's objects. A decoy object in another
   namespace is never touched.
 
-Recorded run (2026-11-24, SF-305, after the review repair): `--supervisor`
-passed all 83 checks in 156 s. It ran on x86-64 WSL2 with Docker,
-k3s v1.31.4+k3s1 and Rust 1.94.0. The offline unit tests passed 29 of 29. This run is a point-in-time record,
+Recorded run (2026-11-24, SF-305, after the second review repair):
+`--supervisor` passed all 94 checks in 188 s. It ran on x86-64 WSL2 with
+Docker, k3s v1.31.4+k3s1 and Rust 1.94.0. The offline unit tests passed 35 of
+35. This run is a point-in-time record,
 not a substitute for rerunning the tests after changes.
 
 The test node uses absolute 512 MiB kubelet eviction thresholds, which relaxes
