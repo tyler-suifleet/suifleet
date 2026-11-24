@@ -1,0 +1,85 @@
+# SF-305: one-time, customer-administrator-owned setup for the optional
+# SuiFleet Kubernetes workload publisher (docs/KUBERNETES_EDGE.md).
+#
+# Apply this with the CLUSTER ADMINISTRATOR's own credentials. SuiFleet never
+# receives these credentials or cluster-admin. Rename the namespace and adjust
+# the quota for the workloads you delegate. The administrator, not SuiFleet,
+# owns this namespace, its Pod Security level, its quota and the Role below.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: suifleet-apps
+  labels:
+    # The authoritative pod restriction: privileged, host-namespace, hostPath,
+    # added-capability and root pods are rejected by the API server even if a
+    # bundle bypasses the helper's own validation.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: suifleet-publisher
+  namespace: suifleet-apps
+# The publisher's own credential is not mounted into any pod.
+automountServiceAccountToken: false
+---
+# Namespaced Role: only the three kinds the helper accepts. No Secrets, Pods,
+# exec/attach/port-forward, RBAC, quotas, namespaces or cluster-scoped objects.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: suifleet-publisher
+  namespace: suifleet-apps
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: suifleet-publisher
+  namespace: suifleet-apps
+subjects:
+  - kind: ServiceAccount
+    name: suifleet-publisher
+    namespace: suifleet-apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: suifleet-publisher
+---
+# Administrator-owned bounds on everything SuiFleet may schedule here.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: suifleet-publisher
+  namespace: suifleet-apps
+spec:
+  hard:
+    pods: "10"
+    requests.cpu: "1"
+    requests.memory: 512Mi
+    limits.cpu: "2"
+    limits.memory: 1Gi
+    services: "5"
+    services.nodeports: "0"
+    services.loadbalancers: "0"
+    configmaps: "20"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: suifleet-publisher
+  namespace: suifleet-apps
+spec:
+  limits:
+    - type: Container
+      default: {cpu: 200m, memory: 64Mi}
+      defaultRequest: {cpu: 50m, memory: 32Mi}
