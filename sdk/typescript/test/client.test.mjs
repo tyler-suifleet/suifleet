@@ -303,3 +303,48 @@ test('OutboundBuffer snapshots payloads at enqueue', async () => {
     [['publish', { n: 1, tags: ['a'] }], ['publish', { n: 1, tags: ['a'] }], ['stream_append', { n: 1, tags: ['a'] }]]);
   await server.close();
 });
+
+test('OutboundBuffer refuses an item whose frame can never be sent, leaving the queue unchanged', async () => {
+  const server = await serve(() => ok({ sequence: 0 }));
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path, component: 'svc' }));
+  buffer.append('s', 'a');
+  const bytes = buffer.pendingBytes;
+  assert.throws(() => buffer.append('s', 'x'.repeat(MAX_FRAME)), RangeError);
+  // Just under the payload bound but over the frame once the envelope is added.
+  assert.throws(() => buffer.append('s', 'x'.repeat(MAX_FRAME - 60)), RangeError);
+  assert.equal(buffer.pending, 1);
+  assert.equal(buffer.pendingBytes, bytes);
+  assert.deepEqual(await buffer.flush(), { sent: 1, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => r.payload), ['a']);
+  await server.close();
+});
+
+test('OutboundBuffer lets the caller drop a definitively rejected head and resume', async () => {
+  const server = await serve((r) => (r.payload === 'bad' ? { version: 1, ok: false, error: 'invalid' } : ok({ sequence: 0 })));
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  assert.throws(() => buffer.discardHead(), /empty/);
+  buffer.append('s', 'bad');
+  buffer.append('s', 'next');
+  const stopped = await buffer.flush({ retryDelayMs: 1 });
+  assert.equal(stopped.rejected, true);
+  assert.equal(stopped.pending, 2);
+  assert.ok(stopped.error instanceof IpcError && stopped.error.code === 'invalid');
+  assert.equal(buffer.head.payload, 'bad');
+  assert.throws(() => buffer.resolveUncertain('discard'), /no uncertain/);
+  assert.equal(buffer.discardHead().payload, 'bad');
+  assert.deepEqual(await buffer.flush(), { sent: 1, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => r.payload), ['bad', 'next']);
+  await server.close();
+});
+
+test('OutboundBuffer keeps uncertain-head discard behind resolveUncertain', async () => {
+  const server = await serve((_, socket) => { socket.destroy(); return undefined; });
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.publish('t', 'a');
+  await assert.rejects(buffer.flush(), UncertainDeliveryError);
+  assert.throws(() => buffer.discardHead(), /resolveUncertain/);
+  assert.equal(buffer.pending, 1);
+  buffer.resolveUncertain('discard');
+  assert.equal(buffer.pending, 0);
+  await server.close();
+});

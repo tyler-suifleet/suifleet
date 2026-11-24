@@ -11,7 +11,8 @@
  * - stream_append IpcError with a stream protocol code: every coded refusal is
  *   raised before the record is stored. `full` and `unavailable` are retried;
  *   permanent codes (`invalid`, `retired`, `not-found`, ...) end the flush at
- *   once with the item still queued.
+ *   once with the item still queued and `rejected: true`; the caller may drop
+ *   it with `discardHead` to resume the items behind it.
  * - stream_append IpcError `request_failed`: generic, and the daemon can return
  *   it after the record was stored (for example a failed segment cleanup), so
  *   it is treated like an `unknown` outcome below.
@@ -21,11 +22,13 @@
  *   UncertainDeliveryError. The caller decides with `resolveUncertain`.
  *
  * Payloads are snapshotted at enqueue: later changes to the caller's object do
- * not affect the queued message or the byte accounting.
+ * not affect the queued message or the byte accounting. An item whose request
+ * frame would exceed the IPC frame limit is refused at enqueue, so it can never
+ * strand the queue.
  */
 import type { Client } from './index.js';
 import type { JsonValue } from './protocol.js';
-import { IpcError, MAX_PUBLISH_PAYLOAD, TransportError } from './protocol.js';
+import { IpcError, MAX_PUBLISH_PAYLOAD, TransportError, encodeRequest } from './protocol.js';
 
 /** A queued item. Its payload is a frozen, detached copy taken at enqueue. */
 export type OutboundItem =
@@ -57,6 +60,11 @@ export interface FlushResult {
   pending: number;
   /** Last rejection of the head item when flush stopped early. */
   error?: IpcError | TransportError;
+  /**
+   * True when the daemon definitively refused the head with a permanent code:
+   * it stored nothing and resending cannot succeed. `discardHead` drops it.
+   */
+  rejected?: true;
 }
 
 export class BufferFullError extends Error {
@@ -114,17 +122,39 @@ export class OutboundBuffer {
   /** True after an `unknown` outcome until `resolveUncertain` is called. */
   get blocked(): boolean { return this.uncertain; }
 
-  /** Queue a publication. Throws BufferFullError instead of growing past the bounds. */
+  /**
+   * Queue a publication. Throws BufferFullError instead of growing past the
+   * bounds, and RangeError (queue unchanged) for a payload that can never be sent.
+   */
   publish(topic: string, payload: JsonValue): void {
     const copy = snapshot(payload);
     if (copy.bytes > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
+    encodeRequest('publish', this.client.component, topic, copy.payload);
     this.push({ item: { kind: 'publish', topic, payload: copy.payload }, bytes: copy.bytes });
   }
 
-  /** Queue a durable stream append. */
+  /** Queue a durable stream append. Throws RangeError (queue unchanged) when the frame exceeds the IPC limit. */
   append(stream: string, payload: JsonValue): void {
     const copy = snapshot(payload);
+    encodeRequest('stream_append', this.client.component, stream, copy.payload);
     this.push({ item: { kind: 'stream', stream, payload: copy.payload }, bytes: copy.bytes });
+  }
+
+  /** The item flush sends next, if any. */
+  get head(): OutboundItem | undefined { return this.entries[0]?.item; }
+
+  /**
+   * Drop the head item and return it, for example after a flush returned
+   * `rejected: true`. An uncertain head must go through `resolveUncertain`
+   * instead, so that choice stays explicit.
+   */
+  discardHead(): OutboundItem {
+    if (this.flushing) throw new Error('flush in progress');
+    if (this.uncertain) throw new Error('head delivery is uncertain; call resolveUncertain');
+    const entry = this.entries[0];
+    if (!entry) throw new Error('outbound buffer is empty');
+    this.shift();
+    return entry.item;
   }
 
   private push(entry: Entry): void {
@@ -184,7 +214,7 @@ export class OutboundBuffer {
                 this.uncertain = true;
                 throw new UncertainDeliveryError(entry.item, error);
               }
-              if (!RETRYABLE_STREAM_CODES.has(error.code)) return { sent, pending: this.entries.length, error };
+              if (!RETRYABLE_STREAM_CODES.has(error.code)) return { sent, pending: this.entries.length, error, rejected: true };
             }
             if (attempt >= maxAttempts) return { sent, pending: this.entries.length, error };
             await new Promise<void>((resolve, reject) => {
