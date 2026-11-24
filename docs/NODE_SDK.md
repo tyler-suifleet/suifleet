@@ -110,7 +110,9 @@ in order and never drops or reorders:
   `maxAttempts`: publication is all-or-nothing, so a refused one stored nothing;
 - a `stream_append` refusal with a stream code stored nothing. `full` and
   `unavailable` are retried up to `maxAttempts`; permanent codes (`invalid`,
-  `retired`, `not-found`, ...) end the flush at once;
+  `retired`, `not-found`, ...) end the flush at once with `rejected: true`;
+  the item stays queued until the caller drops it with `discardHead()`, which
+  lets the items behind it continue;
 - a `not_sent` failure is retried up to `maxAttempts`;
 - when retries run out, `flush` returns with the item still queued and the
   last error;
@@ -122,6 +124,10 @@ in order and never drops or reorders:
 Each payload is serialized and copied (frozen) when it is queued, so changing
 the caller's object afterwards changes neither the queued message nor the byte
 accounting.
+An item whose request frame would exceed the 64 KiB IPC frame limit is
+refused with `RangeError` at enqueue, leaving the queue unchanged, so no
+unsendable item can block the items behind it. `discardHead()` refuses an
+uncertain head: that choice always goes through `resolveUncertain`.
 
 The buffer does not survive the Node process. Data that must survive belongs in
 a durable stream.
