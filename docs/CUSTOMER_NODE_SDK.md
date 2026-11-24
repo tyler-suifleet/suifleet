@@ -45,7 +45,7 @@ Permitted requests return the daemon's data. Denied requests raise `IpcError` wi
 
 - `TransportError` with outcome `not_sent` means nothing reached the daemon, for example during a daemon restart; it is safe to retry, and `connectAttempts` does so automatically.
 - Outcome `unknown` means the request may have run. Do not repeat a change blindly: check status, the stream's newest sequence or the shadow version first.
-- Backpressure (`full`, a full inbox or subscription queue) is a refusal with nothing stored. `OutboundBuffer` holds a bounded number of messages in memory and resends them in order; it does not survive a process restart.
+- Backpressure (`full`, a full inbox or subscription queue) is a refusal with nothing stored. `OutboundBuffer` holds a bounded number of messages in memory and resends them in order; it does not survive a process restart. It stops instead of resending when a delivery is uncertain, including a generic `request_failed` from a stream append, which may follow a stored record.
 - Acknowledge durable messages only after processing; unacknowledged messages are delivered again, including after a daemon restart.
 - macOS is not yet tested with this package, and Windows uses a different interface.
 

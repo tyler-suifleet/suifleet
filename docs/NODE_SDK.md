@@ -61,7 +61,7 @@ const client = new Client({
 | Area | Methods (wire operation) |
 |---|---|
 | Generic | `request(operation, {component, topic, payload, signal})` |
-| Configuration and health | `configuration()` (`config`), `health(state)` |
+| Configuration and health | `configuration()` (`config`; `null` before the component has a committed configuration), `health(state)` |
 | Management | `status()`, `start()`, `stop()`, `restart()`, `logs()`; administrators: `install(id)`, `list()` |
 | Volatile and durable pub/sub ([MESSAGING.md](MESSAGING.md)) | `publish(topic, payload)`, `receive(topic)`, `subscribe(filter, qos)`, `unsubscribe(filter)`, `ack(filter, id)`, `messages(filter, options)` async iterator; administrators: `messaging()` |
 | Durable streams ([STREAMS.md](STREAMS.md)) | `streamCreate`, `streamAppend`, `streamRead`, `streamDescribe`, `streamDelete`, `streamList`; trusted exporters: `streamExportAck`, `streamExportStatus` |
@@ -80,7 +80,7 @@ precision (not reachable by the documented limits).
 
 | Error | Meaning | Safe reaction |
 |---|---|---|
-| `IpcError` (`code`, `operation`, `oldest`) | The daemon processed and refused the request. `request_failed` covers authorization, validation and lifecycle failures (details stay in daemon logs); streams/shadows return protocol codes such as `full`, `evicted`, `exists`, `not-found`, `conflict`, `quota`. | Denied/invalid requests had no handler side effects. Fix the ACL or request; for `full`/backpressure retry later. |
+| `IpcError` (`code`, `operation`, `oldest`) | The daemon processed and refused the request. `request_failed` covers authorization, validation and lifecycle failures (details stay in daemon logs); streams/shadows return protocol codes such as `full`, `evicted`, `exists`, `not-found`, `conflict`, `quota`. | Denied requests and coded stream/shadow refusals stored nothing. A generic `request_failed` from a mutation is not a guarantee: a `stream_append` can return it after the record was stored (for example when a later segment cleanup fails), so check the stream's `newest` before resending. Fix the ACL or request; for `full`/backpressure retry later. |
 | `TransportError` with `outcome: 'not_sent'` | No request byte reached the daemon (missing socket during a restart, refused connection, abort before connect). | Retrying is safe for every operation. `connectAttempts` does this automatically for ENOENT/ECONNREFUSED/EAGAIN. |
 | `TransportError` with `outcome: 'unknown'` | The request may have executed: timeout, closed connection, truncated response. An unmapped UID also sees a closed connection. | Never retry a mutation blindly. Inspect status, stream `newest`, shadow version or the deployment outcome first. |
 | `ProtocolError` (a `TransportError`, outcome `unknown`) | Unsupported response version, malformed or oversize frame. | As above; check SDK/daemon versions. |
@@ -106,13 +106,22 @@ bounded by `maxItems` (default 256) and `maxBytes` (default 1 MiB); a full
 buffer throws `BufferFullError` instead of growing or dropping. `flush()` sends
 in order and never drops or reorders:
 
-- an `IpcError` (inbox full, durable spool limit, `full` stream) or a `not_sent`
-  failure is retried up to `maxAttempts`, then `flush` returns with the item
-  still queued and the last error — the daemon's backpressure is atomic, so a
-  refused publication or append stored nothing;
-- an `unknown` outcome stops the buffer with `UncertainDeliveryError`; the
-  caller chooses `resolveUncertain('retry')` (may duplicate) or `'discard'`
-  (may lose).
+- a `publish` `IpcError` (inbox full, durable spool limit) is retried up to
+  `maxAttempts`: publication is all-or-nothing, so a refused one stored nothing;
+- a `stream_append` refusal with a stream code stored nothing. `full` and
+  `unavailable` are retried up to `maxAttempts`; permanent codes (`invalid`,
+  `retired`, `not-found`, ...) end the flush at once;
+- a `not_sent` failure is retried up to `maxAttempts`;
+- when retries run out, `flush` returns with the item still queued and the
+  last error;
+- an `unknown` outcome, or a `stream_append` `request_failed` (which may follow
+  a stored record), stops the buffer with `UncertainDeliveryError`; the caller
+  checks the destination and chooses `resolveUncertain('retry')` (may
+  duplicate) or `'discard'` (may lose).
+
+Each payload is serialized and copied (frozen) when it is queued, so changing
+the caller's object afterwards changes neither the queued message nor the byte
+accounting.
 
 The buffer does not survive the Node process. Data that must survive belongs in
 a durable stream.
@@ -147,8 +156,8 @@ reboots the platform or asserts firmware/boot health; platform tools own those.
 
 | Command | What it runs |
 |---|---|
-| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, iterator ack, buffer bounds/order/uncertain stop. |
-| `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
+| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, iterator ack, buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, `null` configuration. |
+| `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; `null` configuration before the first install handled by the sensor example; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
 
 Fake-peer unit tests establish client framing and classification only; the
 behavioral claims above come from the real-daemon suite. Not covered: macOS and
