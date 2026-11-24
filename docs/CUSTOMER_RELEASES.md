@@ -9,7 +9,7 @@ from your operator.
 |---|---|---|
 | Linux amd64 | `x86_64-unknown-linux-gnu` | `amd64` |
 | Linux arm64 | `aarch64-unknown-linux-gnu` | `arm64` |
-| Linux ARMv7 hard-float (ARM EABIhf, ARMv7-A with VFPv3-D16 or newer) | `armv7-unknown-linux-gnueabihf` | Archive only |
+| Linux ARMv7 hard-float (ARM EABIhf, ARMv7-A with VFPv3 and NEON) | `armv7-unknown-linux-gnueabihf` | Archive only |
 
 The Linux binaries require glibc 2.35 or later. Check the **userspace** ABI as
 well as the CPU. For example, an arm64 kernel can have 32-bit armhf userspace.
