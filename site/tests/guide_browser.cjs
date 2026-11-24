@@ -137,6 +137,16 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  await retryPage.close();
  console.log('PASS lazy NO_SOURCE states and successful media retry recovery');
 
+ for(const viewport of [{width:320,height:568},{width:844,height:390}]) {
+ const touchPage=await browser.newPage({viewport});
+ await touchPage.goto(origin+'/guide/',{waitUntil:'networkidle'});
+ for(const selector of ['[data-guide-prev-part]','[data-guide-forward]','[data-guide-next]','[data-guide-select]']) {
+  const bounds=await touchPage.locator(selector+':visible').first().boundingBox();
+  assert.ok(bounds&&bounds.width>=44&&bounds.height>=44,`${selector}: mobile touch target is smaller than44px`);
+ }
+ await touchPage.close();
+ }
+ console.log('PASS mobile guide44px touch controls');
  // Native captions load from the same origin on desktop and mobile. Keyboard
  // focus stays on the native player; Space must start/pause real playback.
  for(const viewport of [{width:1280,height:720},{width:390,height:844}]) {
