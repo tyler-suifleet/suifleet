@@ -300,13 +300,14 @@ def run(bin_dir, evidence_path):
             token_file.chmod(0o600)
             scrape_token = json.loads(subprocess.run([sys.executable, str(ADAPTER), '--token'], capture_output=True,
                                                      text=True, check=True).stdout)
-            # Store only a digest computed here, and check it matches the one the
-            # adapter reported for the generated token.
-            scrape_digest = hashlib.sha256(scrape_token['token'].encode()).hexdigest()
-            assert scrape_digest == scrape_token['token_sha256'], 'adapter --token digest mismatch'
             scrape_file = secrets_dir / 'scrape.token'
             scrape_file.write_text(scrape_token['token'])
             scrape_file.chmod(0o600)
+            # As an operator would: the scraper reads the private credential file,
+            # and the adapter configuration stores only the SHA-256 of that file,
+            # which must match the digest the adapter reported for the token.
+            scrape_digest = hashlib.sha256(scrape_file.read_bytes()).hexdigest()
+            assert scrape_digest == scrape_token['token_sha256'], 'adapter --token digest mismatch'
             headers_file = secrets_dir / 'otlp.headers'
             headers_file.write_text(f'Authorization: Bearer {GATEWAY_TOKEN}\n')
             headers_file.chmod(0o600)
@@ -314,7 +315,7 @@ def run(bin_dir, evidence_path):
             def adapter_config(name, **fields):
                 path = secrets_dir / name
                 path.write_text(json.dumps(fields))
-                path.chmod(0o640)
+                path.chmod(0o600)
                 return path
 
             # Disabled by default: no listener, no console request.

@@ -11,6 +11,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import threading
@@ -149,6 +150,22 @@ class Base(unittest.TestCase):
         os.chmod(path, mode)
         return str(path)
 
+    def with_mode(self, path, mode):
+        """Report `path` to the adapter as a regular file with permission bits
+        `mode`, so group/other-access checks run against the real file's
+        metadata without creating a group- or world-accessible file."""
+        real_lstat = os.lstat
+        target = os.path.abspath(path)
+
+        def fake(name, *args, **kwargs):
+            info = real_lstat(name, *args, **kwargs)
+            if os.path.abspath(name) != target:
+                return info
+            fields = list(info)
+            fields[stat.ST_MODE] = stat.S_IFREG | mode
+            return os.stat_result(fields)
+        return unittest.mock.patch.object(em.os, "lstat", side_effect=fake)
+
     def config(self, **overrides):
         raw = dict(enabled=True, evidence="simulated", device="sim-1",
                    console=dict(url="http://127.0.0.1:1441", token_file=self.token_file),
@@ -161,11 +178,11 @@ class ConfigTests(Base):
     def test_disabled_by_default(self):
         self.assertFalse(em.Config({}).enabled)
         self.assertFalse(em.Config(dict(enabled=False, otlp=dict(endpoint="ftp://x"))).enabled)
-        path = self.write("config.json", "{}", 0o640)
+        path = self.write("config.json", "{}")
         self.assertEqual(em.main(["--config", path]), 0)
 
     def test_disabled_main_opens_no_socket(self):
-        path = self.write("config.json", json.dumps(dict(enabled=False)), 0o640)
+        path = self.write("config.json", json.dumps(dict(enabled=False)))
         with unittest.mock.patch.object(em, "make_server", side_effect=AssertionError("listened")), \
                 unittest.mock.patch.object(em, "Console", side_effect=AssertionError("polled")):
             self.assertEqual(em.main(["--config", path]), 0)
@@ -210,13 +227,27 @@ class ConfigTests(Base):
                 em.Config(self.config(**overrides))
 
     def test_secret_files_are_protected(self):
-        wide = self.write("wide.token", CONSOLE_TOKEN, 0o640)
         link = self.dir / "link.token"
         link.symlink_to(self.token_file)
         wrong = self.write("wrong.token", "hunter2", 0o600)
-        for path in (wide, str(link), wrong, "relative.token"):
+        for path in (str(link), wrong, "relative.token"):
             with self.subTest(path=path), self.assertRaises(em.ConfigError):
                 em.Config(self.config(console=dict(url="http://127.0.0.1:1441", token_file=path)))
+        # Any group/other permission bit on a secret is rejected.
+        for mode in (0o640, 0o620, 0o610, 0o604, 0o602, 0o601):
+            with self.subTest(mode=oct(mode)), self.with_mode(self.token_file, mode), \
+                    self.assertRaises(em.ConfigError):
+                em.Config(self.config())
+        em.Config(self.config())  # owner-only secret is still accepted
+
+    def test_config_file_must_not_be_writable_by_others(self):
+        path = self.write("config.json", json.dumps(dict(enabled=False)))
+        with self.with_mode(path, 0o640):  # group-readable configuration is allowed
+            self.assertEqual(em.main(["--config", path]), 0)
+        for mode in (0o620, 0o602):
+            with self.subTest(mode=oct(mode)), self.with_mode(path, mode), \
+                    unittest.mock.patch("sys.stderr"):
+                self.assertEqual(em.main(["--config", path]), 2)
         for text in ("Host: evil", "NoColon", "Authorization: a\nauthorization: b", "X: a\x01"):
             headers = self.write("h", text)
             with self.subTest(text=text), self.assertRaises(em.ConfigError):
@@ -225,7 +256,7 @@ class ConfigTests(Base):
     def test_rejected_configuration_message_has_no_secret(self):
         headers = self.write("h", "Authorization: Bearer topsecretvalue\nHost: x\n")
         path = self.write("config.json", json.dumps(self.config(
-            otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers))), 0o640)
+            otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers))))
         with unittest.mock.patch("sys.stderr") as stderr:
             self.assertEqual(em.main(["--config", path]), 2)
         written = "".join(call.args[0] for call in stderr.write.call_args_list)
