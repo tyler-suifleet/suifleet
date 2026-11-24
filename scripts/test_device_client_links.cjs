@@ -9,7 +9,7 @@ const { loader, appRequire } = require('./frontend_test_utils.cjs');
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const client = loader()('lib/device-client.ts');
-const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, guideUrl, docsUrl } = client;
+const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, YOCTO_LAYER_URL, guideUrl, docsUrl } = client;
 
 // Public slugs are curated independently of source filenames. The docs Python
 // regression checks these sections against actual rendered HTML.
@@ -35,6 +35,7 @@ else process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE = previous;
 console.log(`PASS: ${urls.length} console links resolve to curated public docs; custom docs roots supported`);
 
 const guidePath = 'docs/INSTALL_DEVICE_CLIENT.md', guide = read(guidePath);
+assert.ok(guide.includes(`(${YOCTO_LAYER_URL})`), 'Yocto guide and console link to different layer repositories');
 // 3. Commands and the printed address line match the client and its installers.
 const usage = /"usage: suifleet \[([^"]+)\]"/.exec(read('suifleet-edge/src/linux_main.rs'));
 assert.ok(usage, 'daemon usage string not found');
@@ -83,7 +84,10 @@ for (const variant of ['address', 'enroll']) {
   const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
   assert.ok(hrefs.includes(guideUrl()), `${variant}: no guide link`);
   for (const section of ['yocto', 'macos', 'linux', 'debian', 'manifest']) assert.ok(hrefs.includes(guideUrl(section)), `${variant}: no ${section} link`);
-  for (const href of hrefs) docPath(href);
+  assert.equal(hrefs.filter((href) => href === YOCTO_LAYER_URL).length, 1, `${variant}: missing or duplicated Yocto layer link`);
+  for (const href of hrefs) {
+    if (href !== YOCTO_LAYER_URL) docPath(href);
+  }
   assert.ok(html.includes('Install the device client'));
   assert.ok(html.includes('Download connection settings'));
   assert.match(html, /rel="noopener noreferrer"/);

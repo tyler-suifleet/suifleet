@@ -6,8 +6,11 @@ target: suifleet
 repos:
   suifleet:
     layers:
-      suifleet-edge/meta-suifleet:
       suifleet-edge/meta-suifleet-integration:
+  meta-suifleet:
+    url: https://github.com/tyler-suifleet/meta-suifleet.git
+    branch: main
+    commit: ec0fd5b1417ed103593725827755e8003f260be7
   openembedded-core:
     url: https://git.openembedded.org/openembedded-core
     commit: 0f03c732a0a2d0506b41b1abe60b3f368b2300dc

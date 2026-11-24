@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { MANIFEST } from "@/lib/deployment-manifest";
-import { ADDRESS_FORMAT, ADDRESS_LINE, COMMANDS, PLATFORMS, guideUrl, type GuideSection } from "@/lib/device-client";
+import { ADDRESS_FORMAT, ADDRESS_LINE, COMMANDS, PLATFORMS, YOCTO_LAYER_URL, guideUrl, type GuideSection } from "@/lib/device-client";
 
 const LINK = "font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700";
 
@@ -40,7 +40,10 @@ export function DeviceClientHelp({ variant }: { variant: "address" | "enroll" })
     </p>
     <details><summary className="cursor-pointer font-medium">Installation options</summary>
     <ul className="mt-2 list-disc space-y-0.5 pl-5">
-      {PLATFORMS.map((platform) => <li key={platform.section}><GuideLink section={platform.section}>{platform.label}</GuideLink>: {platform.note}</li>)}
+      {PLATFORMS.map((platform) => <li key={platform.section}>
+        <GuideLink section={platform.section}>{platform.label}</GuideLink>: {platform.note}
+        {platform.section === "yocto" && <>{" · "}<a className={LINK} href={YOCTO_LAYER_URL} target="_blank" rel="noopener noreferrer">meta-suifleet repository</a></>}
+      </li>)}
     </ul></details>
     <details><summary className="cursor-pointer font-medium">Manual setup for device integrators</summary>
     <div className="mt-2 space-y-2">
