@@ -2878,9 +2878,13 @@ mod tests {
         // the pruned Deployment's Pods (foreground deletion keeps the
         // Deployment until they are gone), so readiness must keep failing
         // until the hold is released.
+        // Registered as known: the supervisor's orphan sweep kills (or reaps)
+        // any untracked direct child of this test process.
         let shell = |command: String| {
-            let status = std::process::Command::new("sh").arg("-c").arg(&command).status().unwrap();
-            assert!(status.success(), "{command}");
+            let mut child = spawn_std_tracked(std::process::Command::new("sh").arg("-c").arg(&command)).unwrap();
+            let status = child.wait();
+            forget_std_tracked(child.id());
+            assert!(status.unwrap().success(), "{command}");
         };
         shell(var("SF_K8S_HOLD"));
         let hold = Duration::from_secs(8);
