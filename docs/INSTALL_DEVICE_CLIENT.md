@@ -158,12 +158,11 @@ Follow [key isolation](KEY_ISOLATION.md) for the current signer and PKCS#11
 build requirements. The standard bundles use the current service signer
 and do not enable the optional PKCS#11 feature. For user-owned hardware keys,
 use a build with that feature and validate the operator's token integration.
-Track older-kernel signing in [SF-292](https://github.com/tyler-suifleet/suifleet/issues/818),
-non-systemd supervision in [SF-293](https://github.com/tyler-suifleet/suifleet/issues/829)
-and isolated-signer self-update in [SF-299](https://github.com/tyler-suifleet/suifleet/issues/831).
-Standalone layer publication and older Yocto LTS support are tracked in
-[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) and
-[SF-309](https://github.com/tyler-suifleet/suifleet/issues/835).
+Follow the progress of [older-kernel signing](https://github.com/tyler-suifleet/suifleet/issues/818),
+[non-systemd supervision](https://github.com/tyler-suifleet/suifleet/issues/829),
+[isolated-signer self-update](https://github.com/tyler-suifleet/suifleet/issues/831),
+[standalone layer publication](https://github.com/tyler-suifleet/suifleet/issues/820)
+and [older Yocto LTS support](https://github.com/tyler-suifleet/suifleet/issues/835).
 
 ## Find the device address
 

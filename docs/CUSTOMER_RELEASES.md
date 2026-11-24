@@ -1,5 +1,7 @@
 # Download and verify a client release
 
+## Prerequisites
+
 Get the version and reviewed commit for your fleet from your operator. Use the
 matching asset from the [GitHub Releases page](https://github.com/tyler-suifleet/suifleet/releases)
 when a protected release has been published, or obtain the same signed bundle
@@ -44,12 +46,23 @@ ARMv6, soft-float and musl are outside these release profiles.
    Substitute the correct target and confirm the manifest version and reviewed
    commit. Use only files listed in the verified manifest. Stop on a verification
    error and obtain a corrected bundle.
-5. Follow the [generic archive install](INSTALL_DEVICE_CLIENT.md#generic-linux)
-   or [Debian instructions](DEBIAN_PACKAGING.md). For APT, the separate signed
-   snapshot uses a separately authenticated OpenPGP keyring.
+
+## Expected result
+
+After verification succeeds and the manifest matches the approved version,
+commit and target, follow the
+[generic archive install](INSTALL_DEVICE_CLIENT.md#generic-linux) or
+[Debian instructions](DEBIAN_PACKAGING.md). The signed APT snapshot uses a
+separately authenticated OpenPGP keyring.
+
+## Recovery and limits
 
 Keep public trust roots root-owned. Obtain initial trust roots and their
 replacements through the same authenticated operator channel. A checksum alone
-cannot authenticate a publisher. Protected signing and actual publication
-acceptance are tracked in [SF-042](https://github.com/tyler-suifleet/suifleet/issues/62).
+cannot authenticate a publisher.
+
+## Technical reference
+
 See [release engineering](RELEASES.md) for provenance and rotation.
+Follow [protected signing and publication acceptance](https://github.com/tyler-suifleet/suifleet/issues/62)
+for current release availability.
