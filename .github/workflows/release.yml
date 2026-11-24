@@ -1,6 +1,6 @@
 # Signed, reproducible daemon releases (SF-039). Never runs for pull requests or
 # branch pushes. The build job has no secrets and a read-only token: it builds
-# the aarch64 bundle twice from the tagged commit and fails unless both builds
+# each target bundle twice from the tagged commit and fails unless both builds
 # are byte-identical. Only the sign job sees the signing key, through the
 # protected `release` environment (a human reviewer must approve it). It signs
 # release.json, verifies the bundle with the daemon's own verifier against the
@@ -26,7 +26,17 @@ jobs:
     timeout-minutes: 180
     strategy:
       matrix:
-        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+        include:
+          - target: x86_64-unknown-linux-gnu
+            platform: linux/amd64
+            deb: amd64
+          - target: aarch64-unknown-linux-gnu
+            platform: linux/arm64
+            emulation: arm64
+            deb: arm64
+          - target: armv7-unknown-linux-gnueabihf
+            platform: linux/arm/v7
+            emulation: arm
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -45,15 +55,16 @@ jobs:
       - name: Build twice and require identical bundles
         run: python3 scripts/release.py build --out dist --target "${{ matrix.target }}" --ref "$GITHUB_SHA" --image suifleet-release:ci --reproduce
 
-      - name: Enable ARM64 package test emulation
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: docker run --privileged --rm tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 --install arm64
+      - name: Enable target package and archive test emulation
+        if: matrix.emulation != ''
+        run: docker run --privileged --rm tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 --install "${{ matrix.emulation }}"
 
-      - name: Install, upgrade, remove and lint real Debian packages
-        run: |
-          arch=amd64
-          if [ "${{ matrix.target }}" = aarch64-unknown-linux-gnu ]; then arch=arm64; fi
-          python3 scripts/test_deb.py --packages dist --arch "$arch"
+      - name: Run the generic client from the release archive
+        run: bash scripts/test_release_archive.sh dist "${{ matrix.platform }}"
+
+      - name: Install, upgrade, remove and lint real Debian packages via signed APT snapshots
+        if: matrix.deb != ''
+        run: python3 scripts/test_deb.py --packages dist --arch "${{ matrix.deb }}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -86,6 +97,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -95,6 +108,11 @@ jobs:
       - name: Runner identity
         id: ids
         run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
+      - name: Require reviewed release source
+        run: |
+          git fetch --no-tags origin refs/heads/main
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
 
       - name: Sign and verify against the committed trust roots
         env:
@@ -118,6 +136,40 @@ jobs:
                 cargo run --locked --release --bin suifleet -- --verify-release "$bundle" ../release/trust.toml
               done'
 
+      - name: Prepare immutable publication assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          APT_SIGNING_FINGERPRINT: ${{ vars.APT_SIGNING_FINGERPRINT }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ] || [ -z "$APT_SIGNING_FINGERPRINT" ]; then
+            echo "::error::APT signing key and fingerprint must be configured"
+            exit 1
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils gnupg
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::unsupported release tag"
+            exit 1
+          fi
+          export GNUPGHOME
+          GNUPGHOME=$(mktemp -d)
+          trap 'gpgconf --kill all; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          mkdir dist/publication
+          snapshot="suifleet-$GITHUB_REF_NAME-apt"
+          python3 scripts/build_apt_snapshot.py --output "dist/$snapshot" \
+            --fingerprint "$APT_SIGNING_FINGERPRINT" dist/unsigned-release-*/*.deb
+          gpg --batch --export "$APT_SIGNING_FINGERPRINT" > "$GNUPGHOME/publisher.gpg"
+          gpgv --keyring "$GNUPGHOME/publisher.gpg" "dist/$snapshot/InRelease"
+          gpgv --keyring "$GNUPGHOME/publisher.gpg" "dist/$snapshot/Release.gpg" "dist/$snapshot/Release"
+          tar -C dist -czf "dist/publication/$snapshot.tar.gz" "$snapshot"
+          for bundle in dist/unsigned-release-*; do
+            target=${bundle#dist/unsigned-release-}
+            tar -C "$bundle" -czf "dist/publication/suifleet-$GITHUB_REF_NAME-$target-release.tar.gz" .
+          done
+          (cd dist/publication && sha256sum -- *.tar.gz > SHA256SUMS)
+
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -127,12 +179,22 @@ jobs:
             dist/**/provenance.json
             dist/**/release.json
 
+      - name: Require repository release immutability
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_IMMUTABILITY_READ_TOKEN }}
+        run: |
+          [ "$(gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)" = true ]
+
       - name: Publish the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            tar -C "dist/unsigned-release-$target" -czf "dist/suifleet-$GITHUB_REF_NAME-$target-release.tar.gz" .
-          done
-          gh release create "$GITHUB_REF_NAME" dist/*-release.tar.gz --title "$GITHUB_REF_NAME" --notes "Per-target signed bundles include Debian packages; extract and verify with suifleet --verify-release before installation (docs/RELEASES.md)."
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::refusing to replace an existing release"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/publication/* --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes "Verify the signed client bundle before installing. See docs/CUSTOMER_RELEASES.md for archive, Debian and signed APT snapshot instructions."
+          [ "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .immutable)" = true ]
