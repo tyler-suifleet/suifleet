@@ -94,6 +94,14 @@ cluster keeps serving the last applied bundle. To retire the workload, deploy a
 version whose bundle has an empty `resources` list, or have the operator run
 `suifleet_k8s_apply.py remove --profile NAME --component NAME`. A retirement
 bundle is ready only once no object labelled for the component remains.
+`remove` deletes the component's objects with foreground deletion and then
+waits, up to `--timeout` seconds (default 300), until no object labelled for
+the component remains. A pruned Deployment stays listed until its ReplicaSets
+and Pods are gone. `remove` exits 0 only after that convergence. It exits 1
+(`not removed: …`) while an object remains, for example when a finalizer
+holds a Pod or an object was replaced between listing and deletion. Running
+it again does not re-delete terminating objects; it waits again and reports
+the current state.
 
 ## Security model
 
@@ -122,7 +130,19 @@ bundle is ready only once no object labelled for the component remains.
   other networking objects, Secrets, Pods, `exec`/`attach`/logs,
   ServiceAccounts or tokens, RBAC, quotas, namespaces, nodes, CRDs or
   cluster-scoped objects. Services stay administrator-owned, so the publisher
-  credential cannot redirect or expose traffic in the namespace.
+  credential cannot create Services, Ingresses or NetworkPolicies, or change
+  their selectors or ports.
+- **Delegated Pod labels select Service backends.** The publisher sets the
+  Pod template labels of its Deployments. Any administrator-owned Service
+  (or other selector-based object) whose selector matches those labels sends
+  its traffic to the publisher's Pods, as the `app=web` Service in the local
+  example does. Delegating a workload therefore also delegates the backends
+  of every Service that selects its Pods. The publisher can also attach Pods
+  to a Service intended for another workload in the namespace by copying its
+  labels. Administrators must treat exposing such a Service as trusting the
+  publisher with that traffic. Do not expose a Service from this namespace
+  that the publisher should not be able to serve. This is another reason the
+  namespace must be dedicated to the publisher.
 - **Trust boundary: a dedicated namespace.** Whoever holds the publisher
   credential can create or change Deployments in the namespace directly,
   without the helper. The helper's checks therefore protect nothing against
@@ -318,8 +338,11 @@ It checks the following:
   Deployment stays terminating (with the `foregroundDeletion` finalizer), its
   ReplicaSet and Pod remain, an empty retirement bundle is not ready and
   re-applying does not re-delete. It becomes ready only after the Pod is
-  released and the Pod, ReplicaSet and Deployment are gone. Removal likewise
-  waits for the component's Pods to disappear.
+  released and the Pod, ReplicaSet and Deployment are gone. `remove` with a
+  held Pod exits 1 at its timeout and leaves the terminating Deployment.
+  A retry does not re-delete and exits 1 again. After the Pod is released,
+  `remove` exits 0, and at that point no object or Pod of the component
+  remains.
 - An update followed by a rollback prunes the extra object.
 - Run mode re-creates a deleted object, stops on SIGTERM and leaves the
   workload running.
