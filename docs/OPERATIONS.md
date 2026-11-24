@@ -71,6 +71,9 @@ Each invocation creates `ci-logs/ota/run-*/` with separate suite logs and a
 active suites every 30 seconds; failed suites also print their log tail. A local
 simulator pass does not establish physical-device or public-network acceptance.
 
+For a bounded fleet of independently enrolled real daemons on disposable Sui,
+see the [virtual fleet rehearsal](VIRTUAL_FLEET.md).
+
 `make test-component` (also run by `make check` and CI) covers the harmless versioned test component in [tests/components/suifleet-test-app](../tests/components/suifleet-test-app/README.md). Its fixture tests run the real shell scripts, under a busybox-only `PATH` too when busybox is installed. It then runs the real daemon against the same simulator with `suifleet-test-updater` as `apply.command`, for v1, v2, an injected install failure and an injected health failure. It checks statuses, reports and the device receipts' version, run ID and artifact SHA-256.
 
 The historical baseline has 13 passing Move tests and 10 Rust tests; counts can legitimately change. Verify results for the actual commit rather than asserting those numbers as a release requirement. Simulator mocks are not proof of network transaction building, wallet compatibility, package upgrades or post-reboot health.

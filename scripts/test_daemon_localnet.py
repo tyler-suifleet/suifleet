@@ -57,7 +57,8 @@ def wait_for(condition, message, process=None, timeout=90):
     raise AssertionError(message)
 
 
-def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node_pid=None, poll_cache_only=False, baseline_binary=None):
+def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node_pid=None,
+        poll_cache_only=False, baseline_binary=None, *, scenario=None, receive=None, record_effects=None):
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
@@ -76,6 +77,21 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
             self.end_headers()
             self.wfile.write(body or b"")
 
+        def do_POST(self):
+            if not receive or self.path not in ("/fleet/v1/telemetry", "/fleet/v1/logs"):
+                self.send_error(404)
+                return
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 2 * 1024 * 1024:
+                self.send_error(413)
+                return
+            result = receive(self.path, json.loads(self.rfile.read(length)))
+            body = json.dumps(result).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
     walrus = ThreadingHTTPServer(("127.0.0.1", 0), Walrus)
     threading.Thread(target=walrus.serve_forever, daemon=True).start()
     aggregator = f"http://127.0.0.1:{walrus.server_port}"
@@ -93,7 +109,8 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 result = subprocess.run(command, text=True, capture_output=True, timeout=300)
                 # Wallet initialization may print a recovery phrase: never forward it.
                 if result.returncode:
-                    raise RuntimeError(f"sui client {args[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
+                    detail = "" if args[0] == "new-address" else result.stderr[-3000:] + "\n" + result.stdout[-3000:]
+                    raise RuntimeError(f"sui client {args[0]} failed: {detail}")
                 if not json_output:
                     return result.stdout
                 out = result.stdout
@@ -123,6 +140,8 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
             def transaction(*ptb):
                 result = client("ptb", *ptb, "--gas-budget", "200000000")
                 assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+                if record_effects:
+                    record_effects(result)
                 return result
 
             def created(result, suffix):
@@ -144,6 +163,8 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
             published = client("test-publish", contracts, "--build-env", "testnet", "--pubfile-path",
                                root / "Pub.local.toml", "--gas-budget", "1500000000", "--silence-warnings")
             assert published["effects"]["status"]["status"] == "success", published["effects"]["status"]
+            if record_effects:
+                record_effects(published)
             package = next(c["packageId"] for c in published["objectChanges"] if c["type"] == "published")
             registry = created(published, "::device_registry::DeviceRegistry")[0]
             upgrade_cap = created(published, "::package::UpgradeCap")[0]
@@ -155,6 +176,9 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
                                                       upgrade_cap=upgrade_cap, registry=registry, network="localnet",
                                                       publisher=aggregator, aggregator=aggregator))
+
+            if scenario:
+                return scenario(manifest, operator, client, transaction, created, blobs)
 
             # Device identity is provisioned by the daemon; it never leaves the device.
             key = root / "device.key"
