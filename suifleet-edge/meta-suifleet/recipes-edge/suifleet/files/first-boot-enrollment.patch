@@ -1,7 +1,7 @@
 From: Tyler Bush <tyler.jonathan.bush@gmail.com>
 Subject: Add first-boot claim enrollment to the pinned client
 
-Upstream-Status: Backport [d9a1826b26aa6cb998e5e622dcf2305185a0074c]
+Upstream-Status: Backport [d9a1826b26aa6cb998e5e622dcf2305185a0074c, fadec4d5a823887cdd612db1652946c98933fd93]
 
 diff --git a/suifleet-edge/src/config.rs b/suifleet-edge/src/config.rs
 index 189d9e44..af06f3d4 100644
@@ -45,10 +45,10 @@ index 189d9e44..af06f3d4 100644
              cfg.walrus.aggregator_url.is_empty()
 diff --git a/suifleet-edge/src/first_boot.rs b/suifleet-edge/src/first_boot.rs
 new file mode 100644
-index 00000000..c6e3e3fd
+index 00000000..56fa3dc7
 --- /dev/null
 +++ b/suifleet-edge/src/first_boot.rs
-@@ -0,0 +1,573 @@
+@@ -0,0 +1,579 @@
 +use crate::{
 +    config::{Config, DeviceConfig, EnrollConfig, ManagedEnrollment, SuiConfig},
 +    identity,
@@ -401,7 +401,7 @@ index 00000000..c6e3e3fd
 +        }
 +        Err(error) => return Err(error),
 +    };
-+    let claim = claim_file
++    let parsed_claim = claim_file
 +        .as_ref()
 +        .map(|file| -> Result<Option<identity::Ed25519File>> {
 +            let bytes = read(file, 128)?;
@@ -415,11 +415,12 @@ index 00000000..c6e3e3fd
 +                ed25519_dalek::SigningKey::from_bytes(&seed),
 +            )))
 +        })
-+        .transpose()?
-+        .flatten();
++        .transpose();
++    let invalid_claim = parsed_claim.is_err();
++    let claim = parsed_claim.unwrap_or_default().flatten();
 +    use crate::identity::TxSigner;
 +
-+    // A missing or zeroed key is resumable only after the matching signer
++    // A missing or partly erased key is resumable only after the matching signer
 +    // configuration has been durably installed by a previous attempt.
 +    let mut resumed_during_erase = false;
 +    let mut enrollment = None;
@@ -453,7 +454,11 @@ index 00000000..c6e3e3fd
 +            if root.join("signer.toml").symlink_metadata().is_ok() {
 +                return Err(Failure("existing-signer-without-enrollment").into());
 +            }
-+            let claim = claim.as_ref().ok_or(Failure("claim-key-missing"))?;
++            let claim = claim.as_ref().ok_or(Failure(if invalid_claim {
++                "invalid-claim-key"
++            } else {
++                "claim-key-missing"
++            }))?;
 +            if !sui
 +                .check_enrollment_limits(&policy_id, &policy, trust.managed.is_some())
 +                .await?
@@ -491,6 +496,7 @@ index 00000000..c6e3e3fd
 +                    last_failure,
 +                    "device-already-enrolled-with-another-claim"
 +                        | "claim-key-missing"
++                        | "invalid-claim-key"
 +                        | "existing-signer-without-enrollment"
 +                ) {
 +                    return Err(Failure(last_failure).into());
