@@ -1479,7 +1479,12 @@ class Coordinator:
             if candidate:
                 return True
             if number in self.batches.reserved_members(project):
-                return False
+                # Unpublished batches still select/validate their sources on
+                # each scan. Filtering these members makes the next advance
+                # see no eligible PRs and repeatedly discard a partial batch.
+                return any(batch['status'] in ('collecting', 'building')
+                    and any(member['pr'] == number for member in json.loads(batch['members']))
+                    for batch in self.batches.rows(project))
             if not owner:
                 return True  # Preserve discovery of untracked infrastructure PRs.
             if (owner.get('status') != 'review' or owner.get('publish_pending') or owner.get('expired')):

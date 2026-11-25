@@ -59,6 +59,25 @@ class DiscoveryBudget(unittest.TestCase):
             self.assertEqual(engine.prs(project,lambda pr:None,owners),[prs[9]])
             self.assertEqual(engine.pr.call_args.args[1],9)
 
+    def test_unpublished_batch_keeps_member_snapshots_on_next_scan(self):
+        # Below-capacity batches wait a collection interval. Their next scan
+        # must still include their reserved sources, or advance() sees an empty
+        # eligible list and invalidates the batch instead of building it.
+        for phase in ('collecting', 'building'):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as d:
+                engine,project,owners,prs=self.setup(d,'integration')
+                engine.store.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    ('p','batch',phase,'b'*40,None,'integration/batch',None,
+                     json.dumps([dict(pr=1)]),d,None,0,0,None,0,None))
+                self.assertEqual(engine.prs(project,lambda pr:None,owners),[prs[1]])
+                engine.pr.assert_called_once()
+                # Discovery remains a fresh read, including a changed source
+                # head. It cannot authorize reuse of the old reviewed head.
+                engine.pr.reset_mock()
+                prs[1]['headRefOid']='e'*40
+                self.assertEqual(engine.prs(project,lambda pr:None,owners)[0]['headRefOid'],'e'*40)
+                engine.pr.assert_called_once()
+
     def test_local_infrastructure_and_unknown_prs_keep_discovery(self):
         with tempfile.TemporaryDirectory() as d:
             engine,project,owners,prs=self.setup(d,'integration')

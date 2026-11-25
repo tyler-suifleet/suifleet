@@ -5568,6 +5568,29 @@
         "Test offline and install verified merged runtimes with recorded provenance."
       ],
       "validation": "Shared cache/transport regressions, coordinator rate handling tests and installed runtime verification."
+    },
+    {
+      "key": "SF-320",
+      "title": "Preserve collecting batch members during integration discovery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests/test_discovery_budget.py"
+      ],
+      "resources": [],
+      "description": "Integration discovery currently excludes all reserved members, including collecting/building batches that still require source snapshots. The next scan invalidates the batch as empty, repeatedly delaying reviewed PRs. Preserve fresh reads for these phases while keeping candidate-stage traffic filtering and authority checks.",
+      "evidence": "On 2026-11-25 reviewed PRs repeatedly entered collecting then invalidated with no eligible members remain during collection; current discovery_needed returns false for every reserved member.",
+      "acceptance": [
+        "Collecting and building batches retain fresh member snapshots across scans and progress to a candidate.",
+        "Published candidates retain low-cost source discovery filtering and fresh candidate/authority/CI checks.",
+        "An offline regression reproduces the lost-member failure before the fix and passes afterward; local combined-candidate tests pass.",
+        "Integrate and activate the verified merged runtime using the user-authorized local-infrastructure policy, then verify live batch advancement."
+      ],
+      "validation": "Focused discovery/batch regressions, full local coordinator suite and tracking/bootstrap checks; verify actual installed generation and live candidate creation."
     }
   ]
 }
