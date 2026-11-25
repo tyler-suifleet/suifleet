@@ -74,6 +74,28 @@ class PipelineLanes(unittest.TestCase):
             c.Coordinator.prs(engine, project, lambda pr: engine.advance_candidate_snapshot(project,pr))
             self.assertEqual(events, [('snapshot',99),('advance',99),('snapshot',1)])
 
+    def test_source_failure_is_discovered_before_any_completed_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.engine(directory, 'integration')
+            project = dict(id='p', repository='a/b')
+            owner = dict(branch='work', status='review', spec={'area': 'edge'})
+            row = dict(number=7, head=dict(ref='work', sha='a'*40))
+            pr = dict(number=7, headRefOid='a'*40, baseRefOid='b'*40,
+                      _review_mode='source', threads=[], comments=[], reviews=[],
+                      statusCheckRollup=[dict(__typename='CheckRun', name='Security CodeQL',
+                                              status='COMPLETED', conclusion='FAILURE',
+                                              detailsUrl='https://example.org/check/7')])
+            self.assertFalse(engine.discovery_needed(project, row, [owner]))
+            engine.observe_pr(project, pr)
+            self.assertTrue(engine.discovery_needed(project, row, [owner]))
+            self.assertFalse(engine.discovery_needed(project, row, [dict(owner, expired=True)]))
+            row['head']['sha'] = 'c'*40
+            self.assertFalse(engine.discovery_needed(project, row, [owner]))
+            row['head']['sha'] = pr['headRefOid']
+            pr['statusCheckRollup'][0].update(status='IN_PROGRESS', conclusion=None)
+            engine.observe_pr(project, pr)
+            self.assertFalse(engine.discovery_needed(project, row, [owner]))
+
     def test_lane_lock_fences_duplicates_but_not_other_roles(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1490,8 +1490,19 @@ class Coordinator:
             completed = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND head=? "
                 "AND kind='review' AND status='done' AND result IS NOT NULL",
                 (project['id'], number, head)).fetchone()
-            return bool(completed)
+            return bool(completed) or self.observed_source_failure(project, number, head)
         return True
+
+    def observed_source_failure(self, project, number, head):
+        """Use the source snapshot only to decide which PR to re-read."""
+        path = self.state/project['id']/'pr-observations'/f'pr-{number}.json'
+        try:
+            observation = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return False
+        if not isinstance(observation, dict):
+            return False
+        return bool(head and observation.get('source_failure_head') == head)
 
     def prs(self, project, on_snapshot=None, owners=()):
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
@@ -1612,6 +1623,8 @@ class Coordinator:
         view['threads'] = [dict(isResolved=t.get('isResolved') is True) for t in pr['threads']]
         payload = dict(schema=1, project=project['id'], repository=project['repository'],
                        source_fingerprint=source_feedback(pr), observed=time.time(), pr=view)
+        if pr.get('_review_mode') == 'source' and source_check_failures(pr):
+            payload['source_failure_head'] = pr['headRefOid']
         directory = self.state/project['id']/'pr-observations'
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor, temporary = tempfile.mkstemp(prefix='.pr-', dir=directory)
