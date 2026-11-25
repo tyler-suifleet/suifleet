@@ -272,11 +272,22 @@ export class Client {
    * or before a request is sent ends the iteration normally; aborting a
    * `receive` already sent throws its `TransportError` (outcome `unknown`),
    * because the daemon may have consumed a message.
+   *
+   * `pollIntervalMs` (default 500) and `maxReconnectDelayMs` (default 5000)
+   * must be finite numbers in [0, 2147483647]; the first `next()` rejects with
+   * RangeError before any `receive` otherwise. Reconnect backoff starts at
+   * `pollIntervalMs` and doubles up to `maxReconnectDelayMs`.
    */
   async *messages(filter: string, options: { pollIntervalMs?: number; maxReconnectDelayMs?: number; signal?: AbortSignal } = {}):
     AsyncGenerator<{ message: ReceivedMessage; ack: () => Promise<boolean> }, void, undefined> {
     const interval = options.pollIntervalMs ?? 500;
     const maxDelay = options.maxReconnectDelayMs ?? 5000;
+    // Node fires larger or non-finite timers after 1 ms, which would hammer the daemon.
+    for (const [name, value] of [['pollIntervalMs', interval], ['maxReconnectDelayMs', maxDelay]] as const) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_TIMER_DELAY_MS) {
+        throw new RangeError(`${name} must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);
+      }
+    }
     let delay = interval;
     const signal = options.signal;
     while (!signal?.aborted) {
@@ -291,7 +302,7 @@ export class Client {
         if (signal?.aborted && !(error instanceof TransportError && error.outcome === 'unknown')) return;
         if (error instanceof TransportError && error.outcome === 'not_sent') {
           try { await sleep(delay, signal); } catch { return; }
-          delay = Math.min(delay * 2, maxDelay);
+          delay = Math.min(delay * 2, maxDelay); // both operands are in range, so the result is too
           continue;
         }
         throw error;

@@ -607,3 +607,46 @@ test('OutboundBuffer.flush refuses invalid maxAttempts and retryDelayMs before a
   assert.equal(server.requests.length, 3);
   await server.close();
 });
+
+test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node timer range before any receive', async () => {
+  const warnings = [];
+  const onWarning = (warning) => warnings.push(warning.name);
+  process.on('warning', onWarning);
+  try {
+    const empty = await serve(() => ok(null));
+    const client = new Client({ socketPath: empty.path, component: 'sub' });
+    for (const option of ['pollIntervalMs', 'maxReconnectDelayMs']) {
+      for (const value of [MAX_TIMER_DELAY_MS + 1, Infinity, -Infinity, NaN, -1, '10']) {
+        const controller = new AbortController();
+        await assert.rejects(client.messages('a/#', { [option]: value, signal: controller.signal }).next(), RangeError, `${option}=${value}`);
+        controller.abort();
+      }
+    }
+    assert.equal(empty.requests.length, 0);
+
+    // The largest honored poll interval is kept: one receive, then an idle wait until abort.
+    const idle = new AbortController();
+    const idleNext = client.messages('a/#', { pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: MAX_TIMER_DELAY_MS, signal: idle.signal }).next();
+    while (empty.requests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(empty.requests.length, 1);
+    idle.abort();
+    assert.deepEqual(await idleNext, { value: undefined, done: true });
+    await empty.close();
+
+    // The largest honored reconnect backoff is kept: one unsent attempt, then a long wait until abort.
+    let attempts = 0;
+    const absent = new Client({ socketPath: join(directory, 'absent-max.sock') });
+    const original = absent.request.bind(absent);
+    absent.request = (...args) => { attempts++; return original(...args); };
+    const unsent = new AbortController();
+    const unsentNext = absent.messages('a/#', { pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: MAX_TIMER_DELAY_MS, signal: unsent.signal }).next();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(attempts, 1);
+    unsent.abort();
+    assert.deepEqual(await unsentNext, { value: undefined, done: true });
+  } finally {
+    process.off('warning', onWarning);
+  }
+  assert.ok(!warnings.includes('TimeoutOverflowWarning'), warnings.join(','));
+});
