@@ -12,7 +12,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import suifleet_k8s_apply as k8s  # noqa: E402
@@ -529,6 +531,86 @@ class WriterTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("configmaps/old not yet pruned", reason)
         self.assertNotIn("delete", [call[0] for call in fake.calls])
+
+    def test_remove_stops_at_the_deadline_when_a_poll_is_slow(self):
+        # Reviewer scenario: --timeout 5 and an API server that takes 30s to
+        # answer the first convergence poll. The deadline-bounded call is cut
+        # off (DeadlineExceeded) and remove returns at the deadline instead
+        # of after the slow response.
+        clock = [1000.0]
+        fake = FakeKubectl([], [])
+        fake.deadline = None
+        seen = []
+
+        def json_call(*args, namespaced=True):
+            seen.append(fake.deadline)
+            if fake.deadline is None:
+                return {"items": []}  # the delete phase's lists: unbounded
+            clock[0] += 5  # the bounded subprocess is killed at the deadline
+            raise k8s.DeadlineExceeded("deadline reached during kubectl get configmaps")
+
+        fake.json = json_call
+        with mock.patch.object(k8s.time, "monotonic", lambda: clock[0]):
+            ok, reason = k8s.remove(fake, "web-app", 5, k8s.Writer(fake, "web-app", pause=0), pause=0)
+        self.assertFalse(ok)
+        self.assertIn("timed out after 5s", reason)
+        self.assertEqual(seen, [None, None, 1005.0])
+        self.assertEqual(clock[0], 1005.0)
+        self.assertIsNone(fake.deadline)
+
+
+class KubectlDeadlineTest(unittest.TestCase):
+    def kubectl(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp))
+        return k8s.Kubectl({"kubectl": ["kubectl"], "kubeconfig": "/k", "namespace": "ns"}, tmp)
+
+    def run_call(self, kubectl, now, side_effect=None):
+        result = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(k8s.time, "monotonic", lambda: now), \
+                mock.patch.object(k8s.subprocess, "run", side_effect=side_effect, return_value=result) as run:
+            kubectl("get", "configmaps")
+        return run
+
+    def test_unbounded_calls_use_fixed_limits(self):
+        run = self.run_call(self.kubectl(), 0.0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--request-timeout") + 1], "30s")
+        self.assertEqual(run.call_args.kwargs["timeout"], k8s.KUBECTL_TIMEOUT)
+
+    def test_deadline_shrinks_request_and_process_limits(self):
+        kubectl = self.kubectl()
+        kubectl.deadline = 104.5
+        run = self.run_call(kubectl, 100.0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--request-timeout") + 1], "5s")
+        self.assertEqual(run.call_args.kwargs["timeout"], 4.5)
+
+    def test_a_hanging_kubectl_process_is_killed_at_the_deadline(self):
+        # Real process: a "kubectl" that hangs for 30s is cut off at the
+        # remaining deadline instead of the fixed 60s process limit.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp))
+        kubectl = k8s.Kubectl({"kubectl": ["/bin/sh", "-c", "sleep 30", "kubectl"], "kubeconfig": "/k",
+                               "namespace": "ns"}, tmp)
+        started = time.monotonic()
+        kubectl.deadline = started + 0.5
+        with self.assertRaises(k8s.DeadlineExceeded):
+            kubectl.json("get", "configmaps")
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_past_deadline_or_killed_call_raises_deadline_exceeded(self):
+        kubectl = self.kubectl()
+        kubectl.deadline = 100.0
+        with self.assertRaises(k8s.DeadlineExceeded):
+            self.run_call(kubectl, 100.0)
+        kubectl.deadline = 130.0
+        with self.assertRaises(k8s.DeadlineExceeded):
+            self.run_call(kubectl, 100.0, side_effect=subprocess.TimeoutExpired("kubectl", 30))
+        kubectl.deadline = None
+        with self.assertRaises(subprocess.TimeoutExpired):
+            self.run_call(kubectl, 100.0, side_effect=subprocess.TimeoutExpired("kubectl", 60))
+
 
 class ReadyTest(unittest.TestCase):
     """ready() requires every desired object ready AND prune convergence."""

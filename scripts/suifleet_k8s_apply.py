@@ -63,6 +63,7 @@ SUIFLEET_COMPONENT / SUIFLEET_COMPONENT_VERSION environment):
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -83,7 +84,8 @@ COMPONENT_LABEL = "suifleet.io/component"
 VERSION_ANNOTATION = "suifleet.io/version"
 BUNDLE_ANNOTATION = "suifleet.io/bundle-sha256"
 DEFAULT_PROFILE_ROOT = "/etc/suifleet/k8s"
-KUBECTL_TIMEOUT = 60
+KUBECTL_TIMEOUT = 60  # process limit per kubectl call (seconds)
+REQUEST_TIMEOUT = 30  # kubectl --request-timeout per API request (seconds)
 WRITE_ATTEMPTS = 8
 
 # (apiVersion, kind) -> kubectl resource name used for get/list/prune.
@@ -472,18 +474,37 @@ def check_credentials(view):
 
 # ------------------------------------------------------------------- kubectl
 
+class DeadlineExceeded(Rejected):
+    """A deadline-bounded kubectl call (Kubectl.deadline) ran out of time."""
+
+
 class Kubectl:
     def __init__(self, profile, cache_dir):
         self.profile = profile
-        self.base = list(profile["kubectl"]) + ["--kubeconfig", profile["kubeconfig"], "--cache-dir", cache_dir,
-                                                 "--request-timeout", "30s"]
+        self.base = list(profile["kubectl"]) + ["--kubeconfig", profile["kubeconfig"], "--cache-dir", cache_dir]
         # Never inherit KUBECONFIG, contexts or credentials from the environment.
         self.env = {"PATH": os.environ.get("PATH", "/usr/sbin:/usr/bin:/sbin:/bin"), "HOME": cache_dir, "LANG": "C"}
+        # Optional time.monotonic() deadline. When set, every call's API
+        # request timeout and process limit shrink to the remaining time, and
+        # a call past the deadline raises DeadlineExceeded instead of running.
+        self.deadline = None
 
     def __call__(self, *args, stdin=None, namespaced=True):
-        command = self.base + (["--namespace", self.profile["namespace"]] if namespaced else []) + list(args)
-        return subprocess.run(command, input=stdin, capture_output=True, text=True, env=self.env,
-                              timeout=KUBECTL_TIMEOUT, check=False)
+        request, limit = REQUEST_TIMEOUT, KUBECTL_TIMEOUT
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise DeadlineExceeded("deadline reached before kubectl " + " ".join(args[:2]))
+            request, limit = min(request, max(1, math.ceil(remaining))), min(limit, remaining)
+        command = (self.base + ["--request-timeout", f"{request}s"]
+                   + (["--namespace", self.profile["namespace"]] if namespaced else []) + list(args))
+        try:
+            return subprocess.run(command, input=stdin, capture_output=True, text=True, env=self.env,
+                                  timeout=limit, check=False)
+        except subprocess.TimeoutExpired:
+            if self.deadline is None:
+                raise
+            raise DeadlineExceeded("deadline reached during kubectl " + " ".join(args[:2])) from None
 
     def json(self, *args, namespaced=True):
         result = self(*args, "-o", "json", namespaced=namespaced)
@@ -662,15 +683,33 @@ def remove(kubectl, component, timeout, writer=None, pause=2.0):
     then poll until none remains (foreground deletion keeps a Deployment
     listed until its ReplicaSets and Pods are gone). Objects already
     terminating are not re-deleted; a finalizer or a raced replacement left
-    alone keeps it unconverged. Returns (False, reason) at the deadline."""
+    alone keeps it unconverged.
+
+    `timeout` bounds the convergence wait after the deletes are issued:
+    polling kubectl calls run under Kubectl.deadline, so a slow API server
+    cannot stretch the wait past it. The delete phase itself is not counted;
+    each of its calls has the fixed REQUEST_TIMEOUT/KUBECTL_TIMEOUT limits.
+    Returns (False, reason) at the deadline. Success is a point-in-time
+    observation: anything that recreates the objects later (such as a still
+    running `run` reconciler) is outside this check."""
     removed = prune(kubectl, component, {}, writer)
     _log(f"deleting {removed}" if removed else "no object to delete")
     deadline = time.monotonic() + max(0.0, timeout)
-    while True:
-        ok, reason = ready(kubectl, [], component)
-        if ok or time.monotonic() >= deadline:
-            return ok, ("removed" if ok else reason)
-        time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
+    previous, kubectl.deadline = getattr(kubectl, "deadline", None), deadline
+    reason = "no convergence check completed"
+    try:
+        while True:
+            try:
+                ok, reason = ready(kubectl, [], component)
+            except DeadlineExceeded:
+                return False, f"timed out after {timeout:g}s; last state: {reason}"
+            if ok:
+                return True, "removed"
+            if time.monotonic() >= deadline:
+                return False, reason
+            time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
+    finally:
+        kubectl.deadline = previous
 
 
 # ----------------------------------------------------------------------- CLI
@@ -689,7 +728,7 @@ def main(argv=None):
     parser.add_argument("--version", default=os.environ.get("SUIFLEET_COMPONENT_VERSION", ""))
     parser.add_argument("--interval", type=float, default=30.0)
     parser.add_argument("--timeout", type=float, default=300.0,
-                        help="remove: seconds to wait for the deleted objects (and Pods) to disappear")
+                        help="remove: seconds to wait, after the deletes are issued, for the objects (and their Pods) to disappear; polling API calls are cut off at this deadline")
     args = parser.parse_args(argv)
     try:
         if args.command != "remove":
