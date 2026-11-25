@@ -244,12 +244,20 @@ or encrypted swap.
 A crash dump is also a copy of a process's memory. Before the claim is read,
 the role reads `kernel.core_pattern` and, without privilege escalation, the
 core dump size limit (`ulimit -c`) that the SSH session receiving the claim
-inherits. It refuses the host unless a crash could store nothing:
+inherits. It first checks that `/proc/sys/kernel/core_pattern` is the
+kernel's sysctl: the mount serving it must be a procfs whose entry there is
+`/sys/kernel/core_pattern`. A file, another filesystem or another procfs entry
+bind-mounted over it (an isolated view can mask the machine-wide pattern this
+way) is refused, and so is a mount table that cannot be read. It then refuses
+the host unless a crash could store nothing:
 
 - **`kernel.core_pattern` names a file** (for example Debian's default
   `core`) and the session's limit is 0: the kernel writes nothing;
 - **it pipes to `systemd-coredump`** and either the session's limit is 0
-  (systemd-coredump honors the crashing process's limit) or `coredump.conf`
+  and the pattern's arguments start `%P %u %g %s %t %c` (systemd-coredump
+  honors the crashing process's limit, which it reads only from that sixth
+  `%c` argument; a literal value there, as on some hosts, means a limit of 0
+  counts for nothing), or `coredump.conf`
   sets both `Storage=none` and `ProcessSizeMax=0`. With `Storage=none` alone,
   systemd-coredump may still write the dump to disk temporarily while
   processing it. As in systemd, only assignments inside a `[Coredump]`
@@ -270,6 +278,9 @@ inherits. It refuses the host unless a crash could store nothing:
   `/etc` file besides the drop-ins, so such a file's settings may not apply
   and the host is refused;
 - **it pipes to `false` or `true`**: nothing is kept.
+
+A socket collector (`@path` or `@@path`, Linux 6.17 and later) is refused: the
+kernel sends it the dump with an unlimited size whatever the limit.
 
 A piped handler is identified by its full path, never by its name: it must be
 `/usr/lib/systemd/systemd-coredump` or `/lib/systemd/systemd-coredump`, or
@@ -387,15 +398,25 @@ The harness checks these phases:
    Crash dumps are checked the same way: when the classifier reports the
    machine's real `kernel.core_pattern` and SSH session core limit unsafe (WSL's piped
    crash handler is), a transfer with them must be refused. Then
-   `kernel.core_pattern` is bind-mounted inside each host's mount namespace,
-   and transfers must be refused, giving the reason, for Apport, for core files
+   when that real pattern is systemd-coredump with a literal limit argument
+   (this WSL machine's is), a transfer with it under a session limit of 0 must
+   be refused. A transfer with a `core` file pattern bind-mounted over
+   `/proc/sys/kernel/core_pattern` must be refused by the committed role, as a
+   masked sysctl. For the remaining cases
+   `kernel.core_pattern` is bind-mounted inside each host's mount namespace and
+   the role runs from a test-only copy whose `kernel_pattern` check (that one
+   function) always passes; its results are synthetic classifier evidence, not
+   evidence about a real host's crash policy. Transfers must be refused,
+   giving the reason, for Apport, for core files
    with a nonzero limit, for systemd-coredump storing dumps with a nonzero
    limit, for systemd-coredump with `Storage=none` but the default or a
    nonzero `ProcessSizeMax`, for the disabling settings outside `[Coredump]`
    or in a drop-in without a section header, for a path-like comment before
    settings that re-enable dumps, for a UTF-8 byte order mark, for a malformed
-   section header, for a line continuation and for the disabling settings only
-   in a main `coredump.conf` in `/usr/local/lib`. Because the test hosts are
+   section header, for a line continuation, for the disabling settings only
+   in a main `coredump.conf` in `/usr/local/lib`, for systemd-coredump with a
+   literal limit argument, persistent storage and a session limit of 0, and
+   for `@` and `@@` socket collectors. Because the test hosts are
    containers, which do not share the host's initial namespaces, transfers
    must also be refused, as unverifiable, for systemd-coredump with
    `Storage=none` and `ProcessSizeMax=0`, for systemd-coredump with a session
@@ -406,7 +427,8 @@ The harness checks these phases:
    unlimited limit). No test
    process is crashed: `kernel.core_pattern` is global to the shared kernel,
    so a real crash would reach the machine's own handler. Enrollment runs with
-   core files under a `limits.d` core limit of 0 for the deploy account.
+   core files under a `limits.d` core limit of 0 for the deploy account, through
+   the same synthetic copy, because that file pattern is a bind-mounted fixture.
    Then a claim transfer is
    interrupted right after staging, for plain and Vault claims, with zram
    without writeback and dm-crypt swap and with core files under a
