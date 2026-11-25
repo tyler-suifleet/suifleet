@@ -83,50 +83,68 @@ How the helper keeps two controllers from fighting:
    labels cannot detect it.
 6. **A multi-object apply is not transactional.** Objects are written one at a
    time: all ConfigMaps first, then Deployments, each group in bundle order.
-   Writing ConfigMaps first means a Pod the new Deployment template starts
-   reads the new configuration rather than keeping the old values. If a later write fails (a conflict, a rejection or a
-   cluster error), earlier objects may already carry the new bundle, and
-   nothing is pruned in that run. `ready` keeps failing until every object
-   carries the new bundle's digest and pruning has converged, so the
-   supervisor does not see a partial apply as ready. A later successful apply
-   converges, and a supervisor rollback re-applies the previous bundle. A
-  rollback can restore every object in place because bundles cannot contain
-  immutable ConfigMaps (see Helper validation).
-7. **Configuration changes roll the Pods out.** Kubernetes never restarts
-   Pods when a ConfigMap they read changes. Values read through `env`,
-   `envFrom` and `subPath` mounts stay as they were when the container
+   Writing ConfigMaps first means a Deployment never references a
+   content-addressed ConfigMap (item 7) that does not exist yet. If a later
+   write fails (a conflict, a rejection or a cluster error), earlier objects
+   may already carry the new bundle, and nothing is pruned in that run.
+   `ready` keeps failing until every object carries the new bundle's digest
+   and pruning has converged, so the supervisor does not see a partial apply
+   as ready. A later successful apply converges, and a supervisor rollback
+   re-applies the previous bundle. A rollback can restore every object:
+   stable-name ConfigMaps are mutable (bundles cannot make them immutable; see
+   Helper validation), and a content-addressed ConfigMap is only ever
+   recreated with the content its name denotes.
+7. **Pods read the configuration their template names.** Kubernetes never
+   restarts Pods when a ConfigMap they read changes. Values read through
+   `env`, `envFrom` and `subPath` mounts stay as they were when the container
    started, and a whole-volume mount refreshes only after a kubelet sync
-   delay. A configuration-only bundle change or rollback would therefore
-   leave the old configuration running behind a Deployment that looks healthy
-   and current. The helper prevents this. For every Deployment that consumes
-   bundle ConfigMaps (`envFrom` `configMapRef`, `env`
-   `valueFrom.configMapKeyRef` or a `configMap` volume, in any container or
-   init container), it adds the Pod-template annotation
-   `suifleet.io/config-sha256`, a digest of those ConfigMaps' data. A
-   configuration change then changes the Pod template and starts a rollout.
-   The data digest alone does not bind a Pod to what it read: if an update
-   writes a ConfigMap and its Deployment write then fails, an old-template
-   Pod that starts or restarts in between reads the new data, and a rollback
-   that restores the old data would leave the identical old template (and
-   that Pod) in place. The helper therefore stamps each ConfigMap with a data
-   epoch (`suifleet.io/config-epoch`). A write that changes the data sets the
-   epoch to the `resourceVersion` it replaced. The API server never reuses a
-   `resourceVersion` and the write is bound to it, so every data change gets
-   a distinct epoch, even one that restores earlier data. A write that keeps
-   the data keeps the epoch. After writing the ConfigMaps, the helper records
-   the UID and epoch of each consumed live ConfigMap in the Pod-template
-   annotation `suifleet.io/config-revision`. Any data change since the
-   Deployment was last written, including a rollback's restoring write,
-   therefore produces a new template and replaces every Pod. `ready` compares
-   the live Pod template with the rendered one, including the live
-   ConfigMaps' current UIDs and epochs, and waits for that rollout. It never
-   reports a configuration change or rollback ready while a Pod may still run
-   another configuration. Re-applying a bundle, or a new bundle that keeps the
-   ConfigMap data, restarts nothing; neither does a change to a ConfigMap that
-   no Deployment consumes. Whole-volume consumers
-   are restarted too, for the same guarantee. If a ConfigMap no longer holds
-   exactly the bundle's content right after its write, the apply stops with a
-   conflict before any Deployment is bound to it.
+   delay. The kubelet also resolves ConfigMaps by namespace and name from a
+   watch-based cache, so a Pod starting on a node can read data the API
+   server has already replaced. With a mutable shared name, a
+   configuration-only change, a rollback or a partially applied update could
+   therefore leave Pods running other configuration behind a Deployment that
+   looks healthy and current. The helper prevents this by content
+   addressing. Every bundle ConfigMap that a bundle Deployment consumes
+   (`envFrom` `configMapRef`, `env` `valueFrom.configMapKeyRef` or a
+   `configMap` volume, in any container or init container) is published as
+   `NAME-HASH`, where `HASH` is the first 16 hex digits of the SHA-256 of its
+   data (canonical JSON), with `immutable: true` and the annotation
+   `suifleet.io/config-name: NAME`. The helper rewrites the Deployment's
+   references to that name. The API server refuses any data change to an
+   immutable ConfigMap, so each published name denotes exactly one content,
+   and whatever the kubelet has cached under that name is that content.
+   - A configuration change produces a new name, so the Pod template changes
+     and Kubernetes rolls the Pods out. A rollback restores the earlier name
+     and the identical earlier template.
+   - A partially applied update creates the new ConfigMap but leaves the
+     previous one, which the live template still names, until a later apply
+     succeeds. An old-template Pod that starts in between still reads the old
+     data.
+   - `ready` compares the live Pod template, and so the ConfigMap names, with
+     the rendered one and waits for that rollout. It never reports a
+     configuration change or rollback ready while a Pod may still read other
+     configuration.
+   - Re-applying a bundle, or a new bundle that keeps the ConfigMap data,
+     keeps the name and restarts nothing; neither does a change to a ConfigMap
+     that no Deployment consumes.
+   - A successful apply prunes the content-addressed ConfigMaps of earlier
+     bundles. Pods of the previous template keep the environment and files
+     they already read. One that restarts before the rollout replaces it
+     cannot start (`CreateContainerConfigError`) rather than starting with
+     other data. Deployment ReplicaSet history therefore does not support
+     `kubectl rollout undo`; roll back by deploying the previous bundle.
+   - A live owned content-addressed ConfigMap whose content differs from what
+     its name denotes (for example one recreated out of band) stops `apply`
+     and `run` with exit code 2 before any write. If a ConfigMap no longer
+     holds exactly the bundle's content right after its write, the apply
+     stops with a conflict before any Deployment is written. Do not recreate
+     a content-addressed ConfigMap out of band: the kubelet stops watching an
+     immutable ConfigMap once it has cached it, so a Pod started while such
+     an object existed can keep its content, which `ready` cannot observe.
+     In the dedicated namespace only the publisher and administrators can
+     write ConfigMaps.
+   - ConfigMaps that no bundle Deployment consumes keep their bundle name and
+     stay mutable, for consumers outside the bundle.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -248,12 +266,16 @@ waits again and reports the current state.
     outside the bundle.
   - `immutable: true` on a ConfigMap. Kubernetes never lets an immutable
     ConfigMap's data change or the flag return to `false`, so a supervisor
-    rollback could not restore the previous bundle in place. Bundles manage
-    mutable ConfigMaps only. If an owned ConfigMap in the cluster has been
-    made immutable out of band, `apply` and `run` refuse with exit code 2
-    before writing any object, so nothing is half-applied. The helper never
-    deletes and recreates it automatically. An administrator must delete it;
-    the next apply then recreates it as a mutable object.
+    rollback could not restore a stable-name ConfigMap in place. The helper
+    itself makes consumed ConfigMaps immutable under content-addressed names
+    (see the ownership model, item 7), where no in-place change is needed.
+    If an owned stable-name ConfigMap in the cluster has been made immutable
+    out of band, `apply` and `run` refuse with exit code 2 before writing any
+    object, so nothing is half-applied. The helper never deletes and
+    recreates it automatically. An administrator must delete it; the next
+    apply then recreates it as a mutable object.
+  - a content-addressed name that collides with another ConfigMap name in
+    the same bundle.
 
   It also forces `automountServiceAccountToken: false`. A pod can read a Secret
   through its spec without any RBAC on Secrets, so the helper never lets a
@@ -458,6 +480,10 @@ It checks the following:
   bundle offline.
 - Apply, rollout readiness and the content an administrator-owned Service
   actually serves work.
+- The consumed ConfigMap is published immutable under its content-addressed
+  name, the Pod template references that name, no ConfigMap exists under the
+  bundle name, and the API server refuses another manager's data change to
+  it.
 - A configuration-only update of a ConfigMap consumed through `envFrom`,
   `configMapKeyRef` and a `subPath` mount starts a new rollout, and every
   running Pod reports the new value through all three when `ready` succeeds.
@@ -465,10 +491,17 @@ It checks the following:
   the same bundle starts no rollout. A Deployment consuming a ConfigMap
   outside its bundle is rejected offline.
 - A partially applied update: a test admission policy denies the Deployment
-  write after the new ConfigMap is written, and a replacement Pod started
-  from the old template reads the new value. The rollback replaces that Pod,
-  and every live Pod reports the old value through all three paths once
-  `ready` succeeds.
+  write after the new ConfigMap is written. The old ConfigMap and template
+  remain, and a replacement Pod started from the old template still reads
+  the old value through all three paths. The rollback prunes the new
+  ConfigMap, needs no new rollout, and every live Pod reports the old value
+  once `ready` succeeds. The kubelet's by-name cache lag itself cannot be
+  forced in a real cluster; the offline tests model a cache that never
+  refreshes through updates, a partial update and rollbacks.
+- A stable-name ConfigMap made immutable out of band, and a content-addressed
+  ConfigMap recreated with other content, each stop the apply before any
+  write; readiness rejects the forged one, and the apply recreates both after
+  an administrator deletes them.
 - Readiness of a ConfigMap-only bundle fails while the object is missing, is a
   pre-existing foreign object with matching data, belongs to another
   component or comes from a stale bundle digest, and succeeds once applied.
