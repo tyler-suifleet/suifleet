@@ -187,9 +187,10 @@ class Config:
 
         console = raw.get("console")
         _only(console, ("url", "token_file"), "console")
-        url = urllib.parse.urlsplit(console.get("url", "http://127.0.0.1:1441"))
-        if url.scheme != "http" or not url.hostname or not _loopback_host(url.hostname) or url.path not in ("", "/") \
-                or url.query or url.fragment or url.username or url.password or url.port is None:
+        url = _split_url(console.get("url", "http://127.0.0.1:1441"))
+        if url is None or url.scheme != "http" or not url.hostname or not _loopback_host(url.hostname) \
+                or url.path not in ("", "/") or url.query or url.fragment or url.username or url.password \
+                or _port(url) is None:
             raise ConfigError("console.url must be http://<loopback address>:<port> (the console is loopback-only)")
         self.console_url = f"http://{url.netloc}"
         if not isinstance(console.get("token_file"), str):
@@ -225,10 +226,13 @@ class Config:
             _only(otlp, ("endpoint", "headers_file", "ca_file", "timeout_seconds", "initial_backoff_seconds",
                          "max_backoff_seconds", "logs"), "otlp")
             endpoint = otlp.get("endpoint")
-            parsed = urllib.parse.urlsplit(endpoint) if isinstance(endpoint, str) else None
+            parsed = _split_url(endpoint)
             if parsed is None or parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.query \
-                    or parsed.fragment or parsed.username or parsed.password:
-                raise ConfigError("otlp.endpoint must be an http(s) URL without credentials, query or fragment")
+                    or parsed.fragment or parsed.username or parsed.password or _port(parsed, default=0) is None:
+                raise ConfigError("otlp.endpoint must be an http(s) URL with a valid port and without credentials, query or fragment")
+            for key in ("headers_file", "ca_file"):
+                if otlp.get(key) is not None and not isinstance(otlp[key], str):
+                    raise ConfigError(f"otlp.{key} must be a path")
             if parsed.scheme == "http" and not _loopback_host(parsed.hostname):
                 raise ConfigError("otlp.endpoint must use https unless it is a loopback collector")
             base = endpoint.rstrip("/")
@@ -267,8 +271,8 @@ class Config:
             _only(logs, ("components", "max_lines", "max_buffer"), "logs")
             components = logs.get("components")
             if not isinstance(components, list) or not 1 <= len(components) <= MAX_LOG_COMPONENTS \
-                    or len(set(components)) != len(components) \
-                    or not all(isinstance(c, str) and NAME.fullmatch(c) for c in components):
+                    or not all(isinstance(c, str) and NAME.fullmatch(c) for c in components) \
+                    or len(set(components)) != len(components):
                 raise ConfigError(f"logs.components must list 1-{MAX_LOG_COMPONENTS} distinct component names")
             self.logs = dict(components=components,
                              max_lines=_int(logs, "max_lines", 50, 1, MAX_LOG_LINES, "logs.max_lines"),
@@ -277,6 +281,27 @@ class Config:
                 raise ConfigError("logs need an otlp endpoint with logs enabled (Prometheus does not ingest logs)")
         if self.prometheus is None and self.otlp is None:
             raise ConfigError("an enabled adapter needs prometheus, otlp or both")
+
+
+def _split_url(value):
+    """urlsplit for a configured string; None for a non-string or unparsable URL."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return urllib.parse.urlsplit(value)
+    except ValueError:          # for example an unbalanced IPv6 bracket
+        return None
+
+
+def _port(url, default=None):
+    """The URL's explicit port in 1-65535, ``default`` when absent, None when invalid."""
+    try:
+        port = url.port
+    except ValueError:          # nonnumeric or out of range
+        return None
+    if port is None:
+        return default
+    return port if 1 <= port <= 65535 else None
 
 
 def _split_listen(listen):

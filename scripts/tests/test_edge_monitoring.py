@@ -267,6 +267,45 @@ class ConfigTests(Base):
             with self.subTest(overrides=overrides), self.assertRaises(em.ConfigError):
                 em.Config(self.config(**overrides))
 
+    def test_malformed_types_and_ports_are_config_errors(self):
+        # Every malformed value takes the sanitized ConfigError path, never an
+        # AttributeError/TypeError/ValueError traceback, and an unreachable
+        # destination is never reported as a valid configuration.
+        bad = [
+            dict(console=dict(url=123, token_file=self.token_file)),
+            dict(console=dict(url=["http://127.0.0.1:1441"], token_file=self.token_file)),
+            dict(console=dict(url="http://127.0.0.1:abc", token_file=self.token_file)),
+            dict(console=dict(url="http://127.0.0.1:99999", token_file=self.token_file)),
+            dict(console=dict(url="http://127.0.0.1:0", token_file=self.token_file)),
+            dict(console=dict(url="http://[::1:1441", token_file=self.token_file)),
+            dict(otlp=dict(endpoint="http://127.0.0.1:abc")),
+            dict(otlp=dict(endpoint="https://collector.example:70000")),
+            dict(otlp=dict(endpoint="https://collector.example:0")),
+            dict(otlp=dict(endpoint="https://[collector")),
+            dict(otlp=dict(endpoint=4318)),
+            dict(otlp=dict(endpoint="https://collector.example", headers_file=7)),
+            dict(otlp=dict(endpoint="https://collector.example", ca_file=["x"])),
+            dict(otlp=dict(endpoint="http://127.0.0.1:4318"), logs=dict(components=[["svc"]])),
+            dict(otlp=dict(endpoint="http://127.0.0.1:4318"), logs=dict(components=[{"a": 1}])),
+            dict(otlp=dict(endpoint="http://127.0.0.1:4318"), logs=dict(components="svc")),
+            dict(prometheus=dict(listen=9469)),
+            dict(console="http://127.0.0.1:1441"), dict(logs=["svc"]), dict(otlp="http://127.0.0.1:4318"),
+        ]
+        for overrides in bad:
+            with self.subTest(overrides=overrides), self.assertRaises(em.ConfigError):
+                em.Config(self.config(**overrides))
+            with self.subTest(check_config=overrides):
+                path = self.write("config.json", json.dumps(self.config(**overrides)))
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                written = "".join(call.args[0] for call in stderr.write.call_args_list)
+                self.assertIn("configuration rejected", written)
+                self.assertNotIn("Traceback", written)
+        # An explicit valid port and the scheme default are still accepted.
+        self.assertEqual(em.Config(self.config(otlp=dict(endpoint="https://collector.example"))).otlp["metrics_url"],
+                         "https://collector.example/v1/metrics")
+        em.Config(self.config(otlp=dict(endpoint="http://[::1]:4318")))
+
     def test_secret_files_are_protected(self):
         link = self.dir / "link.token"
         link.symlink_to(self.token_file)

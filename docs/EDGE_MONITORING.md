@@ -99,11 +99,11 @@ Example `/etc/suifleet-monitoring/monitoring.json` (replace example values):
 | `evidence` | Required when enabled: `simulated`, `physical` or `unclassified`. Attached to every metric and to the OTLP resource. It is an operator declaration so test rigs and real devices never share dashboards by accident; it is not hardware attestation. SuiFleet's own tests only produce `simulated`. |
 | `device` | Label, 1–128 characters of `[A-Za-z0-9._:-]`. Optional for Prometheus-only use; **required with `otlp`**, where it is part of the OTLP resource identity and must be stable and unique among devices sharing the collector (otherwise their points would land in one series). Choose a non-secret name; it is not the Sui Device object ID unless you put it there. |
 | `interval_seconds` | Console poll and OTLP export cadence, 10–3600, default 60. Pick it with the daemon's poll and heartbeat cadence in mind; scraping `/metrics` more often only returns the last poll. |
-| `console.url` | `http://<loopback address>:<port>`; the console is loopback-only. |
+| `console.url` | `http://<loopback address>:<port>` with a port in 1–65535; the console is loopback-only. |
 | `console.token_file` | One `sfc_…` token from `suifleet --console-token`. |
 | `prometheus.listen` | `host:port`, default `127.0.0.1:9469`. A non-loopback address needs `"allow_remote": true` **and** `token_sha256`. The endpoint speaks plain HTTP: for scraping across a network, put a customer-owned TLS proxy in front, or scrape over SSH/WireGuard. |
 | `prometheus.token_sha256` | Optional for loopback, required otherwise. Requests must carry `Authorization: Bearer <token>`; only the hash is stored. |
-| `otlp.endpoint` | Collector base URL; the adapter posts to `/v1/metrics` and `/v1/logs`. HTTPS is required unless the collector is on loopback. No credentials, query or fragment in the URL. |
+| `otlp.endpoint` | Collector base URL; the adapter posts to `/v1/metrics` and `/v1/logs`. HTTPS is required unless the collector is on loopback. No credentials, query or fragment in the URL; an explicit port must be 1–65535. |
 | `otlp.headers_file` | Optional `Name: value` lines (at most 16), for example `Authorization: Bearer …` or a tenant header. Host, Content-Type, Content-Length, Connection and Transfer-Encoding cannot be overridden. |
 | `otlp.ca_file` | Optional PEM bundle for a private CA (HTTPS only). Otherwise the system trust store is used. TLS 1.2+ is required; session-key logging is disabled. |
 | `otlp.timeout_seconds` | 1–30, default 5, per request. |
@@ -113,7 +113,8 @@ Example `/etc/suifleet-monitoring/monitoring.json` (replace example values):
 | `logs.max_lines` | Lines requested per component per poll, 1–200 (the console's limit), default 50. |
 | `logs.max_buffer` | Redacted lines held for export while the collector is unavailable, 10–10000, default 1000. |
 
-Unknown fields and out-of-range values are rejected before anything starts.
+Unknown fields, values of the wrong type, invalid ports and out-of-range values
+are rejected with a configuration error before anything starts.
 Validate with `--check-config`. The configuration file must be a regular file,
 not a symlink, owned by the adapter user or root and not writable by group or
 others. Token, header and CA files must be absolute; token and header files
