@@ -15,9 +15,10 @@ only loopback (the chain container is started with --network none):
 
 Phases: release/profile preflight cases with injected facts (Ubuntu 24.10 and
 Debian 13 refused for deb unless explicitly allowed), refusal, check mode on
-fresh hosts (no change), a claim transfer interrupted after staging (plain
-and Vault claims only in tmpfs, none on host persistent storage or controller
-files), install + on-device identity + claim enrollment +
+fresh hosts (no change), a control showing sudo input logging (enabled on
+every host) records a become command's stdin, a claim transfer interrupted
+after staging (plain and Vault claims only in tmpfs, none on host persistent
+storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
 (changed=0), claim staging left by an enrollment interrupted after its record
 was written (check mode reports it; retry without the batch erases it without
@@ -80,7 +81,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd
  && printf '[Unit]\\nBefore=ssh.service\\n[Service]\\nType=oneshot\\nExecStart=/usr/bin/ssh-keygen -A\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/ssh-hostkeys.service \\
  && systemctl enable ssh-hostkeys.service \\
  && useradd --create-home --shell /bin/bash deploy \\
- && printf 'deploy ALL=(ALL) NOPASSWD: ALL\\n' > /etc/sudoers.d/deploy && chmod 0440 /etc/sudoers.d/deploy
+ && printf 'deploy ALL=(ALL) NOPASSWD: ALL\\n' > /etc/sudoers.d/deploy && chmod 0440 /etc/sudoers.d/deploy \\
+ && printf 'Defaults log_input, !compress_io\\n' > /etc/sudoers.d/io-log && chmod 0440 /etc/sudoers.d/io-log && visudo -c
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 '''
@@ -152,6 +154,19 @@ CLAIM_INTERRUPT_PLAY = """- hosts: suifleet_devices
         suifleet_claim_group: nogroup
     - ansible.builtin.fail: {msg: interrupted after the claim transfer}
 """
+# Control for the sudo input-logging check: a no_log command with a marker
+# on stdin, run through become exactly as a claim was sent before the
+# transfer stopped using privilege escalation. sudo must record it.
+SUDO_LOG_CONTROL_PLAY = """- hosts: suifleet_devices
+  gather_facts: false
+  tasks:
+    - ansible.builtin.command:
+        argv: [sh, -c, 'cat > /dev/null']
+        stdin: "{{ lookup('ansible.builtin.file', '/work/sudo-log-marker') }}"
+      no_log: true
+      changed_when: false
+"""
+SUDO_IO_LOGS = "/var/log/sudo-io"
 # Lists files under the roots that contain any secret read from stdin. With
 # --one-filesystem it stays on each root's filesystem (here: skips the tmpfs
 # /run, /proc and /sys). Prints a JSON list of paths, never the secrets.
@@ -518,7 +533,7 @@ class Harness:
             binary_sha256=sh("sha256sum /usr/bin/suifleet | cut -d' ' -f1"),
             package=sh("dpkg-query -W -f='${Version}' suifleet 2>/dev/null || true"),
             claims_left=sh("find / -xdev \\( -name claim.key -o -name '*.enrollment.json.partial' \\) 2>/dev/null; "
-                           "ls -A /run/suifleet-enroll 2>/dev/null || true"),
+                           "ls -A /run/suifleet-enroll 2>/dev/null || true; ls -d /dev/shm/suifleet-claim.* 2>/dev/null || true"),
             ansible_tmp=sh("find /home/deploy/.ansible /root/.ansible -type f 2>/dev/null | head -5"),
             journal_key_hits=self.journal_hits(container, [key]),
             initialized=self.exec(container, "python3", "-c", "import json; print(json.load(open('/var/lib/suifleet/state.json'))"
@@ -646,6 +661,27 @@ class Harness:
         self.unchanged(recap, "rerun after the retry")
         return after, rollout
 
+    def sudo_log_control(self):
+        """sudo records the standard input of become commands on every host, so the claim checks can see it."""
+        marker = uuid.uuid4().hex + uuid.uuid4().hex  # a disposable stand-in for a claim, never a real key
+        (self.work / "ctl/sudo-log-marker").write_text(marker + "\n")
+        (self.work / "ctl/sudo-log-control.yml").write_text(SUDO_LOG_CONTROL_PLAY)
+        self.ansible("control: sudo records a become command's stdin", "/work/sudo-log-control.yml")
+        (self.work / "ctl/sudo-log-marker").unlink()
+        for name, host in self.hosts.items():
+            hits = self.disk_hits(host["container"], [marker], SUDO_IO_LOGS)
+            assert hits and all(h.endswith("/stdin") for h in hits), (name, "sudo did not record the control stdin", hits)
+        print("PASS control: sudo input logging recorded a no_log become command's stdin in persistent I/O logs on every host")
+
+    def assert_no_claim_in_sudo_logs(self, phase):
+        claims = list(self.claim_secrets.values())
+        for name, host in self.hosts.items():
+            hits = self.disk_hits(host["container"], claims, SUDO_IO_LOGS)
+            assert not hits, (name, phase, "a claim in the sudo I/O logs", hits)
+            sessions = self.exec(host["container"], "sh", "-c", f"find {SUDO_IO_LOGS} -name stdin | wc -l").stdout.strip()
+            assert int(sessions) > 0, (name, "no sudo I/O sessions were logged")
+        print(f"PASS {phase}: no claim in the hosts' sudo I/O logs (input logging on)")
+
     def interrupted_claim_transfer(self, vault):
         """Enrollment stops right after the claim transfer, before its cleanup."""
         (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
@@ -662,6 +698,7 @@ class Harness:
             assert meta == "nobody:nogroup 600", (name, meta)
             hits = self.disk_hits(container, [secret], "/")
             assert not hits, (name, "the claim reached persistent storage", hits)
+            assert not self.disk_hits(container, [secret], "/dev/shm", one_filesystem=False), (name, "transfer copy left")
         hits = self.controller_hits(list(self.claim_secrets.values()))
         assert not hits, ("a claim in controller files", hits)
         print("PASS interrupted claim transfer left the claim only in tmpfs staging: none on host persistent storage"
@@ -678,14 +715,26 @@ class Harness:
                       " && cp /etc/suifleet/deployment.json /run/suifleet-enroll/deployment.json"
                       " && : > /run/suifleet-enroll/enroll.toml", input=marker + "\n")
             assert sorted(self.disk_hits(container, [marker], "/run/suifleet-enroll", one_filesystem=False)) == staged[:1], name
+            # A run killed during the claim transfer leaves the SSH account's copy;
+            # another account's directory with the same name pattern is not the role's.
+            self.exec(container, "sh", "-c", "umask 077 && mkdir /dev/shm/suifleet-claim.AbandonedX"
+                      " && cat > /dev/shm/suifleet-claim.AbandonedX/claim.key", user="deploy", input=marker + "\n")
+            self.exec(container, "mkdir", "/dev/shm/suifleet-claim.OtherOwner", user="nobody")
         _, recap = self.ansible("check mode with staging left after the record", "site.yml", "--check", "--diff", *vault)
         for name, host in self.hosts.items():
             assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, "abandoned staging not reported", recap[name])
             assert self.exec(host["container"], "test", "-e", staged[0], check=False).returncode == 0, (name, "check mode erased")
+            assert self.exec(host["container"], "test", "-e", "/dev/shm/suifleet-claim.AbandonedX", check=False).returncode == 0, \
+                (name, "check mode erased the transfer copy")
         print("PASS check mode reported claim staging abandoned after the enrollment record")
         # The credential batch is still absent: the cleanup must not need it.
         _, recap = self.ansible("retry with staging left after the record", "site.yml", *vault)
         for name, host in self.hosts.items():
+            container = host["container"]
+            assert not self.disk_hits(container, [marker], "/dev/shm", one_filesystem=False), (name, "transfer copy remains")
+            assert self.exec(container, "test", "-d", "/dev/shm/suifleet-claim.OtherOwner", check=False).returncode == 0, \
+                (name, "erased another account's directory")
+            self.exec(container, "rmdir", "/dev/shm/suifleet-claim.OtherOwner")
             state, _ = self.host_state(name)
             self.assert_converged(name, state)
             assert recap[name]["changed"] > 0, (name, recap[name])
@@ -693,7 +742,8 @@ class Harness:
             assert not self.disk_hits(host["container"], [marker], "/run", one_filesystem=False), (name, "marker remains")
             for field in ("key_sha256", "address", "enrollment_sha256", "main_pid", "invocations"):
                 assert state[field] == previous[name][field], (name, field, "changed by the staging cleanup")
-        print("PASS retry erased the abandoned claim staging without the credential batch, re-enrollment or restarts")
+        print("PASS retry erased the abandoned claim staging and transfer copy without the credential batch,"
+              " re-enrollment or restarts; another account's directory was kept")
         _, recap = self.ansible("rerun after the staging cleanup", "site.yml", *vault)
         self.unchanged(recap, "rerun after the staging cleanup")
 
@@ -785,7 +835,9 @@ class Harness:
             assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
             assert self.exec(host["container"], "test", "-e", "/usr/bin/suifleet", check=False).returncode != 0, name
             assert self.exec(host["container"], "test", "-e", "/etc/suifleet/device.key", check=False).returncode != 0, name
+        self.sudo_log_control()
         self.interrupted_claim_transfer(vault)
+        self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
         batches = output.count("PLAY [SuiFleet device client]")
@@ -802,6 +854,7 @@ class Harness:
                              "--records", "/chain/records.json", user="1001:1001").stdout.strip().splitlines()[-1]
         self.evidence["enrollments"] = json.loads(verified)
         print("PASS on-chain enrollments: device-signed, claim-sponsored, caps owned by device and operator")
+        self.assert_no_claim_in_sudo_logs("enrollment")
 
         # The claim batch is no longer needed once hosts are enrolled.
         hidden = self.work / "chain/batch-erased"
