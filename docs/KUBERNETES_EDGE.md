@@ -197,7 +197,12 @@ How the helper keeps two controllers from fighting:
      (foreground deletion) after the previous bundle's ConfigMaps are gone,
      and the rollback would have to recreate them, so another bundle is
      refused until that deletion completes. Only then, with no object of
-     the previous bundle left, has the update's prune converged.
+     the previous bundle left, has the update's prune converged. A
+     terminating object never counts as converged, even when every listed
+     object carries one digest and that bundle's full object count: an
+     empty retirement of a Deployment-only bundle leaves exactly that
+     Deployment listed while its Pods may still serve, so a successor
+     bundle is refused until the deletion completes.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -627,7 +632,11 @@ It checks the following:
   Deployment stays terminating (with the `foregroundDeletion` finalizer), its
   ReplicaSet and Pod remain, an empty retirement bundle is not ready and
   re-applying does not re-delete. It becomes ready only after the Pod is
-  released and the Pod, ReplicaSet and Deployment are gone. `remove` with a
+  released and the Pod, ReplicaSet and Deployment are gone. Retiring a
+  Deployment-only component while its Pod is held leaves that Deployment
+  terminating with the bundle's full object count; a successor with a
+  different Deployment name is refused before any write until the Pod is
+  released and the deletion completes, and then applies. `remove` with a
   held Pod exits 1 at its timeout and leaves the terminating Deployment.
   A retry does not re-delete and exits 1 again. After the Pod is released,
   `remove` exits 0, and at that point no object or Pod of the component
