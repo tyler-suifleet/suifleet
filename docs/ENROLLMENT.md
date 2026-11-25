@@ -66,8 +66,8 @@ Revoke leaked claims, and keep claim batches small, with expiries.
 
 ## Automatic Linux first boot
 
-Prepare the root-owned `/etc/suifleet/first-boot.toml` on the OS filesystem for
-the entire batch. Keep this file separate from the writable provisioning
+After package or image build, provision the root-owned
+`/etc/suifleet/first-boot.toml` on the installed OS during trusted batch staging. Keep this file separate from the writable provisioning
 media. The SHA-256 values pin the exact archive members, including line
 endings. Obtain them with `sha256sum deployment.json config.template.toml` from a
 trusted copy of the extracted archive. If the operator omitted the template,
@@ -163,9 +163,9 @@ The device's transaction signature proves possession of its key. The alias is ne
 |---|---|
 | Reserved | Claim not yet registered |
 | Needs enrollment gas | Claim registered, but holds less than the job's enrollment gas |
-| Waiting for device | Registered and funded; the device has not enrolled |
-| Enrolled, naming | Enrolled; alias, serial or group still to apply |
-| Enrolled | Complete |
+| Funded, unused | Registered and funded; the device has not enrolled |
+| Consumed, pending binding | Enrolled; alias, serial or group still to apply |
+| Bound | Alias, serial and any selected group are applied |
 | Revoked | Revoked before use |
 | Claim withdrawn | Registered earlier and now missing from the policy (revoked elsewhere, or an uncertain submission). It is never re-registered without the explicit *Re-register withdrawn claims* action. |
 | Conflict | The alias or serial is now used by another device, or the group is gone |
@@ -183,9 +183,9 @@ Each failure is shown against the entries of its transaction.
 Keep the archive offline, copy each folder only to that device's private provisioning media, and delete it after enrollment. Claims stay single-use, expire with their policy and can be revoked (*Revoke unused claims*). The risk of a leaked unused claim is described above.
 
 **Lost credential file.** A lost archive cannot be downloaded again. Open *Lost a credential file?* under the job and enter the serials it contained:
-- *Waiting for device* or *Needs enrollment gas*: *Revoke lost claims* revokes only those claims, after a confirmation. The entries are marked revoked first, so an interrupted revocation is never re-registered automatically.
+- *Funded, unused* or *Needs enrollment gas*: *Revoke lost claims* revokes only those claims, after a confirmation. The entries are marked revoked first, so an interrupted revocation is never re-registered automatically.
 - *Reserved*, *Revoked* or *Claim withdrawn*: no live claim remains. *Remove reservations to reissue* frees the serial. Reserve it again in step 2 to download a new file.
-- *Enrolled*: nothing to do. The device keeps its own key; never issue it a new credential.
+- *Consumed, pending binding* or *Bound*: the device already keeps its own key. Continue binding if needed.
 - *Confirming registration*: refresh until the outcome is known before revoking.
 
 **Transaction feedback.** A failed step shows inline guidance with optional technical details instead of a browser alert:
