@@ -670,6 +670,20 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, nano, "1.0.0")
     check("the server rounds the sub-nano sizeLimit up to nano precision and readiness accepts it",
           size_limit() == "1073741824000000001n", repr(size_limit()))
+
+    # ParseQuantity also caps a BinarySI magnitude at 2**63-1, so an accepted
+    # sizeLimit of 8Ei is stored as 9223372036854775807; readiness must expect
+    # the capped value instead of timing out.
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["volumes"].append(
+        {"name": "scratch", "emptyDir": {"sizeLimit": "8Ei"}})
+    capped = work / "size-limit-capped.json"
+    capped.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, capped)
+    check("helper applies a bundle with an 8Ei emptyDir sizeLimit", result.returncode == 0, result.stderr)
+    wait_ready(profiles, capped, "1.0.0")
+    check("the server caps the BinarySI sizeLimit at 2**63-1 and readiness accepts it",
+          size_limit() == "9223372036854775807", repr(size_limit()))
     result = helper("apply", profiles, v1)
     check("apply returns to v1 after the sizeLimit bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")

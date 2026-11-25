@@ -310,7 +310,10 @@ zero/empty bundle value, and Kubernetes quantities (resource
 (`0.1`, `"0.1"` and `100m` are equal; `1.5Gi` equals the server's `1536Mi`;
 `1E` equals `1000P`; `1G` does not equal `1Gi`). Every quantity is compared
 after the API server's parse-time round-up (away from zero) to nano precision
-(an emptyDir `sizeLimit` of `0.1n` is stored, and accepted, as `1n`).
+(an emptyDir `sizeLimit` of `0.1n` is stored, and accepted, as `1n`), and a
+binary-suffixed (`Ki`…`Ei`) quantity is then capped at 2^63−1 as the server
+does (`8Ei` is stored, and accepted, as `9223372036854775807`; decimal `10E`
+is not capped).
 Resource `limits`/`requests` and `overhead` are further compared after the
 server's round-up to milli precision (a bundle request of `10.1m` is stored,
 and accepted, as `11m`); emptyDir `sizeLimit` gets no milli round-up. Any other
