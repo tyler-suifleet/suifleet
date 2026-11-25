@@ -61,6 +61,7 @@ SUIFLEET_COMPONENT / SUIFLEET_COMPONENT_VERSION environment):
                                               1 when objects still remain
 """
 import argparse
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -346,10 +347,71 @@ def object_ready(current, desired, component):
                 bool(current.get("immutable")) != bool(desired.get("immutable")):
             return False, f"{kind}/{name} content differs from this bundle"
     if kind == "Deployment":
+        drift = spec_drift(desired.get("spec") or {}, current.get("spec") or {}, "spec")
+        if drift:
+            return False, f"{kind}/{name} {drift} differs from this bundle"
         ok, reason = deployment_ready(current, desired["metadata"]["annotations"][BUNDLE_ANNOTATION])
         if not ok:
             return False, f"{kind}/{name}: {reason}"
     return True, "ready"
+
+
+QUANTITY = re.compile(r"^([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))(Ki|Mi|Gi|Ti|Pi|Ei|[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E)?$")
+QUANTITY_SCALE = {None: 0, "n": -9, "u": -6, "m": -3, "k": 3, "M": 6, "G": 9, "T": 12, "P": 15, "E": 18}
+QUANTITY_BINARY = {"Ki": 10, "Mi": 20, "Gi": 30, "Ti": 40, "Pi": 50, "Ei": 60}
+
+
+def _quantity(value):
+    """Exact value of a Kubernetes resource quantity, or None if not one. The
+    API server canonicalises quantities (for example "0.5" becomes "500m")."""
+    match = QUANTITY.match(str(value)) if isinstance(value, (str, int)) and not isinstance(value, bool) else None
+    if not match:
+        return None
+    number, suffix = Fraction(match.group(1)), match.group(2)
+    if suffix in QUANTITY_BINARY:
+        return number * 2 ** QUANTITY_BINARY[suffix]
+    if suffix and suffix[0] in "eE":
+        return number * Fraction(10) ** int(suffix[1:])
+    return number * Fraction(10) ** QUANTITY_SCALE[suffix]
+
+
+def spec_drift(desired, live, path):
+    """Path of the first field the bundle specifies that the live object does
+    not hold, or None. Fields the bundle omits are not compared, so API-server
+    defaults (and, for example, replicas left to a HorizontalPodAutoscaler) are
+    tolerated. A field the server omits matches a zero/empty desired value
+    (Go omitempty), and resource quantities compare by value."""
+    if live is None:
+        if not desired:
+            return None
+        if isinstance(desired, dict):
+            live = {}
+    if isinstance(desired, dict):
+        if not isinstance(live, dict):
+            return path
+        for key, value in desired.items():
+            drift = spec_drift(value, live.get(key), f"{path}.{key}")
+            if drift:
+                return drift
+        return None
+    if isinstance(desired, list):
+        if not isinstance(live, list) or len(live) != len(desired):
+            return path
+        for index, (want, have) in enumerate(zip(desired, live)):
+            drift = spec_drift(want, have, f"{path}[{index}]")
+            if drift:
+                return drift
+        return None
+    if type(desired) is type(live) and desired == live:
+        return None
+    if isinstance(desired, (int, float)) and isinstance(live, (int, float)) and \
+            not isinstance(desired, bool) and not isinstance(live, bool) and desired == live:
+        return None
+    if ".resources." in path:
+        want, have = _quantity(desired), _quantity(live)
+        if want is not None and want == have:
+            return None
+    return path
 
 
 def transfer_patch(current):

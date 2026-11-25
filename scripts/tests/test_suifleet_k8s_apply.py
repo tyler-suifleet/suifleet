@@ -207,6 +207,102 @@ class DecisionTest(unittest.TestCase):
         live["status"]["availableReplicas"] = 0
         self.assertIn("availableReplicas", k8s.object_ready(live, deploy, "web-app")[1])
 
+    def healthy(self, desired, replicas=1, generation=2):
+        """`desired` as the API server returns it after a completed rollout:
+        server defaults filled in, quantities canonicalised, status healthy."""
+        live = self.live(desired, status={"observedGeneration": generation, "replicas": replicas,
+                                          "updatedReplicas": replicas, "readyReplicas": replicas,
+                                          "availableReplicas": replicas})
+        live["metadata"]["generation"] = generation
+        spec = live["spec"]
+        spec.setdefault("replicas", replicas)
+        spec.update(revisionHistoryLimit=10, strategy={"type": "RollingUpdate", "rollingUpdate": {
+            "maxSurge": "25%", "maxUnavailable": "25%"}})
+        pod = spec["template"]["spec"]
+        pod.update(dnsPolicy="ClusterFirst", restartPolicy="Always", schedulerName="default-scheduler",
+                   terminationGracePeriodSeconds=30)
+        for container in pod["containers"]:
+            container.update(imagePullPolicy="IfNotPresent", terminationMessagePath="/dev/termination-log",
+                             terminationMessagePolicy="File")
+            for port in container.get("ports", []):
+                port["protocol"] = "TCP"
+            probe = container.get("readinessProbe")
+            if probe:
+                probe.update(timeoutSeconds=1, successThreshold=1, failureThreshold=3)
+                probe["httpGet"]["scheme"] = "HTTP"
+        for volume in pod.get("volumes", []):
+            if "configMap" in volume:
+                volume["configMap"]["defaultMode"] = 420
+        return live
+
+    def test_deployment_readiness_requires_the_bundle_spec(self):
+        objects = k8s.render(example(), "suifleet-apps", "web-app", "1.0.0", "d" * 64)
+        deploy = objects[1]
+        self.assertEqual(k8s.object_ready(self.healthy(deploy), deploy, "web-app"), (True, "ready"),
+                         "server defaults are tolerated")
+        # An external update changes the pod template but keeps SuiFleet's
+        # metadata; the drifted generation then rolls out healthily.
+        for mutate, where in [
+                (lambda c: c.update(image="docker.io/library/busybox@sha256:" + "1" * 64), "containers[0].image"),
+                (lambda c: c["command"].append("-x"), "containers[0].command"),
+                (lambda c: c["resources"]["limits"].update(memory="64Mi"), "limits.memory"),
+                (lambda c: c["securityContext"].update(readOnlyRootFilesystem=False), "readOnlyRootFilesystem")]:
+            drifted = self.healthy(deploy)
+            mutate(drifted["spec"]["template"]["spec"]["containers"][0])
+            ok, why = k8s.object_ready(drifted, deploy, "web-app")
+            self.assertFalse(ok, f"healthy rollout of a drifted {where} is not this bundle's readiness")
+            self.assertIn(where, why)
+            self.assertIn("differs from this bundle", why)
+        extra = self.healthy(deploy)
+        extra["spec"]["template"]["spec"]["containers"].append({"name": "sidecar", "image": "x@sha256:" + "2" * 64})
+        self.assertIn("spec.template.spec.containers differs", k8s.object_ready(extra, deploy, "web-app")[1])
+        annotated = self.healthy(deploy)
+        annotated["spec"]["template"]["metadata"]["annotations"]["example.com/content"] = "customer"
+        self.assertFalse(k8s.object_ready(annotated, deploy, "web-app")[0])
+        token = self.healthy(deploy)
+        token["spec"]["template"]["spec"]["automountServiceAccountToken"] = True
+        self.assertFalse(k8s.object_ready(token, deploy, "web-app")[0])
+        scaled = self.healthy(deploy, replicas=3)
+        scaled["spec"]["replicas"] = 3
+        self.assertIn("spec.replicas", k8s.object_ready(scaled, deploy, "web-app")[1],
+                      "replicas the bundle specifies are compared")
+
+    def test_deployment_readiness_tolerates_canonical_quantities_and_delegated_replicas(self):
+        bundle = example()
+        resources = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["resources"]
+        resources["requests"] = {"cpu": "0.01", "memory": "8388608"}
+        resources["limits"] = {"cpu": "0.1", "memory": "32Mi"}
+        del deployment(bundle)["spec"]["replicas"]  # left to a HorizontalPodAutoscaler
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy, replicas=3)
+        live["spec"]["template"]["spec"]["containers"][0]["resources"] = {
+            "requests": {"cpu": "10m", "memory": "8Mi"}, "limits": {"cpu": "100m", "memory": "32Mi"}}
+        self.assertEqual(live["spec"]["replicas"], 3)
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        live["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]["cpu"] = "200m"
+        self.assertIn("limits.cpu", k8s.object_ready(live, deploy, "web-app")[1])
+
+    def test_spec_drift(self):
+        self.assertIsNone(k8s.spec_drift({"a": 1}, {"a": 1, "b": 2}, "spec"), "server-added fields are ignored")
+        self.assertEqual(k8s.spec_drift({"a": 1}, {"a": 2}, "spec"), "spec.a")
+        self.assertEqual(k8s.spec_drift({"a": 1}, {}, "spec"), "spec.a")
+        for empty in (False, 0, "", {}, [], None, {"x": {}}):
+            self.assertIsNone(k8s.spec_drift({"a": empty}, {}, "spec"), f"omitted live field matches {empty!r}")
+        self.assertEqual(k8s.spec_drift({"a": True}, {}, "spec"), "spec.a")
+        self.assertEqual(k8s.spec_drift({"a": True}, {"a": 1}, "spec"), "spec.a", "bool is not int")
+        self.assertEqual(k8s.spec_drift({"a": "1"}, {"a": 1}, "spec"), "spec.a", "IntOrString kinds differ")
+        self.assertEqual(k8s.spec_drift({"a": [1, 2]}, {"a": [2, 1]}, "spec"), "spec.a[0]")
+        self.assertEqual(k8s.spec_drift({"a": [1]}, {"a": [1, 2]}, "spec"), "spec.a")
+        self.assertEqual(k8s.spec_drift({"a": {"b": 1}}, {"a": "x"}, "spec"), "spec.a")
+        cases = [("1", "1000m", True), ("0.5", "500m", True), ("1Gi", "1073741824", True), ("1e3", "1k", True),
+                 (1, "1", True), ("1G", "1Gi", False), ("100m", "0.2", False)]
+        for want, have, same in cases:
+            drift = k8s.spec_drift({"resources": {"limits": {"cpu": want}}},
+                                   {"resources": {"limits": {"cpu": have}}}, "spec.c")
+            self.assertEqual(drift is None, same, f"{want!r} vs {have!r}")
+        self.assertEqual(k8s.spec_drift({"image": "1"}, {"image": "1000m"}, "spec"), "spec.image",
+                         "quantity equivalence applies only to resources")
+
     def test_transfer_patch(self):
         current = {"metadata": {"uid": "u1", "resourceVersion": "7", "managedFields": [
             {"manager": "suifleet", "operation": "Update", "apiVersion": "v1", "fieldsType": "FieldsV1",
