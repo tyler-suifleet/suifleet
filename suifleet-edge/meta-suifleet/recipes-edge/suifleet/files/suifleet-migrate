@@ -1,0 +1,139 @@
+#!/bin/sh
+# Package upgrade parks the legacy client. Only an operator prepares and enrolls.
+set -eu
+umask 077
+config=/etc/suifleet
+state=/var/lib/suifleet
+pending=$config/migration.pending
+key=$config/device.key
+
+fail() { printf '%s\n' "$*" >&2; exit 1; }
+exists() { [ -e "$1" ] || [ -L "$1" ]; }
+
+stop_client() {
+    [ -d /run/systemd/system ] || return 0
+    # Stop activation triggers first. Never interrupt a running firmware helper.
+    for unit in suifleet-first-boot-enrollment.service suifleet-enrollment.path \
+                suifleet-firmware.path suifleet-signer.socket; do
+        if [ "$(systemctl show -p LoadState --value "$unit")" != not-found ]; then
+            systemctl stop "$unit"
+        fi
+    done
+    case "$(systemctl show -p ActiveState --value suifleet-firmware.service)" in
+        inactive|failed) ;;
+        *) fail 'Wait for the SuiFleet firmware helper to finish before migrating' ;;
+    esac
+    for unit in suifleet.service suifleet-signer.service suifleet-provision.service; do
+        if [ "$(systemctl show -p LoadState --value "$unit")" != not-found ]; then
+            systemctl stop "$unit"
+        fi
+    done
+}
+
+preserve_key() {
+    [ ! -L "$key" ] && [ -f "$key" ] && [ "$(stat -c %h "$key")" = 1 ] ||
+        fail 'Migration requires the original unlinked regular device.key'
+    /usr/bin/suifleet --derive-address "$key" >/dev/null
+    [ "$(id -u suifleet)" != 0 ] && [ "$(id -u suifleet-signer)" != 0 ] &&
+        [ "$(id -u suifleet)" != "$(id -u suifleet-signer)" ] ||
+        fail 'Migration requires separate unprivileged daemon and signer accounts'
+    chmod 0600 "$key"
+    chown suifleet-signer:suifleet-signer "$key"
+}
+
+park() {
+    if ! exists "$pending"; then
+        mkdir -m 0700 "$pending"
+        sync
+    fi
+    [ ! -L "$pending" ] && [ "$(stat -c '%u:%a' "$pending")" = 0:700 ] && [ -d "$pending" ] ||
+        fail 'Unsafe SuiFleet migration directory'
+    stop_client
+    preserve_key
+}
+
+[ "$#" = 1 ] || fail 'Usage: suifleet-migrate prepare | enroll'
+[ "$(id -u)" = 0 ] || fail 'Run SuiFleet migration as root'
+[ ! -L "$config" ] && [ -d "$config" ] || fail 'Unsafe SuiFleet config directory'
+case "$(stat -c '%u:%a' "$config")" in
+    0:700|0:750|0:755) ;;
+    *) fail 'SuiFleet config directory must be controlled by root' ;;
+esac
+
+# There is no installed identity to preserve on a fresh package install.
+if [ "$1" = package-upgrade ] && ! exists "$pending" && ! exists "$config/config.toml"; then
+    exit 0
+fi
+
+# Coordinate operator actions and package hooks without locking the directory
+# descriptor used independently by the first-boot enrollment binary.
+exec 9>"$config/.migration.lock"
+flock -x 9
+
+case "$1" in
+    package-upgrade)
+        # A migration that already reached prepare/enroll remains parked and
+        # is resumed by the operator. Fresh installs need no migration.
+        if exists "$pending" ||
+           [ "$(/usr/bin/suifleet --key-holder "$config/config.toml" 2>/dev/null)" != suifleet-signer ]; then
+            park
+            printf '%s\n' 'Legacy SuiFleet client parked. Run suifleet-migrate prepare to start re-enrollment.'
+        fi
+        ;;
+    prepare)
+        exists "$pending" || exists "$config/config.toml" ||
+            fail 'No existing SuiFleet configuration to migrate'
+        park
+        if [ ! -f "$pending/prepared" ]; then
+            if [ ! -f "$pending/archive" ]; then
+                archive=$(mktemp -d /var/lib/suifleet.previous.XXXXXX)
+                printf '%s\n' "$archive" > "$pending/archive.new"
+                mv "$pending/archive.new" "$pending/archive"
+                sync
+            fi
+            archive=$(cat "$pending/archive")
+            if ! exists "$archive/state" && exists "$state"; then
+                [ ! -L "$state" ] && [ -d "$state" ] || fail 'Unsafe SuiFleet state directory'
+                [ "$(stat -c %d "$state")" = "$(stat -c %d "$archive")" ] ||
+                    fail 'Relocate the mounted SuiFleet state directory before migrating'
+                mv "$state" "$archive/state"
+            fi
+            install -d -m 0700 -o suifleet -g suifleet "$state"
+            for name in config.toml deployment.json signer.toml first-boot.toml firmware.toml env; do
+                if exists "$config/$name"; then
+                    # A power loss may have interrupted the previous prepare.
+                    ! exists "$pending/$name" || fail "Duplicate $name during migration"
+                    mv "$config/$name" "$pending/$name"
+                fi
+            done
+            sync
+            touch "$pending/prepared"
+            sync
+        fi
+        printf 'SuiFleet parked. Previous state archive: %s\n' "$(cat "$pending/archive")"
+        ;;
+    enroll)
+        [ -f "$pending/prepared" ] || fail 'Run suifleet-migrate prepare before enrollment'
+        park
+        if [ ! -f "$pending/enrolling" ]; then
+            ! exists "$config/config.toml" || fail 'Use first-boot media to install the new config.toml'
+            touch "$pending/enrolling"
+            sync
+        fi
+        /usr/bin/suifleet --first-boot-enroll "$config"
+        for name in config.toml signer.toml deployment.json; do
+            path=$config/$name
+            [ ! -L "$path" ] && [ -f "$path" ] && [ "$(stat -c '%u:%a' "$path")" = 0:640 ] ||
+                fail "Enrollment did not install a secure $name"
+        done
+        [ "$(/usr/bin/suifleet --key-holder "$config/config.toml")" = suifleet-signer ] ||
+            fail 'Enrollment did not install a signer-backed configuration'
+        archive=$(cat "$pending/archive")
+        config_archive=$(mktemp -d "$config/migration.previous.XXXXXX")
+        sync
+        mv "$pending" "$config_archive/config"
+        sync
+        printf 'SuiFleet enrolled. Previous configuration: %s/config\nPrevious state: %s\n' "$config_archive" "$archive"
+        ;;
+    *) fail 'Usage: suifleet-migrate prepare | enroll' ;;
+esac
