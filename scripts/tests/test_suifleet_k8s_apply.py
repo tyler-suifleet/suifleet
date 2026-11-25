@@ -251,7 +251,7 @@ class DecisionTest(unittest.TestCase):
         for mutate, where in [
                 (lambda c: c.update(image="docker.io/library/busybox@sha256:" + "1" * 64), "containers[0].image"),
                 (lambda c: c["command"].append("-x"), "containers[0].command"),
-                (lambda c: c["resources"]["limits"].update(memory="64Mi"), "limits.memory"),
+                (lambda c: c["resources"]["limits"].update(memory="64Mi"), 'limits["memory"]'),
                 (lambda c: c["securityContext"].update(readOnlyRootFilesystem=False), "readOnlyRootFilesystem")]:
             drifted = self.healthy(deploy)
             mutate(drifted["spec"]["template"]["spec"]["containers"][0])
@@ -310,14 +310,14 @@ class DecisionTest(unittest.TestCase):
         # in a map the bundle omits and in one it already populates.
         for mutate, where in [
                 (lambda t: t["spec"].update(nodeSelector={"example.com/pool": ""}),
-                 "spec.nodeSelector.example.com/pool"),
+                 'spec.nodeSelector["example.com/pool"]'),
                 (lambda t: t["metadata"]["labels"].update({"example.com/extra": ""}),
-                 "metadata.labels.example.com/extra"),
+                 'metadata.labels["example.com/extra"]'),
                 (lambda t: t["metadata"]["annotations"].update({"example.com/extra": ""}),
-                 "metadata.annotations.example.com/extra"),
+                 'metadata.annotations["example.com/extra"]'),
                 (lambda t: t["spec"]["containers"][0]["resources"]["limits"].update({"example.com/gpu": "0"}),
-                 "limits.example.com/gpu"),
-                (lambda t: t["spec"].update(overhead={"cpu": ""}), "spec.overhead.cpu")]:
+                 'limits["example.com/gpu"]'),
+                (lambda t: t["spec"].update(overhead={"cpu": ""}), 'spec.overhead["cpu"]')]:
             drifted = self.healthy(deploy)
             mutate(drifted["spec"]["template"])
             ok, why = k8s.object_ready(drifted, deploy, "web-app")
@@ -325,7 +325,7 @@ class DecisionTest(unittest.TestCase):
             self.assertIn(where, why)
         selector = self.healthy(deploy)
         selector["spec"]["selector"]["matchLabels"]["example.com/extra"] = ""
-        self.assertIn("matchLabels.example.com/extra", k8s.object_ready(selector, deploy, "web-app")[1])
+        self.assertIn('matchLabels["example.com/extra"]', k8s.object_ready(selector, deploy, "web-app")[1])
         # A bundle map key with an empty value must be present live, not omitted.
         bundle = example()
         deployment(bundle)["spec"]["template"]["spec"]["nodeSelector"] = {"example.com/pool": ""}
@@ -334,7 +334,7 @@ class DecisionTest(unittest.TestCase):
         live = self.healthy(pinned)
         self.assertEqual(k8s.object_ready(live, pinned, "web-app"), (True, "ready"))
         del live["spec"]["template"]["spec"]["nodeSelector"]
-        self.assertIn("spec.nodeSelector.example.com/pool", k8s.object_ready(live, pinned, "web-app")[1])
+        self.assertIn('spec.nodeSelector["example.com/pool"]', k8s.object_ready(live, pinned, "web-app")[1])
         # Struct defaults and zero values for omitted struct fields still pass.
         zero = self.healthy(deploy)
         zero["spec"]["template"]["spec"].update(nodeSelector={}, hostNetwork=False)
@@ -508,10 +508,10 @@ class DecisionTest(unittest.TestCase):
                                    (container, "args", ["x"])]:
             self.assertEqual(k8s.spec_drift({field: None}, {field: value}, path), f"{path}.{field}", f"null {field}")
         self.assertEqual(k8s.spec_drift({"nodeSelector": None}, {"nodeSelector": {"pool": ""}}, pod),
-                         f"{pod}.nodeSelector.pool")
+                         f'{pod}.nodeSelector["pool"]')
         # A null map entry keeps map key semantics: the key must still match.
-        self.assertEqual(k8s.spec_drift({"pool": None}, {}, f"{pod}.nodeSelector"), f"{pod}.nodeSelector.pool")
-        self.assertEqual(k8s.spec_drift({}, {"pool": ""}, f"{pod}.nodeSelector"), f"{pod}.nodeSelector.pool")
+        self.assertEqual(k8s.spec_drift({"pool": None}, {}, f"{pod}.nodeSelector"), f'{pod}.nodeSelector["pool"]')
+        self.assertEqual(k8s.spec_drift({}, {"pool": ""}, f"{pod}.nodeSelector"), f'{pod}.nodeSelector["pool"]')
 
     def test_deployment_readiness_tolerates_canonical_quantities_and_delegated_replicas(self):
         bundle = example()
@@ -526,7 +526,7 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(live["spec"]["replicas"], 3)
         self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
         live["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]["cpu"] = "200m"
-        self.assertIn("limits.cpu", k8s.object_ready(live, deploy, "web-app")[1])
+        self.assertIn('limits["cpu"]', k8s.object_ready(live, deploy, "web-app")[1])
 
     def test_deployment_readiness_compares_empty_dir_size_limit_by_value(self):
         bundle = example()
@@ -543,6 +543,44 @@ class DecisionTest(unittest.TestCase):
         self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1])
         del volume["emptyDir"]["sizeLimit"]  # *Quantity: presence still matters
         self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1])
+
+    def test_deployment_readiness_keeps_dotted_map_keys_literal(self):
+        # A map key that merely ends in a field path (".emptyDir.sizeLimit",
+        # ".resources.limits.cpu", ".timeoutSeconds") is still a literal key:
+        # its value compares as text, never as a quantity or server default.
+        keys = ["example.com/setting.emptyDir.sizeLimit", "example.com/x.resources.limits.cpu",
+                "example.com/x.overhead.memory", "example.com/x.readinessProbe.timeoutSeconds",
+                'example.com/q".resources.limits["cpu']
+        for key in keys:
+            bundle = example()
+            deployment(bundle)["spec"]["template"]["metadata"]["annotations"] = {key: "1"}
+            k8s.validate_bundle(bundle)
+            deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+            live = self.healthy(deploy)
+            self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"), key)
+            live["spec"]["template"]["metadata"]["annotations"][key] = "1000m"
+            ok, why = k8s.object_ready(live, deploy, "web-app")
+            self.assertFalse(ok, f"changed annotation {key!r} is drift")
+            self.assertIn("spec.template.metadata.annotations[", why)
+            live["spec"]["template"]["metadata"]["annotations"][key] = ""
+            self.assertFalse(k8s.object_ready(live, deploy, "web-app")[0], f"emptied {key!r} is drift")
+        # Real quantity fields keep value equivalence alongside such keys.
+        bundle = example()
+        template = deployment(bundle)["spec"]["template"]
+        template["metadata"]["annotations"] = {keys[0]: "1"}
+        template["spec"]["volumes"].append({"name": "scratch", "emptyDir": {"sizeLimit": "1.5Gi"}})
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        live["spec"]["template"]["spec"]["volumes"][-1]["emptyDir"]["sizeLimit"] = "1536Mi"
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        # Map values are scalars: a structured value is compared whole, not walked.
+        parent = "spec.volumes[0].emptyDir.labels"
+        self.assertEqual(k8s.spec_drift({"k": {"sizeLimit": "1"}}, {"k": {"sizeLimit": "1000m"}}, parent),
+                         f'{parent}["k"]')
+        self.assertEqual(k8s.spec_drift({"a.b": 1}, {"a.b": 2}, "spec"), 'spec["a.b"]',
+                         "a struct key that is not a field name is quoted too")
+        self.assertEqual(k8s.spec_drift({"labels": {'a"%': "x"}}, {"labels": {}}, "spec"),
+                         'spec.labels["a%22%25"]')
 
     def test_spec_drift(self):
         self.assertEqual(k8s.spec_drift({"a": 1}, {"a": 1, "b": 2}, "spec"), "spec.b",
@@ -567,11 +605,11 @@ class DecisionTest(unittest.TestCase):
             drift = k8s.spec_drift({"resources": {"limits": {"cpu": want}}},
                                    {"resources": {"limits": {"cpu": have}}}, "spec.c")
             self.assertEqual(drift is None, same, f"{want!r} vs {have!r}")
-        self.assertEqual(k8s.spec_drift({}, {"nodeSelector": {"k": ""}}, "spec"), "spec.nodeSelector.k",
+        self.assertEqual(k8s.spec_drift({}, {"nodeSelector": {"k": ""}}, "spec"), 'spec.nodeSelector["k"]',
                          "map keys are meaningful even with empty values")
         self.assertEqual(k8s.spec_drift({"labels": {"a": "1"}}, {"labels": {"a": "1", "b": ""}}, "spec"),
-                         "spec.labels.b")
-        self.assertEqual(k8s.spec_drift({"labels": {"a": ""}}, {"labels": {}}, "spec"), "spec.labels.a")
+                         'spec.labels["b"]')
+        self.assertEqual(k8s.spec_drift({"labels": {"a": ""}}, {"labels": {}}, "spec"), 'spec.labels["a"]')
         self.assertIsNone(k8s.spec_drift({"labels": {"a": ""}}, {"labels": {"a": ""}}, "spec"))
         self.assertIsNone(k8s.spec_drift({}, {"nodeSelector": {}}, "spec"))
         self.assertEqual(k8s.spec_drift({"image": "1"}, {"image": "1000m"}, "spec"), "spec.image",
@@ -579,8 +617,9 @@ class DecisionTest(unittest.TestCase):
         quantity_paths = [("spec.c.resources.limits", "example.com/gpu"), ("spec.resources.requests", "cpu"),
                           ("spec.overhead", "memory"), ("spec.volumes[0].emptyDir", "sizeLimit")]
         for parent, key in quantity_paths:
-            self.assertIsNone(k8s.spec_drift({key: "1.5Gi"}, {key: "1536Mi"}, parent), f"{parent}.{key}")
-            self.assertEqual(k8s.spec_drift({key: "1.5Gi"}, {key: "2Gi"}, parent), f"{parent}.{key}")
+            where = f"{parent}.{key}" if key == "sizeLimit" else f'{parent}["{key}"]'
+            self.assertIsNone(k8s.spec_drift({key: "1.5Gi"}, {key: "1536Mi"}, parent), where)
+            self.assertEqual(k8s.spec_drift({key: "1.5Gi"}, {key: "2Gi"}, parent), where)
         for parent, key in [("spec.c.resources.claims[0]", "name"), ("spec.volumes[0].configMap", "name"),
                             ("spec.volumes[0]", "sizeLimit")]:
             self.assertEqual(k8s.spec_drift({key: "1"}, {key: "1000m"}, parent), f"{parent}.{key}",

@@ -444,7 +444,7 @@ def scenario(cluster, work, supervisor):
           drifted["metadata"]["annotations"].get("suifleet.io/bundle-sha256")
           and drifted["status"].get("availableReplicas") == 1
           and drifted["status"].get("observedGeneration") == drifted["metadata"]["generation"]
-          and result.returncode == 1 and "spec.template.metadata.annotations.example.com/content differs" in result.stderr,
+          and result.returncode == 1 and 'spec.template.metadata.annotations["example.com/content"] differs' in result.stderr,
           result.stderr)
     fight = helper("apply", profiles, v1)
     check("apply reports the template conflict instead of overriding it", fight.returncode == 3, fight.stderr)
@@ -524,7 +524,7 @@ def scenario(cluster, work, supervisor):
     check("readiness rejects a healthy rollout that adds an empty-valued nodeSelector key",
           selected["spec"]["template"]["spec"].get("nodeSelector") == {"example.com/pool": ""}
           and selected["status"].get("availableReplicas") == 1
-          and result.returncode == 1 and "spec.template.spec.nodeSelector.example.com/pool differs" in result.stderr,
+          and result.returncode == 1 and 'spec.template.spec.nodeSelector["example.com/pool"] differs' in result.stderr,
           result.stderr)
     cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
         {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))

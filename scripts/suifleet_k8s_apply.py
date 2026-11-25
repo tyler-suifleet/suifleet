@@ -385,9 +385,23 @@ def _quantity(value):
 # Fields whose values are Kubernetes resource.Quantity, which the API server
 # canonicalises ("1.5Gi" is returned as "1536Mi"): ResourceRequirements limits
 # and requests (container and pod level), PodSpec overhead and
-# EmptyDirVolumeSource sizeLimit. Map keys may contain dots ("example.com/gpu").
+# EmptyDirVolumeSource sizeLimit. Map keys may contain dots ("example.com/gpu"),
+# so drift paths quote them (see _child): a key is never read as a field name.
 # Every other field, including resources.claims names, compares as plain text.
-QUANTITY_PATH = re.compile(r"(?:\.resources\.(?:limits|requests)\.|\.overhead\.).+$|\.emptyDir\.sizeLimit$")
+QUANTITY_PATH = re.compile(r'(?:\.resources\.(?:limits|requests)|\.overhead)\["[^"]*"\]$|\.emptyDir\.sizeLimit$')
+FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _child(path, key, *, is_map=False):
+    """Drift path of a struct field or map entry. Struct fields are dotted
+    (spec.replicas). Map keys, and any key that is not a plain field name, are
+    quoted (metadata.annotations["example.com/x.emptyDir.sizeLimit"]) with '%'
+    and '"' percent-encoded, so a key can never end a path in a field name or
+    open a quoted segment. Field-name rules (quantities, server defaults,
+    pointer presence, map fields) therefore apply only to real fields."""
+    if not is_map and FIELD_NAME.fullmatch(key):
+        return f"{path}.{key}"
+    return f'{path}["{key.replace("%", "%25").replace(chr(34), "%22")}"]'
 
 
 def _http_get_defaults(prefix):
@@ -520,7 +534,7 @@ def _is_map(path, value):
 def _map_drift(desired, live, path):
     """Path of the first key present in only one of two map fields, or None."""
     extra = sorted(set(live) ^ set(desired))
-    return f"{path}.{extra[0]}" if extra else None
+    return _child(path, extra[0], is_map=True) if extra else None
 
 
 def _is_zero(value):
@@ -583,13 +597,18 @@ def spec_drift(desired, live, path):
                 # its delegated owner. Compare it by the omitted-field rules,
                 # including pointer presence. Map entries keep key semantics.
                 have = live.get(key)
-                drift = None if have is None else _unexpected(have, f"{path}.{key}")
+                drift = None if have is None else _unexpected(have, _child(path, key))
+            elif is_map and (isinstance(value, (dict, list)) or isinstance(live.get(key), (dict, list))):
+                # Map values (map[string]string, ResourceList) are scalars:
+                # never descend into one where field-name rules could apply.
+                child = _child(path, key, is_map=True)
+                drift = None if value == live.get(key) else child
             else:
-                drift = spec_drift(value, live.get(key), f"{path}.{key}")
+                drift = spec_drift(value, live.get(key), _child(path, key, is_map=is_map))
             if drift:
                 return drift
         for key in sorted(set(live) - set(desired)):
-            drift = _unexpected(live[key], f"{path}.{key}")
+            drift = _unexpected(live[key], _child(path, key))
             if drift:
                 return drift
         return None
