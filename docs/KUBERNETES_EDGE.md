@@ -309,6 +309,10 @@ zero/empty bundle value, and Kubernetes quantities (resource
 `limits`/`requests`, `overhead` and emptyDir `sizeLimit`) compare by value
 (`0.1`, `"0.1"` and `100m` are equal; `1.5Gi` equals the server's `1536Mi`;
 `1E` equals `1000P`; `1G` does not equal `1Gi`). Other fields compare as text.
+Map keys are always literal: an annotation key such as
+`example.com/setting.emptyDir.sizeLimit` compares as text, and drift messages
+quote map keys (`spec.template.metadata.annotations["example.com/x"]`, with
+`"` and `%` percent-encoded) so a key is never mistaken for a field.
 Omitting `replicas` leaves scaling to, for example, a HorizontalPodAutoscaler.
 A pre-existing foreign object with the right
 name, an object of another component and an object from a stale bundle are

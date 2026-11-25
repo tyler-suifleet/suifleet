@@ -659,6 +659,45 @@ def scenario(cluster, work, supervisor):
     check("apply returns to v1 after the sizeLimit bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
 
+    # A map key that ends in a quantity field path is still a literal key: a
+    # pod-template annotation "example.com/setting.emptyDir.sizeLimit" changed
+    # from "1" to "1000m" (equal as quantities) is drift, not canonicalisation.
+    dotted = "example.com/setting.emptyDir.sizeLimit"
+
+    def dotted_annotation():
+        template = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]
+        return (template["metadata"].get("annotations") or {}).get(dotted)
+
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["metadata"].setdefault("annotations", {})[dotted] = "1"
+    annotated = work / "dotted-annotation.json"
+    annotated.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, annotated)
+    check("helper applies a bundle with a dotted quantity-like annotation key", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, annotated, "1.0.0")
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                  stdin=json.dumps({
+                      "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+                      "spec": {"template": {"metadata": {"annotations": {dotted: "1000m"}}}}}))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    result = helper("ready", profiles, annotated)
+    check("readiness rejects a dotted annotation changed to an equal-quantity text",
+          dotted_annotation() == "1000m" and result.returncode == 1
+          and f'spec.template.metadata.annotations["{dotted}"] differs' in result.stderr, result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    result = helper("apply", profiles, annotated)
+    check("apply restores the dotted annotation after the other manager relinquishes it", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, annotated, "1.0.0")
+    check("readiness succeeds once the dotted annotation is restored", dotted_annotation() == "1",
+          repr(dotted_annotation()))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the dotted-annotation bundle", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}
