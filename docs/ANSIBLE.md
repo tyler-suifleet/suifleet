@@ -258,7 +258,11 @@ inherits. It refuses the host unless a crash could store nothing:
   that `systemd-analyze cat-config` lists, so a comment that looks like its
   `# /path` header does not end a section. A configuration that cannot be
   read, whose listing does not match its files, or that uses line
-  continuations, is refused;
+  continuations, is refused. So is syntax whose meaning to systemd the check
+  does not reproduce exactly: any byte outside printable ASCII (including a
+  UTF-8 byte order mark, which systemd strips), a section header other than
+  `[Name]` (systemd stops reading the file at an invalid one) and any other
+  line that is not a comment or a `Key=value` assignment;
 - **it pipes to `false` or `true`**: nothing is kept.
 
 Any other piped handler is refused, because the kernel runs it whatever the
@@ -362,7 +366,8 @@ The harness checks these phases:
    limit, for systemd-coredump with `Storage=none` but the default or a
    nonzero `ProcessSizeMax`, for the disabling settings outside `[Coredump]`
    or in a drop-in without a section header, for a path-like comment before
-   settings that re-enable dumps, and for a line continuation
+   settings that re-enable dumps, for a UTF-8 byte order mark, for a malformed
+   section header and for a line continuation
    (the containers' init and sshd inherit Docker's
    unlimited limit). No test
    process is crashed: `kernel.core_pattern` is global to the shared kernel,
