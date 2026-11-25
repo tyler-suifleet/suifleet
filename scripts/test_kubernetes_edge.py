@@ -1158,6 +1158,13 @@ def scenario(cluster, work, supervisor):
     check("config-only re-apply of the same bundle succeeds",
           helper("apply", profiles, config_v1, component="config-app").returncode == 0)
     again = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
+
+    def config_replicasets():
+        listed = json.loads(cluster.admin("get", "replicasets", "-n", NAMESPACE, "-l", "app=config-app",
+                                          "-o", "json").stdout)
+        return sorted(item["metadata"]["uid"] for item in listed["items"])
+
+    steady_replicasets = config_replicasets()
     check("a no-op re-apply keeps the content-addressed name and starts no rollout",
           again["metadata"]["generation"] == steady["metadata"]["generation"]
           and again["spec"]["template"] == steady["spec"]["template"])
@@ -1213,9 +1220,15 @@ def scenario(cluster, work, supervisor):
     seen = observed_config(cluster)
     check("once the rollback is ready, every live Pod runs the v1 configuration",
           seen == [("alpha",) * 3], str(seen))
+    # The rollback rewrites the Deployment's apply-generation annotation, and
+    # the API server bumps a Deployment's metadata.generation on annotation
+    # changes too; a rollout would change the template, the revision and the
+    # ReplicaSets.
+    revision = lambda deployment: deployment["metadata"]["annotations"].get("deployment.kubernetes.io/revision")
     check("the rollback needed no new rollout (the v1 template never named other data)",
-          settled["spec"]["template"] == again["spec"]["template"]
-          and settled["metadata"]["generation"] == again["metadata"]["generation"])
+          settled["spec"]["template"] == again["spec"]["template"] and revision(settled) == revision(again)
+          and config_replicasets() == steady_replicasets,
+          f"revision {revision(again)} -> {revision(settled)}")
     retire_config = work / "config-retire.json"
     retire_config.write_text(json.dumps({"version": 1, "resources": []}))
     check("config-only test component retires",
@@ -1534,9 +1547,10 @@ def scenario(cluster, work, supervisor):
                   "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
 
     def shared_frozen():
-        probe = json.loads(shared[1].read_text())["resources"][-1]
-        probe["metadata"]["namespace"] = NAMESPACE
-        return cluster.admin("create", "--dry-run=server", "-f", "-", stdin=json.dumps(probe), ok=False).returncode != 0
+        # Rendered as the helper writes it, so only the test freeze refuses it.
+        probe = publisher.render(json.loads(shared[1].read_text()), NAMESPACE, "shared-app", "2.0.0", "0" * 64)[-1]
+        result = cluster.admin("create", "--dry-run=server", "-f", "-", stdin=json.dumps(probe), ok=False)
+        return result.returncode != 0 and "shared-worker Deployment creation is frozen" in result.stderr
 
     def shared_state():
         listed = json.loads(cluster.admin("get", "configmaps", "-n", NAMESPACE, "-l", "suifleet.io/component=shared-app",
