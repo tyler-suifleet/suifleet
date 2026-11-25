@@ -337,7 +337,7 @@ def scenario(cluster, work, supervisor):
     check("helper refuses a group/other-readable kubeconfig", loose.returncode == 2 and "0600" in loose.stderr, loose.stderr)
     (edge / "kubeconfig").chmod(0o600)
     # Unusable pacing is rejected with a valid profile, before any cluster call.
-    for value in ("0", "-1", "nan", "inf"):
+    for value in ("0", "0.5", "1e-20", "-1", "nan", "inf"):
         paced = helper("run", profiles, BUNDLE, extra=(f"--interval={value}",))
         check(f"helper run rejects --interval={value} before applying",
               paced.returncode == 2 and "--interval" in paced.stderr, paced.stderr)

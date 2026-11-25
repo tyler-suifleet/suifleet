@@ -265,7 +265,7 @@ attestation of the pods is out of scope.
 
 `run` applies, prunes, then re-applies every interval, so an owned object that
 someone deletes is recreated. `--interval` (default 30 seconds) must be finite
-and greater than 0; a zero, negative, infinite or NaN interval is rejected
+and at least 1 second; a smaller, zero, negative, infinite or NaN interval is rejected
 (exit 2) before the profile is loaded or any cluster call is made. It exits non-zero on a conflict, rejection or
 cluster error, and the supervisor's restart budget then applies. `ready`
 succeeds only when every object in the bundle exists, is not being deleted, is
