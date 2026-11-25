@@ -5526,6 +5526,28 @@
       "validation": "Focused offline coordinator regressions and diff check. Install only through reviewed merged-main activation."
     },
     {
+      "key": "SF-317",
+      "title": "Make website and guide commercially ready",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "scripts/site_pricing.py"
+      ],
+      "resources": [],
+      "description": "Customer-perspective review and commercial copy cleanup across the website and guide.",
+      "evidence": "User identified confusing demo-wallet wording and requested a commercial-ready website.",
+      "acceptance": [
+        "Public website copy is clear and professional without internal verification notes.",
+        "Guide narration and captions match updated instructions; preserve honest security and capture provenance.",
+        "Desktop/mobile navigation, layout and media pass browser checks."
+      ],
+      "validation": "Static site build/regressions; Chromium desktop/mobile media checks; changed-media decode and provenance."
+    },
+    {
       "key": "SF-318",
       "title": "Reduce GitHub quota waste and isolate rate-limit recovery",
       "priority": "P0",

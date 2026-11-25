@@ -41,3 +41,18 @@ class OverviewTest(unittest.TestCase):
   original=build.load_json
   with patch.object(build,'load_json',side_effect=lambda p: manifest if p==build.OVERVIEW_MEDIA/'manifest.json' else original(p)):
    with self.assertRaisesRegex(build.BuildError,'speech'):build.overview_manifest()
+
+ def test_section_clip_bytes_and_caption_drift_are_rejected(self):
+  for field in ('file','captions'):
+   with self.subTest(field=field),tempfile.TemporaryDirectory() as temp:
+    media=Path(temp)/'media';shutil.copytree(build.OVERVIEW_MEDIA,media)
+    manifest=json.loads((media/'sections.json').read_text())
+    (media/manifest['clips'][0][field]).write_bytes(b'altered')
+    with patch.object(build,'OVERVIEW_MEDIA',media),self.assertRaisesRegex(build.BuildError,'section media'):
+     build.how_section_video('first-update')
+
+ def test_missing_section_video_is_rejected(self):
+  original=build.load_json
+  manifest=json.loads((build.OVERVIEW_MEDIA/'sections.json').read_text());manifest['clips'].pop()
+  with patch.object(build,'load_json',side_effect=lambda p:manifest if p==build.OVERVIEW_MEDIA/'sections.json' else original(p)):
+   with self.assertRaisesRegex(build.BuildError,'complete video coverage'):build.how_section_video('first-update')

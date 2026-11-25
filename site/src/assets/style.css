@@ -1984,21 +1984,105 @@ td.num,th.num {
  .how-player .guide-copy p { font-size:12px; line-height:1.4; }
 }
 
-/* Portrait phones give the introduction room to watch, then focus on reading. */
+/* Each explanation retains its matching animation on phones. */
+.how-player .how-media[hidden] { display:none; }
 @media(max-width:700px) and (orientation:portrait) {
- .how-page.guide-ready .how-player .guide-screen { grid-template-rows:minmax(0,1fr); }
- .how-page.guide-ready .how-player .how-media { display:none; }
- .how-page.guide-ready .how-player .guide-stage, .how-page.guide-ready .how-player .guide-complete { grid-row:1; }
- .how-page.guide-ready .how-player .guide-screen:has(#big-picture:not([hidden])) { grid-template-rows:minmax(0,1fr) 190px; }
- .how-page.guide-ready .how-player .guide-screen:has(#big-picture:not([hidden])) .how-media { display:grid; }
- .how-page.guide-ready .how-player #big-picture { grid-row:2; }
- .how-player #big-picture .guide-instruction-card { padding:10px; gap:6px; }
- .how-player #big-picture .guide-instruction-card h2 { font-size:16px; }
- .how-player #big-picture .guide-instruction-card h3 { font-size:10px; }
- .how-player #big-picture .guide-instruction-meta { grid-template-rows:44px; gap:0; }
- .how-player #big-picture .guide-instruction-meta > a { display:none; }
+ .how-page.guide-ready .how-player .guide-screen { grid-template-rows:minmax(0,1fr) minmax(190px,.85fr); }
+ .how-page.guide-ready .how-player .how-media:not([hidden]) { display:grid; }
+ .how-page.guide-ready .how-player .guide-stage, .how-page.guide-ready .how-player .guide-complete { grid-row:2; }
+ .how-player .guide-instruction-card { padding:10px; gap:6px; }
+ .how-player .guide-instruction-card h2 { font-size:16px; }
+ .how-player .guide-instruction-card h3 { font-size:10px; }
+ .how-player .guide-instruction-meta { grid-template-rows:44px; gap:0; }
+ .how-player .guide-instruction-meta > a { display:none; }
 }
 @media(max-width:700px) and (max-height:620px) and (orientation:portrait) {
  .how-page .header-row { min-height:48px; padding-top:4px; padding-bottom:4px; }
  .how-player { padding:8px 12px; gap:6px; }
+}
+
+/* Landing page: a focused mobile introduction, separate from the console guide. */
+.mobile-menu {display:none}
+.landing-page .workflow-grid p {margin-bottom:0}
+.landing-page .workflow-actions {margin-top:28px}
+@media(max-width:800px) {
+  .landing-page .header-row {min-height:80px;padding-top:0;flex-wrap:nowrap;gap:8px}
+  .landing-page .header-row>.brand {margin-right:auto}
+  .landing-page .header-row>nav {display:none}
+  .landing-page .header-cta {order:2;min-height:44px;flex:none}
+  .landing-page .mobile-menu {display:block;order:3;position:relative;flex:none}
+  .landing-page .mobile-menu summary {display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;font-size:12px;font-weight:550;cursor:pointer;list-style:none}
+  .landing-page .mobile-menu summary::-webkit-details-marker {display:none}
+  .landing-page .mobile-menu[open] summary {background:var(--soft)}
+  .landing-page .mobile-menu nav {position:absolute;top:calc(100% + 10px);right:0;width:min(290px,calc(100vw - 48px));margin:0;padding:8px;overflow:visible;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:0 16px 40px #15304c24;z-index:20}
+  .landing-page .mobile-menu nav ul {display:grid;gap:0;padding:0}
+  .landing-page .mobile-menu nav a {display:flex;align-items:center;min-height:44px;padding:10px 14px;border-radius:8px;font-size:14px}
+  .landing-page .mobile-menu nav a:hover {background:var(--soft)}
+  .landing-page .hero {padding-top:36px;padding-bottom:48px;gap:30px}
+  .landing-page .workflow-grid {grid-template-columns:1fr;gap:16px}
+  .landing-page .workflow-grid p {font-size:15px;line-height:1.65;max-width:none}
+  .landing-page .workflow-grid h3 {font-size:24px}
+  .landing-page .feature-glyph {display:none}
+  .landing-page .platform-section,.landing-page .trust-section {grid-template-columns:1fr;gap:32px}
+  .landing-page .section-heading>p,.landing-page .platform-section p,.landing-page .trust-section>div>p {font-size:15px;line-height:1.7}
+}
+@media(max-width:560px) {
+  .landing-page .brand {font-size:22px;gap:6px}
+  .landing-page .brand img {width:42px;height:30px}
+  .landing-page .header-cta {font-size:11px;padding:10px 12px}
+  .landing-page .hero h1 {font-size:clamp(2.5rem,11.6vw,3rem);margin:18px 0;line-height:1.08}
+  .landing-page .preview-label,.landing-page .eyebrow {font-size:11px;letter-spacing:1px}
+  .landing-page .preview-label {margin:0}
+  .landing-page .hero-description {font-size:16px;line-height:1.65;max-width:none;margin-bottom:22px}
+  .landing-page .hero .actions {display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .landing-page .hero .actions>a {min-height:48px;justify-content:center;padding:12px 8px;gap:8px;font-size:13px}
+  .landing-page .fleet-visual {margin-top:10px;box-shadow:0 14px 40px -28px #226aa150,0 0 0 5px #f0f7ff}
+  .landing-page .visual-brand,.landing-page .example-label {font-size:11px}
+  .landing-page .visual-body {padding:16px 16px 0}
+  .landing-page .visual-heading {display:block}
+  .landing-page .visual-heading h2 {font-size:20px;margin-bottom:16px}
+  .landing-page .visual-eyebrow,.landing-page .live-pill,.landing-page .visual-bottom {display:none}
+  .landing-page .release-summary strong {font-size:13px}
+  .landing-page .release-summary div>span,.landing-page .verified-label {font-size:11px}
+  .landing-page .release-summary {gap:8px;padding:12px}
+  .landing-page .verified-label {margin-left:auto}
+  .landing-page .package-symbol {display:none}
+  .landing-page .rollout-stages {padding:20px 0 24px}
+  .landing-page .stage,.landing-page .stage>span {font-size:11px}
+  .landing-page .device-list>div {font-size:12px;padding:13px 0}
+  .landing-page .device-list .device-list-heading {font-size:11px;padding:0 0 9px}
+  .landing-page .device-list>div:nth-child(3) {display:none}
+  .landing-page .applied,.landing-page .updating {font-size:11px}
+  .landing-page .fleet-visual figcaption {position:static;width:auto;margin:12px 16px 0;padding:13px 0;font-size:11px;line-height:1.6;border-top:1px solid var(--line)}
+  .landing-page .use-cases {padding-top:24px;padding-bottom:24px;gap:12px}
+  .landing-page .use-cases>span {font-size:11px;letter-spacing:.5px}
+  .landing-page .use-cases ul {gap:8px 16px}
+  .landing-page .use-cases li {font-size:14px}
+  .landing-page .workflow-section {padding-top:48px;padding-bottom:48px}
+  .landing-page .section-heading h2,.landing-page .platform-section h2,.landing-page .trust-section h2,.landing-page .closing-section h2 {font-size:32px;line-height:1.15;letter-spacing:-1.5px}
+  .landing-page .section-heading>p,.landing-page .platform-section p,.landing-page .trust-section>div>p,.landing-page .closing-section>p {font-size:15px;line-height:1.7}
+  .landing-page .workflow-grid {gap:14px;margin-top:26px}
+  .landing-page .workflow-grid article {padding:22px}
+  .landing-page .feature-number {font-size:11px}
+  .landing-page .feature-glyph {display:none}
+  .landing-page .workflow-grid h3 {font-size:23px;margin:12px 0}
+  .landing-page .workflow-grid p {font-size:15px;line-height:1.65}
+  .landing-page .text-link {font-size:14px;min-height:44px;gap:12px}
+  .landing-page .platform-section,.landing-page .trust-section {padding-top:48px;padding-bottom:48px;gap:28px}
+  .landing-page .platform-layer {padding:18px 16px}
+  .landing-page .platform-layer strong {font-size:14px}
+  .landing-page .platform-layer div>span {font-size:12px;line-height:1.6}
+  .landing-page .platform-tags>span {font-size:11px;padding:6px 9px}
+  .landing-page .trust-section .button {font-size:13px;min-height:48px;gap:14px}
+  .landing-page .trust-points h3 {font-size:19px}
+  .landing-page .trust-points p {font-size:15px;line-height:1.65}
+  .landing-page .trust-points article {gap:12px;padding:20px 0}
+  .landing-page .trust-points article>span {font-size:15px;min-width:16px}
+  .landing-page .closing-section {padding-top:48px;padding-bottom:48px}
+  .landing-page .closing-section .actions {gap:12px 24px}
+  .landing-page .closing-section .button {font-size:14px;min-height:48px}
+  .landing-page .footer-links a {font-size:13px;min-height:32px;display:flex;align-items:center}
+  .landing-page .footer-label {font-size:11px}
+  .landing-page .footer-top>div>p {font-size:14px}
+  .landing-page .footer-bottom,.landing-page .footer-bottom p {font-size:11px;line-height:1.6}
 }

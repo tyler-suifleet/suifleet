@@ -137,7 +137,7 @@
       ],
       "actions": [
         "Open Access policies and create a named policy.",
-        "Choose Group as the recipient type, select the demo group and click Grant decryption.",
+        "Choose Group as the recipient type, select the group you want to authorize and click Grant decryption.",
         "Approve the transaction. The group appears under granted recipients."
       ],
       "result": "Devices currently in the group can request access to the private files. Removing access cannot take back a copy that a device has already decrypted.",
@@ -224,7 +224,7 @@
         "Select the saved rollout, choose waiting devices and approve Check device health and continue. Empty selection checks health without new grants. Return to approve later checks and subsequent batches; closing the browser stops coordination.",
         "Use Pause to stop new starts, Resume to allow further checks, or Abort permanently. Give an audit reason; updates already allowed to start may finish."
       ],
-      "result": "Creation leaves devices waiting. The demonstration creates and pauses a plan without admitting devices; it does not claim healthy rollout completion. Actual progress requires admitted devices, verified update results and current health reports.",
+      "result": "Your plan is saved and paused, with devices waiting. When you are ready, resume it and approve the first batch. Review installation results and current health reports before advancing to another batch.",
       "docs": [
         {
           "label": "Staged rollouts",
