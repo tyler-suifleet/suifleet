@@ -17,6 +17,8 @@ The shipped `suifleet.service` starts `ExecStart=/usr/bin/suifleet --launch`. Wi
 
 Self-update cannot be combined with the device signing service (`[device.signer] kind = "service"`, [KEY_ISOLATION.md](KEY_ISOLATION.md)); the daemon refuses that configuration. The install directory belongs to the daemon user, which components share, so components could choose the binary the signing service trusts.
 
+Use the [package migration procedure](INSTALL_DEVICE_CLIENT.md#migrate-an-enrolled-linux-device-in-place) to move a legacy device to the isolated signer and enroll against a new deployment while retaining its identity and journal.
+
 ## Publishing an update
 
 Deploy the configured component (for example `suifleet-daemon 0.3.0`) to devices, like any component. The artifact is the daemon executable for the target platform. Its recipe must have no lifecycle commands or dependencies. The recipe and artifact digests are verified on chain and in Walrus as for every deployment.
