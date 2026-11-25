@@ -53,7 +53,8 @@ ServiceAccount credential:
   refused before any write and the rollback recreates them within the full
   quota. The same holds while an update that replaced a Deployment name still
   waits for the old Deployment's foreground deletion (a finalizer holds its
-  Pod), and after that deletion completes. A failed update that
+  Pod), and after that deletion completes, and after a partial update that
+  overwrote the only object of a ConfigMap-only bundle. A failed update that
   omits a stable ConfigMap keeps it with its data; a successful one prunes it.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   stable-name ConfigMap made immutable out of band (or a content-addressed one
@@ -323,6 +324,24 @@ def quota_bundle(work, name, message, count=publisher.MAX_CONFIGMAPS):
     worker["spec"]["replicas"] = 0
     worker["spec"]["template"]["spec"]["containers"][0].pop("envFrom")
     bundle["resources"].append(worker)
+    path.write_text(json.dumps(bundle))
+    return path
+
+
+def shared_bundle(work, name, mode, workload=False):
+    """A stable (unconsumed) ConfigMap shared-settings holding `mode`; with
+    `workload`, also a ConfigMap shared-extra-`mode` and a zero-replica
+    Deployment shared-worker that consumes neither, written last."""
+    bundle = {"version": 1, "resources": [
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shared-settings"}, "data": {"MODE": mode}}]}
+    if workload:
+        worker = json.loads(quota_bundle(work, f"{name}-base", mode, count=1).read_text())["resources"][-1]
+        worker["metadata"]["name"] = "shared-worker"
+        worker["metadata"]["labels"] = worker["spec"]["selector"]["matchLabels"] = \
+            worker["spec"]["template"]["metadata"]["labels"] = {"app": "shared-worker"}
+        bundle["resources"] += [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": f"shared-extra-{mode}"},
+                                 "data": {"MODE": mode}}, worker]
+    path = work / f"{name}.json"
     path.write_text(json.dumps(bundle))
     return path
 
@@ -1488,6 +1507,71 @@ def scenario(cluster, work, supervisor):
     check("stable test component retires",
           helper("apply", profiles, retire_config, component="stable-app").returncode == 0)
     wait_ready(profiles, retire_config, "1.0.0", component="stable-app")
+
+    # Review 4654: a partial apply can overwrite every object it shares with
+    # the last ready bundle, replacing that bundle's own annotation. Here the
+    # ready bundle is one stable ConfigMap; the update rewrites it and creates
+    # shared-extra-u2, then its Deployment create is denied. Every listed
+    # object then carries the update's digest, yet the namespace is not
+    # converged: a further update is refused before any write and the
+    # rollback to the ConfigMap-only bundle stays allowed and converges.
+    shared = [shared_bundle(work, "shared-u1", "u1"), shared_bundle(work, "shared-u2", "u2", workload=True),
+              shared_bundle(work, "shared-u3", "u3", workload=True)]
+    check("a ConfigMap-only bundle applies",
+          helper("apply", profiles, shared[0], component="shared-app").returncode == 0)
+    wait_ready(profiles, shared[0], "1.0.0", component="shared-app")
+    cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
+         "metadata": {"name": "test-freeze-shared-worker"},
+         "spec": {"failurePolicy": "Fail",
+                  "matchConstraints": {"resourceRules": [{"apiGroups": ["apps"], "apiVersions": ["v1"],
+                                                          "operations": ["CREATE"], "resources": ["deployments"]}]},
+                  "validations": [{"expression": "object.metadata.name != 'shared-worker'",
+                                   "message": "test: shared-worker Deployment creation is frozen"}]}},
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding",
+         "metadata": {"name": "test-freeze-shared-worker"},
+         "spec": {"policyName": "test-freeze-shared-worker", "validationActions": ["Deny"],
+                  "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
+
+    def shared_frozen():
+        probe = json.loads(shared[1].read_text())["resources"][-1]
+        probe["metadata"]["namespace"] = NAMESPACE
+        return cluster.admin("create", "--dry-run=server", "-f", "-", stdin=json.dumps(probe), ok=False).returncode != 0
+
+    def shared_state():
+        listed = json.loads(cluster.admin("get", "configmaps", "-n", NAMESPACE, "-l", "suifleet.io/component=shared-app",
+                                          "-o", "json").stdout)["items"]
+        return {item["metadata"]["name"]: (item["data"], item["metadata"]["annotations"].get(publisher.BUNDLE_ANNOTATION))
+                for item in listed}
+
+    wait("the shared-worker Deployment creation freeze to take effect", shared_frozen, timeout=60)
+    for attempt in ("an update", "its retry"):
+        result = helper("apply", profiles, shared[1], component="shared-app", version="2.0.0")
+        check(f"{attempt} rewrites shared-settings, creates shared-extra-u2 and fails at the Deployment create",
+              result.returncode == 2 and "frozen" in result.stderr
+              and {name: data for name, (data, _) in shared_state().items()}
+              == {"shared-settings": {"MODE": "u2"}, "shared-extra-u2": {"MODE": "u2"}}
+              and len({digest for _, digest in shared_state().values()}) == 1, f"{result.stderr[-500:]} {shared_state()}")
+    before = shared_state()
+    result = helper("apply", profiles, shared[2], component="shared-app", version="3.0.0")
+    check("a further update is refused before any write although only one bundle digest is listed",
+          result.returncode == 2 and "not converged" in result.stderr and shared_state() == before,
+          f"{result.stderr[-800:]} {shared_state()}")
+    result = helper("apply", profiles, shared[0], component="shared-app", version="1.0.0")
+    check("the rollback to the ConfigMap-only bundle stays allowed and prunes shared-extra-u2",
+          result.returncode == 0 and "configmaps/shared-extra-u2" in result.stderr, result.stderr[-800:])
+    wait_ready(profiles, shared[0], "1.0.0", component="shared-app")
+    check("the rollback restored shared-settings alone",
+          {name: data for name, (data, _) in shared_state().items()} == {"shared-settings": {"MODE": "u1"}},
+          str(shared_state()))
+    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-shared-worker")
+    wait("the shared-worker Deployment creation freeze to lift", lambda: not shared_frozen(), timeout=60)
+    result = helper("apply", profiles, shared[2], component="shared-app", version="3.0.0")
+    check("the further update then applies", result.returncode == 0, result.stderr[-500:])
+    wait_ready(profiles, shared[2], "3.0.0", component="shared-app")
+    check("shared test component retires",
+          helper("apply", profiles, retire_config, component="shared-app").returncode == 0)
+    wait_ready(profiles, retire_config, "1.0.0", component="shared-app")
     cluster.admin("create", "configmap", "legacy", "-n", NAMESPACE, "--from-literal=k=customer")
 
     # A stable-name (unconsumed) ConfigMap cannot be restored in place once
