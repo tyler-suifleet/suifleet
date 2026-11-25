@@ -114,7 +114,8 @@ Delete the batch once every host is enrolled.
 Hosts need SSH, sudo and Python 3; `deb` hosts also need `python3-apt` (present on
 standard Debian and Ubuntu installs) for the `apt` module. Enrolling hosts also
 need a tmpfs the SSH account can write (`/dev/shm` by default, see
-`suifleet_claim_transfer_dir`). Use a controller with
+`suifleet_claim_transfer_dir`) and no swap that can write to a disk while
+they enroll ([claim storage](#claim-storage)). Use a controller with
 ansible-core 2.16 or later. The examples use only
 `ansible.builtin` modules. The tested controller is pinned in
 [`requirements-controller.txt`](../examples/ansible/requirements-controller.txt):
@@ -200,6 +201,9 @@ restarted once.
   after the record was written but before its cleanup). Every run also erases
   the SSH account's transfer directories left by a killed run. An interrupted
   run leaves the claim only on those tmpfs mounts until the next run or a reboot. Revoke a claim that was exposed before use.
+  tmpfs alone is not enough, because its pages and the memory of the
+  processes holding the claim can be swapped out; see
+  [claim storage](#claim-storage).
 - **One enrollment per device.** `/etc/suifleet/enrollment.json` records the
   public IDs, and a recorded host never enrolls again. A host that has
   `config.toml` but no record is refused rather than given a new claim.
@@ -212,6 +216,30 @@ restarted once.
   as root. Package installation, service control and file ownership need root.
   The daemon and the signing service run as separate unprivileged users
   ([key isolation](KEY_ISOLATION.md)). Firmware helpers are not installed.
+
+### Claim storage
+
+The claim must never reach persistent storage on the host, neither as a file
+nor as swapped-out memory. Linux can swap tmpfs pages, and the processes
+that handle the claim (the transfer command, `runuser` and `suifleet
+--enroll`) hold it in memory. Before the claim is read, the role reads
+`/proc/swaps` and refuses the host unless every active swap
+device is one of:
+
+- **zram without a writeback device** (`/sys/block/zramN/backing_dev` is
+  `none` or absent): compressed RAM, never written to a disk;
+- **a dm-crypt device** (device-mapper UUID `CRYPT-…`, for example
+  `cryptsetup` plain swap with a random key or LUKS): the kernel writes only
+  ciphertext.
+
+A swap file, a plain disk partition, zram that writes back to a disk, swap on
+LVM or another device-mapper target (even on top of dm-crypt) and anything
+unrecognized refuse the claim, and the message names the devices. Hibernation
+writes memory to swap, so it is covered by the same rule. For a host with
+ordinary disk swap, run `swapoff -a` before enrolling it and `swapon -a`
+afterwards (recorded hosts never handle a claim again), or move it to zram
+or encrypted swap. This check covers the hosts; keep the controller, which
+also holds the claim in memory, on a machine whose swap is encrypted or off.
 
 ## Recovery
 
@@ -230,6 +258,8 @@ restarted once.
   ```
 
   Never issue an enrolled device a new claim, and never replace its key.
+- **Swap refusal.** See [claim storage](#claim-storage): enroll with swap
+  off, on zram without writeback or on dm-crypt swap. Nothing was sent.
 - **A lost or exposed claim before enrollment.** Revoke it on the Enrollment
   page (*Lost a credential file?*).
 - **Removing a host** from the fleet is a separate, deliberate decision. The
@@ -270,8 +300,17 @@ The harness checks these phases:
    `ansible_python_interpreter` is wrapped in `sudo -u nobody` (refused by the
    host probe because the process chain changes user), and the same with
    `/proc` remounted `hidepid=2` (refused because the chain is not fully
-   readable). Then a claim transfer is
-   interrupted right after staging, for plain and Vault claims: the claim must
+   readable). Swap is checked next. The hosts share the test machine's
+   kernel, so when that machine has active swap (for example WSL's disk swap),
+   a claim transfer with it unchanged must be refused, naming the device. Then
+   `/proc/swaps` (and `/sys/block`) are replaced inside each host's mount
+   namespace; nothing is swapped on or off. A transfer must be refused,
+   listing every unsafe device, with a swap file, a disk partition,
+   zram writing back to a disk, a non-crypt device-mapper device and an
+   unknown zram device. All other phases see a `/proc/swaps` with no swap.
+   Then a claim transfer is
+   interrupted right after staging, for plain and Vault claims, with zram
+   without writeback and dm-crypt swap (accepted): the claim must
    exist only in the tmpfs staging directory, not anywhere on the host's
    persistent filesystem (including Ansible's remote temporary directories)
    or in the controller's files and Ansible home, and no transfer copy may
