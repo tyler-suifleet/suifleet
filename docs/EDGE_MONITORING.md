@@ -230,8 +230,11 @@ no on-disk spool.
 
 ## Resource bounds
 
-One poll/export loop and one single-threaded `/metrics` server (5 s per
-request, listen backlog 16) run in the adapter. Memory is bounded by the
+One console poll loop, one OTLP export thread and one single-threaded
+`/metrics` server (5 s per request, listen backlog 16) run in the adapter.
+Collector latency, timeouts and backoff run on the export thread, so they
+never delay console polling or the withdrawal of stale health; a log batch in
+flight still counts against `max_buffer` when it is put back for a retry. Memory is bounded by the
 component limit, the log buffer (`max_buffer` lines of at most 512 bytes) and
 at most 512 log records per OTLP request. The end-to-end test asserts the
 adapter's peak RSS stays below 64 MiB. Size the customer's own Prometheus

@@ -132,12 +132,16 @@ class FakeCollector:
         self.received = []
         self.responses = []         # queued (status, headers, body); default 200
         self.truncate = []          # queued HTTP statuses answered with a truncated body
+        self.arrived = []           # request paths, recorded before any reply delay
+        self.gate = None            # threading.Event that holds every reply until set
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
         self.server = server
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{server.server_port}"
 
     def close(self):
+        if self.gate:
+            self.gate.set()
         self.server.shutdown()
         self.server.server_close()
 
@@ -150,6 +154,9 @@ class FakeCollector:
 
             def do_POST(self):
                 body = self.rfile.read(int(self.headers["Content-Length"]))
+                fake.arrived.append(self.path)
+                if fake.gate:
+                    fake.gate.wait(30)
                 if fake.truncate:
                     status = fake.truncate.pop(0)
                     fake.received.append((self.path, dict(self.headers), json.loads(body), status))
@@ -925,6 +932,75 @@ class AdapterTests(Base):
         thread.join(10)
         self.assertFalse(thread.is_alive())
         self.assertEqual(collector.received[0][0], "/v1/metrics")
+
+    def wait(self, predicate, seconds=10):
+        deadline = time.time() + seconds
+        while not predicate():
+            if time.time() > deadline:
+                self.fail("condition not reached")
+            time.sleep(0.02)
+
+    def test_delayed_collector_does_not_stall_console_polling(self):
+        collector = FakeCollector()
+        collector.gate = threading.Event()             # every collector reply waits
+        self.addCleanup(collector.close)
+        cfg, _, _ = self.make(otlp=dict(endpoint=collector.url, timeout_seconds=30),
+                              logs=dict(components=["svc"]))
+        cfg.interval = 0.2
+        stop = threading.Event()
+        holder = {}
+        thread = threading.Thread(target=lambda: em.run(cfg, stop=stop, ready=lambda e, s: holder.update(e=e, s=s)))
+        thread.start()
+        self.addCleanup(lambda: (stop.set(), collector.gate.set(), thread.join(35)))
+        self.wait(lambda: collector.arrived)            # first export is now blocked in flight
+        exporter = holder["e"]
+        polls = exporter.polls["ok"]
+        self.wait(lambda: exporter.polls["ok"] >= polls + 3, seconds=5)
+        self.assertEqual(len(collector.arrived), 1)     # still the same pending request
+        self.console.status = "unavailable"             # daemon goes down during the delay
+        self.wait(lambda: not exporter.up, seconds=5)
+        self.assertEqual(len(collector.arrived), 1)
+        port = holder["s"].server_address[1]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5) as response:
+            text = response.read().decode()
+        self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 0', text)
+        self.assertNotIn("suifleet_device_healthy", text)   # stale health withdrawn
+        self.console.status = None
+        collector.gate.set()                            # collector recovers
+        self.wait(lambda: exporter.up and exporter.otlp_results[("metrics", "ok")] >= 2)
+        stop.set()
+        thread.join(35)
+        self.assertFalse(thread.is_alive())
+
+    def test_log_batch_in_flight_is_requeued_within_the_buffer_bound(self):
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
+                                           logs=dict(components=["svc"], max_lines=200, max_buffer=10))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        self.console.logs["svc"] = [f"line {i}" for i in range(8)]
+        exporter.poll(console)
+        seen = {}
+
+        def post(signal_name, payload):
+            if signal_name == "metrics":
+                return ("ok", None)
+            # While the batch is in flight the poll loop buffers 5 new lines.
+            seen["buffered"] = exporter.render_prometheus()
+            self.console.logs["svc"] = [f"line {i}" for i in range(13)]
+            exporter.poll(console)
+            transport.failures["logs"] = 1
+            transport.not_before["logs"] = 1.0
+            return ("retry", None)
+        with unittest.mock.patch.object(transport, "post", side_effect=post):
+            em.export_once(exporter, transport)
+        self.assertIn(b'suifleet_exporter_log_buffered{evidence="simulated",device="sim-1"} 8', seen["buffered"])
+        self.assertEqual([line for _, _, line in exporter.log_buffer], [f"line {i}" for i in range(3, 13)])
+        self.assertEqual(exporter.log_records["dropped"], 3)  # oldest requeued lines over the bound
+        self.assertEqual(exporter.log_inflight, 0)
+        transport.not_before["logs"] = 0.0
+        with unittest.mock.patch.object(transport, "post", return_value=("ok", None)):
+            em.export_once(exporter, transport)
+        self.assertEqual(len(exporter.log_buffer), 0)
+        self.assertEqual(exporter.log_records["exported"], 10)
 
 
 
