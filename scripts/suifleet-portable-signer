@@ -34,6 +34,18 @@ def trusted_binary(path):
     return path
 
 
+def sha256_file(handle):
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: handle.read(65536), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def valid_digest(value):
+    return (isinstance(value, str) and len(value) == 64
+            and all(c in "0123456789abcdef" for c in value))
+
+
 class ClientUpdate:
     """The platform supplies a verified candidate in a root-owned directory."""
 
@@ -42,8 +54,13 @@ class ClientUpdate:
         self.base = base
         self.path = directory / "state.json"
         self.state = json.loads(self.path.read_text()) if self.path.exists() else {}
-        if self.state.get("trial"):
-            self.resolve(False)
+        with self.base.open("rb") as executable:
+            self.base_digest = sha256_file(executable)
+        if self.state.get("current") and self.state.get("base_sha256") != self.base_digest:
+            del self.state["current"]
+            self.state.pop("base_sha256", None)
+            self.save()
+        self.resolve(False)
 
     def sync(self):
         fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
@@ -53,7 +70,7 @@ class ClientUpdate:
             os.close(fd)
 
     def save(self):
-        with tempfile.NamedTemporaryFile(mode="w", dir=self.directory, delete=False) as handle:
+        with tempfile.NamedTemporaryFile(mode="w", dir=self.directory, prefix=".update-", delete=False) as handle:
             tmp = Path(handle.name)
             try:
                 json.dump(self.state, handle)
@@ -69,11 +86,14 @@ class ClientUpdate:
         return trusted_binary(self.directory / digest) if digest else self.base
 
     def stage(self, request):
-        digest = request["sha256"]
-        if (not isinstance(digest, str) or len(digest) != 64
-                or any(c not in "0123456789abcdef" for c in digest)
-                or not isinstance(request["deployment"], str)):
+        try:
+            request = json.loads(request)
+        except ValueError as error:
+            raise RuntimeError("invalid managed update request") from error
+        if (not isinstance(request, dict) or not valid_digest(request.get("sha256"))
+                or not isinstance(request.get("deployment"), str) or not request["deployment"]):
             raise RuntimeError("invalid managed update request")
+        digest = request["sha256"]
         self.state["result"] = {"deployment": request["deployment"], "applied": False}
         try:
             source = trusted_binary(self.directory / "candidate")
@@ -84,16 +104,14 @@ class ClientUpdate:
                         or header[18:20] != baseline[18:20] or not header.startswith(b"\x7fELF")):
                     raise RuntimeError("candidate ELF ABI differs from the installed client")
                 incoming.seek(0)
-                with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as output:
+                with tempfile.NamedTemporaryFile(dir=self.directory, prefix=".update-", delete=False) as output:
                     tmp = Path(output.name)
                     try:
                         shutil.copyfileobj(incoming, output)
                         output.flush()
                         with tmp.open("rb") as check:
-                            hashed = hashlib.sha256()
-                            for chunk in iter(lambda: check.read(65536), b""):
-                                hashed.update(chunk)
-                        if hashed.hexdigest() != digest:
+                            actual_digest = sha256_file(check)
+                        if actual_digest != digest:
                             raise RuntimeError("candidate digest differs from the deployment")
                         os.fchmod(output.fileno(), 0o755)
                         os.fsync(output.fileno())
@@ -112,12 +130,13 @@ class ClientUpdate:
         if trial:
             if applied:
                 self.state["current"] = trial
+                self.state["base_sha256"] = self.base_digest
             self.state["result"]["applied"] = applied
             self.save()
         current = self.state.get("current")
         for path in self.directory.iterdir():
             name = path.name
-            if name != current and len(name) == 64 and all(c in "0123456789abcdef" for c in name):
+            if name.startswith(".update-") or (name != current and valid_digest(name)):
                 path.unlink()
         self.sync()
 
@@ -229,7 +248,7 @@ def run(args, daemon_user, signer_user, updates=None):
         while all(child.poll() is None for child in children):
             time.sleep(0.1)
         if control and daemon.returncode == 75 and signer.poll() is None:
-            return json.loads(control.recv(1024))
+            return control.recv(1024)
         raise RuntimeError("portable signer or daemon exited; restart the paired service")
     finally:
         if child_control:

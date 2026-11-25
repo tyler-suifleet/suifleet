@@ -1119,6 +1119,41 @@ mod tests {
     fn fixture() -> DeploymentManifest {
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn managed_daemon_update_requires_service_signer_and_platform_paths() {
+        let dir = std::env::temp_dir().join(format!("suifleet-config-managed-update-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            dir.join("deployment.json"),
+            include_bytes!("../../manifests/fixture.localnet.json"),
+        )
+        .unwrap();
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let signer = "[device.signer]\nkind='service'\nsocket='/run/suifleet/signer.sock'\n";
+        for (signer_config, enabled, paths, valid) in [
+            (signer, true, "", true),
+            (signer, false, "", false),
+            ("", true, "", false),
+            (signer, true, "install_dir='/var/lib/suifleet/client'\n", false),
+        ] {
+            std::fs::write(
+                &path,
+                format!("{base}{signer_config}[daemon_update]\nmanaged=true\nenabled={enabled}\n{paths}"),
+            )
+            .unwrap();
+            let result = Config::load(&path);
+            if valid {
+                assert!(result.unwrap().daemon_update.managed);
+            } else {
+                let error = result.err().expect("invalid managed update configuration");
+                assert!(error.to_string().contains("managed daemon_update requires"), "{error}");
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn shadows_need_a_thing_name_and_bounded_limits() {
         for (text, valid) in [

@@ -67,6 +67,12 @@ and package update access under platform control.
    persisted trial. The resulting daemon uses the same signer key and
    deployment journal and reports the update outcome.
 
+Stop the paired service before replacing the platform-installed executable and
+restart it afterward. The launcher checks the installed executable's SHA-256 at
+startup. A change clears the managed selection and any interrupted trial, so the
+replacement platform executable runs both the daemon and the signer. The device
+key and deployment journal stay in place.
+
 The native systemd signer profile still requires the platform-installed
 executable. Use its package manager for updates, or switch to the managed
 portable signer profile before deploying a daemon component. Client binary
@@ -81,9 +87,10 @@ python3 scripts/test_key_isolation_systemd.py --inside --portable --managed-upda
 ```
 
 The test exercises update deployment, signer rebinding, tamper rejection and
-rollback against a loopback simulator. Set `SUIFLEET_TEST_UPDATE_CANDIDATE`
-to a separately built compatible executable inside the guest to exercise two
-build profiles.
+rollback and platform executable replacement against a loopback simulator.
+Run this guest check locally because the hosted workflows do not currently run
+it. Set `SUIFLEET_TEST_UPDATE_CANDIDATE` to a separately built compatible
+executable inside the guest to exercise two build profiles.
 
 ## Publishing an update
 

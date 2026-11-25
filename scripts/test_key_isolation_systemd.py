@@ -314,6 +314,28 @@ with socket.socket(socket.AF_UNIX) as conn:
             assert hashlib.sha256(key.read_bytes()).digest() == key_hash
             assert not sim.errors, sim.errors
             check("launcher SIGKILL during a durable trial recovered the previous executable, key and journal")
+
+            stop(process)
+            installed = Path("/usr/bin/suifleet")
+            replacement = installed.with_name("suifleet.platform-replacement")
+            replacement.write_bytes(base + b"SF-299 platform replacement")
+            replacement.chmod(0o755)
+            replacement.replace(installed)
+            orphan = update_dir / ("a" * 64)
+            leftover = update_dir / ".update-interrupted"
+            orphan.touch()
+            leftover.touch()
+            process = managed_start()
+            report("0x926", process)
+            assert current_exe(process) == str(installed)
+            assert not json.loads(root_state.read_text()).get("current")
+            assert not Path(confirmed).exists()
+            assert not orphan.exists() and not leftover.exists()
+            assert candidate.is_file()
+            assert journal()["binding"] == binding
+            assert hashlib.sha256(key.read_bytes()).digest() == key_hash
+            assert not sim.errors, sim.errors
+            check("replacing the platform executable reset the managed selection and preserved identity and journal")
         finally:
             stop(process)
         print("EVIDENCE " + json.dumps({"ticket": "SF-299", "checks": "managed portable update",
