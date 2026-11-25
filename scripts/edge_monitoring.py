@@ -241,6 +241,11 @@ class Config:
             _only(otlp, ("endpoint", "headers_file", "ca_file", "timeout_seconds", "initial_backoff_seconds",
                          "max_backoff_seconds", "logs"), "otlp")
             endpoint = otlp.get("endpoint")
+            if isinstance(endpoint, str) and not re.fullmatch(r"[\x21-\x7e]+", endpoint):
+                # urllib/http.client cannot put non-ASCII, whitespace or control
+                # characters on the request line; a permanent misconfiguration
+                # would otherwise look like an endless collector outage.
+                raise ConfigError("otlp.endpoint must be printable ASCII without spaces; percent-encode other characters")
             parsed = _split_url(endpoint)
             if parsed is None or parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.query \
                     or parsed.fragment or parsed.username or parsed.password or _port(parsed, default=0) is None:

@@ -403,6 +403,31 @@ class ConfigTests(Base):
         self.assertIn("rejected", written)
         self.assertNotIn("topsecretvalue", written)
 
+    def test_non_ascii_otlp_endpoint_is_rejected_by_check_config(self):
+        # http.client cannot put non-ASCII on the request line; accepting it would
+        # turn a permanent configuration error into endless "unreachable" retries.
+        for endpoint in ("http://127.0.0.1:4318/caf\u00e9", "http://127.0.0.1:4318/a b",
+                         "http://127.0.0.1:4318/x\ty", "https://coll\u00e9ctor.example"):
+            path = self.write("config.json", json.dumps(self.config(otlp=dict(endpoint=endpoint))))
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaisesRegex(em.ConfigError, "otlp.endpoint must be printable ASCII"):
+                    em.Config(self.config(otlp=dict(endpoint=endpoint)))
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                self.assertIn("configuration rejected",
+                              "".join(call.args[0] for call in stderr.write.call_args_list))
+        # The explicitly percent-encoded equivalent is accepted and kept verbatim.
+        cfg = em.Config(self.config(otlp=dict(endpoint="http://127.0.0.1:4318/caf%C3%A9")))
+        self.assertEqual(cfg.otlp["metrics_url"], "http://127.0.0.1:4318/caf%C3%A9/v1/metrics")
+        self.assertEqual(cfg.otlp["logs_url"], "http://127.0.0.1:4318/caf%C3%A9/v1/logs")
+
+    def test_percent_encoded_otlp_endpoint_reaches_the_collector(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg = em.Config(self.config(prometheus=None, otlp=dict(endpoint=collector.url + "/caf%C3%A9")))
+        transport = em.Transport(cfg, em.Exporter(cfg), clock=lambda: 0.0, rng=lambda: 0.5)
+        self.assertEqual(transport.post("metrics", {"resourceMetrics": []}), ("ok", None))
+
     def test_token_generation(self):
         token = em.generate_token()
         self.assertRegex(token["token"], em.MONITOR_TOKEN)

@@ -103,7 +103,7 @@ Example `/etc/suifleet-monitoring/monitoring.json` (replace example values):
 | `console.token_file` | One `sfc_…` token from `suifleet --console-token`. |
 | `prometheus.listen` | `host:port`, default `127.0.0.1:9469`. A non-loopback address needs `"allow_remote": true` **and** `token_sha256`. The endpoint speaks plain HTTP: for scraping across a network, put a customer-owned TLS proxy in front, or scrape over SSH/WireGuard. |
 | `prometheus.token_sha256` | Optional for loopback, required otherwise. Requests must carry `Authorization: Bearer <token>`; only the hash is stored. |
-| `otlp.endpoint` | Collector base URL; the adapter posts to `/v1/metrics` and `/v1/logs`. HTTPS is required unless the collector is on loopback. No credentials, query or fragment in the URL; an explicit port must be 1–65535. |
+| `otlp.endpoint` | Collector base URL; the adapter posts to `/v1/metrics` and `/v1/logs`. HTTPS is required unless the collector is on loopback. No credentials, query or fragment in the URL; an explicit port must be 1–65535. The URL must be printable ASCII without spaces; percent-encode any other path characters (for example `%C3%A9`). |
 | `otlp.headers_file` | Optional `Name: value` lines (at most 16), for example `Authorization: Bearer …` or a tenant header. Host, Content-Type, Content-Length, Connection and Transfer-Encoding cannot be overridden. Values must be printable ASCII; `--check-config` rejects anything else. |
 | `otlp.ca_file` | Optional PEM bundle for a private CA (HTTPS only). Otherwise the system trust store is used. TLS 1.2+ is required; session-key logging is disabled. |
 | `otlp.timeout_seconds` | 1–30, default 5, per request. |
