@@ -250,7 +250,10 @@ inherits. It refuses the host unless a crash could store nothing:
   `core`) and the session's limit is 0: the kernel writes nothing;
 - **it pipes to `systemd-coredump`** and either the session's limit is 0
   (systemd-coredump honors the crashing process's limit) or `coredump.conf`
-  sets `Storage=none`;
+  sets both `Storage=none` and `ProcessSizeMax=0`. With `Storage=none` alone,
+  systemd-coredump may still write the dump to disk temporarily while
+  processing it, and a configuration that `systemd-analyze cat-config` cannot
+  read is refused;
 - **it pipes to `false` or `true`**: nothing is kept.
 
 Any other piped handler is refused, because the kernel runs it whatever the
@@ -258,7 +261,8 @@ limit and it may keep the dump: Apport (Ubuntu's default), ABRT, the WSL
 crash handler or a vendor handler. The message gives the reason. To enroll
 such a host, stop the handler for the enrollment (for example
 `systemctl stop apport`, which restores a file pattern), add
-`/etc/systemd/coredump.conf.d/` with `Storage=none` on systemd-coredump hosts,
+`/etc/systemd/coredump.conf.d/` with `Storage=none` and `ProcessSizeMax=0` on
+systemd-coredump hosts,
 or set the deploy account's `core` limit to 0 in `/etc/security/limits.d/`
 (`pam_limits` sets SSH sessions' limits, starting from PID 1's, so
 `LimitCORE=0` on the SSH service alone may not reach them). The root-run staging and enrollment commands
@@ -292,7 +296,7 @@ allows it). The role does not check the controller.
   off, on zram without writeback or on dm-crypt swap. Nothing was sent.
 - **Crash dump refusal.** See [claim storage](#claim-storage): disable core
   dumps for the enrollment (limit 0 with a file pattern or systemd-coredump,
-  or `Storage=none`). Nothing was sent.
+  or `Storage=none` with `ProcessSizeMax=0`). Nothing was sent.
 - **A lost or exposed claim before enrollment.** Revoke it on the Enrollment
   page (*Lost a credential file?*).
 - **Removing a host** from the fleet is a separate, deliberate decision. The
@@ -348,11 +352,13 @@ The harness checks these phases:
    crash handler is), a transfer with them must be refused. Then
    `kernel.core_pattern` is bind-mounted inside each host's mount namespace,
    and transfers must be refused, giving the reason, for Apport, for core files
-   with a nonzero limit and for systemd-coredump storing dumps with a nonzero
-   limit (the containers' init and sshd inherit Docker's unlimited limit). No test
+   with a nonzero limit, for systemd-coredump storing dumps with a nonzero
+   limit, and for systemd-coredump with `Storage=none` but the default or a
+   nonzero `ProcessSizeMax` (the containers' init and sshd inherit Docker's
+   unlimited limit). No test
    process is crashed: `kernel.core_pattern` is global to the shared kernel,
    so a real crash would reach the machine's own handler. Enrollment runs with
-   systemd-coredump and `Storage=none`.
+   systemd-coredump, `Storage=none` and `ProcessSizeMax=0`.
    Then a claim transfer is
    interrupted right after staging, for plain and Vault claims, with zram
    without writeback and dm-crypt swap and with core files under a
