@@ -842,25 +842,36 @@ class Transport:
         body = json.dumps(payload, separators=(",", ":")).encode()
         headers = {**self.cfg["headers"], "Content-Type": "application/json"}
         request = urllib.request.Request(url, data=body, method="POST", headers=headers)
-        retry_after = None
+        retry_after, status, data, unreadable = None, None, None, False
         try:
             with self.opener.open(request, timeout=self.cfg["timeout"]) as response:
-                status, data = response.status, _read_body(response, MAX_OTLP_RESPONSE)
+                status = response.status
+                try:
+                    data = _read_body(response, MAX_OTLP_RESPONSE)
+                except _IO_ERRORS:
+                    # The status line already arrived: a 2xx means the collector
+                    # accepted the payload, so a body cut short (truncation or
+                    # timeout) leaves the acknowledgement uninspectable, not the
+                    # delivery failed. Other statuses keep their own handling.
+                    data, unreadable = b"", True
         except urllib.error.HTTPError as error:
             status, data = error.code, b""
             value = error.headers.get("Retry-After") if error.headers else None
             retry_after = _retry_after(value, self.cfg["max_backoff"])
             error.close()
         except _IO_ERRORS:
-            status, data = None, b""
+            if status is None or not 200 <= status < 300:
+                status = None                  # failed before a success status was known
+            if data is None:
+                data, unreadable = b"", True
         if status is not None and 200 <= status < 300:
-            rejected = _partial_rejected(data, signal_name)
+            rejected = _INVALID if unreadable else _partial_rejected(data, signal_name)
             if rejected not in (None, _INVALID) and rejected > _payload_items(payload, signal_name):
                 rejected = _INVALID                # more refused than sent: impossible
             self._success(signal_name)
             if rejected is _INVALID:
-                # Accepted (2xx) but the body could not be inspected or its
-                # count is impossible: never resend, never count it, and do not
+                # Accepted (2xx) but the body could not be read or inspected,
+                # or its count is impossible: never resend, never count it, and do not
                 # report the records as confirmed exported.
                 self._record(signal_name, "invalid_response")
                 return ("unconfirmed", None)

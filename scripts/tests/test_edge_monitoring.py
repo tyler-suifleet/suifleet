@@ -141,6 +141,7 @@ class FakeCollector:
         self.received = []
         self.responses = []         # queued (status, headers, body); default 200
         self.truncate = []          # queued HTTP statuses answered with a truncated body
+        self.stall = []             # queued reply callables (e.g. headers, then a stalled body)
         self.arrived = []           # request paths, recorded before any reply delay
         self.gate = None            # threading.Event that holds every reply until set
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
@@ -166,6 +167,9 @@ class FakeCollector:
                 fake.arrived.append(self.path)
                 if fake.gate:
                     fake.gate.wait(30)
+                if fake.stall:
+                    fake.received.append((self.path, dict(self.headers), json.loads(body), 200))
+                    return fake.stall.pop(0)(self)
                 if fake.truncate:
                     status = fake.truncate.pop(0)
                     fake.received.append((self.path, dict(self.headers), json.loads(body), status))
@@ -880,7 +884,7 @@ class AdapterTests(Base):
         self.assertEqual(attributed, {"jwt ready": em.REDACTED, "plain ready": "sensor-reader"})
         self.assertNotIn("eyJa.b.c", json.dumps(records))
 
-    def test_truncated_collector_response_retries_and_keeps_logs(self):
+    def test_truncated_collector_error_response_retries_and_keeps_logs(self):
         collector = FakeCollector()
         self.addCleanup(collector.close)
         cfg, exporter, console = self.make(prometheus=None, otlp=dict(
@@ -889,7 +893,9 @@ class AdapterTests(Base):
         now = [0.0]
         transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
         exporter.poll(console)
-        for truncation in TRUNCATIONS:                  # success body and HTTPError paths
+        errors = [t for t in TRUNCATIONS if (t[0] if isinstance(t, tuple) else t) >= 300]
+        self.assertEqual(len(errors), 2)                # chunked and Content-Length
+        for truncation in errors:                       # HTTPError path: status is not a success
             collector.truncate = [truncation, truncation]
             em.export_once(exporter, transport)
             self.assertFalse(transport.ready("metrics"))
@@ -897,15 +903,83 @@ class AdapterTests(Base):
             self.assertEqual(len(exporter.log_buffer), 2)   # retained for retry
             self.assertEqual(exporter.log_records["exported"], 0)
             now[0] += 100
-        self.assertEqual(exporter.otlp_results[("metrics", "unreachable")]
-                         + exporter.otlp_results[("metrics", "retry")], len(TRUNCATIONS))
-        # A short 2xx body is a transport failure, never a delivered batch.
+        self.assertEqual(exporter.otlp_results[("logs", "retry")], len(errors))
         self.assertEqual(exporter.otlp_results[("logs", "ok")], 0)
-        self.assertEqual(transport.failures["logs"], len(TRUNCATIONS))
+        self.assertEqual(transport.failures["logs"], len(errors))
         em.export_once(exporter, transport)             # collector recovers
         self.assertEqual(len(exporter.log_buffer), 0)
         self.assertEqual(exporter.log_records["exported"], 2)
         self.assertEqual(exporter.backoff["metrics"], 0.0)
+
+    def test_truncated_collector_success_response_is_unconfirmed_not_resent(self):
+        # The 2xx status already arrived, so the collector accepted the batch:
+        # resending it after a cut-short acknowledgement would duplicate logs.
+        for truncation in (200, (200, "length")):       # chunked and Content-Length
+            with self.subTest(truncation=truncation):
+                self.console.logs["svc"] = ["one", "two"]
+                collector = FakeCollector()
+                self.addCleanup(collector.close)
+                cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+                    endpoint=collector.url, initial_backoff_seconds=2, max_backoff_seconds=8),
+                    logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+                transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+                exporter.poll(console)
+                first = list(exporter.log_buffer)
+                self.assertEqual(len(first), 2)
+                collector.truncate = [truncation, truncation]
+                em.export_once(exporter, transport)
+                self.assertEqual(len(exporter.log_buffer), 0)       # accepted: not requeued
+                self.assertTrue(transport.ready("metrics"))          # no backoff
+                self.assertTrue(transport.ready("logs"))
+                self.assertEqual(exporter.backoff["logs"], 0.0)
+                self.assertEqual(transport.failures["logs"], 0)
+                self.assertEqual(exporter.log_records["unconfirmed"], 2)
+                self.assertEqual(exporter.log_records["exported"], 0)
+                for signal in ("metrics", "logs"):
+                    self.assertEqual(exporter.otlp_results[(signal, "invalid_response")], 1)
+                    self.assertEqual(exporter.otlp_results[(signal, "unreachable")], 0)
+                    self.assertEqual(exporter.otlp_results[(signal, "retry")], 0)
+                # Recovery: new lines export normally and the accepted batch is never resent.
+                self.console.logs["svc"] = self.console.logs.get("svc", []) + ["after truncation"]
+                exporter.poll(console)
+                fresh = list(exporter.log_buffer)
+                em.export_once(exporter, transport)
+                self.assertEqual(len(exporter.log_buffer), 0)
+                self.assertEqual(exporter.log_records["exported"], len(fresh))
+                bodies = [r["body"]["stringValue"] for path, _, payload, _ in collector.received
+                          if path.endswith("/v1/logs")
+                          for resource in payload["resourceLogs"] for scope in resource["scopeLogs"]
+                          for r in scope["logRecords"]]
+                for line in first:
+                    text = line[2]
+                    self.assertEqual(sum(1 for b in bodies if text in b), 1, text)
+
+    def test_success_status_with_body_read_timeout_is_not_resent(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        stall = threading.Event()
+        self.addCleanup(stall.set)
+
+        def stalled_reply(handler):
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", "100")
+            handler.end_headers()
+            handler.wfile.write(b"{")
+            handler.wfile.flush()
+            stall.wait(10)                               # outlast the client read timeout
+            handler.close_connection = True
+        collector.stall = [stalled_reply]
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, timeout_seconds=1, initial_backoff_seconds=2, max_backoff_seconds=8),
+            logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        exporter.poll(console)
+        self.assertEqual(transport.post("logs", exporter.otlp_logs(list(exporter.log_buffer))),
+                         ("unconfirmed", None))
+        self.assertTrue(transport.ready("logs"))
+        self.assertEqual(exporter.otlp_results[("logs", "invalid_response")], 1)
+        self.assertEqual(exporter.otlp_results[("logs", "unreachable")], 0)
 
     def test_partial_success_count_is_validated(self):
         # Valid OTLP int64 encodings: JSON number or decimal string.

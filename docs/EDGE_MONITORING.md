@@ -159,7 +159,7 @@ the two apart.
 | `suifleet_exporter_info{adapter_version}` | gauge | Adapter version. |
 | `suifleet_exporter_polls_total{result}` | counter | Console reads by result (`ok`, `unreachable`, `unauthenticated`, `denied`, `unavailable`, `malformed`, and `logs-…` for log reads). |
 | `suifleet_exporter_last_success_timestamp_seconds` | gauge | Last successful console read. |
-| `suifleet_exporter_otlp_exports_total{signal,result}` | counter | OTLP posts by `metrics`/`logs` and `ok`, `partial` (accepted with 2xx, but the collector's partial-success reply refused a positive number of data points or log records; not resent), `invalid_response` (accepted with 2xx, but the reply could not be inspected: larger than 64 KiB, not a JSON object, a partial-success count that is not a nonnegative int64, or a count larger than the data points or log records sent; the batch is not resent and its log lines count as `unconfirmed`, not `exported`), `rejected`, `retry`, `unauthorized` or `unreachable`. |
+| `suifleet_exporter_otlp_exports_total{signal,result}` | counter | OTLP posts by `metrics`/`logs` and `ok`, `partial` (accepted with 2xx, but the collector's partial-success reply refused a positive number of data points or log records; not resent), `invalid_response` (accepted with 2xx, but the reply could not be inspected: its body was cut short or timed out after the status arrived, larger than 64 KiB, not a JSON object, a partial-success count that is not a nonnegative int64, or a count larger than the data points or log records sent; the batch is not resent and its log lines count as `unconfirmed`, not `exported`), `rejected`, `retry`, `unauthorized` or `unreachable`. |
 | `suifleet_exporter_otlp_metric_points_rejected_total` | counter | Metric data points refused in OTLP partial-success replies (`rejectedDataPoints`). |
 | `suifleet_exporter_otlp_backoff_seconds{signal}` | gauge | Current retry delay; 0 when healthy. |
 | `suifleet_exporter_log_records_total{result}` | counter | Log lines `exported`, `dropped` from the full buffer, `rejected` by the collector, or `unconfirmed` (sent and accepted with 2xx, but the reply could not be inspected for partial rejection). |
@@ -226,6 +226,11 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   as `rejected` and refused metric data points add to
   `suifleet_exporter_otlp_metric_points_rejected_total`. A count larger than
   the number sent is impossible and is recorded as `invalid_response` instead.
+- **Reply cut short after a 2xx status** (truncated chunked or
+  Content-Length body, or a read timeout): the collector already accepted the
+  payload, so it is not resent; it is recorded as `invalid_response` and its
+  log lines count as `unconfirmed`. A connection that fails before any status
+  arrives, or a truncated non-2xx reply, is `unreachable`/`retry` as above.
 - **Wrong collector credential:** reported as `unauthorized` and retried with
   backoff; fix the header file and restart.
 - Requests use no proxy environment and follow no redirects. Request and
