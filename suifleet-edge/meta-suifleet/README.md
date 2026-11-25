@@ -7,12 +7,11 @@ Metadata is MIT licensed (COPYING.MIT); each recipe declares its payload license
 
 ## Availability and supported configurations
 
-This is a prepared standalone export, **not a published standalone repository or
-an OpenEmbedded Layer Index listing**. The authoritative development repository is
-https://github.com/tyler-suifleet/suifleet (public).
-The packaged daemon is deliberately pinned to 0.2.3 at
-`b9bb2ef6210624d732ab2de2075ea1826e5300c1`, not the latest development client.
-Do not advertise current-client feature completeness for this pin.
+The public standalone repository is https://github.com/tyler-suifleet/meta-suifleet.
+Layer Index submission is deferred. The daemon package is version 0.2.3 at
+`b9bb2ef6210624d732ab2de2075ea1826e5300c1`, the source pin used for the
+integrated build validation. The daemon and optional codec fetch immutable
+HTTPS archives with pinned SHA-256 checksums.
 
 Declared series: kirkstone, scarthgap and wrynose, using only the full revisions
 in the core repository's `kas/packaging-kirkstone.yml`, `kas/packaging.yml` and
@@ -25,13 +24,10 @@ OE-Core (`core`) and meta-openembedded/meta-oe (`openembedded-layer`). Systemd,
 usrmerge and a writable persistent root were used in the validated integrated
 builds described below.
 The archive runtime's prebuilt Node recipe supports Linux AArch64/glibc only.
-There are no standalone release branches yet; series compatibility is not proof
-that a same-named remote branch exists. No other release/architecture is claimed.
+See RELEASE.md for the validation and branch requirements.
 
 Add this directory to BBLAYERS and run `bitbake suifleet`. Optional archive
-packages are `suifleet-node` and `suifleet-walrus-codec`; the codec requires five
-prebuilt, checksum-pinned files at SUIFLEET_WALRUS_CODEC_DIR **before parsing**.
-See RELEASE.md for source/artifact publication prerequisites.
+packages are `suifleet-node` and `suifleet-walrus-codec`; the codec fetches its pinned archive when built.
 
 The separate, core-repository `meta-suifleet-integration` contains Pi image/access
 policy, test components and a glibc usrmerge layout guard for its reused build
@@ -69,12 +65,10 @@ from the extracted export without the integration layer, is recorded in the core
 repository's `docs/YOCTO_STANDALONE_VALIDATION.md`. Apart from the class, that
 standalone configuration requires OE-Core, meta-oe, the Scarthgap Rust mixin, and
 the systemd/usrmerge distro features listed above. It needs no other distro
-setting. Kirkstone's recorded recipe builds still included the integration layer.
-Its yocto-check-layer pass applies to the earlier SF-309 export that declared
-Kirkstone, before this class was added; the current export has not been
-layer-checked on Kirkstone, and no Kirkstone build without the integration layer
-has been run. See RELEASE.md before claiming standalone
-build support for a series.
+setting. The earlier SF-309 Kirkstone recipe builds used the integration layer. Its
+layer-check pass covered the export before the opt-in class. See
+[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) for standalone
+validation of the public source distribution and RELEASE.md for release criteria.
 
 Builds contain examples only: no device keys, enrollment configuration, signer
 PINs or journals. Provision identities at runtime. Preserve /etc/suifleet and
@@ -83,8 +77,8 @@ firmware recovery; the daemon does not establish healthy boot.
 
 ## Contributions
 
-Send patches through pull requests. Until standalone publication, open changes against the existing SuiFleet
-repository and reference its existing issue. Never include credentials or live
+Send patches through pull requests in the core SuiFleet repository and reference
+the existing issue. Never include credentials or live
 state. Keep source revision, crate include, lock digest and codec provenance in
 sync; retain signing/identity boundaries and package QA. Supply exact recipe
 build and yocto-check-layer logs for every declared series, artifact checksums and

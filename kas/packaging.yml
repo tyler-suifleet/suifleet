@@ -6,8 +6,11 @@ target: suifleet
 repos:
   suifleet:
     layers:
-      suifleet-edge/meta-suifleet:
       suifleet-edge/meta-suifleet-integration:
+  meta-suifleet:
+    url: https://github.com/tyler-suifleet/meta-suifleet.git
+    branch: scarthgap
+    commit: c78e6297691b38da87989a7ec279734a6669e379
   poky:
     url: https://git.yoctoproject.org/poky
     commit: a53cae3de9f45417b97efc4c46c42e4c8ebdb939
