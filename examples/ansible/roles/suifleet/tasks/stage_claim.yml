@@ -55,4 +55,3 @@
     stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
   no_log: true
   diff: false
-

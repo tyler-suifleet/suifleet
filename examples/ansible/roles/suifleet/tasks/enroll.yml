@@ -128,6 +128,15 @@
             path: "{{ suifleet_enroll_staging }}"
             state: absent
 
+# A run interrupted after the record was renamed into place, but before the
+# cleanup above, leaves the staged claim behind. Recorded hosts skip the
+# enrollment block, so erase abandoned staging here; this needs no credential
+# batch and never re-enrolls. Check mode reports it without erasing.
+- name: Erase claim staging left by an interrupted enrollment
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: absent
+
 - name: Read the enrollment record
   ansible.builtin.slurp:
     src: /etc/suifleet/enrollment.json
