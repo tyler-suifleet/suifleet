@@ -987,20 +987,100 @@ class AdapterTests(Base):
             seen["buffered"] = exporter.render_prometheus()
             self.console.logs["svc"] = [f"line {i}" for i in range(13)]
             exporter.poll(console)
+            seen["after"] = exporter.render_prometheus()
             transport.failures["logs"] = 1
             transport.not_before["logs"] = 1.0
             return ("retry", None)
         with unittest.mock.patch.object(transport, "post", side_effect=post):
             em.export_once(exporter, transport)
         self.assertIn(b'suifleet_exporter_log_buffered{evidence="simulated",device="sim-1"} 8', seen["buffered"])
-        self.assertEqual([line for _, _, line in exporter.log_buffer], [f"line {i}" for i in range(3, 13)])
-        self.assertEqual(exporter.log_records["dropped"], 3)  # oldest requeued lines over the bound
+        # The 8 in-flight lines count against max_buffer=10 while pending: only
+        # 2 new lines are held, the oldest queued ones give way to newer lines.
+        self.assertIn(b'suifleet_exporter_log_buffered{evidence="simulated",device="sim-1"} 10', seen["after"])
+        self.assertEqual([line for _, _, line in exporter.log_buffer],
+                         [f"line {i}" for i in range(8)] + ["line 11", "line 12"])
+        self.assertEqual(exporter.log_records["dropped"], 3)
         self.assertEqual(exporter.log_inflight, 0)
         transport.not_before["logs"] = 0.0
         with unittest.mock.patch.object(transport, "post", return_value=("ok", None)):
             em.export_once(exporter, transport)
         self.assertEqual(len(exporter.log_buffer), 0)
         self.assertEqual(exporter.log_records["exported"], 10)
+
+    def test_whole_buffer_in_flight_keeps_the_bound_at_saturation(self):
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
+                                           logs=dict(components=["svc"], max_lines=200, max_buffer=10))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        self.console.logs["svc"] = [f"line {i}" for i in range(10)]
+        exporter.poll(console)
+        seen = {}
+
+        def post(signal_name, payload):
+            if signal_name == "metrics":
+                return ("ok", None)
+            self.console.logs["svc"] = [f"line {i}" for i in range(30)]
+            exporter.poll(console)                       # 20 new lines while all 10 are in flight
+            seen["held"] = len(exporter.log_buffer) + exporter.log_inflight
+            seen["text"] = exporter.render_prometheus()
+            return ("ok", None)
+        with unittest.mock.patch.object(transport, "post", side_effect=post):
+            more = em.export_once(exporter, transport)
+        self.assertEqual(seen["held"], 10)
+        self.assertIn(b'suifleet_exporter_log_buffered{evidence="simulated",device="sim-1"} 10', seen["text"])
+        self.assertEqual(exporter.log_records["dropped"], 20)
+        self.assertEqual(exporter.log_records["exported"], 10)
+        self.assertFalse(more)
+        self.assertEqual(len(exporter.log_buffer), 0)
+
+    def test_refilled_log_queue_does_not_starve_metrics(self):
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
+                                           logs=dict(components=["svc"], max_lines=200))
+        transport = em.Transport(cfg, exporter)
+        stop, wakeup = threading.Event(), threading.Event()
+        posts, counter = [], [0]
+        lock = threading.Lock()
+
+        def refill():
+            # The poll loop: every log POST is followed by a poll that adds
+            # more lines and signals the worker, as under sustained load.
+            counter[0] += 1
+            self.console.logs["svc"] = [f"line {counter[0]}-{i}" for i in range(5)]
+            exporter.poll(console)
+            wakeup.set()
+
+        def post(signal_name, payload):
+            with lock:
+                if signal_name == "metrics":
+                    up = [m for m in payload["resourceMetrics"][0]["scopeMetrics"][0]["metrics"] if m["name"] == "suifleet_up"]
+                    posts.append(("metrics", up[0]["gauge"]["dataPoints"][0]["asInt"]))
+                else:
+                    posts.append(("logs", None))
+                    if sum(1 for p in posts if p[0] == "logs") == 3:
+                        self.console.status = "unavailable"   # daemon goes down mid-stream
+                        self.console.logs["svc"] = []
+                        exporter.poll(console)
+                        wakeup.set()
+                    elif self.console.status is None:
+                        refill()
+                if len(posts) >= 12:
+                    stop.set()
+            return ("ok", None)
+        self.console.logs["svc"] = [f"line 0-{i}" for i in range(5)]
+        exporter.poll(console)
+        wakeup.set()
+        with unittest.mock.patch.object(transport, "post", side_effect=post):
+            worker = threading.Thread(target=em.export_loop, args=(exporter, transport, stop, wakeup))
+            worker.start()
+            self.wait(lambda: ("metrics", "0") in posts or stop.is_set(), seconds=10)
+            stop.set()
+            wakeup.set()
+            worker.join(10)
+        self.assertFalse(worker.is_alive())
+        # Metrics are re-sent between log batches whenever a poll happened,
+        # and the daemon-down transition reaches the collector.
+        self.assertIn(("metrics", "0"), posts)
+        kinds = [k for k, _ in posts]
+        self.assertNotIn(["logs", "logs"], [kinds[i:i + 2] for i in range(len(kinds) - 1)])
 
 
 

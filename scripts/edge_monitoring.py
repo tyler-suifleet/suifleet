@@ -686,9 +686,14 @@ class Exporter:
             with self.lock:
                 self.log_gaps += int(gap)
                 for line in fresh:
-                    if len(self.log_buffer) >= self.log_max:
-                        self.log_buffer.popleft()
+                    # A batch in flight is still held, so it counts against
+                    # max_buffer. Drop the oldest queued line; when the whole
+                    # bound is in flight, drop the new line instead.
+                    if len(self.log_buffer) + self.log_inflight >= self.log_max:
                         self.log_records["dropped"] += 1
+                        if not self.log_buffer:
+                            continue
+                        self.log_buffer.popleft()
                     self.log_buffer.append((now, component, redact(line)))
 
     # --- Prometheus exposition
@@ -893,55 +898,66 @@ def _payload_items(payload, signal_name):
 
 
 def export_once(exporter, transport, signals=("metrics", "logs")):
-    """Send current metrics and pending logs to the OTLP endpoint if not backing off.
+    """Send current metrics and at most one pending log batch if not backing off.
+
+    Returns True when more log lines are queued and logs are not backing off,
+    so the caller can schedule another batch after servicing any newer poll.
 
     A log batch is taken out of the buffer while its request is in flight, so
-    the poll loop can keep appending (and dropping the oldest lines) without
-    racing this export; a batch that must be retried is put back at the front,
-    still within the configured buffer bound.
+    the poll loop can keep appending without racing this export; the batch
+    still counts against the configured buffer bound (see poll_logs), and a
+    batch that must be retried is put back at the front.
     """
     if "metrics" in signals and transport.ready("metrics"):
         result, rejected = transport.post("metrics", exporter.otlp_metrics())
         if result == "ok" and rejected:
             with exporter.lock:
                 exporter.metric_points_rejected += rejected
-    if "logs" not in signals or not exporter.config.logs:
-        return
-    while transport.ready("logs"):
+    if "logs" not in signals or not exporter.config.logs or not transport.ready("logs"):
+        return False
+    with exporter.lock:
+        batch = [exporter.log_buffer.popleft() for _ in range(min(MAX_LOG_BATCH, len(exporter.log_buffer)))]
+        exporter.log_inflight = len(batch)
+    if not batch:
+        return False
+    result, rejected = "retry", None             # an unexpected error requeues the batch
+    try:
+        result, rejected = transport.post("logs", exporter.otlp_logs(batch))
+    finally:
         with exporter.lock:
-            batch = [exporter.log_buffer.popleft() for _ in range(min(MAX_LOG_BATCH, len(exporter.log_buffer)))]
-            exporter.log_inflight = len(batch)
-        if not batch:
-            return
-        result, rejected = "retry", None         # an unexpected error requeues the batch
-        try:
-            result, rejected = transport.post("logs", exporter.otlp_logs(batch))
-        finally:
-            with exporter.lock:
-                exporter.log_inflight = 0
-                if result == "retry":
-                    exporter.log_buffer.extendleft(reversed(batch))
-                    while len(exporter.log_buffer) > exporter.log_max:
-                        exporter.log_buffer.popleft()          # oldest first, as in poll_logs
-                        exporter.log_records["dropped"] += 1
-        if result == "retry":
-            return
-        with exporter.lock:
-            if result == "ok":
-                refused = rejected or 0              # bounded by the batch in Transport.post
-                exporter.log_records["exported"] += len(batch) - refused
-                exporter.log_records["rejected"] += refused
-            elif result == "unconfirmed":
-                exporter.log_records["unconfirmed"] += len(batch)
-            else:
-                exporter.log_records["rejected"] += len(batch)
+            exporter.log_inflight = 0
+            if result == "retry":
+                exporter.log_buffer.extendleft(reversed(batch))
+                while len(exporter.log_buffer) > exporter.log_max:
+                    exporter.log_buffer.popleft()              # defensive; poll_logs keeps the bound
+                    exporter.log_records["dropped"] += 1
+    with exporter.lock:
+        if result == "ok":
+            refused = rejected or 0                  # bounded by the batch in Transport.post
+            exporter.log_records["exported"] += len(batch) - refused
+            exporter.log_records["rejected"] += refused
+        elif result == "unconfirmed":
+            exporter.log_records["unconfirmed"] += len(batch)
+        elif result == "rejected":
+            exporter.log_records["rejected"] += len(batch)
+        more = bool(exporter.log_buffer)
+    return more and result != "retry" and transport.ready("logs")
 
 
 def export_loop(exporter, transport, stop, wakeup):
     """OTLP export worker: runs off the poll loop so that collector latency,
     timeouts and backoff never delay console polling or the withdrawal of
-    stale health. `wakeup` is set after each console poll."""
+    stale health. `wakeup` is set after each console poll.
+
+    Each turn sends at most one log batch. While more lines are queued the
+    worker keeps draining, but a newer console poll is serviced first (metrics
+    plus the next batch), so a steadily refilled log queue never starves
+    metric updates such as a daemon-down transition."""
+    more = False
     while not stop.is_set():
+        if more and not wakeup.is_set():
+            more = export_once(exporter, transport, ("logs",))
+            continue
         due = [t for s, t in transport.not_before.items() if transport.failures[s]]
         timeout = max(0.05, min(due) - transport.clock()) if due else None
         polled = wakeup.wait(timeout)
@@ -949,12 +965,11 @@ def export_loop(exporter, transport, stop, wakeup):
             return
         if polled:
             wakeup.clear()
-            export_once(exporter, transport)
+            more = export_once(exporter, transport)
         else:
             # Retry only the signals that are backing off and now due.
             ready = tuple(s for s in ("metrics", "logs") if transport.failures[s] and transport.ready(s))
-            if ready:
-                export_once(exporter, transport, ready)
+            more = export_once(exporter, transport, ready) if ready else False
 
 
 # ---------------------------------------------------------------- Prometheus endpoint

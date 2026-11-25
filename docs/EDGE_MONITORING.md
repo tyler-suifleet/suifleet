@@ -164,7 +164,7 @@ the two apart.
 | `suifleet_exporter_otlp_backoff_seconds{signal}` | gauge | Current retry delay; 0 when healthy. |
 | `suifleet_exporter_log_records_total{result}` | counter | Log lines `exported`, `dropped` from the full buffer, `rejected` by the collector, or `unconfirmed` (sent and accepted with 2xx, but the reply could not be inspected for partial rejection). |
 | `suifleet_exporter_log_gaps_total` | counter | Polls whose tail did not overlap the previous one, so lines may have been missed. |
-| `suifleet_exporter_log_buffered` | gauge | Lines waiting for export. |
+| `suifleet_exporter_log_buffered` | gauge | Lines held for export, including a batch in flight (at most `max_buffer`). |
 
 Never exported: degraded-reason texts, deployment error texts, last-exit texts,
 configuration, audit records, tokens, header values, Sui keys or addresses.
@@ -212,8 +212,9 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   `max_backoff_seconds`, with ±20 % jitter. A `Retry-After` header raises the
   delay up to the maximum. Metrics and logs back off independently. Metrics
   are not queued: the next successful post carries current values (counters
-  are cumulative). Log lines stay buffered up to `max_buffer`; when it is full
-  the oldest lines are dropped and counted.
+  are cumulative). Log lines stay buffered up to `max_buffer`, including a
+  batch in flight; when it is full the oldest queued lines are dropped and
+  counted (if the whole bound is in flight, the new lines are dropped).
 - **Collector rejects a payload** (400, 413, 422): it is not resent and is
   counted as `rejected`. An OTLP partial-success reply with a positive count is
   recorded as `partial`, not `ok`, and is not resent: refused log records count
@@ -233,8 +234,12 @@ no on-disk spool.
 One console poll loop, one OTLP export thread and one single-threaded
 `/metrics` server (5 s per request, listen backlog 16) run in the adapter.
 Collector latency, timeouts and backoff run on the export thread, so they
-never delay console polling or the withdrawal of stale health; a log batch in
-flight still counts against `max_buffer` when it is put back for a retry. Memory is bounded by the
+never delay console polling or the withdrawal of stale health. The export
+thread sends at most one log batch per turn and services a newer console poll
+(current metrics) before the next batch, so a continuously refilled log queue
+never holds back metric updates. A log batch in flight counts against
+`max_buffer` for its whole request and when it is put back for a retry, and
+`suifleet_exporter_log_buffered` includes it. Memory is bounded by the
 component limit, the log buffer (`max_buffer` lines of at most 512 bytes) and
 at most 512 log records per OTLP request. The end-to-end test asserts the
 adapter's peak RSS stays below 64 MiB. Size the customer's own Prometheus
