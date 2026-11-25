@@ -82,6 +82,9 @@ spec:
     services: "5"
     services.nodeports: "0"
     services.loadbalancers: "0"
+    # An update briefly holds two bundles' content-addressed ConfigMaps: 2 x 9
+    # (the helper's per-bundle limit) + kube-root-ca.crt + 1 spare. Add 18 per
+    # additional SuiFleet component publishing into this namespace.
     configmaps: "20"
 ---
 apiVersion: v1

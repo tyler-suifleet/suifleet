@@ -144,7 +144,28 @@ How the helper keeps two controllers from fighting:
      In the dedicated namespace only the publisher and administrators can
      write ConfigMaps.
    - ConfigMaps that no bundle Deployment consumes keep their bundle name and
-     stay mutable, for consumers outside the bundle.
+     stay mutable, for consumers outside the bundle. Their names may not end
+     in `-` and 16 lowercase hex digits, the shape reserved for
+     content-addressed names, so no bundle can leave a mutable object at a
+     name another bundle derives. An owned mutable ConfigMap found at a
+     content-addressed name (a node may have cached it with other data)
+     stops `apply` with exit code 2 before any write; an administrator must
+     delete it.
+   - Quota headroom. A changed consumed ConfigMap is created under its new
+     name before the old one is pruned, so an update or rollback briefly
+     holds two bundles' ConfigMaps. A bundle may contain at most 9
+     ConfigMaps. The shipped quota of 20 ConfigMaps covers two such bundles
+     plus the namespace's `kube-root-ca.crt` and one more ConfigMap. Raise
+     the quota by twice the per-bundle limit for every additional SuiFleet
+     component in the namespace. Before creating ConfigMaps, `apply` deletes
+     this component's ConfigMaps that the bundle does not contain and no
+     live Deployment references, such as those a partial apply left behind,
+     so a retry or a new bundle after a partial apply also fits. A partial
+     apply that updated only some of several Deployments can leave
+     references to two earlier bundles; the next update can then exceed the
+     headroom and fail with a quota error before writing any Deployment.
+     Re-applying the last converged bundle needs no new ConfigMaps and
+     always fits.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -274,8 +295,11 @@ waits again and reports the current state.
     object, so nothing is half-applied. The helper never deletes and
     recreates it automatically. An administrator must delete it; the next
     apply then recreates it as a mutable object.
-  - a content-addressed name that collides with another ConfigMap name in
-    the same bundle.
+  - a ConfigMap that no Deployment consumes whose name ends in `-` and 16
+    lowercase hex digits, the suffix reserved for content-addressed names
+    (item 7). This also rules out a collision between a content-addressed
+    name and another ConfigMap of the same bundle.
+  - more than 9 ConfigMaps (the quota headroom in item 7).
 
   It also forces `automountServiceAccountToken: false`. A pod can read a Secret
   through its spec without any RBAC on Secrets, so the helper never lets a
@@ -498,6 +522,14 @@ It checks the following:
   once `ready` succeeds. The kubelet's by-name cache lag itself cannot be
   forced in a real cluster; the offline tests model a cache that never
   refreshes through updates, a partial update and rollbacks.
+- A stable ConfigMap name with the reserved content-addressed suffix and a
+  bundle with more than 9 ConfigMaps are rejected offline. An owned mutable
+  ConfigMap at a content-addressed name stops the apply before any write.
+- Quota boundary: with `kube-root-ca.crt` and one other ConfigMap present,
+  changing every ConfigMap of a 9-ConfigMap bundle peaks exactly at the
+  shipped quota of 20 and converges. After a partial apply at that bundle
+  size fills the quota (a further create fails with `exceeded quota`), the
+  next bundle frees the leftovers first and converges.
 - A stable-name ConfigMap made immutable out of band, and a content-addressed
   ConfigMap recreated with other content, each stop the apply before any
   write; readiness rejects the forged one, and the apply recreates both after
