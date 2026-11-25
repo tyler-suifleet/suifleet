@@ -136,7 +136,12 @@ export class Client {
         const retry = error instanceof TransportError && error.outcome === 'not_sent'
           && error.errno !== undefined && RETRYABLE_CONNECT.has(error.errno) && attempt < this.connectAttempts;
         if (!retry) throw error;
-        await sleep(delay, options.signal);
+        try {
+          await sleep(delay, options.signal);
+        } catch (reason) {
+          // Cancelled during backoff: nothing was sent, so keep the documented classification.
+          throw new TransportError(operation, 'not_sent', 'aborted', { cause: reason });
+        }
         delay = Math.min(delay * 2, 5000);
       }
     }
@@ -333,7 +338,7 @@ export class Client {
     const chunks = Math.max(1, Math.ceil(data.length / DATA_CHUNK_SIZE));
     const startChunk = options.startChunk ?? 0;
     if (!Number.isInteger(startChunk) || startChunk < 0 || startChunk >= chunks) throw new RangeError('invalid startChunk');
-    const metadata = validateDataMetadata(options.metadata ?? {});
+    const metadata = validateDataMetadata(options.metadata === undefined ? {} : options.metadata);
     const receipts: DataPutReceipt[] = [];
     for (let chunk = startChunk; chunk < chunks; chunk++) {
       const part = Buffer.from(data.buffer, data.byteOffset + chunk * DATA_CHUNK_SIZE,

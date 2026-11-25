@@ -156,6 +156,17 @@ test('abort before sending is not_sent', async () => {
     (e) => e instanceof TransportError && e.outcome === 'not_sent');
 });
 
+test('abort during connection retry backoff is not_sent with the abort reason as cause', async () => {
+  const controller = new AbortController();
+  const reason = new Error('caller cancelled');
+  const client = new Client({ socketPath: join(directory, 'missing.sock'), connectAttempts: 2, connectRetryDelayMs: 1000 });
+  const started = Date.now();
+  setTimeout(() => controller.abort(reason), 80);
+  await assert.rejects(client.request('stream_append', { signal: controller.signal }),
+    (e) => e instanceof TransportError && e.outcome === 'not_sent' && e.cause === reason);
+  assert.ok(Date.now() - started < 900, 'abort interrupts the backoff instead of waiting it out');
+});
+
 test('publish payloads above 4096 serialized bytes are refused locally', async () => {
   const client = new Client({ socketPath: join(directory, 'none.sock') });
   await assert.rejects(client.publish('t', 'x'.repeat(4095)), RangeError);
@@ -205,6 +216,8 @@ test('putData metadata matches the daemon string map contract and is refused loc
   for (const [value, kind] of refused) {
     await assert.rejects(client.putData('sensor', 'k', Buffer.from([1]), { metadata: value }), kind, JSON.stringify(String(value)));
   }
+  // An explicit top-level null is a non-map, not an omitted value.
+  await assert.rejects(client.putData('sensor', 'k', Buffer.from([1]), { metadata: null }), TypeError);
   assert.equal(server.requests.length, sent, 'refused metadata never reaches the daemon');
   // Limits are inclusive; the copy is detached from the caller's object.
   const max = { ['k'.repeat(64)]: 'é'.repeat(128) };
