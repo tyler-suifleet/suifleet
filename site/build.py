@@ -262,6 +262,39 @@ def overview_player():
     return ''.join(parts)
 
 
+def how_section_video(section):
+    overview=overview_manifest()
+    path=OVERVIEW_MEDIA/'sections.json'; manifest=load_json(path)
+    source=next(v for v in overview['variants'] if v['name']=='landscape')
+    if (manifest.get('schema')!=1 or manifest.get('kind')!='overview-chapter-excerpts'
+        or manifest.get('source_manifest_sha256')!=sha256(OVERVIEW_MEDIA/'manifest.json')
+        or manifest.get('source_video_sha256')!=source['fallback_sha256']
+        or manifest.get('renderer_sha256')!=sha256(ROOT/'site/overview/render_sections.py')):
+        raise BuildError('Overview section provenance changed; regenerate the clips')
+    clips={c['section']:c for c in manifest['clips']}
+    if set(clips)!={'first-update','update-flow','your-platform','behind-console'}:
+        raise BuildError('Overview sections need complete video coverage')
+    clip=clips[section];start,end=clip['start'],clip['end'];duration=end-start
+    if not 0<=start<end<=overview['duration_seconds'] or duration!=clip['duration_seconds']:
+        raise BuildError('Invalid overview section timing')
+    cues=[{**c,'speech_start':round(c['speech_start']-start,6),'speech_end':round(c['speech_end']-start,6)} for c in overview['cues'] if start<=c['speech_start']<c['speech_end']<=end]
+    if cues!=clip['cues'] or not cues:
+        raise BuildError('Section narration differs from the overview')
+    for key in ('file','poster','captions'):
+        name=clip[key]
+        if Path(name).name!=name or sha256(OVERVIEW_MEDIA/name)!=clip[key+'_sha256']:
+            raise BuildError('Overview section media failed digest verification')
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('section_captions',GUIDE/'captions.py');captions=importlib.util.module_from_spec(spec);spec.loader.exec_module(captions)
+    if (OVERVIEW_MEDIA/clip['captions']).read_text()!=captions.webvtt(cues,duration):
+        raise BuildError('Section captions differ from narration')
+    url=lambda key:'/media/overview/'+clip[key]+'?v='+clip[key+'_sha256'][:16]
+    title=html.escape(clip['title'])
+    return (f'<div class="overview-intro"><video class="overview-video overview-landscape" data-mp4-sha256="{clip["file_sha256"]}" controls playsinline preload="none" width="1280" height="720" poster="{url("poster")}" aria-label="{title}">'
+        f'<source src="{url("file")}" type="video/mp4"><track kind="captions" src="{url("captions")}" srclang="en" label="English">Your browser cannot play this video. Read the narration below.</video>'
+        f'<p class="overview-caption">Animated explanation · {title}</p><details><summary>Read this narration</summary><div class="overview-transcript">'+''.join('<p>'+html.escape(c['text'])+'</p>' for c in cues)+'</div></details></div>')
+
+
 def expand(text, config, source):
     def replace(match):
         name, arg = match.group(1), match.group(2)
@@ -278,6 +311,8 @@ def expand(text, config, source):
             return "".join(f'<option value="{step["id"]}">{index}. {html.escape(step["title"])}</option>' for index, step in enumerate(steps, 1)) + '<option value="complete">Walkthrough complete</option>'
         if name == "motion_sample_player" and arg is None:
             return motion_sample_player()
+        if name == "how_section_video" and arg is not None:
+            return how_section_video(arg)
         if name == "overview_player" and arg is None:
             return overview_player()
         if name == "guide_steps" and arg is None:
@@ -342,6 +377,9 @@ def build(out, config=None):
     overview=overview_manifest()
     (out/'media/overview').mkdir(parents=True)
     names=[overview['captions'],'manifest.json']+[v[key] for v in overview['variants'] for key in ['file','fallback','poster']]
+    names.append('sections.json')
+    for clip in load_json(OVERVIEW_MEDIA/'sections.json')['clips']:
+        names.extend(clip[key] for key in ('file','poster','captions'))
     for name in names:shutil.copyfile(OVERVIEW_MEDIA/name,out/'media/overview'/name)
     sample=motion_sample_manifest()
     (out/'media/motion-sample').mkdir(parents=True)
