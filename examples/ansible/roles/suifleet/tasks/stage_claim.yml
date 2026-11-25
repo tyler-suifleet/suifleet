@@ -2,7 +2,9 @@
 # Writes the claim (suifleet_claim_file on the controller, plain or Vault)
 # to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner.
 # enroll.yml checks that the staging directory is on tmpfs and erases it
-# afterwards, also when enrollment fails.
+# afterwards, also when enrollment fails. tmpfs pages and process memory can
+# be swapped out, so swap_policy.yml refuses hosts with swap that could
+# write the claim to a disk before the claim is read.
 #
 # The claim must not touch persistent storage. Ansible's copy module
 # would transfer the decrypted file through the remote temporary
@@ -127,6 +129,9 @@
     that: suifleet_transfer_fs.stdout == 'tmpfs'
     quiet: true
     fail_msg: "{{ suifleet_claim_transfer_dir }} must be a tmpfs writable by the SSH account so the claim never reaches persistent storage on the host."
+
+- name: Refuse claims on a host that can swap them to disk
+  ansible.builtin.import_tasks: swap_policy.yml
 
 - name: Erase a claim left by an interrupted run
   ansible.builtin.file:
