@@ -42,11 +42,17 @@ grants = ["inventory", "health", "deployments", "logs"]   # drop "logs" if not e
 
 Never grant `configuration`, `audit` or a support operation to the monitoring
 user. Each poll makes one `health` call, paged `inventory` calls (at most 256
-components) and paged `deployments` calls (at most 10 pages of 100 journal
-entries); with logs enabled, one `logs` call per listed component. All of
+components) and paged `deployments` calls (at most 10 pages of up to 100
+journal entries); with logs enabled, one `logs` call per listed component. All of
 these are read views served from the daemon's state files; a poll never
 changes device state and never waits for the poll loop. Console responses are
-bounded at 64 KiB by the daemon and 70 KiB by the adapter.
+bounded at 64 KiB by the daemon and 70 KiB by the adapter. Long error or exit
+texts can make a full page exceed the daemon's limit; when the console answers
+`too-large`, the adapter re-requests that page at a smaller size (50, 25, 12,
+6, 3, then 1 entries) and keeps that size for the rest of the poll, so a
+durable journal of long errors does not take monitoring down. Smaller pages
+still count against the 10-page bound, and a read ending there sets the
+matching `_truncated` metric.
 
 The console's own [trust boundary](LOCAL_CONSOLE.md#trust-boundary) applies:
 run the adapter as its own Unix user, not as the daemon user or a component
@@ -155,7 +161,7 @@ the two apart.
 | `suifleet_components_truncated` | gauge | 1 when more than 256 components exist or the bounded inventory read (10 pages) ends early. |
 | `suifleet_deployment_outcomes{outcome}` | gauge | Historical: journal entries by `applied`, `failed`, `indeterminate` or `pending`. Past failures stay visible while the device is currently healthy. |
 | `suifleet_deployment_outcomes_unreported` | gauge | Historical: terminal outcomes whose receipt is not on chain yet. |
-| `suifleet_deployment_outcomes_truncated` | gauge | 1 when the journal has more than 1000 entries and counts are partial. |
+| `suifleet_deployment_outcomes_truncated` | gauge | 1 when the bounded journal read (10 pages of up to 100 entries) ends with entries left uncounted, so counts are partial. |
 | `suifleet_exporter_info{adapter_version}` | gauge | Adapter version. |
 | `suifleet_exporter_polls_total{result}` | counter | Console reads by result (`ok`, `unreachable`, `unauthenticated`, `denied`, `unavailable`, `malformed`, and `logs-…` for log reads). |
 | `suifleet_exporter_last_success_timestamp_seconds` | gauge | Last successful console read. |
