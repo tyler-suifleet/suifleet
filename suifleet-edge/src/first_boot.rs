@@ -350,7 +350,7 @@ socket = "/run/suifleet-signer/sign.sock"
         }
         Err(error) => return Err(error),
     };
-    let claim = claim_file
+    let parsed_claim = claim_file
         .as_ref()
         .map(|file| -> Result<Option<identity::Ed25519File>> {
             let bytes = read(file, 128)?;
@@ -364,11 +364,12 @@ socket = "/run/suifleet-signer/sign.sock"
                 ed25519_dalek::SigningKey::from_bytes(&seed),
             )))
         })
-        .transpose()?
-        .flatten();
+        .transpose();
+    let invalid_claim = parsed_claim.is_err();
+    let claim = parsed_claim.unwrap_or_default().flatten();
     use crate::identity::TxSigner;
 
-    // A missing or zeroed key is resumable only after the matching signer
+    // A missing or partly erased key is resumable only after the matching signer
     // configuration has been durably installed by a previous attempt.
     let mut resumed_during_erase = false;
     let mut enrollment = None;
@@ -402,7 +403,11 @@ socket = "/run/suifleet-signer/sign.sock"
             if root.join("signer.toml").symlink_metadata().is_ok() {
                 return Err(Failure("existing-signer-without-enrollment").into());
             }
-            let claim = claim.as_ref().ok_or(Failure("claim-key-missing"))?;
+            let claim = claim.as_ref().ok_or(Failure(if invalid_claim {
+                "invalid-claim-key"
+            } else {
+                "claim-key-missing"
+            }))?;
             if !sui
                 .check_enrollment_limits(&policy_id, &policy, trust.managed.is_some())
                 .await?
@@ -440,6 +445,7 @@ socket = "/run/suifleet-signer/sign.sock"
                     last_failure,
                     "device-already-enrolled-with-another-claim"
                         | "claim-key-missing"
+                        | "invalid-claim-key"
                         | "existing-signer-without-enrollment"
                 ) {
                     return Err(Failure(last_failure).into());

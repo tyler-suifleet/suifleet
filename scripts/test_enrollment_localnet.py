@@ -478,7 +478,20 @@ def check_first_boot(root, manifest, policy, operator, claims, client, transacti
     run_boot(recovered, recovery_media, "enrolled")
     assert check_install(recovered, recovery_media) == actual
     assert (recovered / "config.toml").read_bytes() == kept
+    # A filesystem can retain only part of the claim overwrite after a stop.
+    # The installed signer and confirmed cap are sufficient to finish erasure.
+    (recovered / "config.toml").unlink()
+    original_claim = claims["c2"][0].read_bytes()
+    (recovery_media / "claim.key").write_bytes(b"\0" * 8 + original_claim[8:])
+    run_boot(recovered, recovery_media, "enrolled")
+    assert check_install(recovered, recovery_media) == actual
     assert client("object", policy)["version"] == confirmed_policy_version
+
+    invalid, invalid_media = prepare("invalid-unspent-claim", claims["c4"][0])
+    (invalid_media / "claim.key").write_bytes(b"invalid")
+    run_boot(invalid, invalid_media, "invalid-claim-key")
+    assert not (invalid / "config.toml").exists()
+    assert (invalid_media / "claim.key").read_bytes() == b"invalid"
 
     shutil.copyfile(claims["c3"][0], recovery_media / "claim.key")
     subprocess.run(command(recovered), check=True, capture_output=True)
@@ -513,7 +526,7 @@ def check_first_boot(root, manifest, policy, operator, claims, client, transacti
             job.result()
             assert (folder / "claim.key").exists() and not (directory / "config.toml").exists()
     assert client("object", policy)["version"] == policy_version, "refused or recovered enrollment consumed a claim"
-    print("PASS: first boot, offline recovery, confirmed-submit reboot, pre-existing config, tampering, revoked/expired/consumed/foreign claims")
+    print("PASS: first boot, offline recovery, confirmed-submit reboot, interrupted claim erasure, pre-existing config, tampering, invalid/revoked/expired/consumed/foreign claims")
 
 
 if __name__ == "__main__":
