@@ -73,7 +73,8 @@ The provisioning helper preserves existing keys and changes their ownership to
 `suifleet-signer` when service signing is configured. The signer socket is
 suifleet-signer:suifleet 0660; components run as `suifleet`, never root. Firmware
 helpers are not installed by this package. Consult [key isolation](KEY_ISOLATION.md)
-for policy and kernel requirements.
+for policy and kernel requirements. For many hosts, the [Ansible examples](ANSIBLE.md)
+perform these steps, enrollment and rolling upgrades idempotently.
 
 ## Upgrade, removal and purge
 
