@@ -235,7 +235,23 @@ device is one of:
 
 A swap file, a plain disk partition, zram that writes back to a disk, swap on
 LVM or another device-mapper target (even on top of dm-crypt) and anything
-unrecognized refuse the claim, and the message names the devices. Hibernation
+unrecognized refuse the claim, and the message names the devices.
+
+The session's view of the swap list and device attributes can be
+substituted (a file or an LXCFS-style FUSE view bind-mounted over
+`/proc/swaps` can list no swap while the kernel swaps to a disk; a tmpfs or
+another entry mounted over part of `/sys` can report a disk-backed device as
+safe), so the role uses them only once `/proc/self/mountinfo` shows they come
+from the kernel. `/proc/swaps` must be served by procfs at `/swaps`;
+otherwise, or when the mount table cannot be read, the host is refused as
+unverifiable before the list is read. A device counts as zram or dm-crypt
+only when the kernel's swap list names it `/dev/zramN` or `/dev/dm-N` (the
+name is never resolved through the session's `/dev`), `/sys/block` is served
+by sysfs at `/block`, the device's entry resolves to a sysfs directory of the
+same name under `/sys/devices`, and the attribute read (`backing_dev`,
+`dm/uuid`) is served by sysfs at that place; otherwise the device is unsafe.
+Enroll from a session that sees the kernel's `/proc` and `/sys`, not from
+inside a container that masks them. Hibernation
 writes memory to swap, so it is covered by the same rule. For a host with
 ordinary disk swap, run `swapoff -a` before enrolling it and `swapon -a`
 afterwards (recorded hosts never handle a claim again), or move it to zram
@@ -391,10 +407,20 @@ The harness checks these phases:
    transfer with it unchanged must be refused, naming the device. Accepted
    real swap (zram without writeback, dm-crypt) skips that case. Then
    `/proc/swaps` (and `/sys/block`) are replaced inside each host's mount
-   namespace; nothing is swapped on or off. A transfer must be refused,
-   listing every unsafe device, with a swap file, a disk partition,
-   zram writing back to a disk, a non-crypt device-mapper device and an
-   unknown zram device. All other phases see a `/proc/swaps` with no swap.
+   namespace; nothing is swapped on or off. The committed role must refuse a
+   transfer, as unverifiable, with a header-only file bind-mounted over
+   `/proc/swaps`. A test-only copy whose swap classifier trusts only that
+   `/proc/swaps` fixture (its device attribute checks unchanged) must refuse a
+   transfer, naming both devices, with zram `backing_dev` `none` and a
+   dm-crypt UUID on a tmpfs over `/sys/block`. The remaining swap fixtures run
+   through a test-only copy whose swap classifier's `kernel_view` and
+   `sysattr` checks always pass (synthetic classifier evidence, not evidence
+   about a real host's swap): a transfer must be refused, listing every unsafe
+   device, with a swap file, a disk partition, zram writing back to a disk, a
+   non-crypt device-mapper device and an unknown zram device. All other phases
+   see a `/proc/swaps` with no swap, through that copy; crash cases that use
+   the committed crash classifier run from a copy whose only change is that
+   swap stub.
    Crash dumps are checked the same way: when the classifier reports the
    machine's real `kernel.core_pattern` and SSH session core limit unsafe (WSL's piped
    crash handler is), a transfer with them must be refused. Then
@@ -404,8 +430,8 @@ The harness checks these phases:
    `/proc/sys/kernel/core_pattern` must be refused by the committed role, as a
    masked sysctl. For the remaining cases
    `kernel.core_pattern` is bind-mounted inside each host's mount namespace and
-   the role runs from a test-only copy whose `kernel_pattern` check (that one
-   function) always passes; its results are synthetic classifier evidence, not
+   the role runs from the synthetic test-only copy, whose crash classifier
+   differs only in its `kernel_pattern` check, which always passes; its results are synthetic classifier evidence, not
    evidence about a real host's crash policy. Transfers must be refused,
    giving the reason, for Apport, for core files
    with a nonzero limit, for systemd-coredump storing dumps with a nonzero
