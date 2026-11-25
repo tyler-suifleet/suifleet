@@ -288,8 +288,56 @@ class ConfigBindingTest(unittest.TestCase):
         bundle = self.bundle("v1")
         bundle["resources"].append({"apiVersion": "v1", "kind": "ConfigMap",
                                     "metadata": {"name": self.name("v1")}, "data": {}})
-        with self.assertRaisesRegex(k8s.Rejected, "publishes as .* which another bundle ConfigMap already uses"):
+        with self.assertRaisesRegex(k8s.Rejected, "suffix reserved for content-addressed ConfigMaps"):
             k8s.validate_bundle(bundle)
+
+    def test_stable_names_never_take_the_content_addressed_shape(self):
+        """Review 4613: a stable ConfigMap of one bundle must never occupy
+        the name a later (or earlier) bundle derives for a consumed one."""
+        for name in (self.name("v2"), "x-0123456789abcdef", "a-ffffffffffffffff"):
+            with self.subTest(name=name):
+                bundle = self.bundle("v1")
+                bundle["resources"].append({"apiVersion": "v1", "kind": "ConfigMap",
+                                            "metadata": {"name": name}, "data": {"index.html": "old"}})
+                with self.assertRaisesRegex(k8s.Rejected, "suffix reserved for content-addressed ConfigMaps"):
+                    k8s.validate_bundle(bundle)
+        for name in ("x-0123456789abcde", "x-0123456789abcdef0", "x0123456789abcdef"):
+            with self.subTest(allowed=name):
+                bundle = self.bundle("v1")
+                bundle["resources"].append({"apiVersion": "v1", "kind": "ConfigMap",
+                                            "metadata": {"name": name}, "data": {}})
+                k8s.validate_bundle(bundle)
+        # A consumed ConfigMap may itself carry such a base name: its
+        # published name always appends one more reserved suffix.
+        bundle = self.bundle("v1")
+        bundle["resources"][0]["metadata"]["name"] = "x-0123456789abcdef"
+        deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["envFrom"] = [
+            {"configMapRef": {"name": "x-0123456789abcdef"}}]
+        deployment(bundle)["spec"]["template"]["spec"]["volumes"][0]["configMap"]["name"] = "x-0123456789abcdef"
+        k8s.validate_bundle(bundle)
+        self.assertRegex(k8s.config_names(bundle)["x-0123456789abcdef"], r"^x-0123456789abcdef-[0-9a-f]{16}$")
+
+    def test_preexisting_mutable_alias_is_refused_before_any_write(self):
+        """Review 4613: an owned mutable ConfigMap already at the name this
+        bundle derives (which a node may cache with other data) is refused
+        before any write instead of being converted in place."""
+        cluster = ModelCluster()
+        k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
+        cluster.roll_out()
+        alias = copy.deepcopy(cluster.store["configmaps"][self.name("v1")])
+        alias["metadata"]["name"] = self.name("v2")
+        alias.pop("immutable")
+        alias["data"] = {"index.html": "old"}
+        cluster.store["configmaps"][self.name("v2")] = alias
+        before, cluster.order = copy.deepcopy(cluster.store), []
+        with self.assertRaisesRegex(k8s.Rejected, "mutable ConfigMap at a content-addressed name"):
+            k8s.apply(cluster, self.objects("v2"), "web-app", cluster)
+        self.assertEqual(cluster.order, [], "no write happened")
+        self.assertEqual(cluster.store, before)
+        alias["metadata"]["annotations"] = copy.deepcopy(self.objects("v2")[0]["metadata"]["annotations"])
+        ok, reason = k8s.object_ready(alias, self.objects("v2")[0], "web-app")
+        self.assertFalse(ok)
+        self.assertIn("content differs", reason)
 
     def test_malformed_configmap_references_are_rejected(self):
         for reference in ({}, {"name": 1}, {"name": "Bad_Name"}, "web-content", []):
@@ -387,6 +435,73 @@ class ConfigBindingTest(unittest.TestCase):
                     self.assertEqual(cluster.pod_reads(cache), [message])
                     previous = message
 
+    def many(self, message, count):
+        """Bundle whose Deployment consumes `count` ConfigMaps via envFrom."""
+        bundle = self.bundle(message)
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        for index in range(1, count):
+            bundle["resources"].insert(index, {"apiVersion": "v1", "kind": "ConfigMap",
+                                               "metadata": {"name": f"extra-{index}"}, "data": {"v": message}})
+            pod["containers"][0].setdefault("envFrom", []).append({"configMapRef": {"name": f"extra-{index}"}})
+        k8s.validate_bundle(bundle)
+        return k8s.render(bundle, "suifleet-apps", "web-app", "1", hashlib.sha256(message.encode()).hexdigest())
+
+    def test_configmaps_per_bundle_fit_two_bundles_in_the_shipped_quota(self):
+        """Review 4613: each changed consumed ConfigMap is created before the
+        old one is pruned. The per-bundle limit keeps two bundles plus
+        kube-root-ca.crt within the shipped quota of 20."""
+        self.assertLessEqual(2 * k8s.MAX_CONFIGMAPS + 1, 20)
+        self.assertEqual(len(self.many("v1", k8s.MAX_CONFIGMAPS)), k8s.MAX_CONFIGMAPS + 1)
+        with self.assertRaisesRegex(k8s.Rejected, f"more than {k8s.MAX_CONFIGMAPS} ConfigMaps"):
+            self.many("v1", k8s.MAX_CONFIGMAPS + 1)
+
+    def test_update_at_the_configmap_limit_converges_within_the_quota(self):
+        cluster = ModelCluster(configmap_quota=20)
+        for message in ("v1", "v2", "v1"):
+            objects = self.many(message, k8s.MAX_CONFIGMAPS)
+            k8s.apply(cluster, objects, "web-app", cluster)
+            cluster.roll_out()
+            self.assertEqual(k8s.ready(cluster, objects, "web-app"), (True, "ready"))
+            self.assertEqual(len(cluster.store["configmaps"]), k8s.MAX_CONFIGMAPS)
+        self.assertEqual(cluster.peak, 2 * k8s.MAX_CONFIGMAPS)
+
+    def test_leftovers_of_a_partial_apply_do_not_exhaust_the_quota(self):
+        """After a partial apply (ConfigMaps written, Deployment refused), its
+        unreferenced ConfigMaps are freed before the next bundle creates its
+        own, so a forward update still fits. Without freeing it would not."""
+        def run():
+            cluster = ModelCluster(configmap_quota=20)
+            k8s.apply(cluster, self.many("v1", k8s.MAX_CONFIGMAPS), "web-app", cluster)
+            cluster.roll_out()
+            cluster.refuse_deployments = True
+            with self.assertRaises(k8s.Rejected):
+                k8s.apply(cluster, self.many("v2", k8s.MAX_CONFIGMAPS), "web-app", cluster)
+            self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS)
+            cluster.refuse_deployments = False
+            v3 = self.many("v3", k8s.MAX_CONFIGMAPS)
+            k8s.apply(cluster, v3, "web-app", cluster)
+            cluster.roll_out()
+            self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
+            self.assertEqual(cluster.pod_reads(), ["v3"])
+        run()
+        with mock.patch.object(k8s, "free_configmaps", lambda *args: []):
+            with self.assertRaisesRegex(k8s.Rejected, "exceeded quota"):
+                run()
+
+    def test_freeing_keeps_configmaps_live_deployments_reference(self):
+        cluster = ModelCluster()
+        k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
+        cluster.refuse_deployments = True
+        with self.assertRaises(k8s.Rejected):
+            k8s.apply(cluster, self.objects("v2"), "web-app", cluster)
+        # v1 is still referenced by the live template; v2 (unreferenced, not
+        # desired by v3) is freed; v3 is created.
+        cluster.refuse_deployments = True
+        with self.assertRaises(k8s.Rejected):
+            k8s.apply(cluster, self.objects("v3"), "web-app", cluster)
+        self.assertEqual(sorted(cluster.store["configmaps"]), sorted([self.name("v1"), self.name("v3")]))
+        self.assertEqual(cluster.pod_reads(), ["v1"])
+
     def test_configmap_changed_after_write_is_not_bound(self):
         cluster = ModelCluster()
         cluster.tamper = lambda item: item["data"].update({"index.html": "foreign"})
@@ -402,7 +517,11 @@ class ModelCluster:
     ConfigMap never changes, and a Deployment template change bumps the
     generation. roll_out() marks the current template rolled out."""
 
-    def __init__(self):
+    def __init__(self, configmap_quota=None):
+        # configmap_quota models a ResourceQuota on configmaps, including the
+        # namespace's kube-root-ca.crt (not in the store); peak records the
+        # most SuiFleet ConfigMaps that existed at once.
+        self.configmap_quota, self.peak = configmap_quota, 0
         self.profile = {"namespace": "suifleet-apps"}
         self.component, self.namespace = "web-app", "suifleet-apps"
         self.store = {"configmaps": {}, "deployments.apps": {}}
@@ -423,7 +542,8 @@ class ModelCluster:
         for name in k8s.config_refs(self.template()["spec"]):
             if name not in cache:
                 cache[name] = copy.deepcopy(self.store["configmaps"][name]["data"])
-            reads.add(cache[name]["index.html"])
+            if "index.html" in cache[name]:
+                reads.add(cache[name]["index.html"])
         return sorted(reads)
 
     def json(self, *args, namespaced=True):
@@ -451,6 +571,9 @@ class ModelCluster:
             {"labels": o["metadata"].get("labels"), "annotations": o["metadata"].get("annotations")}
         if old is not None and content(old) == content(new):
             return  # No-op: resourceVersion unchanged.
+        if resource == "configmaps" and old is None and self.configmap_quota is not None and \
+                len(self.store["configmaps"]) + 1 >= self.configmap_quota:
+            raise k8s.Rejected("kubectl create ConfigMap failed: exceeded quota: suifleet-publisher")
         self.counter += 1
         generation = (old or {}).get("metadata", {}).get("generation", 0)
         if resource == "deployments.apps" and (old is None or old["spec"] != new["spec"]):
@@ -459,6 +582,7 @@ class ModelCluster:
                                resourceVersion=str(self.counter), generation=generation)
         new["status"] = (old or {}).get("status", {})
         self.store[resource][name] = new
+        self.peak = max(self.peak, len(self.store["configmaps"]))
 
     def roll_out(self):
         live = self.store["deployments.apps"]["web"]

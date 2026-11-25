@@ -99,6 +99,16 @@ BUNDLE_ANNOTATION = "suifleet.io/bundle-sha256"
 CONFIG_NAME_ANNOTATION = "suifleet.io/config-name"
 # Hex digits of the data sha256 appended to a consumed ConfigMap's name.
 CONTENT_HASH_CHARS = 16
+# Names of this shape are reserved for content-addressed ConfigMaps in every
+# bundle, so a stable (unconsumed, mutable) ConfigMap of one bundle can never
+# occupy the name another bundle derives for a consumed one.
+CONTENT_NAME = re.compile(r"-[0-9a-f]{%d}$" % CONTENT_HASH_CHARS)
+# ConfigMaps per bundle. Changing a consumed ConfigMap creates its new
+# content-addressed object before the old one is pruned, so an update or
+# rollback needs room for two bundles' ConfigMaps at once: 2 * 9 = 18, plus the
+# namespace's kube-root-ca.crt, fits the shipped quota of 20
+# (scripts/kubernetes/cluster-setup.yaml; docs/KUBERNETES_EDGE.md).
+MAX_CONFIGMAPS = 9
 DEFAULT_PROFILE_ROOT = "/etc/suifleet/k8s"
 KUBECTL_TIMEOUT = 60  # process limit per kubectl call (seconds)
 REQUEST_TIMEOUT = 30  # kubectl --request-timeout per API request (seconds)
@@ -377,6 +387,8 @@ def _validate_bundle(bundle):
     # could change without any rollout, so readiness could not vouch for the
     # configuration the Pods actually run.
     configs = {name for kind, name in seen if kind == "ConfigMap"}
+    _require(len(configs) <= MAX_CONFIGMAPS,
+             f"bundle has more than {MAX_CONFIGMAPS} ConfigMaps; an update needs quota for two bundles' ConfigMaps at once")
     for index, resource in enumerate(resources):
         if resource["kind"] != "Deployment":
             continue
@@ -384,9 +396,15 @@ def _validate_bundle(bundle):
             _require(name in configs, f"resources[{index}] consumes ConfigMap {name!r}, which is not in this bundle; "
                      "Deployments may consume only ConfigMaps the same bundle defines")
     # A content-addressed name must not collide with another bundle ConfigMap.
+    # Stable ConfigMap names must stay disjoint from content-addressed names
+    # of any bundle: the reserved suffix shape is refused for them, so no
+    # earlier or later bundle can leave a mutable object at a name a consumed
+    # ConfigMap derives (where a node's kubelet could still cache old data).
     published = config_names(bundle)
-    for base, name in sorted(published.items()):
-        _require(name not in configs, f"ConfigMap {base!r} publishes as {name!r}, which another bundle ConfigMap already uses")
+    for name in sorted(configs - set(published)):
+        _require(not CONTENT_NAME.search(name),
+                 f"ConfigMap {name!r} ends in '-' and {CONTENT_HASH_CHARS} hex digits, a suffix reserved for "
+                 "content-addressed ConfigMaps; rename it")
 
 
 def validate_component(component):
@@ -1146,7 +1164,15 @@ def immutable_problem(current, desired):
     return to mutable; the helper never deletes and recreates it automatically.
     A content-addressed (immutable) ConfigMap may only be relabelled: its live
     content must already be exactly the content its name denotes."""
-    if current.get("kind") != "ConfigMap" or current.get("immutable") is not True:
+    if current.get("kind") != "ConfigMap":
+        return None
+    if current.get("immutable") is not True:
+        if desired.get("immutable") is True:
+            # A mutable object at a content-addressed name (left by an older
+            # helper, or recreated out of band) may already be cached by a
+            # node under that name with other data; never convert it in place.
+            return ("is a mutable ConfigMap at a content-addressed name; an administrator must delete it "
+                    "before SuiFleet publishes this content under that name")
         return None
     if desired.get("immutable") is not True:
         return ("is an immutable ConfigMap and cannot be updated or rolled back in place; "
@@ -1155,6 +1181,37 @@ def immutable_problem(current, desired):
         return ("is an immutable ConfigMap whose content differs from the content its name denotes; "
                 "an administrator must delete it before SuiFleet manages it again")
     return None
+
+
+def live_config_refs(deployment):
+    """ConfigMap names a live Deployment's Pod template references (tolerant
+    of unexpected shapes: live objects are not validated bundles)."""
+    pod = (((deployment.get("spec") or {}).get("template") or {}).get("spec")) or {}
+    names = set()
+    try:
+        for _, reference in _config_ref_slots(pod):
+            if isinstance(reference, dict) and isinstance(reference.get("name"), str):
+                names.add(reference["name"])
+    except (AttributeError, TypeError):
+        pass
+    return names
+
+
+def free_configmaps(kubectl, component, objects, writer):
+    """Before creating ConfigMaps, delete this component's ConfigMaps that the
+    bundle does not contain and no live (non-terminating) component
+    Deployment references -- leftovers of an earlier apply that failed before
+    pruning. The end-of-apply prune would delete them anyway; doing it first
+    keeps them from consuming the namespace's ConfigMap quota, so a retry or
+    new bundle after a partial apply needs room for only the live and the
+    desired ConfigMaps."""
+    selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
+    listed = kubectl.json("get", "deployments.apps", "-l", selector) or {}
+    keep = {item["metadata"]["name"] for item in objects if item["kind"] == "ConfigMap"}
+    for deployment in listed.get("items") or []:
+        if not (deployment.get("metadata") or {}).get("deletionTimestamp"):
+            keep |= live_config_refs(deployment)
+    return prune(kubectl, component, {"configmaps": keep}, writer, resources=("configmaps",))
 
 
 def preflight(writer, objects):
@@ -1181,9 +1238,12 @@ def apply(kubectl, objects, component, writer=None):
     Pruning then deletes the content-addressed ConfigMaps of earlier bundles:
     Pods of the previous template keep the environment and files they
     already read; one that restarts before the rollout replaces it cannot
-    start (rather than starting with different data)."""
+    start (rather than starting with different data). Leftover ConfigMaps of
+    an earlier failed apply are freed first (free_configmaps) so they do not
+    consume the namespace quota the new ones need."""
     writer = writer or Writer(kubectl, component)
     preflight(writer, objects)
+    freed = free_configmaps(kubectl, component, objects, writer)
     desired = {}
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
@@ -1194,14 +1254,14 @@ def apply(kubectl, objects, component, writer=None):
             if not ok:
                 raise Conflict(f"{reason} right after it was written; not writing its consumers")
         desired.setdefault(resource, set()).add(name)
-    return prune(kubectl, component, desired, writer)
+    return freed + prune(kubectl, component, desired, writer)
 
 
-def prune(kubectl, component, desired, writer=None):
+def prune(kubectl, component, desired, writer=None, resources=None):
     writer = writer or Writer(kubectl, component)
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     removed = []
-    for resource in ALLOWED_KINDS.values():
+    for resource in resources or ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}
         items = {item["metadata"]["name"]: item for item in listed.get("items") or []}
         for name in prune_candidates(list(items.values()), desired.get(resource, set())):
