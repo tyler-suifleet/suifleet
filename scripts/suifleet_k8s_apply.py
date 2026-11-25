@@ -1183,54 +1183,6 @@ def immutable_problem(current, desired):
     return None
 
 
-def live_config_refs(deployment):
-    """ConfigMap names a live Deployment's Pod template references (tolerant
-    of unexpected shapes: live objects are not validated bundles)."""
-    pod = (((deployment.get("spec") or {}).get("template") or {}).get("spec")) or {}
-    names = set()
-    try:
-        for _, reference in _config_ref_slots(pod):
-            if isinstance(reference, dict) and isinstance(reference.get("name"), str):
-                names.add(reference["name"])
-    except (AttributeError, TypeError):
-        pass
-    return names
-
-
-def content_addressed(configmap):
-    """True for a ConfigMap this helper published under a content-addressed
-    name for a bundle Deployment: immutable, annotated with its bundle name
-    and named NAME-HASH. Only bundle Deployments consume these; stable
-    (mutable, bundle-named) ConfigMaps may have consumers outside the bundle."""
-    metadata = configmap.get("metadata") or {}
-    name = metadata.get("name")
-    return (configmap.get("immutable") is True and isinstance(name, str) and bool(CONTENT_NAME.search(name))
-            and isinstance((metadata.get("annotations") or {}).get(CONFIG_NAME_ANNOTATION), str))
-
-
-def free_configmaps(kubectl, component, objects, writer):
-    """Before creating ConfigMaps, delete this component's content-addressed
-    ConfigMaps that the bundle does not contain and no live (non-terminating)
-    component Deployment references -- leftovers of an earlier apply that
-    failed before pruning. Nothing can still read such an object: only bundle
-    Deployments consume content-addressed names, and none references it.
-    The end-of-apply prune would delete them anyway; doing it first keeps
-    them from consuming the namespace's ConfigMap quota, so a retry or new
-    bundle after a partial apply needs room for only the live and the
-    desired ConfigMaps. Stable ConfigMaps are never freed here: one of the
-    last converged bundle may be in use by a consumer outside the bundle,
-    and a leftover cannot be told apart from it, so only the prune after a
-    fully successful apply removes them."""
-    selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
-    listed = kubectl.json("get", "deployments.apps", "-l", selector) or {}
-    keep = {item["metadata"]["name"] for item in objects if item["kind"] == "ConfigMap"}
-    for deployment in listed.get("items") or []:
-        if not (deployment.get("metadata") or {}).get("deletionTimestamp"):
-            keep |= live_config_refs(deployment)
-    return prune(kubectl, component, {"configmaps": keep}, writer, resources=("configmaps",),
-                 only=content_addressed)
-
-
 def preflight(writer, objects):
     """Refuse before any write when an owned live object could not be updated,
     so a rejected bundle never leaves earlier objects half-applied. Writer.apply
@@ -1255,12 +1207,19 @@ def apply(kubectl, objects, component, writer=None):
     Pruning then deletes the content-addressed ConfigMaps of earlier bundles:
     Pods of the previous template keep the environment and files they
     already read; one that restarts before the rollout replaces it cannot
-    start (rather than starting with different data). Leftover ConfigMaps of
-    an earlier failed apply are freed first (free_configmaps) so they do not
-    consume the namespace quota the new ones need."""
+    start (rather than starting with different data).
+
+    Nothing is deleted before every write has succeeded, not even an
+    apparently unreferenced leftover of an earlier failed apply: a partial
+    apply may already have moved a Deployment's template off the last fully
+    applied bundle's ConfigMaps, which are exactly what a rollback re-applies.
+    Every object of the last fully applied bundle therefore still exists
+    after any number of failed applies, so re-applying that bundle creates
+    no object and always fits the namespace quota. A further bundle after a
+    partial apply may exceed the quota instead, failing at a ConfigMap
+    creation before any Deployment is written."""
     writer = writer or Writer(kubectl, component)
     preflight(writer, objects)
-    freed = free_configmaps(kubectl, component, objects, writer)
     desired = {}
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
@@ -1271,7 +1230,7 @@ def apply(kubectl, objects, component, writer=None):
             if not ok:
                 raise Conflict(f"{reason} right after it was written; not writing its consumers")
         desired.setdefault(resource, set()).add(name)
-    return freed + prune(kubectl, component, desired, writer)
+    return prune(kubectl, component, desired, writer)
 
 
 def prune(kubectl, component, desired, writer=None, resources=None, only=None):

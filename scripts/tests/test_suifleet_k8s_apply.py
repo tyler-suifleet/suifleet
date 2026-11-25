@@ -465,41 +465,91 @@ class ConfigBindingTest(unittest.TestCase):
             self.assertEqual(len(cluster.store["configmaps"]), k8s.MAX_CONFIGMAPS)
         self.assertEqual(cluster.peak, 2 * k8s.MAX_CONFIGMAPS)
 
-    def test_leftovers_of_a_partial_apply_do_not_exhaust_the_quota(self):
-        """After a partial apply (ConfigMaps written, Deployment refused), its
-        unreferenced ConfigMaps are freed before the next bundle creates its
-        own, so a forward update still fits. Without freeing it would not."""
-        def run():
-            cluster = ModelCluster(configmap_quota=20)
-            k8s.apply(cluster, self.many("v1", k8s.MAX_CONFIGMAPS), "web-app", cluster)
-            cluster.roll_out()
-            cluster.refuse_deployments = True
-            with self.assertRaises(k8s.Rejected):
-                k8s.apply(cluster, self.many("v2", k8s.MAX_CONFIGMAPS), "web-app", cluster)
-            self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS)
-            cluster.refuse_deployments = False
-            v3 = self.many("v3", k8s.MAX_CONFIGMAPS)
-            k8s.apply(cluster, v3, "web-app", cluster)
-            cluster.roll_out()
-            self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
-            self.assertEqual(cluster.pod_reads(), ["v3"])
-        run()
-        with mock.patch.object(k8s, "free_configmaps", lambda *args: []):
-            with self.assertRaisesRegex(k8s.Rejected, "exceeded quota"):
-                run()
+    def with_worker(self, objects):
+        """`objects` plus a Deployment `worker` that consumes no ConfigMap,
+        written after `web`, so a partial apply can advance web's template
+        and then fail."""
+        web = next(item for item in objects if item["kind"] == "Deployment")
+        worker = copy.deepcopy(web)
+        worker["metadata"]["name"] = "worker"
+        worker["spec"]["template"]["spec"]["containers"][0].pop("envFrom", None)
+        return objects + [worker]
 
-    def test_freeing_keeps_configmaps_live_deployments_reference(self):
+    def test_a_forward_update_after_a_partial_apply_never_consumes_rollback_capacity(self):
+        """Review 4628: a partial apply can move a Deployment template off the
+        last fully applied bundle's content-addressed ConfigMaps. Deleting
+        those as unreferenced leftovers before the next update's writes would
+        leave a rollback unable to recreate them within the shipped quota.
+        Nothing is deleted before every write succeeds, so a further update
+        fails at a ConfigMap creation (before any Deployment write) and the
+        rollback creates nothing and converges."""
+        cluster = ModelCluster(configmap_quota=20)
+        v1 = self.with_worker(self.many("v1", k8s.MAX_CONFIGMAPS))
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        v1_names = set(cluster.store["configmaps"])
+        # v2 writes its ConfigMaps and web, then its worker write is refused.
+        cluster.refuse_deployments = {"worker"}
+        with self.assertRaisesRegex(k8s.Rejected, "injected"):
+            k8s.apply(cluster, self.with_worker(self.many("v2", k8s.MAX_CONFIGMAPS)), "web-app", cluster)
+        self.assertEqual(cluster.pod_reads(), ["v2"], "the partial apply advanced web's template")
+        self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS)
+        # v3 (omitting the consumed ConfigMaps for nine stable ones) hits the
+        # quota at a ConfigMap creation; it deletes nothing and writes no
+        # Deployment.
+        bundle = example()
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        pod.pop("volumes")
+        pod["containers"][0].pop("volumeMounts")
+        bundle["resources"] = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": f"stable-{index}"},
+                                "data": {"v": "v3"}} for index in range(k8s.MAX_CONFIGMAPS)] + [deployment(bundle)]
+        k8s.validate_bundle(bundle)
+        v3 = self.with_worker(k8s.render(bundle, "suifleet-apps", "web-app", "1", "3" * 64))
+        template = copy.deepcopy(cluster.template())
+        cluster.order.clear()
+        with self.assertRaisesRegex(k8s.Rejected, "exceeded quota"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        self.assertNotIn("Deployment", cluster.order)
+        self.assertTrue(v1_names <= set(cluster.store["configmaps"]), "a failed apply deleted rollback ConfigMaps")
+        self.assertEqual(cluster.template(), template)
+        # The rollback to v1 creates nothing, so it fits, and converges.
+        cluster.refuse_deployments = False
+        count = len(cluster.store["configmaps"])
+        cluster.peak = 0
+        k8s.apply(cluster, v1, "web-app", cluster)
+        self.assertLessEqual(cluster.peak, count, "the rollback created a ConfigMap")
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        self.assertEqual(set(cluster.store["configmaps"]), v1_names)
+        self.assertEqual(cluster.pod_reads(), ["v1"])
+
+    def test_retrying_a_partial_apply_fits_the_quota_and_converges(self):
+        cluster = ModelCluster(configmap_quota=20)
+        k8s.apply(cluster, self.many("v1", k8s.MAX_CONFIGMAPS), "web-app", cluster)
+        cluster.roll_out()
+        cluster.refuse_deployments = True
+        v2 = self.many("v2", k8s.MAX_CONFIGMAPS)
+        with self.assertRaises(k8s.Rejected):
+            k8s.apply(cluster, v2, "web-app", cluster)
+        self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS)
+        self.assertEqual(cluster.pod_reads(), ["v1"])
+        cluster.refuse_deployments = False
+        k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
+        self.assertEqual(len(cluster.store["configmaps"]), k8s.MAX_CONFIGMAPS)
+        self.assertEqual(cluster.pod_reads(), ["v2"])
+
+    def test_failed_applies_delete_nothing(self):
         cluster = ModelCluster()
         k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
         cluster.refuse_deployments = True
-        with self.assertRaises(k8s.Rejected):
-            k8s.apply(cluster, self.objects("v2"), "web-app", cluster)
-        # v1 is still referenced by the live template; v2 (unreferenced, not
-        # desired by v3) is freed; v3 is created.
-        cluster.refuse_deployments = True
-        with self.assertRaises(k8s.Rejected):
-            k8s.apply(cluster, self.objects("v3"), "web-app", cluster)
-        self.assertEqual(sorted(cluster.store["configmaps"]), sorted([self.name("v1"), self.name("v3")]))
+        for message in ("v2", "v3"):
+            with self.assertRaises(k8s.Rejected):
+                k8s.apply(cluster, self.objects(message), "web-app", cluster)
+        self.assertEqual(sorted(cluster.store["configmaps"]),
+                         sorted([self.name("v1"), self.name("v2"), self.name("v3")]))
         self.assertEqual(cluster.pod_reads(), ["v1"])
 
     def with_stable(self, message, settings=None):
@@ -529,28 +579,21 @@ class ConfigBindingTest(unittest.TestCase):
         self.assertIsNotNone(stable, "the failed apply deleted a stable ConfigMap")
         self.assertEqual(stable["data"], {"mode": "previous"})
         self.assertEqual(cluster.pod_reads(), ["v1"])
-        # A second failed attempt (which runs the pre-write freeing pass with
-        # the v2 leftover present) still keeps it.
+        # A second failed attempt still keeps it (and every leftover).
         with self.assertRaisesRegex(k8s.Rejected, "injected"):
             k8s.apply(cluster, self.with_stable("v3"), "web-app", cluster)
         self.assertEqual(cluster.store["configmaps"]["customer-settings"]["data"], {"mode": "previous"})
-        self.assertNotIn(self.name("v2"), cluster.store["configmaps"], "content-addressed leftover freed")
+        self.assertIn(self.name("v2"), cluster.store["configmaps"], "a failed apply deletes nothing")
         # Rolling back restores convergence with the stable map untouched.
         cluster.refuse_deployments = False
-        self.assertEqual(sorted(k8s.apply(cluster, v1, "web-app", cluster)), [f"configmaps/{self.name('v3')}"])
+        self.assertEqual(sorted(k8s.apply(cluster, v1, "web-app", cluster)),
+                         sorted([f"configmaps/{self.name('v2')}", f"configmaps/{self.name('v3')}"]))
         self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
         # A successful update that omits it prunes it after every write.
         v2 = self.with_stable("v2")
         removed = k8s.apply(cluster, v2, "web-app", cluster)
         self.assertIn("configmaps/customer-settings", removed)
         self.assertNotIn("customer-settings", cluster.store["configmaps"])
-
-    def test_freeing_never_deletes_stable_configmaps(self):
-        cluster = ModelCluster()
-        k8s.apply(cluster, self.with_stable("v1", settings="kept"), "web-app", cluster)
-        self.assertEqual(k8s.free_configmaps(cluster, "web-app", self.objects("v2"), cluster), [])
-        self.assertIn("customer-settings", cluster.store["configmaps"])
-        self.assertIn(self.name("v1"), cluster.store["configmaps"], "still referenced by the live Deployment")
 
     def test_configmap_changed_after_write_is_not_bound(self):
         cluster = ModelCluster()
@@ -607,9 +650,11 @@ class ModelCluster:
     def apply(self, item):
         self.order.append(item["kind"])
         resource = k8s.ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
-        if resource == "deployments.apps" and self.refuse_deployments:
-            raise k8s.Rejected("kubectl apply Deployment/web failed: injected")
         name = item["metadata"]["name"]
+        # refuse_deployments: True refuses every Deployment write, a set only those named.
+        if resource == "deployments.apps" and (self.refuse_deployments is True or
+                                               name in (self.refuse_deployments or ())):
+            raise k8s.Rejected(f"kubectl apply Deployment/{name} failed: injected")
         old = self.store[resource].get(name)
         new = copy.deepcopy(item)
         if self.tamper and resource == "configmaps":
@@ -635,9 +680,9 @@ class ModelCluster:
         self.peak = max(self.peak, len(self.store["configmaps"]))
 
     def roll_out(self):
-        live = self.store["deployments.apps"]["web"]
-        live["status"] = {"observedGeneration": live["metadata"]["generation"], "replicas": 1,
-                          "updatedReplicas": 1, "readyReplicas": 1, "availableReplicas": 1}
+        for live in self.store["deployments.apps"].values():
+            live["status"] = {"observedGeneration": live["metadata"]["generation"], "replicas": 1,
+                              "updatedReplicas": 1, "readyReplicas": 1, "availableReplicas": 1}
 
     def delete(self, resource, current):
         self.store[resource].pop(current["metadata"]["name"], None)
