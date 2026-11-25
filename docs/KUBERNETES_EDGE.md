@@ -562,8 +562,10 @@ It checks the following:
   customer object and a relabel are each refused (exit code 3) and left
   unchanged. Pruning leaves a prune candidate alone when it is relabelled or
   replaced between the listing and the delete, including by a replacement
-  that carries this component's labels. Readiness then reports the surviving
-  object as not yet pruned.
+  that carries this component's labels: the racing delete never follows the
+  listed UID to the replacement. A same-owner replacement is a stale object of
+  this component, so the same apply's final prune lists it afresh and deletes
+  it; a same-owner stale object that remains is reported not yet pruned.
 - A finalizer-delayed prune keeps `ready` failing until the object is gone,
   and re-applying meanwhile does not re-delete it. An empty retirement bundle
   is not ready before its apply and is ready once pruning has converged.
