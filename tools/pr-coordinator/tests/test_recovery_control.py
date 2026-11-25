@@ -37,7 +37,7 @@ class RetainedRecoveryTests(unittest.TestCase):
         self.d.db.executescript('''
           CREATE TABLE backoff(project TEXT,family TEXT,attempts INTEGER,retry_after REAL,reason TEXT);
           CREATE TABLE runs(session TEXT PRIMARY KEY,project TEXT,family TEXT,status TEXT,directory TEXT,claim TEXT,pid INTEGER,started TEXT,message TEXT);
-          CREATE TABLE retired_runs(session TEXT PRIMARY KEY,status TEXT,message TEXT,reason TEXT,at REAL);
+          CREATE TABLE retired_runs(session TEXT PRIMARY KEY,original_status TEXT,original_message TEXT,reason TEXT,at REAL);
           CREATE TABLE dependency_resumes(claim TEXT,state TEXT);
           CREATE TABLE ci_redirects(claim TEXT,state TEXT);
           CREATE TABLE capacity_retries(claim TEXT,state TEXT);
@@ -90,6 +90,44 @@ class RetainedRecoveryTests(unittest.TestCase):
         # Repeating cannot launch the same source twice.
         with self.assertRaises(RuntimeError): self.resume()
         self.assertEqual(self.child.call_count,1)
+
+    def interrupted_before_launch(self):
+        original_ticket = self.d.ticket.side_effect
+
+        def ticket(project, command, *args):
+            result = original_ticket(project, command, *args)
+            if command == 'resume':
+                self.claim['publish_pending'] = True
+                raise subprocess.CalledProcessError(1, ['ticket', 'resume'])
+            return result
+
+        self.d.ticket.side_effect = ticket
+        self.d.update.side_effect = lambda session, status, message: self.d.db.execute(
+            'UPDATE runs SET status=?,message=? WHERE session=?', (status, message, session))
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.resume()
+        self.d.ticket.side_effect = original_ticket
+        self.child.assert_not_called()
+        return self.d.db.execute("SELECT * FROM runs WHERE status='orphaned'").fetchone()
+
+    def test_explicit_retry_after_ticket_mirror_reconciles(self):
+        orphan = self.interrupted_before_launch()
+        with self.assertRaisesRegex(RuntimeError, 'publication pending'):
+            self.resume()
+        self.claim['publish_pending'] = False
+        result = self.resume()
+        self.assertEqual(result['family'], self.claim['agent'])
+        self.assertEqual(self.d.db.execute(
+            'SELECT status FROM runs WHERE session=?', (orphan['session'],)).fetchone()[0], 'finished')
+        self.child.assert_called_once()
+
+    def test_prelaunch_retry_refuses_worker_launch_artifacts(self):
+        orphan = self.interrupted_before_launch()
+        self.claim['publish_pending'] = False
+        (Path(orphan['directory'])/'command.json').write_text('[]')
+        with self.assertRaisesRegex(RuntimeError, 'remains reserved'):
+            self.resume()
+        self.child.assert_not_called()
 
     def real_availability(self, reason, occupied=False):
         self.d.db.executescript("""
