@@ -1448,6 +1448,51 @@ class Coordinator:
             self.immutable_reads[key] = value
         return self.immutable_reads[key]
 
+    def discovery_needed(self, project, row, owners):
+        """Scheduling hints only; every selected PR still gets a fresh snapshot.
+
+        Completion/CI lanes collect exits and failures independently. Batch
+        publication re-reads all reserved members, so polling them here adds no
+        authority and needlessly multiplies API traffic.
+        """
+        branch = (row.get('head') or {}).get('ref')
+        if not branch:
+            return True  # Incomplete discovery cannot establish a safe shortcut.
+        if row.get('draft'):
+            return False
+        owner = next((o for o in owners if o.get('branch') == branch), None)
+        number = row['number']
+        if self.lane == 'source':
+            if (not owner or owner.get('status') != 'review'
+                    or owner.get('publish_pending') or owner.get('expired')):
+                return False
+            active = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? "
+                "AND status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                (project['id'], number)).fetchone()
+            family = 'Claude' if owner.get('agent') == 'Codex' else 'Codex'
+            count = self.store.db.execute("SELECT COUNT(*) FROM jobs WHERE family=? AND kind='review' "
+                "AND status IN ('reserved','running','orphaned','quota_launch')", (family,)).fetchone()[0]
+            return not active and count < self.store.worker_limits.get(family, {}).get('review', 1)
+        if self.lane == 'integration':
+            candidate = self.store.db.execute("SELECT 1 FROM integration_batches WHERE project=? AND pr=? "
+                "AND status NOT IN ('done','invalidated','failed')", (project['id'], number)).fetchone()
+            if candidate:
+                return True
+            if number in self.batches.reserved_members(project):
+                return False
+            if not owner:
+                return True  # Preserve discovery of untracked infrastructure PRs.
+            if (owner.get('status') != 'review' or owner.get('publish_pending') or owner.get('expired')):
+                return False
+            if owner.get('spec', {}).get('area') == 'infra':
+                return True  # Local-test infrastructure has no source-review wait.
+            head = (row.get('head') or {}).get('sha')
+            completed = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND head=? "
+                "AND kind='review' AND status='done' AND result IS NOT NULL",
+                (project['id'], number, head)).fetchone()
+            return bool(completed)
+        return True
+
     def prs(self, project, on_snapshot=None, owners=()):
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
         pages = json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
@@ -1469,6 +1514,9 @@ class Coordinator:
             raw = [r for r in raw if r['number'] not in excluded]
         result = []
         for row in raw:
+            if (on_snapshot is not None and self.lane in ('source','integration')
+                    and self.batches.enabled(project) and not self.discovery_needed(project, row, owners)):
+                continue
             try:
                 pr = self.pr(project, row['number'], fields)
                 result.append(pr)
