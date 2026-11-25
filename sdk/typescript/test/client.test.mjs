@@ -200,6 +200,44 @@ test('messages() yields durable messages and acks them by id', async () => {
   await server.close();
 });
 
+test('messages() abort of a sent receive throws unknown; idle or unsent abort ends cleanly', async () => {
+  // In flight: the daemon has the receive (and may have popped a message) but has not replied.
+  const silent = await serve(() => undefined);
+  const inFlight = new AbortController();
+  const iterator = new Client({ socketPath: silent.path, component: 'sub' }).messages('a/#', { signal: inFlight.signal });
+  const next = iterator.next();
+  while (silent.requests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  inFlight.abort();
+  try {
+    await assert.rejects(next, (e) => e instanceof TransportError && e.outcome === 'unknown' && e.operation === 'receive');
+  } finally { await silent.close(); }
+
+  // Idle: the queue is empty and the iterator is sleeping between polls.
+  const empty = await serve(() => ok(null));
+  const idle = new AbortController();
+  const idleNext = new Client({ socketPath: empty.path, component: 'sub' }).messages('a/#', { pollIntervalMs: 10_000, signal: idle.signal }).next();
+  while (empty.requests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  idle.abort();
+  try {
+    assert.deepEqual(await idleNext, { value: undefined, done: true });
+    assert.equal(empty.requests.length, 1);
+  } finally { await empty.close(); }
+
+  // Not sent: no daemon socket, so every attempt fails before a byte is written.
+  const unsent = new AbortController();
+  const unsentNext = new Client({ socketPath: join(directory, 'absent.sock') })
+    .messages('a/#', { pollIntervalMs: 10, maxReconnectDelayMs: 20, signal: unsent.signal }).next();
+  setTimeout(() => unsent.abort(), 50);
+  assert.deepEqual(await unsentNext, { value: undefined, done: true });
+
+  // Already aborted: no request is made at all.
+  const before = new AbortController();
+  before.abort();
+  assert.deepEqual(await new Client({ socketPath: join(directory, 'absent.sock') }).messages('a/#', { signal: before.signal }).next(),
+    { value: undefined, done: true });
+});
+
 test('OutboundBuffer is bounded, ordered and retries only definite rejections', async () => {
   let full = 2;
   const server = await serve((r) => {

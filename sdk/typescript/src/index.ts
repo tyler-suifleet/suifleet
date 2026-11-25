@@ -232,7 +232,10 @@ export class Client {
    * before pulling the next value; otherwise the same message is delivered
    * again (at-least-once). Polls `receive` while the queue is empty. Failures
    * that sent no byte (daemon restarting) are retried until `signal` aborts;
-   * any other failure ends the iteration with that error.
+   * any other failure ends the iteration with that error. Aborting while idle
+   * or before a request is sent ends the iteration normally; aborting a
+   * `receive` already sent throws its `TransportError` (outcome `unknown`),
+   * because the daemon may have consumed a message.
    */
   async *messages(filter: string, options: { pollIntervalMs?: number; maxReconnectDelayMs?: number; signal?: AbortSignal } = {}):
     AsyncGenerator<{ message: ReceivedMessage; ack: () => Promise<boolean> }, void, undefined> {
@@ -246,7 +249,10 @@ export class Client {
         message = await this.request<ReceivedMessage | null>('receive', signal === undefined ? { topic: filter } : { topic: filter, signal });
         delay = interval;
       } catch (error) {
-        if (signal?.aborted) return;
+        // A receive that was already sent may have been consumed by the daemon
+        // (volatile and QoS 0 reads are destructive), so cancelling it must not
+        // look like a clean stop. Abort before sending or while idle ends cleanly.
+        if (signal?.aborted && !(error instanceof TransportError && error.outcome === 'unknown')) return;
         if (error instanceof TransportError && error.outcome === 'not_sent') {
           try { await sleep(delay, signal); } catch { return; }
           delay = Math.min(delay * 2, maxDelay);
