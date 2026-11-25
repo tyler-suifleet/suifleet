@@ -62,3 +62,12 @@ missing/invalid or oversized ranges fail closed and require a full CI run. Class
 or deployment permission. Guard tests keep workflow filters and policy exceptions
 synchronized. Testnet controllers, wallets, spending and live-release protections
 are unchanged; cosmetic changes do not create an originating engine-CI run.
+
+## Unchanged runtime activation
+
+The installed operator entrypoint (`scripts/runtime_activation.py`) retains the
+activator's provenance, staged-source compilation and runtime compatibility
+checks. It skips the repeated runtime suite only when target bytes, actual
+installed files and recorded hashes all match. Changed, missing, untrusted or
+malformed inputs receive full validation. The full-suite timeout is 15 minutes;
+other timeouts and authority checks remain unchanged.
