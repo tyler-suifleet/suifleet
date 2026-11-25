@@ -413,6 +413,67 @@ class DecisionTest(unittest.TestCase):
                                         f"{pod}.containers[0].readinessProbe"),
                          f"{pod}.containers[0].readinessProbe.timeoutSeconds", "bool is not int")
 
+    def test_deployment_readiness_preserves_optional_pointer_presence(self):
+        # A container runAsGroup 0 overrides the pod's runAsGroup 101; an
+        # absent one inherits it. Both directions must be drift, never ready.
+        for bundle_has_group in (False, True):
+            bundle = example()
+            pod = deployment(bundle)["spec"]["template"]["spec"]
+            pod["securityContext"]["runAsGroup"] = 101
+            context = pod["containers"][0]["securityContext"]
+            context.pop("runAsGroup")
+            if bundle_has_group:
+                context["runAsGroup"] = 0
+            k8s.validate_bundle(bundle)
+            deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+            live = self.healthy(deploy)
+            self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+            live_context = live["spec"]["template"]["spec"]["containers"][0]["securityContext"]
+            if bundle_has_group:
+                live_context.pop("runAsGroup")
+            else:
+                live_context["runAsGroup"] = 0
+            ready, reason = k8s.object_ready(live, deploy, "web-app")
+            self.assertFalse(ready, f"bundle runAsGroup present={bundle_has_group}")
+            self.assertIn("spec.template.spec.containers[0].securityContext.runAsGroup differs", reason)
+        pod = "spec.template.spec"
+        container = f"{pod}.containers[0]"
+        # Explicit zero/false/empty pointer values the bundle sets must be live,
+        # and the bundle omitting one means it must be absent live.
+        for path, field, value in [
+                (f"{container}.securityContext", "allowPrivilegeEscalation", False),
+                (f"{container}.securityContext", "runAsUser", 0),
+                (f"{pod}.securityContext", "fsGroup", 0),
+                (f"{pod}.securityContext", "runAsNonRoot", False),
+                (pod, "activeDeadlineSeconds", 0),
+                (f"{pod}.tolerations[0]", "tolerationSeconds", 0),
+                (f"{pod}.volumes[0].configMap", "optional", False),
+                (f"{pod}.volumes[0].configMap.items[0]", "mode", 0),
+                (f"{pod}.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]",
+                 "namespaceSelector", {}),
+                (f"{pod}.topologySpreadConstraints[0]", "labelSelector", {}),
+                (f"{pod}.dnsConfig.options[0]", "value", ""),
+                (f"{pod}.initContainers[0]", "restartPolicy", ""),
+                ("spec.strategy.rollingUpdate", "maxUnavailable", 0)]:
+            self.assertEqual(k8s.spec_drift({field: value}, {}, path), f"{path}.{field}", f"{field} missing live")
+            self.assertEqual(k8s.spec_drift({}, {field: value}, path), f"{path}.{field}", f"{field} extra live")
+            self.assertIsNone(k8s.spec_drift({field: value}, {field: value}, path), f"{field} matching")
+        # Server defaults of pointer fields stay accepted when the bundle omits them.
+        for path, field, value in [(pod, "terminationGracePeriodSeconds", 30), (pod, "enableServiceLinks", True),
+                                   (f"{pod}.volumes[0].configMap", "defaultMode", 420),
+                                   ("spec", "progressDeadlineSeconds", 600), ("spec", "revisionHistoryLimit", 10),
+                                   (f"{container}.readinessProbe.grpc", "service", "")]:
+            self.assertIsNone(k8s.spec_drift({}, {field: value}, path), f"defaulted {field}")
+        # Plain (non-pointer) omitempty fields keep the zero-value tolerance in
+        # both directions, including same-named plain fields.
+        for path, field, value in [("spec", "minReadySeconds", 0), (f"{container}.volumeMounts[0]", "readOnly", False),
+                                   (pod, "hostNetwork", False), (f"{container}.env[0]", "value", ""),
+                                   (f"{container}", "stdin", False)]:
+            self.assertIsNone(k8s.spec_drift({field: value}, {}, path), f"omitted plain {field}")
+            self.assertIsNone(k8s.spec_drift({}, {field: value}, path), f"zero plain {field}")
+        # An explicit JSON null in the bundle still means omitted.
+        self.assertIsNone(k8s.spec_drift({"runAsGroup": None}, {}, f"{container}.securityContext"))
+
     def test_deployment_readiness_tolerates_canonical_quantities_and_delegated_replicas(self):
         bundle = example()
         resources = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["resources"]

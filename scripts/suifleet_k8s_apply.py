@@ -424,6 +424,8 @@ def _server_defaults():
         })
         for probe in ("livenessProbe", "readinessProbe", "startupProbe"):
             table.update(_probe_defaults(f"{container}.{probe}"))
+            # GRPCAction.Service is a *string with +default="".
+            table[f"{container}.{probe}.grpc.service"] = ("",)
     return table
 
 
@@ -459,6 +461,50 @@ MAP_FIELDS = frozenset({"labels", "annotations", "matchLabels", "nodeSelector", 
                         "overhead", "volumeAttributes", "options"})
 
 
+# Optional fields that are Go pointers (*int64, *bool, *string, *IntOrString,
+# *Quantity, *LabelSelector) in the apps/v1 and core/v1 types reachable from a
+# Deployment spec, by field name. For these, presence is meaningful in both
+# directions: the server keeps an explicit zero, false or empty value, and an
+# absent field means "inherit" or "unset". For example, a container's
+# runAsGroup 0 overrides the pod's runAsGroup while an absent one inherits it,
+# and an empty namespaceSelector selects all namespaces while an absent one
+# selects only the pod's own. So a bundle value (even a zero) must be present
+# live, and a live value the bundle omits must be a server default. Plain
+# (non-pointer) omitempty fields keep the zero-value tolerance: the server
+# omits their zero value, so an absent live field equals an explicit zero.
+PRESENCE_FIELDS = frozenset({
+    # DeploymentSpec, RollingUpdateDeployment
+    "replicas", "revisionHistoryLimit", "progressDeadlineSeconds", "maxUnavailable", "maxSurge",
+    # PodSpec
+    "terminationGracePeriodSeconds", "activeDeadlineSeconds", "automountServiceAccountToken",
+    "shareProcessNamespace", "priority", "enableServiceLinks", "preemptionPolicy", "setHostnameAsFQDN",
+    "hostUsers", "runtimeClassName",
+    # PodSecurityContext, SecurityContext, SeccompProfile, AppArmorProfile, WindowsSecurityContextOptions
+    "runAsUser", "runAsGroup", "runAsNonRoot", "fsGroup", "fsGroupChangePolicy", "supplementalGroupsPolicy",
+    "seLinuxChangePolicy", "privileged", "readOnlyRootFilesystem", "allowPrivilegeEscalation", "procMount",
+    "localhostProfile", "gmsaCredentialSpecName", "gmsaCredentialSpec", "runAsUserName", "hostProcess",
+    # VolumeMount, GRPCAction, ConfigMap{KeySelector,EnvSource,VolumeSource}, KeyToPath, EmptyDirVolumeSource
+    "mountPropagation", "recursiveReadOnly", "service", "optional", "defaultMode", "mode", "sizeLimit",
+    # Toleration, TopologySpreadConstraint, PodAffinityTerm, PodDNSConfigOption
+    "tolerationSeconds", "minDomains", "nodeAffinityPolicy", "nodeTaintsPolicy", "labelSelector",
+    "namespaceSelector", "value",
+})
+# Container.RestartPolicy is a *string (sidecar init containers); the PodSpec
+# restartPolicy of the same name is a plain string with a server default.
+CONTAINER_RESTART_POLICY = re.compile(r"\.(?:containers|initContainers)\[[0-9]*\]\.restartPolicy$")
+# EnvVar.Value and HTTPHeader.Value are plain strings; only PodDNSConfigOption's is a pointer.
+DNS_OPTION_VALUE = re.compile(r"\.dnsConfig\.options\[[0-9]*\]\.value$")
+
+
+def _presence_matters(path):
+    name = path.rsplit(".", 1)[-1]
+    if name == "restartPolicy":
+        return bool(CONTAINER_RESTART_POLICY.search(path))
+    if name == "value":
+        return bool(DNS_OPTION_VALUE.search(path))
+    return name in PRESENCE_FIELDS
+
+
 def _is_map(path, value):
     return isinstance(value, dict) and path.rsplit(".", 1)[-1] in MAP_FIELDS
 
@@ -481,6 +527,10 @@ def _unexpected(live, path):
     if pattern in SERVER_DEFAULTS:
         allowed = SERVER_DEFAULTS[pattern]
         return None if any(type(live) is type(value) and live == value for value in allowed) else path
+    if live is None:
+        return None
+    if _presence_matters(path):
+        return path
     if _is_map(path, live):
         return _map_drift({}, live, path)
     if isinstance(live, dict):
@@ -493,11 +543,17 @@ def spec_drift(desired, live, path):
     bundle specifies, or None. Every field the bundle specifies must match. A
     live field the bundle omits must hold the API server's default for it (or a
     zero value) unless it is delegated (replicas left to a
-    HorizontalPodAutoscaler). Map fields (labels, annotations, nodeSelector,
+    HorizontalPodAutoscaler). Optional pointer fields (runAsGroup,
+    allowPrivilegeEscalation, namespaceSelector, ...) must be present live
+    exactly when the bundle specifies them, even with a zero value. Map fields (labels, annotations, nodeSelector,
     resource lists, ...) must have exactly the bundle's keys, even when an
     extra key's value is empty. A field the server omits matches a zero/empty
     desired value (Go omitempty), and resource quantities compare by value."""
     if live is None:
+        if desired is None:
+            return None
+        if _presence_matters(path):
+            return path
         if not desired:
             return None
         if isinstance(desired, dict):
