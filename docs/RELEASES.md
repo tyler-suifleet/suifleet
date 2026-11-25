@@ -30,6 +30,8 @@ make release-artifacts            # builds HEAD twice; fails unless byte-identic
 
 **Debian packages (SF-231):** amd64 and arm64 bundles also contain versioned `.deb` files and SHA-256 files covered by the same signed manifest. The SBOM describes their included daemon/signer binary; distribution dependencies are declared in Debian control metadata. See [Debian build/install and data retention](DEBIAN_PACKAGING.md). The release workflow builds both targets and publishes one archive containing each complete signed bundle, avoiding ambiguous shared SBOM/manifest filenames. No signed APT repository is provided. Protected production signing remains SF-042/#62.
 
+**Rocky Linux RPMs (SF-297):** Use the x86_64 build bundle as input to the [RPM builder and signed repository staging](RPM_PACKAGING.md). Repository signing uses an operator-approved OpenPGP key within the protected release process.
+
 **Targets:** `aarch64-unknown-linux-gnu` (the default), `x86_64-unknown-linux-gnu` (amd64) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
 
 The daemon uses rustls for both gRPC and Walrus HTTP, so the release links no OpenSSL. Bump these pins deliberately, and record the new versions here.
