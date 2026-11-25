@@ -271,9 +271,16 @@ inherits. It refuses the host unless a crash could store nothing:
   and the host is refused;
 - **it pipes to `false` or `true`**: nothing is kept.
 
-Any other piped handler is refused, because the kernel runs it whatever the
-limit and it may keep the dump: Apport (Ubuntu's default), ABRT, the WSL
-crash handler or a vendor handler. The message gives the reason. To enroll
+A piped handler is identified by its full path, never by its name: it must be
+`/usr/lib/systemd/systemd-coredump` or `/lib/systemd/systemd-coredump`, or
+`false`/`true` in `/usr/bin` or `/bin`, must resolve through any symlinks
+(such as a merged `/usr`'s `/lib`) to one of those paths, and must be an
+existing root-owned executable regular file that only root can modify. A
+collector elsewhere that shares a supported handler's name (for example
+`/usr/local/bin/systemd-coredump`), or a `true` that resolves to a multi-call
+binary, is refused. Any other piped handler is refused, because the kernel
+runs it whatever the limit and it may keep the dump: Apport (Ubuntu's
+default), ABRT, the WSL crash handler or a vendor handler. The message gives the reason. To enroll
 such a host, stop the handler for the enrollment (for example
 `systemctl stop apport`, which restores a file pattern), add
 a drop-in in `/etc/systemd/coredump.conf.d/` whose `[Coredump]` section sets
