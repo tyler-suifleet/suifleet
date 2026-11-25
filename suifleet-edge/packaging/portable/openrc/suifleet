@@ -1,0 +1,17 @@
+#!/sbin/openrc-run
+
+description="SuiFleet edge daemon and isolated device signer"
+supervisor=supervise-daemon
+command=/usr/libexec/suifleet-portable-signer
+retry="TERM/15/KILL/5"
+umask=077
+output_log=/var/log/suifleet-pair.log
+error_log=$output_log
+respawn_delay=2
+respawn_max=5
+respawn_period=60
+
+depend() {
+    use localmount
+    use net
+}

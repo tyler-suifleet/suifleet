@@ -1,0 +1,54 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          suifleet
+# Required-Start:    $local_fs $network
+# Required-Stop:     $local_fs $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: SuiFleet edge daemon and isolated device signer
+### END INIT INFO
+
+# Requires Debian dpkg's start-stop-daemon. The pidfile is root-owned in /run.
+set -eu
+pidfile=/run/suifleet-pair.pid
+launcher=/usr/libexec/suifleet-portable-signer
+python=/usr/bin/python3
+umask 077
+exec 9>/run/suifleet-sysv.lock
+flock -x 9
+
+start() {
+    start-stop-daemon --start --oknodo --background --make-pidfile --output /var/log/suifleet-pair.log \
+        --pidfile "$pidfile" --exec "$python" --name suifleet-pair --user root \
+        -- "$launcher" 9>&-
+    # dpkg acknowledges the fork before the interpreter has set its name.
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if status; then
+            return
+        fi
+        sleep 0.2
+    done
+    echo "SuiFleet launcher did not start" >&2
+    return 1
+}
+
+stop() {
+    start-stop-daemon --stop --oknodo --remove-pidfile --retry TERM/15/KILL/5 \
+        --pidfile "$pidfile" --exec "$python" --name suifleet-pair --user root
+}
+
+status() {
+    start-stop-daemon --status --pidfile "$pidfile" --exec "$python" \
+        --name suifleet-pair --user root
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    restart|force-reload) stop; start ;;
+    status) status ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|force-reload|status}" >&2
+        exit 2
+        ;;
+esac

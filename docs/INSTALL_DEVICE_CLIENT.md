@@ -41,6 +41,7 @@ Do not install unverified binaries.
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
 | Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
 | Rocky Linux 10 (x86_64, systemd, Linux ≥6.5) | [RPM packaging](RPM_PACKAGING.md) | Buildable RPM and signed repository staging; public repository pending |
+| Linux without systemd | [OpenRC, SysV, runit and foreground](PORTABLE_LINUX_SERVICE.md) | Manual install using the portable signer |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
 
 Windows and 32-bit x86 Linux have their own notes in
