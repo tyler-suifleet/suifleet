@@ -62,15 +62,18 @@ It changes only these recipes and suppresses no QA:
   rewrite a no-op.
 
 Each was still unfixed on OE-Core scarthgap, wrynose and master on 2026-11-24.
-The integration layer inherits the same class, so the pinned profiles keep
-identical task signatures. Validation, including Scarthgap and Wrynose builds
+The integration layer inherits the same class; identical task signatures were
+verified on the Scarthgap and Wrynose profiles only (no Kirkstone comparison has
+been run). Validation, including Scarthgap and Wrynose builds
 from the extracted export without the integration layer, is recorded in the core
 repository's `docs/YOCTO_STANDALONE_VALIDATION.md`. Apart from the class, that
 standalone configuration requires OE-Core, meta-oe, the Scarthgap Rust mixin, and
 the systemd/usrmerge distro features listed above. It needs no other distro
-setting. Kirkstone's recorded recipe builds still included the integration layer;
-its extracted export passed yocto-check-layer only, and no Kirkstone build without
-the integration layer has been run. See RELEASE.md before claiming standalone
+setting. Kirkstone's recorded recipe builds still included the integration layer.
+Its yocto-check-layer pass applies to the earlier SF-309 export that declared
+Kirkstone, before this class was added; the current export has not been
+layer-checked on Kirkstone, and no Kirkstone build without the integration layer
+has been run. See RELEASE.md before claiming standalone
 build support for a series.
 
 Builds contain examples only: no device keys, enrollment configuration, signer

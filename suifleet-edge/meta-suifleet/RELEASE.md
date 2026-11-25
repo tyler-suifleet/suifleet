@@ -27,9 +27,11 @@ with the class enabled and without meta-suifleet-integration built `suifleet`,
 `suifleet-node`, `suifleet-walrus-codec` and `core-image-minimal` for
 `qemuarm64`. Package QA passed and the image booted in QEMU. The core
 repository's `docs/YOCTO_STANDALONE_VALIDATION.md` records the results.
-Kirkstone's extracted export passed yocto-check-layer (PASS, 7 tests, 2
-BSP/distro skips; see the core repository's docs/YOCTO_LEGACY_SERIES.md), but a
-layer check is not a recipe task-execution build: no Kirkstone build without
+On Kirkstone, the earlier SF-309 export that first declared the series, before
+this class was added, passed yocto-check-layer (PASS, 7 tests, 2 BSP/distro
+skips; see the core repository's docs/YOCTO_LEGACY_SERIES.md). The current export
+with the class has not been layer-checked on Kirkstone, and a layer check is not
+a recipe task-execution build: no Kirkstone build without
 meta-suifleet-integration has been run. Repeat the standalone build for
 Kirkstone and any other series, machine or distro, recording any separately
 supplied distro fixes and package QA results, before claiming support for it.
