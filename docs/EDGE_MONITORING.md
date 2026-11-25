@@ -220,8 +220,9 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   `suifleet_up == 0` (and on `up == 0` for the adapter itself) covers both.
 - **Collector unavailable, 5xx, 429 or 401/403:** the post is retried after
   `initial_backoff_seconds`, doubling per consecutive failure up to
-  `max_backoff_seconds`, with ±20 % jitter. A `Retry-After` header raises the
-  delay up to the maximum. Metrics and logs back off independently. Metrics
+  `max_backoff_seconds`, with ±20 % jitter. A `Retry-After` header, as
+  delay-seconds or an HTTP-date (measured against the device clock), raises
+  the delay up to the maximum; a past date or unparsable value adds nothing. Metrics and logs back off independently. Metrics
   are not queued: the next successful post carries current values (counters
   are cumulative). Log lines stay buffered up to `max_buffer`, including a
   batch in flight; when it is full the oldest queued lines are dropped and

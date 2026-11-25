@@ -7,6 +7,8 @@ scripts/test_edge_monitoring.py exercises the real daemon, real Prometheus and
 a real OpenTelemetry Collector.
 """
 import contextlib
+import datetime
+import email.utils
 import errno
 import hashlib
 import http.server
@@ -1268,6 +1270,48 @@ class AdapterTests(Base):
         em.export_once(exporter, transport)             # collector recovers
         self.assertEqual(len(exporter.log_buffer), 0)
         self.assertEqual(exporter.log_records["exported"], 2)
+
+    def test_http_date_retry_after_is_honored_and_keeps_logs(self):
+        # RFC 9110 section 10.2.3: Retry-After may be an HTTP-date, not only delay-seconds.
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=5, max_backoff_seconds=300),
+            logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        wall = 1_800_000_000.0
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5, wall=lambda: wall)
+        exporter.poll(console)
+        imf = email.utils.formatdate(wall + 120, usegmt=True)
+        cases = [
+            (imf, 120.0),                                                    # IMF-fixdate
+            ("Sunday, 15-Jan-27 08:02:00 GMT", None),                        # obsolete RFC 850
+            ("Fri Jan 15 08:02:00 2027", None),                              # obsolete asctime
+            (email.utils.formatdate(wall + 10 ** 6, usegmt=True), 300.0),    # beyond the cap
+            (email.utils.formatdate(wall - 60, usegmt=True), 5.0),           # past: normal backoff
+            ("Fri, 99 Foo 2027 99:99:99 GMT", 5.0),                          # malformed date
+            ("Fri," + " " * 80 + "31 Dec 9999 23:59:59 GMT", 5.0),            # overlong text ignored
+        ]
+        for value, expected in cases:
+            if expected is None:      # obsolete formats: delay relative to the injected wall clock
+                parsed = email.utils.parsedate_to_datetime(value)
+                parsed = parsed.replace(tzinfo=parsed.tzinfo or datetime.timezone.utc)
+                expected = min(max(parsed.timestamp() - wall, 5.0), 300.0)
+            with self.subTest(retry_after=value):
+                collector.responses = [(503, {"Retry-After": value}, b""), (503, {"Retry-After": value}, b"")]
+                result = transport.post("metrics", exporter.otlp_metrics())
+                self.assertEqual(result, ("retry", None))
+                self.assertEqual(exporter.backoff["metrics"], round(expected, 3))
+                em.export_once(exporter, transport)        # logs back off too, buffer retained
+                self.assertEqual(len(exporter.log_buffer), 2)
+                transport._success("metrics")
+                transport._success("logs")
+        self.assertEqual(em._retry_after(imf, 300, now=wall), 120.0)
+        self.assertEqual(em._retry_after(imf, 60, now=wall), 60.0)
+        self.assertEqual(em._retry_after(email.utils.formatdate(wall - 5, usegmt=True), 60, now=wall), 0.0)
+        self.assertIsNone(em._retry_after("tomorrow", 60, now=wall))
+        self.assertIsNone(em._retry_after("Fri," + " " * 80 + "31 Dec 9999 23:59:59 GMT", 60, now=wall))
+        em.export_once(exporter, transport)                # collector recovers
+        self.assertEqual(len(exporter.log_buffer), 0)
 
     def test_otlp_unauthorized_backs_off(self):
         collector = FakeCollector(require="Bearer right")

@@ -15,6 +15,8 @@ See docs/EDGE_MONITORING.md.
 """
 import argparse
 import collections
+import datetime
+import email.utils
 import hashlib
 import hmac
 import http.client
@@ -412,13 +414,40 @@ def _read_body(response, limit):
     return data
 
 
-def _retry_after(value, cap):
-    """Parses a delay-seconds Retry-After header, bounded by cap seconds."""
+_MAX_HTTP_DATE = 64                           # longest plausible HTTP-date text
+
+
+def _retry_after(value, cap, now=None):
+    """Parses a Retry-After header into a delay bounded by cap seconds.
+
+    RFC 9110 section 10.2.3 allows delay-seconds or an HTTP-date. A date is
+    converted to the seconds remaining from ``now`` (wall-clock epoch seconds;
+    default ``time.time()``); a date already past means no extra delay. Any
+    other text is ignored (None) so the normal backoff applies.
+    """
     value = value.strip() if value else ""
-    if not (value.isascii() and value.isdigit()):
+    if not value or not value.isascii():
         return None
-    # Bound the text before int(): a huge value means "wait as long as allowed".
-    return int(value) if len(value) <= 9 else cap
+    if value.isdigit():
+        # Bound the text before int(): a huge value means "wait as long as allowed".
+        return int(value) if len(value) <= 9 else cap
+    if len(value) > _MAX_HTTP_DATE:
+        return None
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError, IndexError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)   # HTTP-dates are GMT
+    try:
+        delay = when.timestamp() - (time.time() if now is None else now)
+    except (ValueError, OverflowError, OSError):
+        return None
+    if delay != delay:                             # NaN guard
+        return None
+    return min(max(delay, 0.0), float(cap))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -1024,8 +1053,9 @@ def _number(value):
 class Transport:
     """POSTs OTLP JSON with bounded exponential backoff per signal."""
 
-    def __init__(self, config, exporter, clock=time.monotonic, rng=random.random):
+    def __init__(self, config, exporter, clock=time.monotonic, rng=random.random, wall=time.time):
         self.cfg, self.exporter, self.clock, self.rng = config.otlp, exporter, clock, rng
+        self.wall = wall                           # epoch seconds, for HTTP-date Retry-After
         self.opener = _opener(self.cfg["context"])
         self.failures = dict(metrics=0, logs=0)
         self.not_before = dict(metrics=0.0, logs=0.0)
@@ -1057,7 +1087,7 @@ class Transport:
             except urllib.error.HTTPError as error:
                 status, data = error.code, b""
                 value = error.headers.get("Retry-After") if error.headers else None
-                retry_after = _retry_after(value, self.cfg["max_backoff"])
+                retry_after = _retry_after(value, self.cfg["max_backoff"], self.wall())
                 error.close()
             except _IO_ERRORS:
                 if status is None or not 200 <= status < 300:
