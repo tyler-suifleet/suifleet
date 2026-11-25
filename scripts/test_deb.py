@@ -118,7 +118,10 @@ def inside(package):
     assert subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", "suifleet"], text=True) == version
     assert not Path("/etc/suifleet/device.key").exists()
     assert not Path("/etc/suifleet/config.toml").exists()
-    for unit in ("suifleet.service", "suifleet-enrollment.path", "suifleet-signer.socket"):
+    first_boot = Path("/usr/lib/systemd/system/suifleet-first-boot-enrollment.service")
+    assert first_boot.is_file() and stat.S_IMODE(first_boot.stat().st_mode) == 0o644
+    for unit in ("suifleet.service", "suifleet-enrollment.path", "suifleet-signer.socket",
+                 first_boot.name):
         result = subprocess.run(["systemctl", "is-enabled", unit], capture_output=True, text=True)
         assert result.returncode != 0, result.stdout
     assert stat.S_IMODE(Path("/etc/suifleet").stat().st_mode) == 0o750

@@ -24,6 +24,8 @@ mod funding;
 mod fleet_data;
 mod fleet_settings;
 mod fleet_archive;
+#[cfg(target_os = "linux")]
+mod first_boot;
 mod opaque;
 mod handoff;
 mod heads;
@@ -119,6 +121,10 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
     }
+    #[cfg(target_os = "linux")]
+    if args.len() == 3 && args[1] == "--first-boot-enroll" {
+        return first_boot::run(Path::new(&args[2])).await;
+    }
     if args.len() == 3 && args[1] == "--enroll" {
         return enroll(Path::new(&args[2])).await;
     }
@@ -170,7 +176,7 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     init_tracing();
     if signer_service {

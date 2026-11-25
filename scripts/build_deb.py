@@ -39,6 +39,8 @@ def build(binary, out, version, arch, epoch):
         for name in ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket",
                      "suifleet-provision.service", "suifleet-enrollment.path"):
             copy(files / name, "lib/systemd/system/" + name)
+        copy(ROOT / "suifleet-edge/meta-suifleet-integration/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service",
+             "lib/systemd/system/suifleet-first-boot-enrollment.service")
         copy(files / "suifleet-provision", "usr/libexec/suifleet-provision", 0o755)
         for name in ("signer.toml.example", "config.toml.example"):
             copy(files / name, "usr/share/doc/suifleet/examples/" + name)

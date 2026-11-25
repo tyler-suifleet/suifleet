@@ -4,6 +4,8 @@ Core-repository companion to meta-suifleet, not part of its standalone Software
 layer export. Contains Raspberry Pi access/image policy, disposable test component
 and a glibc AArch64 usrmerge layout guard. The guard checks for an incompatible
 layout that appeared in a reused local cache; it is not an upstream defect.
+The daemon recipe append adds the first-boot enrollment backport and systemd
+unit to the pinned public recipe in core kas builds.
 Its OpenSSL/libcap/xz bbappends only inherit meta-suifleet's opt-in
 `suifleet-core-fixes` class, so standalone consumers can enable the same fixes
 with `INHERIT += "suifleet-core-fixes"`. They do not need this layer. Dependencies: meta-suifleet

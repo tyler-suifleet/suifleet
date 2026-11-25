@@ -5,8 +5,36 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - '**'
+      - '!site/src/**/*.html'
+      - '!site/src/**/*.css'
+      - '!docs/*.md'
+      - '!docs/**/*.md'
+      - '!README.md'
+      - 'docs/PR_COORDINATION.md'
+      - 'docs/ATOMIC_TICKETING.md'
+      - 'docs/IMPLEMENTATION_ACCEPTANCE.md'
+      - 'docs/SMALL_CHANGES.md'
+      - 'docs/TESTNET.md'
+      - 'docs/SECURITY_CI.md'
+      - 'docs/OPERATIONS.md'
   push:
     branches: [main]
+    paths:
+      - '**'
+      - '!site/src/**/*.html'
+      - '!site/src/**/*.css'
+      - '!docs/*.md'
+      - '!docs/**/*.md'
+      - '!README.md'
+      - 'docs/PR_COORDINATION.md'
+      - 'docs/ATOMIC_TICKETING.md'
+      - 'docs/IMPLEMENTATION_ACCEPTANCE.md'
+      - 'docs/SMALL_CHANGES.md'
+      - 'docs/TESTNET.md'
+      - 'docs/SECURITY_CI.md'
+      - 'docs/OPERATIONS.md'
   workflow_dispatch:
   schedule:
     - cron: '17 11 * * 1'
@@ -26,6 +54,11 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Offline workflow scope and activation regressions
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_content_scope.py -v
+          python3 -m unittest discover -s scripts/tests -p test_runtime_activation.py -v
 
       - name: Offline Debian package builder tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_deb_packaging.py -v

@@ -62,7 +62,7 @@ for path in /etc/suifleet /var/lib/suifleet; do
     fi
 done
 if [ "$1" -gt 1 ] && [ -d /run/systemd/system ]; then
-    systemctl stop suifleet-enrollment.path suifleet-signer.socket
+    systemctl stop suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-signer.socket
     systemctl stop suifleet.service suifleet-signer.service suifleet-provision.service
 fi
 install -d -m 0750 -o root -g suifleet /etc/suifleet
@@ -77,10 +77,10 @@ fi
 set -eu
 if [ "$1" -eq 0 ]; then
     if [ -d /run/systemd/system ]; then
-        systemctl stop suifleet-enrollment.path suifleet-signer.socket
+        systemctl stop suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-signer.socket
         systemctl stop suifleet.service suifleet-signer.service suifleet-provision.service
     fi
-    systemctl --no-reload disable suifleet.service suifleet-enrollment.path suifleet-signer.socket suifleet-signer.service suifleet-provision.service
+    systemctl --no-reload disable suifleet.service suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-signer.socket suifleet-signer.service suifleet-provision.service
 fi
 
 %postun

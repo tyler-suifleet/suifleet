@@ -37,12 +37,12 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     const open = async () => {
       await tab.goto(origin);
       await tab.locator("#policy").selectOption({ index: 1 });
-      await tab.getByTestId("status-counts").getByText("Waiting for device: 1").or(tab.getByTestId("status-counts").getByText("Revoked: 1")).first().waitFor();
+      await tab.getByTestId("status-counts").getByText("Funded, unused: 1").or(tab.getByTestId("status-counts").getByText("Revoked: 1")).first().waitFor();
     };
     const statusOf = async (serial) => (await tab.getByTestId("enrollment-entries").locator("tr", { hasText: serial }).locator("td").nth(3).innerText()).trim();
     const storedEntry = (serial) => tab.evaluate((s) => { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("suifleet.enrollment.")) { const job = JSON.parse(localStorage.getItem(k)); const e = job.entries.find((x) => x.serial === s); if (e) return e; } } return null; }, serial);
     await open();
-    assert.equal(await statusOf("SN-1"), "Waiting for device"); assert.equal(await statusOf("SN-2"), "Enrolled"); assert.equal(await statusOf("SN-3"), "Reserved");
+    assert.equal(await statusOf("SN-1"), "Funded, unused"); assert.equal(await statusOf("SN-2"), "Bound"); assert.equal(await statusOf("SN-3"), "Reserved");
 
     // 1. The single-copy warning precedes the download, which needs an explicit acknowledgment.
     await tab.getByRole("tab", { name: "Pair one device" }).click();
@@ -83,7 +83,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await alert.waitFor(); assert.match(await alert.innerText(), /Do not try again yet/);
     assert.deepEqual(await tab.evaluate(() => window.fx.calls), [["revoke_claim"]], "double-click sends one revocation");
     assert.equal((await storedEntry("SN-1")).revoked, true, "an interrupted revocation is never re-registered automatically");
-    assert.equal(await statusOf("SN-1"), "Waiting for device", "no invented success");
+    assert.equal(await statusOf("SN-1"), "Funded, unused", "no invented success");
 
     // 3. Restart: guidance and the revocation marker survive a reload.
     await open();
@@ -96,7 +96,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.equal(await statusOf("SN-1"), "Revoked");
     await tab.getByTestId("lost-credentials").getByRole("button", { name: "Remove 1 reservation to reissue" }).click();
     await tab.getByTestId("enrollment-entries").locator("tr", { hasText: "SN-1" }).waitFor({ state: "detached" });
-    assert.equal(await statusOf("SN-2"), "Enrolled", "the enrolled device is untouched");
+    assert.equal(await statusOf("SN-2"), "Bound", "the enrolled device is untouched");
 
     // Reissue: the same serial is accepted again and a new file can be downloaded.
     await tab.getByRole("tab", { name: "Pair one device" }).click();
