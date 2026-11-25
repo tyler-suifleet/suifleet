@@ -31,6 +31,9 @@ ServiceAccount credential:
   a kubectl wrapper): a competing creation, a replacement and a relabel are
   not mutated, and pruning leaves relabelled or replaced objects alone, even a
   replacement that carries this component's labels.
+- A bundle with an immutable ConfigMap is rejected offline, and a live owned
+  ConfigMap made immutable out of band stops the apply before any write; the
+  apply recreates a mutable object after the administrator deletes it.
 - Foreground run mode re-creates a deleted object, exits on SIGTERM and leaves
   the workload running.
 - `remove` exits 1 while a finalizer holds a Pod of the removed Deployment
@@ -951,6 +954,35 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, v1, "1.0.0")
     wait("v1 content after rollback", lambda: "SuiFleet v1" in served(cluster), timeout=90)
     check("service serves v1 content after rollback", True)
+
+    # Immutable ConfigMaps cannot be restored in place (the API server refuses
+    # data changes and a return to mutable), so a rollback could not recover.
+    # Bundles cannot request one, and a live owned immutable ConfigMap (set out
+    # of band) stops the apply before any write instead of half-applying.
+    frozen = json.loads(v1.read_text())
+    frozen["resources"][0]["immutable"] = True
+    (work / "frozen.json").write_text(json.dumps(frozen))
+    result = run(sys.executable, str(HELPER), "validate", "--bundle", str(work / "frozen.json"), ok=False)
+    check("helper validate rejects an immutable ConfigMap offline",
+          result.returncode == 2 and "cannot be rolled back in place" in result.stderr, result.stderr)
+    cluster.admin("patch", "configmap", "web-content", "-n", NAMESPACE, "--type=merge", "-p", '{"immutable":true}')
+    before = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    result = helper("apply", profiles, v2, version="2.0.0")
+    after = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    check("apply refuses a live owned immutable ConfigMap before writing anything",
+          result.returncode == 2 and "immutable ConfigMap" in result.stderr and before == after
+          and cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, ok=False).returncode != 0,
+          f"{result.stderr} deployment rv {before} -> {after}")
+    content = json.loads(cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, "-o", "json").stdout)
+    check("the refused apply left the immutable ConfigMap's v1 data untouched",
+          content.get("immutable") is True and "SuiFleet v1" in content["data"]["index.html"], str(content.get("data")))
+    cluster.admin("delete", "configmap", "web-content", "-n", NAMESPACE)
+    result = helper("apply", profiles, v1)
+    recreated = json.loads(cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, "-o", "json").stdout)
+    check("apply recreates a mutable ConfigMap after the administrator deletes the immutable one",
+          result.returncode == 0 and not recreated.get("immutable"), result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+    check("readiness succeeds once the recreated mutable ConfigMap is applied", True)
 
     # Foreground run mode: reconciles deletion, stops cleanly, workload remains.
     env = {"PATH": "/usr/bin:/bin", "SUIFLEET_COMPONENT": COMPONENT, "SUIFLEET_COMPONENT_VERSION": "1.0.0"}

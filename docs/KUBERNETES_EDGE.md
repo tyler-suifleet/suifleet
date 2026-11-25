@@ -87,7 +87,9 @@ How the helper keeps two controllers from fighting:
    nothing is pruned in that run. `ready` keeps failing until every object
    carries the new bundle's digest and pruning has converged, so the
    supervisor does not see a partial apply as ready. A later successful apply
-   converges, and a supervisor rollback re-applies the previous bundle.
+   converges, and a supervisor rollback re-applies the previous bundle. A
+  rollback can restore every object in place because bundles cannot contain
+  immutable ConfigMaps (see Helper validation).
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -201,6 +203,14 @@ waits again and reports the current state.
     `serviceAccountName` or `imagePullSecrets`
   - privileged mode, privilege escalation, root UID or added capabilities
   - images not pinned by `@sha256`
+  - `immutable: true` on a ConfigMap. Kubernetes never lets an immutable
+    ConfigMap's data change or the flag return to `false`, so a supervisor
+    rollback could not restore the previous bundle in place. Bundles manage
+    mutable ConfigMaps only. If an owned ConfigMap in the cluster has been
+    made immutable out of band, `apply` and `run` refuse with exit code 2
+    before writing any object, so nothing is half-applied. The helper never
+    deletes and recreates it automatically. An administrator must delete it;
+    the next apply then recreates it as a mutable object.
 
   It also forces `automountServiceAccountToken: false`. A pod can read a Secret
   through its spec without any RBAC on Secrets, so the helper never lets a
