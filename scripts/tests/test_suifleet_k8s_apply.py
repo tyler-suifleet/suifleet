@@ -173,9 +173,14 @@ class ValidationTest(unittest.TestCase):
 
 
 class ConfigBindingTest(unittest.TestCase):
-    """Combined review 4602: a configuration-only bundle change (or rollback)
-    must roll the consuming Pods out, because Kubernetes never restarts Pods
-    when a ConfigMap they read through env/envFrom or a subPath mount changes."""
+    """Combined reviews 4602/4605/4609: the configuration a Pod reads must be
+    the one its template was written for. Kubernetes never restarts Pods when
+    a ConfigMap they read through env/envFrom or a subPath mount changes, and
+    the kubelet resolves and caches ConfigMaps by namespace/name only, so a
+    consumed ConfigMap is published immutable under a content-addressed name
+    that the Pod template references."""
+
+    CONSUMERS = ("envFrom", "env", "subPath", "volume")
 
     def bundle(self, message, consume="envFrom"):
         bundle = example()
@@ -191,52 +196,69 @@ class ConfigBindingTest(unittest.TestCase):
         k8s.validate_bundle(bundle)
         return bundle
 
+    def objects(self, message, consume="envFrom"):
+        return k8s.render(self.bundle(message, consume), "suifleet-apps", "web-app", "1",
+                          hashlib.sha256(message.encode()).hexdigest())
+
     def rendered(self, bundle, digest):
         return deployment({"resources": k8s.render(bundle, "suifleet-apps", "web-app", "1", digest)})
 
-    def test_config_only_change_changes_the_pod_template(self):
-        for consume in ("envFrom", "env", "subPath", "volume"):
-            with self.subTest(consume=consume):
-                v1 = self.rendered(self.bundle("v1", consume), "1" * 64)
-                v2 = self.rendered(self.bundle("v2", consume), "2" * 64)
-                annotations = v1["spec"]["template"]["metadata"]["annotations"]
-                self.assertEqual(len(annotations[k8s.CONFIG_ANNOTATION]), 64)
-                self.assertNotEqual(v1["spec"]["template"], v2["spec"]["template"],
-                                    "a ConfigMap-only change must start a new rollout")
-                # Rollback restores exactly the v1 template, so Kubernetes rolls
-                # back to the v1 ReplicaSet (and its configuration).
-                again = self.rendered(self.bundle("v1", consume), "3" * 64)
-                self.assertEqual(v1["spec"]["template"], again["spec"]["template"])
+    @staticmethod
+    def name(message):
+        return k8s.content_name("web-content", {"index.html": message})
 
-    def test_unrelated_configmap_change_does_not_restart(self):
+    def test_consumed_configmaps_get_content_addressed_immutable_names(self):
+        for consume in self.CONSUMERS:
+            with self.subTest(consume=consume):
+                config, deploy = self.objects("v1", consume)
+                digest = hashlib.sha256(json.dumps({"index.html": "v1"}, sort_keys=True, separators=(",", ":")).encode())
+                self.assertEqual(config["metadata"]["name"], "web-content-" + digest.hexdigest()[:16])
+                self.assertIs(config["immutable"], True)
+                self.assertEqual(config["metadata"]["annotations"][k8s.CONFIG_NAME_ANNOTATION], "web-content")
+                pod = deploy["spec"]["template"]["spec"]
+                self.assertEqual(k8s.config_refs(pod), [self.name("v1")],
+                                 "every reference names the content-addressed ConfigMap")
+                # A configuration-only change changes the template, so Kubernetes
+                # rolls the Pods out; a rollback restores exactly the v1 template
+                # (and its ReplicaSet) and the same name.
+                v2 = self.objects("v2", consume)
+                self.assertNotEqual(v2[0]["metadata"]["name"], config["metadata"]["name"])
+                self.assertNotEqual(v2[1]["spec"]["template"], deploy["spec"]["template"])
+                again = k8s.render(self.bundle("v1", consume), "suifleet-apps", "web-app", "1", "3" * 64)
+                self.assertEqual(again[0]["metadata"]["name"], config["metadata"]["name"])
+                self.assertEqual(again[1]["spec"]["template"], deploy["spec"]["template"])
+
+    def test_unconsumed_configmap_keeps_its_name_and_restarts_nothing(self):
         bundle = self.bundle("v1")
         bundle["resources"].insert(0, {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "other"}, "data": {"k": "a"}})
-        before = self.rendered(bundle, "1" * 64)
+        objects = k8s.render(bundle, "suifleet-apps", "web-app", "1", "1" * 64)
+        self.assertEqual(objects[0]["metadata"]["name"], "other")
+        self.assertNotIn("immutable", objects[0])
+        self.assertNotIn(k8s.CONFIG_NAME_ANNOTATION, objects[0]["metadata"]["annotations"])
         bundle["resources"][0]["data"]["k"] = "b"
-        self.assertEqual(before["spec"]["template"], self.rendered(bundle, "2" * 64)["spec"]["template"])
+        self.assertEqual(deployment({"resources": objects})["spec"]["template"],
+                         self.rendered(bundle, "2" * 64)["spec"]["template"])
 
-    def test_no_annotation_without_configmap_consumers(self):
+    def test_no_rewrite_without_configmap_consumers(self):
         bundle = example()
         pod = deployment(bundle)["spec"]["template"]["spec"]
         pod.pop("volumes")
         pod["containers"][0].pop("volumeMounts")
-        template = self.rendered(bundle, "1" * 64)["spec"]["template"]
-        self.assertNotIn(k8s.CONFIG_ANNOTATION, template["metadata"].get("annotations") or {})
         self.assertEqual(k8s.config_refs(pod), [])
+        objects = k8s.render(bundle, "suifleet-apps", "web-app", "1", "1" * 64)
+        self.assertEqual(objects[0]["metadata"]["name"], "web-content")
+        self.assertNotIn("immutable", objects[0])
 
-    def test_template_without_metadata_gets_the_annotation(self):
-        bundle = self.bundle("v1")
-        template = deployment(bundle)["spec"]["template"]
-        template.pop("metadata")
-        k8s.validate_bundle(bundle)
-        rendered = self.rendered(bundle, "1" * 64)["spec"]["template"]
-        self.assertEqual(list(rendered["metadata"]["annotations"]), [k8s.CONFIG_ANNOTATION])
-        self.assertNotIn("metadata", template, "render must not mutate the bundle")
+    def test_render_does_not_mutate_the_bundle(self):
+        bundle = self.bundle("v1", "env")
+        before = copy.deepcopy(bundle)
+        k8s.render(bundle, "suifleet-apps", "web-app", "1", "1" * 64)
+        self.assertEqual(bundle, before)
 
     def test_old_healthy_rollout_is_not_ready_for_a_config_only_update(self):
-        # The reviewer's probe: the v1 Deployment, fully rolled out, now
-        # carries v2's outer annotations (as after SSA of a metadata-only
-        # change). Its Pod template still has v1's configuration digest.
+        # The v1 Deployment, fully rolled out, now carries v2's outer
+        # annotations (as after SSA of a metadata-only change). Its Pod
+        # template still names v1's ConfigMap.
         v1 = self.rendered(self.bundle("v1"), "1" * 64)
         v2 = self.rendered(self.bundle("v2"), "2" * 64)
         live = copy.deepcopy(v1)
@@ -246,7 +268,7 @@ class ConfigBindingTest(unittest.TestCase):
                           "readyReplicas": 1, "availableReplicas": 1}
         ok, reason = k8s.object_ready(live, v2, "web-app")
         self.assertFalse(ok)
-        self.assertIn(k8s.CONFIG_ANNOTATION, reason)
+        self.assertIn("differs from this bundle", reason)
 
     def test_configmap_consumers_must_be_in_the_bundle(self):
         for consume in ("envFrom", "env", "volume"):
@@ -260,6 +282,13 @@ class ConfigBindingTest(unittest.TestCase):
             "name": "init", "image": deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["image"],
             "envFrom": [{"configMapRef": {"name": "admin-config", "optional": True}}]}]
         with self.assertRaisesRegex(k8s.Rejected, "'admin-config', which is not in this bundle"):
+            k8s.validate_bundle(bundle)
+
+    def test_content_addressed_name_must_not_collide(self):
+        bundle = self.bundle("v1")
+        bundle["resources"].append({"apiVersion": "v1", "kind": "ConfigMap",
+                                    "metadata": {"name": self.name("v1")}, "data": {}})
+        with self.assertRaisesRegex(k8s.Rejected, "publishes as .* which another bundle ConfigMap already uses"):
             k8s.validate_bundle(bundle)
 
     def test_malformed_configmap_references_are_rejected(self):
@@ -286,42 +315,34 @@ class ConfigBindingTest(unittest.TestCase):
         cluster = ModelCluster()
         k8s.apply(cluster, objects, "web-app", cluster)
         self.assertEqual(cluster.order, ["ConfigMap", "Deployment"],
-                         "new Pods must never start against the previous ConfigMap content")
+                         "a Deployment never references a ConfigMap that does not exist yet")
 
-    def test_template_records_the_live_configmap_revision(self):
+    def test_update_prunes_the_previous_content_addressed_configmap(self):
         cluster = ModelCluster()
         k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
-        configmap = cluster.store["configmaps"]["web-content"]["metadata"]
-        template = cluster.template()
-        self.assertEqual(configmap["annotations"][k8s.EPOCH_ANNOTATION], "0", "created")
-        self.assertEqual(template["metadata"]["annotations"][k8s.REVISION_ANNOTATION],
-                         f"web-content={configmap['uid']}/0")
-        # A re-apply (the run loop) or a new bundle that keeps the ConfigMap
-        # data (only its digest/version annotations change) keeps the epoch,
-        # so it never restarts the Pods.
+        cluster.roll_out()
         generation = cluster.store["deployments.apps"]["web"]["metadata"]["generation"]
+        # A re-apply or a metadata-only bundle change keeps the name and the
+        # template, so it restarts nothing.
         k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
         metadata_only = k8s.render(self.bundle("v1"), "suifleet-apps", "web-app", "9", "9" * 64)
         k8s.apply(cluster, metadata_only, "web-app", cluster)
-        configmap = cluster.store["configmaps"]["web-content"]["metadata"]
-        self.assertEqual(configmap["annotations"][k8s.BUNDLE_ANNOTATION], "9" * 64)
-        self.assertEqual(configmap["annotations"][k8s.EPOCH_ANNOTATION], "0")
-        self.assertEqual(cluster.template(), template)
+        self.assertEqual(list(cluster.store["configmaps"]), [self.name("v1")])
+        self.assertEqual(cluster.store["configmaps"][self.name("v1")]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION], "9" * 64)
         self.assertEqual(cluster.store["deployments.apps"]["web"]["metadata"]["generation"], generation)
-        # A data change takes the replaced resourceVersion as its epoch.
-        before = configmap["resourceVersion"]
-        k8s.apply(cluster, self.objects("v2"), "web-app", cluster)
-        configmap = cluster.store["configmaps"]["web-content"]["metadata"]
-        self.assertEqual(configmap["annotations"][k8s.EPOCH_ANNOTATION], before)
-        self.assertEqual(cluster.template()["metadata"]["annotations"][k8s.REVISION_ANNOTATION],
-                         f"web-content={configmap['uid']}/{before}")
+        self.assertEqual(k8s.ready(cluster, metadata_only, "web-app"), (True, "ready"))
+        v2 = self.objects("v2")
+        self.assertEqual(k8s.apply(cluster, v2, "web-app", cluster), [f"configmaps/{self.name('v1')}"])
+        self.assertEqual(list(cluster.store["configmaps"]), [self.name("v2")])
+        self.assertFalse(k8s.ready(cluster, v2, "web-app")[0], "new rollout not yet observed")
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
 
-    def test_partial_update_then_rollback_replaces_pods(self):
-        """Combined review 4605: v2 writes the ConfigMap, then its Deployment
-        write fails. An old-template Pod restarting in that window reads v2.
-        Restoring the v1 ConfigMap must start a new rollout, and readiness
-        must refuse the old v1 rollout (whose Pod may hold v2 values)."""
-        for consume in ("envFrom", "env", "subPath", "volume"):
+    def test_partial_update_never_changes_the_data_a_template_names(self):
+        """Review 4605: v2 writes its ConfigMap, then its Deployment write
+        fails. A v1-template Pod that (re)starts in that window must still
+        read v1, and the rollback must converge with every Pod on v1."""
+        for consume in self.CONSUMERS:
             with self.subTest(consume=consume):
                 cluster = ModelCluster()
                 v1 = self.objects("v1", consume)
@@ -332,57 +353,78 @@ class ConfigBindingTest(unittest.TestCase):
                 cluster.refuse_deployments = True
                 with self.assertRaises(k8s.Rejected):
                     k8s.apply(cluster, self.objects("v2", consume), "web-app", cluster)
-                self.assertEqual(cluster.store["configmaps"]["web-content"]["data"]["index.html"], "v2")
+                self.assertEqual(cluster.store["configmaps"][self.name("v2")]["data"]["index.html"], "v2")
                 self.assertEqual(cluster.template(), healthy_v1["spec"]["template"], "the Deployment write failed")
-                # Rollback restores the v1 data. Before its Deployment write, the
-                # live state is v1 ConfigMap data plus the exact, healthy v1
-                # rollout: the reviewer's probe. It must not be ready.
+                self.assertEqual(cluster.pod_reads(), ["v1"], "a restarting v1-template Pod reads v1")
                 cluster.refuse_deployments = False
-                cluster.skip_deployments = True
                 k8s.apply(cluster, v1, "web-app", cluster)
-                self.assertEqual(cluster.store["configmaps"]["web-content"]["data"]["index.html"], "v1")
-                ok, reason = k8s.ready(cluster, v1, "web-app")
-                self.assertFalse(ok, "the restored data has a new revision the old rollout never read")
-                self.assertIn(k8s.REVISION_ANNOTATION, reason)
-                # The full rollback writes a new template, so every Pod
-                # (including the one that read v2) is replaced.
-                cluster.skip_deployments = False
-                k8s.apply(cluster, v1, "web-app", cluster)
-                self.assertNotEqual(cluster.template(), healthy_v1["spec"]["template"])
-                self.assertEqual(cluster.template()["metadata"]["annotations"][k8s.CONFIG_ANNOTATION],
-                                 healthy_v1["spec"]["template"]["metadata"]["annotations"][k8s.CONFIG_ANNOTATION])
-                self.assertFalse(k8s.ready(cluster, v1, "web-app")[0], "new rollout not yet observed")
-                cluster.roll_out()
+                self.assertEqual(list(cluster.store["configmaps"]), [self.name("v1")], "the v2 ConfigMap is pruned")
+                self.assertEqual(cluster.template(), healthy_v1["spec"]["template"])
                 self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+                self.assertEqual(cluster.pod_reads(), ["v1"])
+
+    def test_kubelet_cache_by_name_never_serves_other_data(self):
+        """Review 4609: the kubelet caches ConfigMaps by namespace/name and
+        may serve a new Pod from that cache before it sees the latest write.
+        Model a cache that never refreshes: every Pod started for a ready
+        rollout still reads exactly that bundle's data, through updates,
+        a partial update and rollbacks."""
+        for consume in self.CONSUMERS:
+            with self.subTest(consume=consume):
+                cluster = ModelCluster()
+                cache = {}
+                for message, refuse in (("v1", False), ("v2", False), ("v3", True), ("v1", False), ("v2", False)):
+                    objects = self.objects(message, consume)
+                    cluster.refuse_deployments = refuse
+                    try:
+                        k8s.apply(cluster, objects, "web-app", cluster)
+                    except k8s.Rejected:
+                        self.assertTrue(refuse)
+                        self.assertEqual(cluster.pod_reads(cache), [previous])
+                        continue
+                    cluster.roll_out()
+                    self.assertEqual(k8s.ready(cluster, objects, "web-app"), (True, "ready"))
+                    self.assertEqual(cluster.pod_reads(cache), [message])
+                    previous = message
 
     def test_configmap_changed_after_write_is_not_bound(self):
         cluster = ModelCluster()
         cluster.tamper = lambda item: item["data"].update({"index.html": "foreign"})
         with self.assertRaisesRegex(k8s.Conflict, "content differs.*right after it was written"):
             k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
-        self.assertNotIn("web", cluster.store["deployments.apps"], "no Deployment bound to foreign content")
-
-    def objects(self, message, consume="envFrom"):
-        return k8s.render(self.bundle(message, consume), "suifleet-apps", "web-app", "1",
-                          hashlib.sha256(message.encode()).hexdigest())
+        self.assertNotIn("web", cluster.store["deployments.apps"], "no Deployment references foreign content")
 
 
 class ModelCluster:
     """In-memory model of the namespace, acting as both the kubectl JSON
     reader and the Writer: every content change gets a new, never reused
-    resourceVersion, a no-op write keeps it, and a Deployment template change
-    bumps the generation. roll_out() marks the current template rolled out."""
+    resourceVersion, a no-op write keeps it, the data of an immutable
+    ConfigMap never changes, and a Deployment template change bumps the
+    generation. roll_out() marks the current template rolled out."""
 
     def __init__(self):
         self.profile = {"namespace": "suifleet-apps"}
         self.component, self.namespace = "web-app", "suifleet-apps"
         self.store = {"configmaps": {}, "deployments.apps": {}}
         self.counter, self.order = 0, []
-        self.refuse_deployments = self.skip_deployments = False
+        self.refuse_deployments = False
         self.tamper = None
 
     def template(self):
         return self.store["deployments.apps"]["web"]["spec"]["template"]
+
+    def pod_reads(self, cache=None):
+        """index.html as a Pod (re)started from the live template reads it:
+        through the ConfigMap names its template references, resolved by the
+        kubelet by name (from `cache` when given; a cached entry is never
+        refreshed, the worst case of a lagging watch)."""
+        cache = {} if cache is None else cache
+        reads = set()
+        for name in k8s.config_refs(self.template()["spec"]):
+            if name not in cache:
+                cache[name] = copy.deepcopy(self.store["configmaps"][name]["data"])
+            reads.add(cache[name]["index.html"])
+        return sorted(reads)
 
     def json(self, *args, namespaced=True):
         if "-l" in args:
@@ -395,16 +437,16 @@ class ModelCluster:
     def apply(self, item):
         self.order.append(item["kind"])
         resource = k8s.ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
-        if resource == "deployments.apps":
-            if self.refuse_deployments:
-                raise k8s.Rejected("kubectl apply Deployment/web failed: injected")
-            if self.skip_deployments:
-                return
+        if resource == "deployments.apps" and self.refuse_deployments:
+            raise k8s.Rejected("kubectl apply Deployment/web failed: injected")
         name = item["metadata"]["name"]
         old = self.store[resource].get(name)
-        new = copy.deepcopy(k8s.config_epoch(item, old))  # as Writer.apply stamps it
+        new = copy.deepcopy(item)
         if self.tamper and resource == "configmaps":
             self.tamper(new)
+        if old is not None and old.get("immutable") is True and \
+                (old.get("data") != new.get("data") or new.get("immutable") is not True):
+            raise k8s.Rejected("field is immutable when `immutable` is set")
         content = lambda o: {k: v for k, v in o.items() if k not in ("metadata", "status")} | \
             {"labels": o["metadata"].get("labels"), "annotations": o["metadata"].get("annotations")}
         if old is not None and content(old) == content(new):
@@ -413,7 +455,8 @@ class ModelCluster:
         generation = (old or {}).get("metadata", {}).get("generation", 0)
         if resource == "deployments.apps" and (old is None or old["spec"] != new["spec"]):
             generation += 1
-        new["metadata"].update(uid=f"uid-{name}", resourceVersion=str(self.counter), generation=generation)
+        new["metadata"].update(uid=f"uid-{name}-{self.counter}" if old is None else old["metadata"]["uid"],
+                               resourceVersion=str(self.counter), generation=generation)
         new["status"] = (old or {}).get("status", {})
         self.store[resource][name] = new
 
@@ -1305,24 +1348,23 @@ class WriterTest(unittest.TestCase):
         self.assertEqual((bound["uid"], bound["resourceVersion"]), ("u1", "2"), "apply is bound to the observed object")
         self.assertNotIn("--force-conflicts", fake.calls[5])
 
-    def test_configmap_writes_carry_the_data_epoch(self):
-        writer, fake = self.writer([None, obj(rv="1")], [(0, "")] * 2)
-        writer.apply(self.item)
-        self.assertEqual(fake.calls[1][-1]["metadata"]["annotations"][k8s.EPOCH_ANNOTATION], "0")
-        self.assertEqual(fake.calls[3][-1]["metadata"]["annotations"][k8s.EPOCH_ANNOTATION], "1",
-                         "a live object without an epoch (or with other data) gets the replaced resourceVersion")
-        same = dict(obj(rv="7"), data=dict(self.item["data"]))
-        same["metadata"]["annotations"] = {k8s.EPOCH_ANNOTATION: "3"}
-        writer, fake = self.writer([same], [(0, "")])
-        writer.apply(self.item)
-        self.assertEqual(fake.calls[1][-1]["metadata"]["annotations"][k8s.EPOCH_ANNOTATION], "3",
-                         "unchanged data keeps the epoch")
-        changed = copy.deepcopy(same)
-        changed["data"] = {"index.html": "other"}
-        writer, fake = self.writer([changed], [(0, "")])
-        writer.apply(self.item)
-        self.assertEqual(fake.calls[1][-1]["metadata"]["annotations"][k8s.EPOCH_ANNOTATION], "7")
-        self.assertNotIn(k8s.EPOCH_ANNOTATION, self.item["metadata"]["annotations"], "render output not mutated")
+    def test_content_addressed_configmap_is_only_relabelled(self):
+        consumed = k8s.render(example(), "suifleet-apps", "web-app", "2", "e" * 64)[0]
+        self.assertIs(consumed["immutable"], True)
+        live = dict(obj(name=consumed["metadata"]["name"], rv="4"), immutable=True, data=dict(consumed["data"]))
+        writer, fake = self.writer([live], [(0, "")])
+        writer.apply(consumed)
+        self.assertEqual(self.verbs(fake), ["get", "apply"], "same content: metadata-only server-side apply")
+        self.assertEqual(fake.calls[1][-1]["metadata"]["resourceVersion"], "4")
+        foreign = dict(live, data={"index.html": "other"})
+        writer, fake = self.writer([foreign], [])
+        with self.assertRaisesRegex(k8s.Rejected, "content differs from the content its name denotes"):
+            writer.apply(consumed)
+        self.assertEqual(self.verbs(fake), ["get"], "no write over an immutable ConfigMap with other content")
+        extra = dict(live, binaryData={"x": "AA=="})
+        writer, fake = self.writer([extra], [])
+        with self.assertRaisesRegex(k8s.Rejected, "content differs"):
+            writer.apply(consumed)
 
     def test_owned_immutable_configmap_is_refused_before_any_write(self):
         live = dict(obj(), immutable=True)
