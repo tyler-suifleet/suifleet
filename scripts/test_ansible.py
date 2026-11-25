@@ -24,8 +24,12 @@ and with hidepid=2-hidden process ancestry (no staging), transfers with swap
 that can write to a disk are refused (the machine's real swap
 when the role classifies it unsafe, then /proc/swaps fixtures), transfers
 to hosts that could store a crash dump are refused (the machine's real
-core_pattern/session core limit when classified unsafe, then core_pattern fixtures
-for Apport, a same-name systemd-coredump outside its install location, core files, systemd-coredump with a nonzero limit and
+core_pattern/session core limit when classified unsafe, the real systemd-coredump
+pattern with a literal limit argument under a session limit of 0, a core file
+pattern bind-mounted over the sysctl (refused by the committed role as masked),
+then core_pattern fixtures run through a test-only role copy whose kernel_pattern
+check passes, for Apport, @ and @@ socket collectors, systemd-coredump with a literal
+limit argument, persistent storage and a limit of 0, a same-name systemd-coredump outside its install location, core files, systemd-coredump with a nonzero limit and
 systemd-coredump with Storage=none but a default/nonzero ProcessSizeMax (or with the
 disabling settings outside an effective [Coredump] section, or only in a main
 coredump.conf outside /etc that systemd 252's handler does not read), and
@@ -363,6 +367,29 @@ class Harness:
         self.containers = []
         self.outputs = []
         self.evidence = dict(ticket="SF-304", phases=[], hosts={})
+        # The role as committed; phases with a bind-mounted kernel.core_pattern
+        # fixture switch to the synthetic copy (see synthetic_examples).
+        self.examples = EXAMPLES
+        self.synthetic = self.synthetic_examples()
+
+    def synthetic_examples(self):
+        """A test-only copy of the examples whose crash classifier skips its kernel_pattern check.
+
+        The hosts share this machine's kernel, whose core_pattern is global and
+        is not changed by the test, so crash dump fixtures are bind-mounted over
+        /proc/sys/kernel/core_pattern inside each host. The committed role
+        (rightly) refuses such a masked sysctl; this copy lets the rest of the
+        classifier, and the enrollment phases, run against the fixtures. Its only
+        difference is that one check. Results from it are synthetic classifier
+        evidence, never evidence about a real host's crash policy.
+        """
+        copy = self.work / "examples-synthetic"
+        shutil.copytree(EXAMPLES, copy)
+        crash = copy / "roles/suifleet/files/crash_policy.sh"
+        text = crash.read_text()
+        assert text.count("\nkernel_pattern() {\n") == 1, "crash_policy.sh no longer defines kernel_pattern as expected"
+        crash.write_text(text.replace("\nkernel_pattern() {\n", "\nkernel_pattern() { return 0; }\nreal_kernel_pattern() {\n"))
+        return copy
 
     # Images and containers
     def image(self, name, dockerfile, base, context=None):
@@ -511,7 +538,7 @@ class Harness:
 
     def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True):
         command = ["docker", "run", "--rm", "--network", f"container:{self.chain}",
-                   "-v", f"{EXAMPLES}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
+                   "-v", f"{self.examples}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
                    "-v", f"{self.work / 'artifacts'}:/artifacts:ro", "-v", f"{UNITS}:/units:ro",
                    "-w", "/ansible", "-e", "ANSIBLE_CONFIG=/ansible/ansible.cfg", "-e", "ANSIBLE_FORCE_COLOR=0",
                    # Ansible's controller temporary files land in the scanned work directory.
@@ -774,7 +801,7 @@ class Harness:
         (self.work / "ctl/classify.yml").write_text(CLASSIFY_PLAY)
         extra = []
         if assume_host_view:
-            role_files = ROOT / "examples/ansible/roles/suifleet/files"
+            role_files = self.examples / "roles/suifleet/files"
             stub = self.work / "ctl/assume-host-view"
             stub.mkdir(exist_ok=True)
             crash = (role_files / "crash_policy.sh").read_text()
@@ -822,20 +849,29 @@ class Harness:
             self.no_swap()
 
     SYSTEMD_COREDUMP = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
+    # A literal limit where systemd-coredump reads the crashing process's (%c),
+    # as some hosts configure it (this WSL machine's own pattern does).
+    SYSTEMD_COREDUMP_LITERAL = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %d"
     DECOY_COREDUMP = "/usr/local/bin/systemd-coredump"
 
-    def crash_fixture(self, pattern, limit_zero=False, coredump_conf=None, vendor_main_conf=None, decoy=None):
+    def crash_fixture(self, pattern, limit_zero=False, coredump_conf=None, vendor_main_conf=None, decoy=None, synthetic=True):
         """Replace kernel.core_pattern inside each host's mount namespace and set the SSH session's core limit.
 
         The hosts share the test machine's kernel, whose core_pattern is
         global, so no test process is ever crashed: a real crash would reach
         the machine's own handler. Only the role's policy decision is tested.
+        With pattern None the machine's real pattern stays visible. With
+        synthetic (the default) later runs use the synthetic copy of the role,
+        which does not refuse the bind-mounted pattern; otherwise the role as
+        committed.
         """
+        self.examples = self.synthetic if synthetic else EXAMPLES
         for host in self.hosts.values():
             container = host["container"]
             self.clear_crash_fixture(container)
-            self.exec(container, "sh", "-c", "umask 022 && cat > /root/sf304-core-pattern", input=pattern + "\n")
-            self.exec(container, "mount", "--bind", "/root/sf304-core-pattern", "/proc/sys/kernel/core_pattern")
+            if pattern is not None:
+                self.exec(container, "sh", "-c", "umask 022 && cat > /root/sf304-core-pattern", input=pattern + "\n")
+                self.exec(container, "mount", "--bind", "/root/sf304-core-pattern", "/proc/sys/kernel/core_pattern")
             if coredump_conf is not None:
                 self.exec(container, "sh", "-c", "mkdir -p /etc/systemd/coredump.conf.d"
                           " && umask 022 && cat > /etc/systemd/coredump.conf.d/sf304.conf",
@@ -873,6 +909,7 @@ class Harness:
         """A host that could store a crash dump of a claim-handling process refuses the claim before it is read."""
         for host in self.hosts.values():
             self.clear_crash_fixture(host["container"])
+        self.examples = EXAMPLES
         real = Path("/proc/sys/kernel/core_pattern").read_text().strip()
         limits = {name: self.exec(h["container"], "sh", "-c", "grep '^Max core' /proc/$(systemctl show -p MainPID --value"
                                   " ssh.service)/limits").stdout.split()[4] for name, h in self.hosts.items()}
@@ -885,6 +922,26 @@ class Harness:
         else:
             print(f"NOTE the role accepts this machine's real crash dump policy on some host ({verdicts});"
                   " the real-policy refusal case did not run (fixtures below did)")
+        # The machine's real systemd-coredump pattern with a literal limit argument: a
+        # session limit of 0 must not count, because the handler never receives it.
+        words = real.lstrip("|").split()
+        if (real.startswith("|") and words[0] in ("/usr/lib/systemd/systemd-coredump", "/lib/systemd/systemd-coredump")
+                and words[1:7] != ["%P", "%u", "%g", "%s", "%t", "%c"]):
+            self.crash_fixture(None, limit_zero=True, synthetic=False)
+            self.refused_claim_transfer("claim transfer with the real systemd-coredump pattern and a session limit of 0", vault,
+                                        expected=["could store a crash dump containing the claim", "which the handler does not receive"])
+            print(f"PASS claim transfer refused with this machine's real systemd-coredump pattern ({real!r}) under a session"
+                  " limit of 0: its limit argument is not %c")
+        else:
+            print(f"NOTE this machine's real core_pattern ({real!r}) is not systemd-coredump with a literal limit argument;"
+                  " that real-pattern case did not run (the fixture below did)")
+        # A bind mount over the sysctl masks the machine-wide pattern: the committed role
+        # refuses it before classifying, even though it shows an otherwise safe file pattern.
+        self.crash_fixture("core", limit_zero=True, synthetic=False)
+        self.refused_claim_transfer("claim transfer with a masked kernel.core_pattern is refused", vault,
+                                    expected=["could store a crash dump containing the claim",
+                                              "/proc/sys/kernel/core_pattern is not the kernel's sysctl"])
+        print("PASS claim transfer refused with a file bind-mounted over /proc/sys/kernel/core_pattern (committed role)")
         # The test containers' init and sshd inherit Docker's unlimited core limit, so every
         # case below without limit_zero has a nonzero session limit.
         assert all(lim == "unlimited" for lim in limits.values()), ("fixtures assume an unlimited sshd core limit", limits)
@@ -942,6 +999,17 @@ class Harness:
             ("systemd-coredump configuration with a line continuation", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["[Coredump]", "Storage=external \\", "Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump's configuration uses line continuations"),
+            # systemd-coredump reads the crashing process's limit from its sixth argument;
+            # with a literal there, a session limit of 0 proves nothing and persistent
+            # storage stays enabled.
+            ("systemd-coredump with a literal limit argument, persistent storage and a session limit of 0",
+             self.SYSTEMD_COREDUMP_LITERAL, {"limit_zero": True, "coredump_conf": ["[Coredump]", "Storage=external"]},
+             "which the handler does not receive (its arguments start '%P %u %g %s %t 9223372036854775808'"),
+            # Linux 6.17+ socket collectors receive the dump with an unlimited size.
+            ("a socket core collector (@)", "@/run/sf304-core.sock", {"limit_zero": True},
+             "core dumps are sent to a socket collector (@/run/sf304-core.sock)"),
+            ("a socket core collector (@@)", "@@/run/sf304-core.sock", {"limit_zero": True},
+             "core dumps are sent to a socket collector (@@/run/sf304-core.sock)"),
         ] + [
             # The kernel runs a piped handler, which reads its own configuration, in the
             # host's initial namespaces. The test hosts are containers: what they show at
@@ -979,7 +1047,8 @@ class Harness:
 
         A file pattern is written in the crashing process's own namespace, so a
         container's view is the right one. Piped handlers are refused in the test
-        containers (see crash_refused).
+        containers (see crash_refused). The pattern is a bind-mounted fixture, so
+        the synthetic copy of the role runs from here on (see synthetic_examples).
         """
         self.crash_fixture("core", limit_zero=True)
 
