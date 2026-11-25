@@ -580,6 +580,46 @@ def scenario(cluster, work, supervisor):
     check("apply returns to v1 after the runAsGroup bundles", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
 
+    # An explicit JSON null struct field is accepted by the server as unset and
+    # defaulted (terminationGracePeriodSeconds null becomes 30); readiness must
+    # treat it like the omitted field and still reject a genuine live change.
+    def grace():
+        pod = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]["spec"]
+        return pod.get("terminationGracePeriodSeconds")
+
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] = None
+    nulled = work / "grace-null.json"
+    nulled.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, nulled)
+    check("helper applies a bundle with an explicit null terminationGracePeriodSeconds", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, nulled, "1.0.0")
+    check("the server defaults a null terminationGracePeriodSeconds to 30 and readiness accepts it",
+          grace() == 30, repr(grace()))
+    # SuiFleet's apply of the null field claims it, so the override must force.
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                  stdin=json.dumps({
+                      "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+                      "spec": {"template": {"spec": {"terminationGracePeriodSeconds": 5}}}}))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    result = helper("ready", profiles, nulled)
+    check("readiness rejects another manager's terminationGracePeriodSeconds against a null bundle field",
+          grace() == 5 and result.returncode == 1
+          and "spec.template.spec.terminationGracePeriodSeconds differs" in result.stderr, result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    result = helper("apply", profiles, nulled)
+    check("apply restores the null-field bundle after the other manager relinquishes it", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, nulled, "1.0.0")
+    check("readiness succeeds once the other manager relinquishes terminationGracePeriodSeconds", grace() == 30,
+          repr(grace()))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the null-field bundle", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}

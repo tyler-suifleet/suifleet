@@ -294,7 +294,10 @@ is drift unless it holds the server default. These include the
 `tolerationSeconds`, `activeDeadlineSeconds`, `labelSelector` and
 `namespaceSelector`. Plain fields that the server omits when zero, such as
 `minReadySeconds` or a volume mount's `readOnly`, keep the zero-value
-tolerance. Anything else the bundle omits,
+tolerance. An explicit JSON `null` for a struct field means unset, exactly as
+if the bundle omitted it: the API server defaults it (a `null`
+`terminationGracePeriodSeconds` becomes 30), so the omitted-field rules apply.
+A `null` value inside a map field still counts as a key. Anything else the bundle omits,
 such as an injected init container or sidecar, extra `env`, a `nodeSelector`
 or an extra pod-template annotation (including `kubectl rollout restart`'s
 `restartedAt`), is drift and not ready. Map fields (pod-template labels and
@@ -395,6 +398,10 @@ It checks the following:
   a bundle whose container inherits the pod's `runAsGroup`, another manager
   adding container `runAsGroup: 0` rolls out healthily but is not ready.
   Readiness succeeds after that manager relinquishes it.
+- An explicit `null` `terminationGracePeriodSeconds` is defaulted to 30 by
+  the server and is ready. Another manager forcing it to 5 rolls out but is
+  not ready; after that manager relinquishes it, apply restores the default
+  and readiness succeeds.
 - A kubectl wrapper injects administrator actions between the helper's
   ownership check and its write. A competing creation, a replacement by a
   customer object and a relabel are each refused (exit code 3) and left
