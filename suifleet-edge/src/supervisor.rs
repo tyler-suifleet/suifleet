@@ -2905,8 +2905,11 @@ mod tests {
         // Stopping the client leaves the cluster state as published.
         s.stop_all().await;
         let log = std::fs::read_to_string(f.dir.join("supervised/app/component.log")).unwrap();
-        assert!(log.contains("pruned ['configmaps/bad-extra']"), "{log}");
-        assert!(log.contains("pruned ['configmaps/web-content', 'deployments.apps/web']"), "{log}");
+        // Consumed ConfigMaps are published under content-addressed names
+        // (the harness passes the names the helper derives for each bundle).
+        let (good_config, bad_config) = (var("SF_K8S_CONFIG_GOOD"), var("SF_K8S_CONFIG_BAD"));
+        assert!(log.contains(&format!("pruned ['configmaps/bad-extra', 'configmaps/{bad_config}']")), "{log}");
+        assert!(log.contains(&format!("pruned ['configmaps/{good_config}', 'deployments.apps/web']")), "{log}");
     }
 
 }

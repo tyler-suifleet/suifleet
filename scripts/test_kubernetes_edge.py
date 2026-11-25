@@ -34,13 +34,17 @@ ServiceAccount credential:
 - A configuration-only update and rollback of a ConfigMap consumed through
   envFrom, configMapKeyRef and a subPath mount is observed inside the Pods
   before readiness succeeds, and a Deployment consuming a ConfigMap outside
-  its bundle is rejected offline. A no-op re-apply starts no rollout. After a
-  partially applied update (ConfigMap written, Deployment write denied by a
-  test admission policy) a v1-template Pod restarted in between reads the
-  new data; the rollback replaces it before readiness succeeds.
+  its bundle is rejected offline. Consumed ConfigMaps are published immutable
+  under content-addressed names that the Pod templates reference, and the API
+  server refuses another manager's data change to one. A no-op re-apply
+  starts no rollout. After a partially applied update (new ConfigMap written,
+  Deployment write denied by a test admission policy) a v1-template Pod
+  restarted in between still reads v1, and the rollback converges with every
+  Pod on v1.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
-  ConfigMap made immutable out of band stops the apply before any write; the
-  apply recreates a mutable object after the administrator deletes it.
+  stable-name ConfigMap made immutable out of band (or a content-addressed one
+  recreated with other content) stops the apply before any write; the apply
+  recreates the object after the administrator deletes it.
 - Foreground run mode re-creates a deleted object, exits on SIGTERM and leaves
   the workload running.
 - `remove` exits 1 while a finalizer holds a Pod of the removed Deployment
@@ -79,6 +83,14 @@ ACCOUNT = "suifleet-publisher"
 COMPONENT = "web-app"
 MISSING_IMAGE = "docker.io/library/busybox@sha256:" + "0" * 64
 results = []
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import suifleet_k8s_apply as publisher  # noqa: E402
+
+
+def published(bundle, base="web-content"):
+    """Content-addressed name the helper publishes bundle ConfigMap `base` as."""
+    return publisher.config_names(json.loads(Path(bundle).read_text()))[base]
 
 
 def check(name, condition, detail=""):
@@ -478,19 +490,58 @@ def scenario(cluster, work, supervisor):
           adopt.returncode == 3 and "does not adopt" in adopt.stderr and legacy["data"] == {"k": "customer"}
           and "labels" not in legacy["metadata"], adopt.stderr)
 
-    # No fighting over a field owned by another manager.
+    # The consumed ConfigMap is published immutable under its content-addressed
+    # name, which the Pod template references: the API server itself refuses
+    # another manager's data change to it.
+    web_config = published(v1)
+    live_config = json.loads(cluster.admin("get", "configmap", web_config, "-n", NAMESPACE, "-o", "json").stdout)
+    live_web = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)
+    check("the consumed ConfigMap is published immutable under its content-addressed name",
+          live_config.get("immutable") is True and "SuiFleet v1" in live_config["data"]["index.html"]
+          and live_config["metadata"]["annotations"].get("suifleet.io/config-name") == "web-content"
+          and publisher.config_refs(live_web["spec"]["template"]["spec"]) == [web_config]
+          and cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, ok=False).returncode != 0,
+          json.dumps(live_config.get("metadata", {}))[:500])
+    edit = cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                         ok=False, stdin=json.dumps({
+                             "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": web_config, "namespace": NAMESPACE},
+                             "data": {"index.html": "<p>customer edit</p>\n"}}))
+    unchanged = json.loads(cluster.admin("get", "configmap", web_config, "-n", NAMESPACE, "-o", "json").stdout)["data"]
+    check("the API server refuses another manager's data change to a content-addressed ConfigMap",
+          edit.returncode != 0 and "immutable" in edit.stderr.lower() and unchanged == live_config["data"], edit.stderr)
+
+    # No fighting over a field owned by another manager (a stable-name
+    # ConfigMap that no bundle Deployment consumes stays mutable).
+    shared = variant(work, "shared", "hello from SuiFleet v1", extra_configmap="shared-settings")
+    check("apply a bundle with an unconsumed stable-name ConfigMap", helper("apply", profiles, shared).returncode == 0)
     cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-", stdin=json.dumps({
-        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE},
-        "data": {"index.html": "<p>customer edit</p>\n"}}))
-    fight = helper("apply", profiles, v1)
-    content = json.loads(cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, "-o", "json").stdout)["data"]["index.html"]
+        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shared-settings", "namespace": NAMESPACE},
+        "data": {"k": "customer edit"}}))
+    fight = helper("apply", profiles, shared)
+    content = json.loads(cluster.admin("get", "configmap", "shared-settings", "-n", NAMESPACE, "-o", "json").stdout)["data"]["k"]
     check("helper reports a field-manager conflict instead of overriding it",
           fight.returncode == 3 and "conflict" in fight.stderr.lower() and "customer edit" in content, fight.stderr)
     # The customer's controller relinquishes the field; SuiFleet can apply again.
     cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps({
-        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE}}))
-    result = helper("apply", profiles, v1)
+        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shared-settings", "namespace": NAMESPACE}}))
+    result = helper("apply", profiles, shared)
     check("apply succeeds after the other manager relinquishes the field", result.returncode == 0, result.stderr)
+    # binaryData is outside the bundle schema; another manager adding it to an
+    # owned ConfigMap (projected as an extra file) keeps SuiFleet's markers but
+    # is not this bundle's content.
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps({
+        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shared-settings", "namespace": NAMESPACE},
+        "binaryData": {"extra.sh": "IyEvYmluL3NoCg=="}}))
+    result = helper("ready", profiles, shared)
+    check("readiness rejects foreign binaryData in an owned ConfigMap",
+          result.returncode == 1 and "ConfigMap/shared-settings content differs" in result.stderr, result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shared-settings", "namespace": NAMESPACE}}))
+    wait_ready(profiles, shared, "1.0.0")
+    check("readiness succeeds once the other manager relinquishes its binaryData", True)
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 and prunes the unconsumed ConfigMap",
+          result.returncode == 0 and "configmaps/shared-settings" in result.stderr, result.stderr)
 
     # Readiness compares the bundle's Deployment spec: another manager's pod
     # template edit keeps SuiFleet's labels/annotations and rolls out
@@ -558,20 +609,6 @@ def scenario(cluster, work, supervisor):
     result = helper("apply", profiles, v1)
     check("apply returns to v1 after the zero probe timing bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
-
-    # binaryData is outside the bundle schema; another manager adding it to an
-    # owned ConfigMap (projected as an extra file) keeps SuiFleet's markers but
-    # is not this bundle's content.
-    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps({
-        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE},
-        "binaryData": {"extra.sh": "IyEvYmluL3NoCg=="}}))
-    result = helper("ready", profiles, v1)
-    check("readiness rejects foreign binaryData in an owned ConfigMap",
-          result.returncode == 1 and "ConfigMap/web-content content differs" in result.stderr, result.stderr)
-    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
-        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE}}))
-    wait_ready(profiles, v1, "1.0.0")
-    check("readiness succeeds once the other manager relinquishes its binaryData", True)
 
     # A map key with an empty value is still meaningful: nodeSelector
     # {"example.com/pool": ""} requires that node label. Label the node so the
@@ -896,8 +933,8 @@ def scenario(cluster, work, supervisor):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}
 
-    def restore():
-        cluster.admin("delete", "configmap", "web-content", "-n", NAMESPACE, "--ignore-not-found")
+    def restore(name):
+        cluster.admin("delete", "configmap", name, "-n", NAMESPACE, "--ignore-not-found")
         result = helper("apply", profiles, v1)
         check("apply restores the owned object after the race", result.returncode == 0, result.stderr)
 
@@ -911,24 +948,31 @@ def scenario(cluster, work, supervisor):
           and "app.kubernetes.io/managed-by" not in found and data == {"k": "customer"}, result.stderr)
     cluster.admin("delete", "configmap", "race-new", "-n", NAMESPACE)
 
-    # Race: the owned object is replaced by a customer object after the check.
-    race.arm(["apply", "--server-side"], ["delete", "configmap", "web-content", "--wait=true"],
-             ["create", "configmap", "web-content", "--from-literal=index.html=customer replacement"])
-    result = helper("apply", profiles, variant(work, "race-replace", "hello from SuiFleet race"), profile="race")
-    found, data = labels_of("web-content")
+    # Race: the owned object is replaced by a customer object after the check
+    # (the helper has just created the race bundle's content-addressed
+    # ConfigMap and is about to apply over it).
+    racing = variant(work, "race-replace", "hello from SuiFleet race")
+    race_config = published(racing)
+    race.arm(["apply", "--server-side"], ["delete", "configmap", race_config, "--wait=true"],
+             ["create", "configmap", race_config, "--from-literal=index.html=customer replacement"])
+    result = helper("apply", profiles, racing, profile="race")
+    found, data = labels_of(race_config)
     check("a replacement after the ownership check is not mutated",
           race.fired() and result.returncode == 3 and "does not adopt" in result.stderr
           and "app.kubernetes.io/managed-by" not in found and data == {"index.html": "customer replacement"}, result.stderr)
-    restore()
+    restore(race_config)
 
     # Race: the customer relabels (takes back) the object after the check.
-    race.arm(["apply", "--server-side"], ["label", "configmap", "web-content", "app.kubernetes.io/managed-by-", "suifleet.io/component-"])
-    result = helper("apply", profiles, variant(work, "race-relabel", "hello from SuiFleet race"), profile="race")
-    found, data = labels_of("web-content")
+    racing = variant(work, "race-relabel", "hello from SuiFleet race")
+    race.arm(["apply", "--server-side"], ["label", "configmap", race_config, "app.kubernetes.io/managed-by-", "suifleet.io/component-"])
+    before = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    result = helper("apply", profiles, racing, profile="race")
+    after = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    found, data = labels_of(race_config)
     check("a relabel after the ownership check is not mutated",
           race.fired() and result.returncode == 3 and "does not adopt" in result.stderr
-          and "app.kubernetes.io/managed-by" not in found and "race" not in data["index.html"], result.stderr)
-    restore()
+          and "app.kubernetes.io/managed-by" not in found and before == after, result.stderr)
+    restore(race_config)
 
     # Race: a prune candidate is relabelled, then replaced, between list and delete.
     # A replacement that still carries this component's labels must not be
@@ -1009,8 +1053,9 @@ def scenario(cluster, work, supervisor):
     # Combined review 4602: a configuration-only update or rollback of a
     # ConfigMap consumed through envFrom, configMapKeyRef or a subPath mount
     # must reach the running Pods before readiness succeeds. Kubernetes never
-    # refreshes those in place; the helper binds the ConfigMap digest into the
-    # Pod template so the change rolls the Pods out.
+    # refreshes those in place; the helper publishes the ConfigMap under a
+    # content-addressed name that the Pod template references, so the change
+    # rolls the Pods out.
     outside = json.loads(config_bundle(work, "config-outside", "x").read_text())
     outside["resources"] = outside["resources"][1:]
     (work / "config-outside.json").write_text(json.dumps(outside))
@@ -1041,15 +1086,16 @@ def scenario(cluster, work, supervisor):
     check("config-only re-apply of the same bundle succeeds",
           helper("apply", profiles, config_v1, component="config-app").returncode == 0)
     again = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
-    check("a no-op re-apply keeps the ConfigMap data epoch and starts no rollout",
+    check("a no-op re-apply keeps the content-addressed name and starts no rollout",
           again["metadata"]["generation"] == steady["metadata"]["generation"]
           and again["spec"]["template"] == steady["spec"]["template"])
 
-    # Combined review 4605: a partially applied update writes the ConfigMap,
-    # then its Deployment write fails. A v1-template Pod that starts in that
-    # window reads the v2 configuration. The rollback restores the v1 data;
-    # it must replace that Pod before readiness succeeds, even though the
-    # Deployment still has the exact, healthy v1 template.
+    # Combined reviews 4605/4609: a partially applied update writes the v2
+    # ConfigMap, then its Deployment write fails. The v1 template names the
+    # v1 content-addressed ConfigMap, whose data cannot change, so a
+    # v1-template Pod that starts in that window (whatever the kubelet's
+    # by-name cache holds) still reads v1, and the rollback converges with
+    # every Pod on v1.
     cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
         {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
          "metadata": {"name": "test-freeze-config-app"},
@@ -1071,64 +1117,91 @@ def scenario(cluster, work, supervisor):
     result = helper("apply", profiles, config_v2, component="config-app", version="2.0.0")
     check("a partially applied v2 fails at the Deployment write",
           result.returncode == 2 and "frozen" in result.stderr, result.stderr[-500:])
-    live_data = json.loads(cluster.admin("get", "configmap", "config-settings", "-n", NAMESPACE, "-o", "json").stdout)["data"]
+    config_alpha, config_beta = published(config_v1, "config-settings"), published(config_v2, "config-settings")
+    live_beta = json.loads(cluster.admin("get", "configmap", config_beta, "-n", NAMESPACE, "-o", "json").stdout)
+    live_alpha = json.loads(cluster.admin("get", "configmap", config_alpha, "-n", NAMESPACE, "-o", "json").stdout)
     frozen_deployment = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
-    check("the partial apply wrote the v2 ConfigMap but left the v1 template",
-          live_data == {"MODE": "beta"} and frozen_deployment["spec"]["template"] == again["spec"]["template"],
-          str(live_data))
-    old_pods = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]
-    old_names = {pod["metadata"]["name"] for pod in old_pods}
+    check("the partial apply wrote the v2 ConfigMap but left the v1 template and the v1 ConfigMap",
+          live_beta["data"] == {"MODE": "beta"} and live_alpha["data"] == {"MODE": "alpha"}
+          and live_alpha.get("immutable") is True
+          and frozen_deployment["spec"]["template"] == again["spec"]["template"]
+          and publisher.config_refs(frozen_deployment["spec"]["template"]["spec"]) == [config_alpha],
+          json.dumps([live_alpha.get("data"), live_beta.get("data")]))
     cluster.admin("delete", "pods", "-n", NAMESPACE, "-l", "app=config-app", "--wait=true")
     wait("a replacement v1-template Pod", lambda: len(observed_config(cluster)) == 1, timeout=120, interval=2)
     seen = observed_config(cluster)
-    check("a v1-template Pod started during the partial apply reads v2 (the hazard)", seen == [("beta",) * 3], str(seen))
-    hazard = {pod["metadata"]["name"] for pod in json.loads(cluster.admin(
-        "get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]} - old_names
+    check("a v1-template Pod started during the partial apply still reads v1", seen == [("alpha",) * 3], str(seen))
     cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-config-app")
     wait("the test Deployment write freeze to lift", lambda: not frozen(), timeout=60)
-    check("rollback after the partial apply applies",
-          helper("apply", profiles, config_v1, component="config-app").returncode == 0)
+    result = helper("apply", profiles, config_v1, component="config-app")
+    check("rollback after the partial apply applies and prunes the v2 ConfigMap",
+          result.returncode == 0 and f"configmaps/{config_beta}" in result.stderr, result.stderr)
     wait_ready(profiles, config_v1, "1.0.0", component="config-app")
-    pods = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]
+    settled = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
     seen = observed_config(cluster)
     check("once the rollback is ready, every live Pod runs the v1 configuration",
           seen == [("alpha",) * 3], str(seen))
-    check("the Pod that read v2 was replaced",
-          bool(hazard) and not hazard & {pod["metadata"]["name"] for pod in pods}, str(hazard))
+    check("the rollback needed no new rollout (the v1 template never named other data)",
+          settled["spec"]["template"] == again["spec"]["template"]
+          and settled["metadata"]["generation"] == again["metadata"]["generation"])
     retire_config = work / "config-retire.json"
     retire_config.write_text(json.dumps({"version": 1, "resources": []}))
     check("config-only test component retires",
           helper("apply", profiles, retire_config, component="config-app").returncode == 0)
     wait_ready(profiles, retire_config, "1.0.0", component="config-app")
 
-    # Immutable ConfigMaps cannot be restored in place (the API server refuses
-    # data changes and a return to mutable), so a rollback could not recover.
-    # Bundles cannot request one, and a live owned immutable ConfigMap (set out
-    # of band) stops the apply before any write instead of half-applying.
+    # A stable-name (unconsumed) ConfigMap cannot be restored in place once
+    # immutable (the API server refuses data changes and a return to
+    # mutable), so a rollback could not recover. Bundles cannot request one,
+    # and a live owned immutable stable-name ConfigMap (set out of band) stops
+    # the apply before any write instead of half-applying.
     frozen = json.loads(v1.read_text())
     frozen["resources"][0]["immutable"] = True
     (work / "frozen.json").write_text(json.dumps(frozen))
     result = run(sys.executable, str(HELPER), "validate", "--bundle", str(work / "frozen.json"), ok=False)
     check("helper validate rejects an immutable ConfigMap offline",
           result.returncode == 2 and "cannot be rolled back in place" in result.stderr, result.stderr)
-    cluster.admin("patch", "configmap", "web-content", "-n", NAMESPACE, "--type=merge", "-p", '{"immutable":true}')
+    kept_v1 = variant(work, "kept-v1", "hello from SuiFleet v1", extra_configmap="kept")
+    kept_v2 = variant(work, "kept-v2", "hello from SuiFleet v2", extra_configmap="kept")
+    check("apply a bundle with a stable-name ConfigMap", helper("apply", profiles, kept_v1).returncode == 0)
+    cluster.admin("patch", "configmap", "kept", "-n", NAMESPACE, "--type=merge", "-p", '{"immutable":true}')
     before = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
-    result = helper("apply", profiles, v2, version="2.0.0")
+    result = helper("apply", profiles, kept_v2, version="2.0.0")
     after = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
-    check("apply refuses a live owned immutable ConfigMap before writing anything",
+    check("apply refuses a live owned immutable stable-name ConfigMap before writing anything",
           result.returncode == 2 and "immutable ConfigMap" in result.stderr and before == after
-          and cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, ok=False).returncode != 0,
+          and cluster.admin("get", "configmap", published(kept_v2), "-n", NAMESPACE, ok=False).returncode != 0,
           f"{result.stderr} deployment rv {before} -> {after}")
-    content = json.loads(cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, "-o", "json").stdout)
+    content = json.loads(cluster.admin("get", "configmap", "kept", "-n", NAMESPACE, "-o", "json").stdout)
     check("the refused apply left the immutable ConfigMap's v1 data untouched",
-          content.get("immutable") is True and "SuiFleet v1" in content["data"]["index.html"], str(content.get("data")))
-    cluster.admin("delete", "configmap", "web-content", "-n", NAMESPACE)
-    result = helper("apply", profiles, v1)
-    recreated = json.loads(cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, "-o", "json").stdout)
+          content.get("immutable") is True and "SuiFleet v1" in content["data"]["k"], str(content.get("data")))
+    cluster.admin("delete", "configmap", "kept", "-n", NAMESPACE)
+    result = helper("apply", profiles, kept_v1)
+    recreated = json.loads(cluster.admin("get", "configmap", "kept", "-n", NAMESPACE, "-o", "json").stdout)
     check("apply recreates a mutable ConfigMap after the administrator deletes the immutable one",
           result.returncode == 0 and not recreated.get("immutable"), result.stderr)
+    # A content-addressed ConfigMap recreated (with SuiFleet's labels) holding
+    # other content than its name denotes is refused before any write too.
+    forged = json.loads(cluster.admin("get", "configmap", web_config, "-n", NAMESPACE, "-o", "json").stdout)
+    cluster.admin("delete", "configmap", web_config, "-n", NAMESPACE, "--wait=true")
+    cluster.admin("create", "-f", "-", stdin=json.dumps({
+        "apiVersion": "v1", "kind": "ConfigMap", "immutable": True, "data": {"index.html": "<p>forged</p>\n"},
+        "metadata": {"name": web_config, "namespace": NAMESPACE, "labels": forged["metadata"]["labels"]}}))
+    before = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    result = helper("apply", profiles, v1)
+    after = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    check("apply refuses a content-addressed ConfigMap whose content differs from its name before writing anything",
+          result.returncode == 2 and "differs from the content its name denotes" in result.stderr and before == after
+          and cluster.admin("get", "configmap", "kept", "-n", NAMESPACE, ok=False).returncode == 0, result.stderr)
+    result = helper("ready", profiles, v1)
+    check("readiness rejects the forged content-addressed ConfigMap",
+          result.returncode == 1 and f"ConfigMap/{web_config} content differs" in result.stderr, result.stderr)
+    cluster.admin("delete", "configmap", web_config, "-n", NAMESPACE, "--wait=true")
+    result = helper("apply", profiles, v1)
+    check("apply recreates the content-addressed ConfigMap after the administrator deletes the forged one",
+          result.returncode == 0 and "configmaps/kept" in result.stderr, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
-    check("readiness succeeds once the recreated mutable ConfigMap is applied", True)
+    check("readiness succeeds once the recreated ConfigMaps are applied", True)
 
     # Foreground run mode: reconciles deletion, stops cleanly, workload remains.
     env = {"PATH": "/usr/bin:/bin", "SUIFLEET_COMPONENT": COMPONENT, "SUIFLEET_COMPONENT_VERSION": "1.0.0"}
@@ -1136,9 +1209,9 @@ def scenario(cluster, work, supervisor):
                                 "--bundle", str(v1), "--interval", "1"], env=env, stderr=subprocess.PIPE, text=True)
     try:
         time.sleep(3)
-        cluster.admin("delete", "configmap", "web-content", "-n", NAMESPACE)
+        cluster.admin("delete", "configmap", web_config, "-n", NAMESPACE)
         wait("run mode re-creates the deleted ConfigMap",
-             lambda: cluster.admin("get", "configmap", "web-content", "-n", NAMESPACE, ok=False).returncode == 0, timeout=30)
+             lambda: cluster.admin("get", "configmap", web_config, "-n", NAMESPACE, ok=False).returncode == 0, timeout=30)
         check("run mode re-creates a deleted owned object", True)
     finally:
         process.send_signal(signal.SIGTERM)
@@ -1241,7 +1314,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 patch='{{"metadata":{{"finalizers":'"$value"'}}}}'
-k patch configmap web-content --type=merge -p "$patch" >&2 || exit 1
+k patch configmap {shlex.quote(web_config)} --type=merge -p "$patch" >&2 || exit 1
 for pod in $(k get pods -l app=web -o name); do
   k patch "$pod" --type=merge -p "$patch" >&2 || true
 done
@@ -1258,7 +1331,8 @@ esac
         hold, release = f"{shlex.quote(str(script))} hold", f"{shlex.quote(str(script))} release"
         env = dict(os.environ, SF_K8S_HELPER=str(HELPER), SF_K8S_PROFILE_ROOT=str(profiles),
                    SF_K8S_BUNDLE_GOOD=str(v1), SF_K8S_BUNDLE_BAD=str(bad), SF_K8S_BUNDLE_EMPTY=str(retire),
-                   SF_K8S_HOLD=hold, SF_K8S_RELEASE=release, RUSTUP_TOOLCHAIN="1.94.0")
+                   SF_K8S_HOLD=hold, SF_K8S_RELEASE=release, SF_K8S_CONFIG_GOOD=web_config,
+                   SF_K8S_CONFIG_BAD=published(bad), RUSTUP_TOOLCHAIN="1.94.0")
         test = subprocess.run(["cargo", "test", "--locked", "--manifest-path", str(ROOT / "suifleet-edge/Cargo.toml"),
                                "kubernetes_publisher_real_cluster", "--", "--ignored", "--nocapture"],
                               env=env, capture_output=True, text=True, timeout=1800)
