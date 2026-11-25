@@ -24,7 +24,9 @@ ServiceAccount credential:
   the Deployment stays terminating and a retirement bundle is not ready; it
   becomes ready only once the Pod, ReplicaSet and Deployment are gone.
 - No adoption of pre-existing objects and no overriding of fields owned by
-  another field manager (two controllers do not fight).
+  another field manager (two controllers do not fight). A healthy rollout of
+  another manager's pod-template edit that keeps SuiFleet's metadata is not
+  ready, and becomes ready once the bundle's template is restored.
 - Races injected between the helper's ownership check and its write (through
   a kubectl wrapper): a competing creation, a replacement and a relabel are
   not mutated, and pruning leaves relabelled or replaced objects alone, even a
@@ -426,6 +428,32 @@ def scenario(cluster, work, supervisor):
         "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE}}))
     result = helper("apply", profiles, v1)
     check("apply succeeds after the other manager relinquishes the field", result.returncode == 0, result.stderr)
+
+    # Readiness compares the bundle's Deployment spec: another manager's pod
+    # template edit keeps SuiFleet's labels/annotations and rolls out
+    # healthily, but it is not this bundle's rollout.
+    wait_ready(profiles, v1, "1.0.0")
+    template_edit = {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+                     "spec": {"template": {"metadata": {"annotations": {"example.com/content": "customer rollout"}}}}}
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                  stdin=json.dumps(template_edit))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    drifted = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)
+    result = helper("ready", profiles, v1)
+    check("readiness rejects a healthy rollout of another manager's pod template edit",
+          drifted["metadata"]["annotations"].get("suifleet.io/bundle-sha256")
+          and drifted["status"].get("availableReplicas") == 1
+          and drifted["status"].get("observedGeneration") == drifted["metadata"]["generation"]
+          and result.returncode == 1 and "spec.template.metadata.annotations.example.com/content differs" in result.stderr,
+          result.stderr)
+    fight = helper("apply", profiles, v1)
+    check("apply reports the template conflict instead of overriding it", fight.returncode == 3, fight.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    result = helper("apply", profiles, v1)
+    check("apply restores the bundle template after the other manager relinquishes it", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+    check("readiness succeeds once the bundle's template has rolled out again", True)
 
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)

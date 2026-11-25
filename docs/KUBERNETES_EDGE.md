@@ -267,8 +267,14 @@ someone deletes is recreated. It exits non-zero on a conflict, rejection or
 cluster error, and the supervisor's restart budget then applies. `ready`
 succeeds only when every object in the bundle exists, is not being deleted, is
 owned by this component and carries *this* bundle's digest, version and
-labels. ConfigMaps must also hold the bundle's data, and Deployments must be
-observed, updated and available. A pre-existing foreign object with the right
+labels. ConfigMaps must also hold the bundle's data. Deployments must hold
+every spec field the bundle specifies and be observed, updated and available,
+so a healthy rollout of another manager's edit (for example a changed image or
+pod template that keeps SuiFleet's labels and annotations) is not ready. Fields
+the bundle omits are not compared: API-server defaults are tolerated, a field
+the server omits matches a zero/empty bundle value, resource quantities compare
+by value (`0.5` equals `500m`), and omitting `replicas` leaves scaling to, for
+example, a HorizontalPodAutoscaler. A pre-existing foreign object with the right
 name, an object of another component and an object from a stale bundle are
 all not ready, also for ConfigMap-only bundles. `ready` also requires prune
 convergence: while any other object labelled for this component remains in
@@ -347,6 +353,10 @@ It checks the following:
 - The helper does not adopt an existing object, and does not override a field
   owned by another manager. Recovery works after that manager relinquishes the
   field.
+- Another manager's pod-template edit that keeps SuiFleet's labels and
+  annotations rolls out healthily but is not ready, `apply` reports the
+  conflict, and readiness succeeds after that manager relinquishes the field
+  and the bundle's template rolls out again.
 - A kubectl wrapper injects administrator actions between the helper's
   ownership check and its write. A competing creation, a replacement by a
   customer object and a relabel are each refused (exit code 3) and left
