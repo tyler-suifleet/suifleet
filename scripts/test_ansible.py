@@ -28,7 +28,11 @@ core_pattern/session core limit when classified unsafe, then core_pattern fixtur
 for Apport, a same-name systemd-coredump outside its install location, core files, systemd-coredump with a nonzero limit and
 systemd-coredump with Storage=none but a default/nonzero ProcessSizeMax (or with the
 disabling settings outside an effective [Coredump] section, or only in a main
-coredump.conf outside /etc that systemd 252's handler does not read); nothing is
+coredump.conf outside /etc that systemd 252's handler does not read), and
+every piped handler otherwise accepted (systemd-coredump with Storage=none and
+ProcessSizeMax=0 or a limit of 0, /usr/bin/false) because the containers do not
+share the host's initial namespaces in which the kernel runs it, while a
+test-only copy that assumes the host view accepts those; nothing is
 crashed), a claim transfer interrupted after staging with zram/dm-crypt swap
 and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
@@ -189,7 +193,7 @@ CLASSIFY_PLAY = """- hosts: suifleet_devices
     ansible_become: false
   tasks:
     - ansible.builtin.command:
-        argv: [sh, -c, "{{ lookup('ansible.builtin.file', '/ansible/roles/suifleet/files/' ~ item ~ '_policy.sh') }}"]
+        argv: [sh, -c, "{{ lookup('ansible.builtin.file', policy_dir | default('/ansible/roles/suifleet/files') ~ '/' ~ item ~ '_policy.sh') }}"]
       loop: [swap, crash]
       register: policy
       changed_when: false
@@ -758,10 +762,27 @@ class Harness:
             if mounted != "0":
                 self.exec(container, "umount", target)
 
-    def classify(self):
-        """The role's swap and crash dump verdicts for every host: {host: {"swap": ..., "crash": ...}}."""
+    def classify(self, assume_host_view=False):
+        """The role's swap and crash dump verdicts for every host: {host: {"swap": ..., "crash": ...}}.
+
+        With assume_host_view, the crash classifier runs from a test-only copy whose
+        host_view check passes unconditionally. The test hosts are containers, which
+        the real check (rightly) refuses for every piped handler; the copy shows
+        what the rest of the classifier decides when the session does share the
+        host's view. The role itself never uses the copy.
+        """
         (self.work / "ctl/classify.yml").write_text(CLASSIFY_PLAY)
-        output, _ = self.ansible("classify the hosts' swap and crash dump policy", "/work/classify.yml")
+        extra = []
+        if assume_host_view:
+            role_files = ROOT / "examples/ansible/roles/suifleet/files"
+            stub = self.work / "ctl/assume-host-view"
+            stub.mkdir(exist_ok=True)
+            crash = (role_files / "crash_policy.sh").read_text()
+            assert crash.count("\nhost_view() {\n") == 1, "crash_policy.sh no longer defines host_view as expected"
+            (stub / "crash_policy.sh").write_text(crash.replace("\nhost_view() {\n", "\nhost_view() { return 0; }\nreal_host_view() {\n"))
+            (stub / "swap_policy.sh").write_text((role_files / "swap_policy.sh").read_text())
+            extra = ["-e", "policy_dir=/work/assume-host-view"]
+        output, _ = self.ansible("classify the hosts' swap and crash dump policy", "/work/classify.yml", *extra)
         verdicts = {name: {} for name in self.hosts}
         for host, kind, verdict in re.findall(r'"msg": "CLASSIFY (\S+) (swap|crash) VERDICT ([^"]*)"', output):
             verdicts[host][kind] = verdict
@@ -921,6 +942,14 @@ class Harness:
             ("systemd-coredump configuration with a line continuation", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["[Coredump]", "Storage=external \\", "Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump's configuration uses line continuations"),
+        ] + [
+            # The kernel runs a piped handler, which reads its own configuration, in the
+            # host's initial namespaces. The test hosts are containers: what they show at
+            # the handler's path and in coredump.conf need not be what the kernel runs, so
+            # every piped configuration that would otherwise be accepted is refused.
+            (f"{label} seen only from a container's filesystem view", pattern, options,
+             "is not in the host's initial PID and user namespaces")
+            for label, pattern, options in self.PIPED_ACCEPTED_IN_HOST_VIEW
         ]
         try:
             for label, pattern, options, reason in cases:
@@ -928,12 +957,31 @@ class Harness:
                 self.refused_claim_transfer(f"claim transfer with {label} is refused", vault,
                                             expected=["could store a crash dump containing the claim", reason])
                 print(f"PASS claim transfer refused with {label}")
+            # The view check is the only reason those piped configurations were refused.
+            for label, pattern, options in self.PIPED_ACCEPTED_IN_HOST_VIEW:
+                self.crash_fixture(pattern, **options)
+                verdicts = {name: v["crash"] for name, v in self.classify(assume_host_view=True).items()}
+                assert all(v == "ok" for v in verdicts.values()), (label, "not accepted when the host view is assumed", verdicts)
+                print(f"PASS classifier accepts {label} once the session's host view is assumed (test-only copy)")
         finally:
             self.safe_crash_policy()
 
+    # Piped handlers the classifier accepts when the session shares the host's view.
+    PIPED_ACCEPTED_IN_HOST_VIEW = [
+        ("systemd-coredump with Storage=none and ProcessSizeMax=0", SYSTEMD_COREDUMP,
+         {"coredump_conf": ["[Coredump]", "Storage=none", "ProcessSizeMax=0"]}),
+        ("systemd-coredump with a session core limit of 0", SYSTEMD_COREDUMP, {"limit_zero": True}),
+        ("a handler that discards dumps (/usr/bin/false)", "|/usr/bin/false", {}),
+    ]
+
     def safe_crash_policy(self):
-        """systemd-coredump with Storage=none and ProcessSizeMax=0: no dump is processed or stored whatever the session's core limit."""
-        self.crash_fixture(self.SYSTEMD_COREDUMP, coredump_conf=["[Coredump]", "Storage=none", "ProcessSizeMax=0"])
+        """Core files under a session core limit of 0: the kernel writes nothing.
+
+        A file pattern is written in the crashing process's own namespace, so a
+        container's view is the right one. Piped handlers are refused in the test
+        containers (see crash_refused).
+        """
+        self.crash_fixture("core", limit_zero=True)
 
     def accepted_swap(self):
         """zram without writeback and dm-crypt swap keep plaintext off disks and are accepted.
