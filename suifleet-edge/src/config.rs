@@ -247,6 +247,8 @@ fn default_telemetry_buffer() -> usize {
 #[serde(default, deny_unknown_fields)]
 pub struct DaemonUpdateConfig {
     pub enabled: bool,
+    /// Use a platform-owned launcher and its authenticated control channel.
+    pub managed: bool,
     /// Deployments of this component name carry a new daemon binary.
     pub component: String,
     /// Default: `<state_dir>/daemon`.
@@ -259,6 +261,7 @@ impl Default for DaemonUpdateConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            managed: false,
             component: "suifleet-daemon".into(),
             install_dir: None,
             max_start_attempts: 3,
@@ -872,9 +875,15 @@ impl Config {
         // a component could make itself the unit's main process, which the
         // signing service trusts for status reports (SF-053, KEY_ISOLATION.md).
         anyhow::ensure!(
-            !(cfg.daemon_update.enabled && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            !(cfg.daemon_update.enabled && !cfg.daemon_update.managed && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
             "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
              components could replace the daemon the signing service trusts"
+        );
+        anyhow::ensure!(
+            !cfg.daemon_update.managed || (cfg.daemon_update.enabled
+                && cfg.daemon_update.install_dir.is_none()
+                && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            "managed daemon_update requires an enabled update, a service signer, and platform-owned update paths"
         );
         if let Some(reason) = unsupported_on(std::env::consts::OS, &cfg) {
             anyhow::bail!("{reason} (docs/MACOS_RUNTIME.md)");

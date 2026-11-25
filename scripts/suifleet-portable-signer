@@ -4,14 +4,17 @@
 import argparse
 import errno
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 import pwd
 import signal
+import shutil
 import socket
 import stat
 import subprocess
+import tempfile
 import time
 
 
@@ -20,6 +23,103 @@ def trusted_directory(directory):
         metadata = parent.lstat()
         if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid or metadata.st_mode & 0o022:
             raise RuntimeError(f"expected a root-owned directory without group/other writes: {parent}")
+
+
+def trusted_binary(path):
+    trusted_directory(path.parent)
+    metadata = path.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid
+            or metadata.st_mode & 0o6022 or not metadata.st_mode & 0o100):
+        raise RuntimeError(f"expected a root-owned regular executable: {path}")
+    return path
+
+
+class ClientUpdate:
+    """The platform supplies a verified candidate in a root-owned directory."""
+
+    def __init__(self, directory, base):
+        self.directory = directory
+        self.base = base
+        self.path = directory / "state.json"
+        self.state = json.loads(self.path.read_text()) if self.path.exists() else {}
+        if self.state.get("trial"):
+            self.resolve(False)
+
+    def sync(self):
+        fd = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def save(self):
+        with tempfile.NamedTemporaryFile(mode="w", dir=self.directory, delete=False) as handle:
+            tmp = Path(handle.name)
+            try:
+                json.dump(self.state, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+                tmp.replace(self.path)
+                self.sync()
+            finally:
+                tmp.unlink(missing_ok=True)
+
+    def select(self):
+        digest = self.state.get("trial") or self.state.get("current")
+        return trusted_binary(self.directory / digest) if digest else self.base
+
+    def stage(self, request):
+        digest = request["sha256"]
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+                or not isinstance(request["deployment"], str)):
+            raise RuntimeError("invalid managed update request")
+        self.state["result"] = {"deployment": request["deployment"], "applied": False}
+        try:
+            source = trusted_binary(self.directory / "candidate")
+            with source.open("rb") as incoming, self.base.open("rb") as base:
+                header = incoming.read(20)
+                baseline = base.read(20)
+                if (len(header) != 20 or header[:6] != baseline[:6]
+                        or header[18:20] != baseline[18:20] or not header.startswith(b"\x7fELF")):
+                    raise RuntimeError("candidate ELF ABI differs from the installed client")
+                incoming.seek(0)
+                with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as output:
+                    tmp = Path(output.name)
+                    try:
+                        shutil.copyfileobj(incoming, output)
+                        output.flush()
+                        with tmp.open("rb") as check:
+                            hashed = hashlib.sha256()
+                            for chunk in iter(lambda: check.read(65536), b""):
+                                hashed.update(chunk)
+                        if hashed.hexdigest() != digest:
+                            raise RuntimeError("candidate digest differs from the deployment")
+                        os.fchmod(output.fileno(), 0o755)
+                        os.fsync(output.fileno())
+                        tmp.replace(self.directory / digest)
+                        self.sync()
+                    finally:
+                        tmp.unlink(missing_ok=True)
+        except (OSError, RuntimeError) as error:
+            print(f"suifleet client update refused: {error}", flush=True)
+        else:
+            self.state["trial"] = digest
+        self.save()
+
+    def resolve(self, applied):
+        trial = self.state.pop("trial", None)
+        if trial:
+            if applied:
+                self.state["current"] = trial
+            self.state["result"]["applied"] = applied
+            self.save()
+        current = self.state.get("current")
+        for path in self.directory.iterdir():
+            name = path.name
+            if name != current and len(name) == 64 and all(c in "0123456789abcdef" for c in name):
+                path.unlink()
+        self.sync()
 
 
 def wait_for_signer(path, signer, daemon):
@@ -54,19 +154,30 @@ def stop(children):
             child.wait()
 
 
-def run(args, daemon_user, signer_user):
+def run(args, daemon_user, signer_user, updates=None):
     if args.socket.exists() or args.socket.is_symlink():
         if not stat.S_ISSOCK(args.socket.lstat().st_mode):
             raise RuntimeError(f"refusing to replace non-socket path {args.socket}")
         args.socket.unlink()
     children = []
+    control = child_control = None
     try:
+        command = [updates.select() if updates else args.binary, "--portable-daemon-child",
+                   str(daemon_user.pw_uid), str(daemon_user.pw_gid), args.socket, str(os.getpid())]
+        inherited = ()
+        if updates:
+            control, child_control = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+            inherited = (child_control.fileno(),)
+            command.append(str(child_control.fileno()))
         daemon = subprocess.Popen(
-            [args.binary, "--portable-daemon-child", str(daemon_user.pw_uid), str(daemon_user.pw_gid), args.socket, str(os.getpid())],
+            command,
+            pass_fds=inherited,
             stdin=subprocess.PIPE,
             env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "EDGE_CONFIG": str(args.daemon_config)},
         )
         children.append(daemon)
+        if child_control:
+            child_control.close()
         # The child is alive and root, blocked on the gate. Do not reap it
         # before pinning its task directory and creating a fresh socket.
         task = os.open(f"/proc/{daemon.pid}", os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -109,10 +220,22 @@ def run(args, daemon_user, signer_user):
         wait_for_signer(args.socket, signer, daemon)
         daemon.stdin.write(b"\1")
         daemon.stdin.close()
+        if control:
+            control.settimeout(60)
+            if control.recv(1024) != b"ready" or daemon.poll() is not None or signer.poll() is not None:
+                raise RuntimeError("managed daemon exited without completing startup")
+            updates.resolve(True)
+            control.sendall(json.dumps(updates.state.get("result")).encode())
         while all(child.poll() is None for child in children):
             time.sleep(0.1)
+        if control and daemon.returncode == 75 and signer.poll() is None:
+            return json.loads(control.recv(1024))
         raise RuntimeError("portable signer or daemon exited; restart the paired service")
     finally:
+        if child_control:
+            child_control.close()
+        if control:
+            control.close()
         stop(children)
         args.socket.unlink(missing_ok=True)
 
@@ -123,6 +246,8 @@ def main():
     parser.add_argument("--socket", type=Path, default=Path("/run/suifleet-portable/signer.sock"))
     parser.add_argument("--daemon-config", type=Path, default=Path("/etc/suifleet/config.toml"))
     parser.add_argument("--signer-config", type=Path, default=Path("/etc/suifleet/signer.toml"))
+    parser.add_argument("--client-update-dir", type=Path,
+                        help="root-owned directory containing a verified, platform-approved candidate")
     args = parser.parse_args()
     if os.geteuid():
         raise RuntimeError("portable signer launcher requires root")
@@ -138,12 +263,7 @@ def main():
         raise RuntimeError("daemon and signer require separate non-root accounts")
     if not daemon.pw_gid or not signer.pw_gid or daemon.pw_gid == signer.pw_gid:
         raise RuntimeError("daemon and signer require separate non-root primary groups")
-    binary = args.binary.resolve(strict=True)
-    trusted_directory(binary.parent)
-    metadata = binary.stat()
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid or metadata.st_mode & 0o6022:
-        raise RuntimeError("portable daemon binary must be root-owned and free of set-ID and group/other writes")
-    args.binary = binary
+    args.binary = trusted_binary(args.binary.resolve(strict=True))
     if not args.socket.is_absolute() or args.socket.name == "" or ".." in args.socket.parts:
         raise RuntimeError("portable signer socket must use a canonical absolute path")
     trusted_directory(args.socket.parent.parent)
@@ -156,7 +276,27 @@ def main():
     lock = args.socket.with_suffix(args.socket.suffix + ".lock")
     with lock.open("a") as lease:
         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        run(args, daemon, signer)
+        if args.client_update_dir is None:
+            run(args, daemon, signer)
+            return
+        directory = args.client_update_dir
+        if not directory.is_absolute() or ".." in directory.parts:
+            raise RuntimeError("client update directory must have a canonical absolute path")
+        trusted_directory(directory)
+        if directory.stat().st_mode & 0o077:
+            raise RuntimeError("client update directory must be private to root")
+        with (directory / "update.lock").open("a") as update_lease:
+            fcntl.flock(update_lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            updates = ClientUpdate(directory, args.binary)
+            while True:
+                try:
+                    request = run(args, daemon, signer, updates)
+                except (RuntimeError, OSError):
+                    if not updates.state.get("trial"):
+                        raise
+                    updates.resolve(False)
+                else:
+                    updates.stage(request)
 
 
 def request_stop(_signum, _frame):
