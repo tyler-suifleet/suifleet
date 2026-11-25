@@ -25,7 +25,7 @@ that can write to a disk are refused (the machine's real swap
 when the role classifies it unsafe, then /proc/swaps fixtures), transfers
 to hosts that could store a crash dump are refused (the machine's real
 core_pattern/session core limit when classified unsafe, then core_pattern fixtures
-for Apport, core files, systemd-coredump with a nonzero limit and
+for Apport, a same-name systemd-coredump outside its install location, core files, systemd-coredump with a nonzero limit and
 systemd-coredump with Storage=none but a default/nonzero ProcessSizeMax (or with the
 disabling settings outside an effective [Coredump] section, or only in a main
 coredump.conf outside /etc that systemd 252's handler does not read); nothing is
@@ -86,7 +86,7 @@ FAUCET = "http://127.0.0.1:9123/v2/gas"
 TARGET_DOCKERFILE = '''ARG BASE
 FROM ${BASE}
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo python3 python3-apt ca-certificates adduser procps \\
+RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo python3 python3-apt ca-certificates adduser procps systemd-coredump \\
  && rm -rf /var/lib/apt/lists/* \\
  && systemctl mask systemd-logind.service getty.target console-getty.service systemd-udevd.service systemd-binfmt.service \\
  && (systemctl disable ssh.socket 2>/dev/null || true) && systemctl enable ssh.service \\
@@ -801,8 +801,9 @@ class Harness:
             self.no_swap()
 
     SYSTEMD_COREDUMP = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
+    DECOY_COREDUMP = "/usr/local/bin/systemd-coredump"
 
-    def crash_fixture(self, pattern, limit_zero=False, coredump_conf=None, vendor_main_conf=None):
+    def crash_fixture(self, pattern, limit_zero=False, coredump_conf=None, vendor_main_conf=None, decoy=None):
         """Replace kernel.core_pattern inside each host's mount namespace and set the SSH session's core limit.
 
         The hosts share the test machine's kernel, whose core_pattern is
@@ -819,9 +820,19 @@ class Harness:
                           " && umask 022 && cat > /etc/systemd/coredump.conf.d/sf304.conf",
                           input="".join(f"{line}\n" for line in coredump_conf))
             if vendor_main_conf is not None:
+                # systemd-coredump's package installs /etc/systemd/coredump.conf; set it
+                # aside so cat-config falls back to the /usr/local/lib main file.
+                self.exec(container, "sh", "-c", "if [ -e /etc/systemd/coredump.conf ]; then"
+                          " mv /etc/systemd/coredump.conf /root/sf304-coredump.conf; fi")
                 self.exec(container, "sh", "-c", "mkdir -p /usr/local/lib/systemd"
                           " && umask 022 && cat > /usr/local/lib/systemd/coredump.conf",
                           input="".join(f"{line}\n" for line in vendor_main_conf))
+            if decoy is not None:
+                # An inert executable sharing a supported handler's name outside its
+                # install location; no crash is induced, so it never runs.
+                self.exec(container, "sh", "-c", f"mkdir -p {shlex.quote(str(Path(decoy).parent))}"
+                          f" && umask 022 && printf '#!/bin/sh\\nexit 0\\n' > {shlex.quote(decoy)}"
+                          f" && chmod 0755 {shlex.quote(decoy)}")
             if limit_zero:
                 # pam_limits sets each new SSH session's limits (each controller run
                 # connects afresh), starting from PID 1's, so sshd's own limit is not enough.
@@ -833,7 +844,9 @@ class Harness:
         if mounted != "0":
             self.exec(container, "umount", "/proc/sys/kernel/core_pattern")
         self.exec(container, "rm", "-f", "/etc/systemd/coredump.conf.d/sf304.conf", "/etc/security/limits.d/sf304-core.conf",
-                  "/usr/local/lib/systemd/coredump.conf")
+                  "/usr/local/lib/systemd/coredump.conf", self.DECOY_COREDUMP)
+        self.exec(container, "sh", "-c", "if [ -e /root/sf304-coredump.conf ]; then"
+                  " mv /root/sf304-coredump.conf /etc/systemd/coredump.conf; fi")
 
     def crash_refused(self, vault):
         """A host that could store a crash dump of a claim-handling process refuses the claim before it is read."""
@@ -856,7 +869,12 @@ class Harness:
         assert all(lim == "unlimited" for lim in limits.values()), ("fixtures assume an unlimited sshd core limit", limits)
         cases = [
             ("a piped handler that ignores the limit (apport)", "|/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E",
-             {}, "the crash handler apport may store core dumps"),
+             {}, "the crash handler /usr/share/apport/apport is not a supported handler at a verified location"),
+            # A handler is identified by its full path: a collector that merely shares
+            # systemd-coredump's name may keep dumps whatever coredump.conf says.
+            ("a same-name systemd-coredump outside its install location", f"|{self.DECOY_COREDUMP} %P %u %g %s %t %c %h",
+             {"decoy": self.DECOY_COREDUMP, "coredump_conf": ["[Coredump]", "Storage=none", "ProcessSizeMax=0"]},
+             f"the crash handler {self.DECOY_COREDUMP} is not a supported handler at a verified location"),
             ("core files with a nonzero limit", "core", {}, "core dumps are written to files (core)"),
             ("systemd-coredump storing dumps with a nonzero limit", self.SYSTEMD_COREDUMP, {},
              "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=default;"),
