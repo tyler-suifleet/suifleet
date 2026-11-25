@@ -1,4 +1,4 @@
-//! Docker Engine OCI adapter. No shell, inherited credentials, arbitrary engine
+//! Local Docker and Podman OCI adapter. No shell, inherited credentials, arbitrary engine
 //! flags, host mounts or engine-managed restarts cross this boundary.
 use anyhow::{ensure, Context};
 use serde::Deserialize;
@@ -14,6 +14,7 @@ pub const RUN: &str = "suifleet:oci";
 const LABEL: &str = "io.suifleet.supervisor";
 // @ is forbidden in component path segments, so this cannot hide a component.
 const ENGINE_MARKER: &str = "@oci-engine";
+const ANONYMOUS_AUTH: &str = "@oci-anonymous-auth.json";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -176,15 +177,143 @@ fn scope(root: &Path) -> String {
 fn name(workspace: &Path) -> String {
     format!("suifleet-{}", scope(workspace))
 }
-fn command(config: &Path) -> tokio::process::Command {
-    let mut c = tokio::process::Command::new("/usr/bin/docker");
-    c.args(["--host", "unix:///var/run/docker.sock", "--config"])
-        .arg(config);
-    crate::apply::harden(&mut c, Path::new("/"), None);
-    c
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Engine {
+    #[default]
+    Docker,
+    PodmanRootful,
+    PodmanRootless,
 }
-async fn output(config: &Path, args: &[String], seconds: u64) -> anyhow::Result<Vec<u8>> {
-    if config == public() && config.join("config.json").exists() {
+
+#[derive(Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct EngineMarker {
+    version: u8,
+    #[serde(default)]
+    engine: Engine,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rootless_uid: Option<u32>,
+}
+
+impl Engine {
+    fn selected(root: &Path) -> anyhow::Result<Self> {
+        let engine = match std::env::var("SUIFLEET_OCI_ENGINE").as_deref() {
+            Err(std::env::VarError::NotPresent) | Ok("docker") => Self::Docker,
+            Ok("podman-rootful") => Self::PodmanRootful,
+            Ok("podman-rootless") => Self::PodmanRootless,
+            _ => anyhow::bail!("unsupported SUIFLEET_OCI_ENGINE selection"),
+        };
+        match std::fs::read(root.join(ENGINE_MARKER)) {
+            Ok(bytes) => {
+                let marker: EngineMarker = serde_json::from_slice(&bytes)?;
+                ensure!(marker.version == 1, "unsupported OCI engine marker");
+                ensure!(
+                    engine == marker.engine && engine.rootless_uid() == marker.rootless_uid,
+                    "OCI engine differs from durable recovery marker; restore the prior engine and retire its components first"
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        Ok(engine)
+    }
+
+    fn rootless_uid(self) -> Option<u32> {
+        (self == Self::PodmanRootless).then(|| unsafe { libc::geteuid() })
+    }
+
+    fn command(self, config: &Path) -> tokio::process::Command {
+        let mut command;
+        match self {
+            Self::Docker => {
+                command = tokio::process::Command::new("/usr/bin/docker");
+                command
+                    .args(["--host", "unix:///var/run/docker.sock", "--config"])
+                    .arg(config);
+            }
+            Self::PodmanRootful | Self::PodmanRootless => {
+                let url = if self == Self::PodmanRootless {
+                    "unix:///run/suifleet-podman/podman.sock"
+                } else {
+                    "unix:///run/podman/podman.sock"
+                };
+                // The socket-only binary runs inside the daemon's sandbox.
+                command = tokio::process::Command::new("/usr/bin/podman-remote");
+                command.args(["--url", url]);
+            }
+        }
+        crate::apply::harden(&mut command, Path::new("/"), None);
+        if self != Self::Docker {
+            // Pulls always use an explicit auth file. Keep ordinary client
+            // configuration discovery out of the daemon account's home.
+            command
+                .env("HOME", "/proc/self/fd")
+                .env("XDG_CONFIG_HOME", "/proc/self/fd")
+                .env("DOCKER_CONFIG", "/proc/self/fd");
+            // The client initializes a libpod runtime path for non-root
+            // callers, even with a rootful engine on the other end.
+            command.env("XDG_RUNTIME_DIR", "/run/suifleet-podman");
+        }
+        command
+    }
+
+    async fn check(self, descriptor: &Descriptor) -> anyhow::Result<()> {
+        if self == Self::Docker {
+            return Ok(());
+        }
+        ensure!(
+            descriptor.platform != "linux/arm/v7",
+            "Podman OCI does not support linux/arm/v7: image inspect cannot verify the ARM variant"
+        );
+        ensure!(
+            self != Self::PodmanRootless || descriptor.network == "none",
+            "rootless Podman supports only OCI network none"
+        );
+        let bytes = output(self, public(), &args(&["info", "--format", "json"]), 20).await?;
+        let info: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let host = &info["host"];
+        ensure!(
+            host["security"]["rootless"].as_bool() == Some(self == Self::PodmanRootless),
+            "Podman socket mode does not match the selected OCI engine"
+        );
+        ensure!(
+            host["cgroupVersion"] == "v2"
+                && host["cgroupControllers"]
+                    .as_array()
+                    .is_some_and(|controllers| ["cpu", "memory", "pids"]
+                        .iter()
+                        .all(|name| controllers.iter().any(|entry| entry == *name))),
+            "Podman OCI requires cgroup v2 with delegated cpu, memory and pids controllers"
+        );
+        ensure!(
+            host["security"]["seccompEnabled"] == true,
+            "Podman OCI requires engine seccomp support"
+        );
+        Ok(())
+    }
+}
+
+fn workspace_root(workspace: &Path) -> anyhow::Result<&Path> {
+    workspace
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .context("invalid OCI workspace")
+}
+
+#[cfg(test)]
+pub(crate) fn test_command(root: &Path) -> std::process::Command {
+    Engine::selected(root).unwrap().command(public()).into_std()
+}
+
+async fn output(
+    engine: Engine,
+    config: &Path,
+    args: &[String],
+    seconds: u64,
+) -> anyhow::Result<Vec<u8>> {
+    if engine == Engine::Docker && config == public() && config.join("config.json").exists() {
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(config.join("config.json"))?)?;
         ensure!(
@@ -192,7 +321,7 @@ async fn output(config: &Path, args: &[String], seconds: u64) -> anyhow::Result<
             "anonymous OCI config must be empty"
         );
     }
-    let mut c = command(config);
+    let mut c = engine.command(config);
     c.args(args).stdout(Stdio::piped()).stderr(Stdio::null());
     // A readiness/select cancellation must not abandon a registered helper.
     // The bounded task completes/reaps independently if its caller goes away.
@@ -245,22 +374,37 @@ fn public() -> &'static Path {
 
 /// Pull only during deployment. Bootstrap, crash restart and rollback require
 /// the retained exact image; they never contact a registry or resolve a tag.
-pub async fn prepare(artifact: &Path) -> anyhow::Result<()> {
+pub async fn prepare(root: &Path, artifact: &Path) -> anyhow::Result<()> {
     let d = Descriptor::load(artifact)?;
-    if verify(&d).await.is_err() {
+    let engine = Engine::selected(root)?;
+    engine.check(&d).await?;
+    if verify(engine, &d).await.is_err() {
         let config = d.config()?;
-        output(
-            &config,
-            &args(&["image", "pull", "--platform", &d.platform, &d.image]),
-            120,
-        )
-        .await?;
-        verify(&d).await?;
+        let mut pull = args(&["image", "pull", "--platform", &d.platform]);
+        if engine != Engine::Docker {
+            pull.extend(args(&["--tls-verify=true"]));
+            let auth = if d.registry_auth.is_some() {
+                config.join("config.json")
+            } else {
+                let auth = root.join(ANONYMOUS_AUTH);
+                crate::configuration::write_private(&auth, &serde_json::json!({}))?;
+                auth
+            };
+            pull.push("--authfile".into());
+            pull.push(
+                auth.to_str()
+                    .context("OCI auth path is not UTF-8")?
+                    .to_owned(),
+            );
+        }
+        pull.push(d.image.clone());
+        output(engine, &config, &pull, 120).await?;
+        verify(engine, &d).await?;
     }
     Ok(())
 }
-async fn verify(d: &Descriptor) -> anyhow::Result<()> {
-    let bytes = output(public(), &args(&["image", "inspect", &d.image]), 20).await?;
+async fn verify(engine: Engine, d: &Descriptor) -> anyhow::Result<()> {
+    let bytes = output(engine, public(), &args(&["image", "inspect", &d.image]), 20).await?;
     let values: Vec<serde_json::Value> = serde_json::from_slice(&bytes)?;
     let v = values.first().context("missing OCI image")?;
     let platform = format!(
@@ -299,7 +443,9 @@ pub async fn clean(root: &Path) -> anyhow::Result<()> {
     if !root.join(ENGINE_MARKER).exists() {
         return Ok(());
     }
+    let engine = Engine::selected(root)?;
     let bytes = output(
+        engine,
         public(),
         &args(&[
             "container",
@@ -317,7 +463,13 @@ pub async fn clean(root: &Path) -> anyhow::Result<()> {
             id.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid OCI container ID"
         );
-        output(public(), &args(&["container", "rm", "--force", id]), 20).await?;
+        output(
+            engine,
+            public(),
+            &args(&["container", "rm", "--force", id]),
+            20,
+        )
+        .await?;
     }
     // Only a confirmed global cleanup can discharge the durable engine
     // obligation. Retained versions alone do not require a running engine.
@@ -329,7 +481,9 @@ pub async fn clean(root: &Path) -> anyhow::Result<()> {
 
 fn has_components(root: &Path) -> anyhow::Result<bool> {
     Ok(std::fs::read_dir(root)?.any(|entry| {
-        entry.map(|entry| entry.path().join("oci-engine").exists()).unwrap_or(true)
+        entry
+            .map(|entry| entry.path().join("oci-engine").exists())
+            .unwrap_or(true)
     }))
 }
 
@@ -365,13 +519,19 @@ pub async fn start(root: &Path, workspace: &Path) -> anyhow::Result<tokio::proce
         crate::walrus_client::sha256_file(&workspace.join("artifact"))? == expected,
         "OCI descriptor digest mismatch"
     );
-    verify(&d).await?;
+    let engine = Engine::selected(root)?;
+    engine.check(&d).await?;
+    verify(engine, &d).await?;
     let container = name(workspace);
     // The marker is durable before any create can reach the engine.
     if !root.join(ENGINE_MARKER).exists() {
         crate::configuration::write_private(
             &root.join(ENGINE_MARKER),
-            &serde_json::json!({"version":1}),
+            &EngineMarker {
+                version: 1,
+                engine,
+                rootless_uid: engine.rootless_uid(),
+            },
         )?;
     }
     // Failed cleanup must prevent a second create/start, never overlap runs.
@@ -418,14 +578,28 @@ pub async fn start(root: &Path, workspace: &Path) -> anyhow::Result<tokio::proce
         &d.cpus.to_string(),
         "--pids-limit",
         &d.pids_limit.to_string(),
-        "--log-driver",
-        "local",
-        "--log-opt",
-        "max-size=1m",
-        "--log-opt",
-        "max-file=2",
         "--no-healthcheck",
     ]);
+    if engine == Engine::Docker {
+        a.extend(args(&[
+            "--log-driver",
+            "local",
+            "--log-opt",
+            "max-size=1m",
+            "--log-opt",
+            "max-file=2",
+        ]));
+    } else {
+        a.extend(args(&[
+            "--read-only-tmpfs=false",
+            "--image-volume=ignore",
+            "--log-driver=k8s-file",
+            "--log-opt=max-size=1m",
+            "--cgroups=enabled",
+            "--http-proxy=false",
+            "--systemd=false",
+        ]));
+    }
     if d.tmpfs_bytes > 0 {
         a.extend(args(&[
             "--tmpfs",
@@ -434,8 +608,10 @@ pub async fn start(root: &Path, workspace: &Path) -> anyhow::Result<tokio::proce
     }
     a.push(d.image);
     a.extend(d.command);
-    output(public(), &a, 20).await?;
-    let mut c = command(public());
+    output(engine, public(), &a, 20)
+        .await
+        .context("OCI engine rejected container creation with the required isolation and limits")?;
+    let mut c = engine.command(public());
     c.args(["container", "start", "--attach", &container]);
     Ok(c)
 }
@@ -445,8 +621,11 @@ pub async fn clean_component(component: &Path) -> anyhow::Result<()> {
         !component.join("test-engine-unavailable").exists(),
         "injected OCI engine mutation outage"
     );
+    let root = component.parent().context("invalid OCI component")?;
+    let engine = Engine::selected(root)?;
     let filter = format!("label=io.suifleet.component={}", scope(component));
     let bytes = output(
+        engine,
         public(),
         &args(&["container", "ls", "-aq", "--filter", &filter]),
         20,
@@ -457,7 +636,13 @@ pub async fn clean_component(component: &Path) -> anyhow::Result<()> {
             id.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid OCI container ID"
         );
-        output(public(), &args(&["container", "rm", "--force", id]), 20).await?;
+        output(
+            engine,
+            public(),
+            &args(&["container", "rm", "--force", id]),
+            20,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -465,17 +650,19 @@ pub async fn clean_component(component: &Path) -> anyhow::Result<()> {
 pub async fn remove(workspace: &Path) -> anyhow::Result<()> {
     #[cfg(test)]
     ensure!(
-        !workspace.parent().and_then(Path::parent).context("invalid OCI workspace")?
-            .join("test-engine-unavailable").exists(),
+        !workspace
+            .parent()
+            .and_then(Path::parent)
+            .context("invalid OCI workspace")?
+            .join("test-engine-unavailable")
+            .exists(),
         "injected OCI engine mutation outage"
     );
     let container = name(workspace);
-    let root = workspace
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .context("invalid OCI workspace")?;
+    let root = workspace_root(workspace)?;
+    let engine = Engine::selected(root)?;
     let bytes = output(
+        engine,
         public(),
         &args(&[
             "container",
@@ -494,14 +681,22 @@ pub async fn remove(workspace: &Path) -> anyhow::Result<()> {
             id.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid OCI container ID"
         );
-        output(public(), &args(&["container", "rm", "--force", id]), 20).await?;
+        output(
+            engine,
+            public(),
+            &args(&["container", "rm", "--force", id]),
+            20,
+        )
+        .await?;
     }
     Ok(())
 }
 pub async fn ready(workspace: &Path) -> anyhow::Result<()> {
+    let engine = Engine::selected(workspace_root(workspace)?)?;
     let d = Descriptor::load(&workspace.join("artifact"))?;
     let container = name(workspace);
     let bytes = output(
+        engine,
         public(),
         &args(&[
             "container",
@@ -517,7 +712,7 @@ pub async fn ready(workspace: &Path) -> anyhow::Result<()> {
     if !d.readiness.is_empty() {
         let mut a = args(&["container", "exec", &container]);
         a.extend(d.readiness);
-        output(public(), &a, 10).await?;
+        output(engine, public(), &a, 10).await?;
     }
     Ok(())
 }
@@ -532,7 +727,9 @@ pub async fn stop(workspace: &Path, seconds: u64) -> anyhow::Result<()> {
             .exists(),
         "injected OCI engine mutation outage"
     );
+    let engine = Engine::selected(workspace_root(workspace)?)?;
     output(
+        engine,
         public(),
         &args(&[
             "container",
@@ -557,6 +754,39 @@ mod tests {
     fn descriptor() -> Descriptor {
         serde_json::from_value(serde_json::json!({"version":1,"image":format!("example.com/app@sha256:{}", "a".repeat(64)),"platform":host_platform(),"user":"1000:1000","memoryBytes":67108864u64,"cpus":1,"pidsLimit":32,"network":"none","tmpfsBytes":1048576})).unwrap()
     }
+    #[test]
+    fn legacy_recovery_marker_selects_docker() {
+        let marker: EngineMarker = serde_json::from_str(r#"{"version":1}"#).unwrap();
+        assert_eq!(marker.engine, Engine::Docker);
+        assert!(marker.rootless_uid.is_none());
+    }
+
+    #[tokio::test]
+    async fn rejects_podman_armv7_before_engine_operation() {
+        let mut descriptor = descriptor();
+        descriptor.platform = "linux/arm/v7".to_owned();
+        for engine in [Engine::PodmanRootful, Engine::PodmanRootless] {
+            assert_eq!(
+                engine.check(&descriptor).await.unwrap_err().to_string(),
+                "Podman OCI does not support linux/arm/v7: image inspect cannot verify the ARM variant"
+            );
+        }
+        assert!(Engine::Docker.check(&descriptor).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn rejects_rootless_bridge_before_engine_operation() {
+        let mut descriptor = descriptor();
+        descriptor.platform = "linux/amd64".to_owned();
+        descriptor.network = "bridge".to_owned();
+        assert!(Engine::PodmanRootless
+            .check(&descriptor)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("supports only OCI network none"));
+    }
+
     #[test]
     fn rejects_mutable_images_and_escape_flags() {
         let mut d = descriptor();
@@ -643,7 +873,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires local Docker Engine"]
     async fn oci_real_engine_forwards_private_registry_profile_and_rejects_bad_auth() {
-        use base64::Engine;
+        use base64::Engine as _;
         use std::{
             io::{Read, Write},
             sync::{
@@ -695,6 +925,7 @@ mod tests {
         let config = d.config_at(&base).unwrap();
         let image = format!("{registry}/test/app@sha256:{}", "a".repeat(64));
         let result = output(
+            Engine::Docker,
             &config,
             &args(&["image", "pull", "--platform", host_platform(), &image]),
             30,
@@ -719,12 +950,13 @@ mod tests {
     async fn oci_real_engine_reaps_timed_out_and_cancelled_helpers() {
         let filter = format!("label=io.suifleet.cancel-test={}", std::process::id());
         let command = args(&["events", "--filter", &filter]);
-        assert!(output(public(), &command, 1)
+        assert!(output(Engine::Docker, public(), &command, 1)
             .await
             .unwrap_err()
             .to_string()
             .contains("timed out"));
-        let cancelled = tokio::spawn(async move { output(public(), &command, 1).await });
+        let cancelled =
+            tokio::spawn(async move { output(Engine::Docker, public(), &command, 1).await });
         tokio::time::sleep(Duration::from_millis(200)).await;
         cancelled.abort();
         let _ = cancelled.await;

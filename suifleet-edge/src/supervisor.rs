@@ -418,7 +418,7 @@ impl Supervisor {
         // including paths that return early or are interrupted.
         if spec.run == crate::oci::RUN {
             anyhow::ensure!(install.is_none() && spec.shutdown.is_none() && spec.readiness.is_none(), "OCI lifecycle is adapter-owned");
-            crate::oci::prepare(artifact).await?;
+            crate::oci::prepare(&self.root, artifact).await?;
         }
         self.begin_install(&spec.name)?;
         let workspace = self.workspace(&spec);
@@ -2616,7 +2616,7 @@ mod tests {
         assert!(s.active.is_empty(), "nothing was installed or committed");
     }
     #[tokio::test]
-    #[ignore = "requires local Docker Engine and SF_OCI_TEST_IMAGE"]
+    #[ignore = "requires a local OCI engine and SF_OCI_TEST_IMAGE"]
     async fn oci_real_engine_successful_exit_retries_cleanup_without_rerun() {
         let image = std::env::var("SF_OCI_TEST_IMAGE").unwrap();
         for restart in [Restart::OnFailure, Restart::Never] {
@@ -2636,8 +2636,8 @@ mod tests {
             let name = { use sha2::Digest; format!("suifleet-{}", hex::encode(sha2::Sha256::digest(workspace.as_os_str().as_encoded_bytes()))) };
             let outage = f.dir.join("supervised/app/test-engine-unavailable");
             std::fs::write(&outage, b"test-only mutation failure").unwrap();
-            let mut command = std::process::Command::new("/usr/bin/docker");
-            command.args(["--host", "unix:///var/run/docker.sock", "exec", &name, "touch", "/tmp/exit"])
+            let mut command = crate::oci::test_command(&f.dir.join("supervised"));
+            command.args(["exec", &name, "touch", "/tmp/exit"])
                 .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
             let child = spawn_std_tracked(&mut command).unwrap();
             let pid = child.id();
@@ -2663,10 +2663,10 @@ mod tests {
         }
     }
 
-    /// Requires a local Linux Docker Engine and a pre-cached immutable Alpine
+    /// Requires a local Linux OCI engine and a pre-cached immutable Alpine
     /// image; does not pull, build, contact a registry or use chain credentials.
     #[tokio::test]
-    #[ignore = "requires local Docker Engine and SF_OCI_TEST_IMAGE"]
+    #[ignore = "requires a local OCI engine and SF_OCI_TEST_IMAGE"]
     async fn oci_real_engine_restarts_limits_rollback_and_offline_bootstrap() {
         let image = std::env::var("SF_OCI_TEST_IMAGE").expect("set fully qualified cached Alpine digest");
         let mut f = Fixture::new("oci-real");
@@ -2686,8 +2686,8 @@ mod tests {
         crate::oci::release_if_unused(&f.dir.join("supervised")).await.unwrap();
         assert!(crate::oci::ready(&workspace).await.is_ok(), "another component's retirement must preserve this run");
         let engine = |args: &[&str]| {
-            let mut c = std::process::Command::new("/usr/bin/docker");
-            c.args(["--host", "unix:///var/run/docker.sock"]).args(args)
+            let mut c = crate::oci::test_command(&f.dir.join("supervised"));
+            c.args(args)
                 .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
             let child = spawn_std_tracked(&mut c).unwrap();
             let pid = child.id();
@@ -2703,13 +2703,16 @@ mod tests {
         let host = &inspect[0]["HostConfig"];
         assert_eq!(host["Memory"], 67108864u64);
         assert_eq!(host["MemorySwap"], 67108864u64);
-        assert_eq!(host["NanoCpus"], 1000000000u64);
+        let docker = std::env::var("SUIFLEET_OCI_ENGINE").unwrap_or_else(|_| "docker".into()) == "docker";
+        if docker {
+            assert_eq!(host["NanoCpus"], 1000000000u64);
+        }
         assert_eq!(host["PidsLimit"], 32);
         assert_eq!(host["ReadonlyRootfs"], true);
         assert_eq!(host["NetworkMode"], "none");
-        assert_eq!(host["RestartPolicy"]["Name"], "no");
-        assert!(engine(&["exec", &id, "sh", "-c", "! touch /forbidden && grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status"]).status.success());
-        assert!(engine(&["exec", &id, "sh", "-c", "test $(cat /sys/fs/cgroup/memory.max) = 67108864 && test $(cat /sys/fs/cgroup/pids.max) = 32"]).status.success());
+        assert!(matches!(host["RestartPolicy"]["Name"].as_str(), Some("no" | "")));
+        assert!(engine(&["exec", &id, "sh", "-c", "test $(id -u) = 1000 && ! touch /forbidden && grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status"]).status.success());
+        assert!(engine(&["exec", &id, "sh", "-c", "test $(cat /sys/fs/cgroup/memory.max) = 67108864 && test $(cat /sys/fs/cgroup/pids.max) = 32 && test $(cat /sys/fs/cgroup/memory.swap.max) = 0 && read quota period </sys/fs/cgroup/cpu.max && test \"$quota\" = \"$period\""]).status.success());
         assert!(engine(&["exec", &id, "sh", "-c", "if dd if=/dev/zero of=/tmp/full bs=1048576 count=2 2>/dev/null; then exit 1; fi; rm /tmp/full"]).status.success());
         // A tampered retained descriptor must fail before a new engine run.
         let saved = std::fs::read(workspace.join("artifact")).unwrap();
@@ -2802,6 +2805,15 @@ mod tests {
         std::fs::write(&artifact, serde_json::to_vec(&denied).unwrap()).unwrap();
         assert!(s.deploy(f.spec("auth-missing", crate::oci::RUN), &artifact, None, &f.runner, "missing", &record).await.is_err());
         assert_eq!(phase(&s), Phase::Running);
+        if std::env::var("SUIFLEET_OCI_ENGINE").as_deref() == Ok("podman-rootless") {
+            let mut unsupported = descriptor(&[]);
+            unsupported["network"] = serde_json::json!("bridge");
+            std::fs::write(&artifact, serde_json::to_vec(&unsupported).unwrap()).unwrap();
+            let error = s.deploy(f.spec("bridge", crate::oci::RUN), &artifact, None, &f.runner, "oci-bridge", &record).await.unwrap_err();
+            assert!(error.to_string().contains("supports only OCI network none"));
+            assert_eq!(s.status()["app"].version, "1");
+            assert_eq!(phase(&s), Phase::Running);
+        }
         // A cached but unready replacement must restore the known-good image.
         let bad = f.spec("2", crate::oci::RUN);
         std::fs::write(&artifact, serde_json::to_vec(&descriptor(&["false"])).unwrap()).unwrap();
@@ -2824,6 +2836,14 @@ mod tests {
         assert!(crate::oci::ready(&workspace).await.is_err(), "startup retained an orphan container");
         s.bootstrap().await;
         assert_eq!(phase(&s), Phase::Running);
+        let replacement = f.spec("3", crate::oci::RUN);
+        let mut updated = descriptor(&["test", "-f", "/tmp/updated"]);
+        updated["command"] = serde_json::json!(["sh", "-c", "touch /tmp/updated; exec sleep 300"]);
+        std::fs::write(&artifact, serde_json::to_vec(&updated).unwrap()).unwrap();
+        s.deploy(replacement.clone(), &artifact, None, &f.runner, "oci-update", &record).await.unwrap();
+        assert_eq!(s.status()["app"].version, "3");
+        assert!(crate::oci::ready(&s.workspace(&replacement)).await.is_ok());
+        assert!(crate::oci::ready(&workspace).await.is_err());
         s.stop_all().await;
         crate::oci::clean(&f.dir.join("supervised")).await.unwrap();
         assert!(f.dir.join("supervised/@oci-engine").exists());
