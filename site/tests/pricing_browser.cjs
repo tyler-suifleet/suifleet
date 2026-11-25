@@ -25,12 +25,12 @@ const { chromium } = require('../../dapp/node_modules/playwright');
       await page.getByRole('link', { name: 'Discuss a private pilot or quote' }).click();
       await page.getByRole('heading', { name: 'Private pilot and quote requests' }).waitFor();
       assert.equal(await page.locator('main a[href="mailto:hello@suifleet.io"]').count(), 1);
-      assert.match(await page.locator('main').innerText(), /Mailbox delivery and response times are not yet verified/);
+      assert.match(await page.locator('main').innerText(), /provide a written quote/);
       await page.goto('https://pricing.test/privacy/');
       assert.equal(await page.locator('main a[href="mailto:hello@suifleet.io"]').count(), 1);
-      assert.match(await page.locator('main').innerText(), /Delivery and response times are not yet verified/);
+      assert.match(await page.locator('main').innerText(), /private security reporting/);
       await page.goto('https://pricing.test/docs/');
-      assert.equal(await page.getByRole('link', { name: 'documentation site', exact: true }).getAttribute('href'), 'https://docs.suifleet.io/');
+      assert.equal(await page.getByRole('link', { name: 'the public documentation site', exact: true }).getAttribute('href'), 'https://docs.suifleet.io/');
       for (const url of ['pricing', 'contact', 'privacy', 'docs']) {
         await page.goto(`https://pricing.test/${url}/`);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${url} overflow at ${width}`);

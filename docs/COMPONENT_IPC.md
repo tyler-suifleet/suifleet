@@ -48,7 +48,7 @@ name and operations; topics are exact strings, without wildcards. Component ACLs
 cannot grant `install` or `list`. Operators explicitly listed as administrators
 can manage all components and access their logs/public configuration.
 
-The shipped supervisor still runs components as the daemon user. **Those shared-UID
+The native command supervisor still runs components as the daemon user. **Those shared-UID
 processes are denied component IPC and cannot be made administrators.** Provision
 IPC clients as separate platform-managed Unix services/users with access only to
 the socket, not daemon keys/state/configuration or sibling credentials. This ticket
@@ -56,8 +56,10 @@ does not introduce per-component Unix execution users or turn existing shared-us
 supervision into an isolation boundary. The daemon user, root, operator ACL file
 and daemon-owned socket directory are trusted infrastructure; running untrusted
 code as that user compromises this boundary, including socket integrity. Do not
-use bearer credentials to pretend to isolate same-UID components. The UID mapping
-is a local platform identity; it is not a Sui account or cloud authorization grant.
+use bearer credentials to pretend to isolate same-UID components. For Docker
+components, see [OCI device-local grants](OCI_COMPONENTS.md#device-local-grants-for-descriptor-version-2).
+The UID mapping is a local platform identity; it is not a Sui account or cloud
+authorization grant.
 
 At most 64 component principals, 16 administrators, 128 total subscriptions and
 128 publication topics per component are accepted. Validate configuration before

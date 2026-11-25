@@ -297,6 +297,8 @@ pub struct ComponentsConfig {
     /// Run in the previous committed version workspace, never for platform installers.
     #[serde(default)]
     pub recovery_commands: std::collections::BTreeMap<String, String>,
+    /// Device-local grants for version 2 OCI descriptors.
+    pub oci_grants: std::collections::BTreeMap<String, crate::oci::Grant>,
 }
 impl Default for ComponentsConfig {
     fn default() -> Self {
@@ -306,6 +308,7 @@ impl Default for ComponentsConfig {
             configuration_overlay_dir: "/etc/suifleet/component-config".into(),
             configuration_defer_max_seconds: 86_400,
             recovery_commands: Default::default(),
+            oci_grants: Default::default(),
         }
     }
 }
@@ -835,6 +838,13 @@ impl FirmwareHelperConfig {
 }
 
 impl Config {
+    pub fn oci_policy(&self) -> crate::oci::Policy {
+        crate::oci::Policy {
+            grants: self.components.oci_grants.clone(),
+            ipc: self.ipc.clone(),
+        }
+    }
+
     /// Walrus archives own the durable log cursor when enabled. HTTP and
     /// on-chain health are mutually exclusive (their signed schema is shared).
     pub fn http_logs_enabled(&self) -> bool {
@@ -846,6 +856,7 @@ impl Config {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
+        cfg.oci_policy().validate()?;
         if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
         if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());

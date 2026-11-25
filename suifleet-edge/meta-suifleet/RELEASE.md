@@ -23,8 +23,10 @@ hashes and license metadata in the same change. Run BitBake
 Build `suifleet`, `suifleet-node` and `suifleet-walrus-codec`, and run
 `yocto-check-layer` against the standalone checkout on each advertised series.
 Use a fresh build directory for validation and record the dependency commits,
-compiler, task outcomes and package QA. Keep downstream image access policy
-and distro workarounds in the separate integration layer.
+compiler, task outcomes and package QA. Keep downstream image access policy in the separate integration layer. Enable
+`INHERIT += "suifleet-core-fixes"` explicitly to reproduce the standalone
+configuration described in README.md. Release branches require recipe and
+layer-check evidence for each series at the published pin.
 
 ## Layer Index worksheet
 
@@ -38,12 +40,12 @@ Use the [OpenEmbedded Layer Index form](https://layers.openembedded.org/layerind
 | Repository | https://github.com/tyler-suifleet/meta-suifleet.git |
 | Web URL | https://github.com/tyler-suifleet/meta-suifleet |
 | Subdirectory | Leave empty, the layer is at the repository root |
-| Series branches | scarthgap and wrynose, after checking both remote refs and their build receipts |
+| Series branches | kirkstone, scarthgap and wrynose, after checking each remote ref and its build receipt |
 | Dependencies | openembedded-core and meta-oe |
 | Maintainer | Tyler Bush, tyler.jonathan.bush@gmail.com |
 | License | MIT metadata, with recipe-specific payload licenses |
 
-Record submission confirmation and the listing URL separately in
+The CAPTCHA submission remains deferred. Record submission confirmation and the listing URL separately in
 [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820).
 The Index entry and optional Yocto Project Compatible certification have
 separate requirements.

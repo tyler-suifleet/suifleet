@@ -12,17 +12,17 @@ LICENSE = "Apache-2.0 & BSD-3-Clause & CC0-1.0 & MIT & Unicode-3.0"
 LIC_FILES_CHKSUM = "file://THIRD_PARTY_LICENSES.txt;md5=58ddbd6c47a43049d41c1e1c60972c43"
 
 # Generated with the pinned daemon source and frozen pnpm lockfile.
-SRC_URI = "https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/a4d5a3b16c7e3ab9fdccfd13032b7b3af4bfb87a/suifleet-walrus-codec-${SUIFLEET_CODEC_SOURCE_REV}.tar.gz;subdir=codec"
-SRC_URI[sha256sum] = "208d4b8fd1d38fbafe4a6f49c08645ffb6b6e6c0052dbe266a4398f7928b96a6"
+SRC_URI = "https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/07610303b4ef96843140a35e2028139cc28a76eb/suifleet-walrus-codec-${SUIFLEET_CODEC_SOURCE_REV}.tar.gz;subdir=codec"
+SRC_URI[sha256sum] = "fae67d9cd6a6c501b4afa62c06d8ac7b85d395a7cadbc771d96ee063966bbd9b"
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/codec"
 
-SUIFLEET_CODEC_SOURCE_REV = "212d989af09f847e7f60941a6814b7e6715e997b"
+SUIFLEET_CODEC_SOURCE_REV = "b9bb2ef6210624d732ab2de2075ea1826e5300c1"
 SUIFLEET_CODEC_SHA256[walrus-device-codec.cjs] = "4bdf599f13185393ca20d89a8c8ba6330e96fe596fa4028d91ae9de76972d423"
 SUIFLEET_CODEC_SHA256[walrus_wasm_bg.wasm] = "649f85e5306ebb14e5d36b1edfdb03be5deef4b5e21c9ed06ca030b03b41335a"
 SUIFLEET_CODEC_SHA256[manifest.json] = "91811ce2611bdee2e6b7eac15ddd185178971d8b5ba4e4d7d4ca2c7bddc6cb04"
 SUIFLEET_CODEC_SHA256[THIRD_PARTY_LICENSES.txt] = "eb308bd5d1012b4e741d853817657298eaa9cc4aa7d713d7b8a71a3872085cbc"
-SUIFLEET_CODEC_SHA256[provenance.json] = "31b27fa502ef3e192855e9db2fb4a819c851615dc7c231ee5e911d865dd0792b"
+SUIFLEET_CODEC_SHA256[provenance.json] = "dcd292a9c5026bc56882f13bba128ad0ad6d562cba46ce017a306f7170a42c85"
 SUIFLEET_CODEC_NODE_VERSION = "22.22.2"
 SUIFLEET_CODEC_DIR = "${libdir}/suifleet/walrus-codec"
 

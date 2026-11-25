@@ -9,16 +9,20 @@ Operators installing a first device should follow
 [Install the device client](INSTALL_DEVICE_CLIENT.md#yocto-image-and-recipe);
 this page records the packaging details and evidence.
 
+See the [edge platform compatibility matrix](EDGE_PLATFORM_COMPATIBILITY.md)
+for candidate kernels, libc variants and older Yocto series.
+
 ## Standalone software layer
 
 The public [meta-suifleet repository](https://github.com/tyler-suifleet/meta-suifleet)
-contains the software layer. The core checkout keeps a copy for packaging tests
-and native Linux installation. Pi image/access policy, the test component and
-distro-specific workarounds remain in the separate
-`suifleet-edge/meta-suifleet-integration` layer, which the core kas profiles
-include. Generic consumers use the software layer with their own distro and BSP.
-[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) tracks release
-validation and OpenEmbedded Layer Index submission.
+contains the software layer. The core checkout keeps a mirror for packaging tests
+and native Linux installation. The separate integration layer contains Pi image
+and access policy, the test component and a cache-hygiene guard for glibc. Core
+kas profiles use both layers. Generic consumers bring their own distro and BSP
+and can opt into `INHERIT += "suifleet-core-fixes"` for the documented OE-Core
+fixes. See [standalone validation](YOCTO_STANDALONE_VALIDATION.md) for prior
+per-source evidence and [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820)
+for public release validation and the deferred Layer Index submission.
 
 ## Pinned build inputs
 
@@ -31,7 +35,7 @@ LLVM backends are limited to AArch64 and X86 for this ARM64 target/x86 build hos
 Other hosts/architectures need a deliberate profile change and validation.
 
 The recipe and codec use separately checksum-pinned public source tarballs
-from reviewed core commit `212d989af09f847e7f60941a6814b7e6715e997b` (client 0.2.3).
+from reviewed core commit `b9bb2ef6210624d732ab2de2075ea1826e5300c1` (client 0.2.3).
 The Cargo.lock SHA-256 is
 `c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6`.
 The archive download and unpack layout are independent of the core checkout.
@@ -49,13 +53,6 @@ The bootable SD image profile, access provisioning and flashing instructions are
 in [PI_IMAGE.md](PI_IMAGE.md). Historical validation below remains tied to its
 recorded older sources; use the per-source evidence rather than attributing an older image to the current pin.
 
-To update: select a reviewed source revision, update `SRCREV`, run
-`bitbake -c update_crates suifleet`, and update `SUIFLEET_LOCK_SHA256` from that
-revision's `suifleet-edge/Cargo.lock`. Review the generated include and build
-the package/image again. Yocto documents this workflow in its
-[Cargo classes reference](https://docs.yoctoproject.org/5.0.17/ref-manual/classes.html#cargo-update-recipe-crates).
-Do not merely disable the digest check to accommodate a lockfile change.
-
 The Wrynose profiles are [packaging-wrynose.yml](../kas/packaging-wrynose.yml)
 and [packaging-wrynose-qemu.yml](../kas/packaging-wrynose-qemu.yml). They pin
 OE-Core, BitBake 2.18, meta-openembedded and meta-raspberrypi directly and use
@@ -64,8 +61,12 @@ Both series have the package/image and emulated boot validation recorded below.
 Support here covers the ARM64 Pi client package and writable-root QEMU image;
 physical Pi image/boot acceptance remains SF-029/SF-031. See the [Wrynose migration guide](https://docs.yoctoproject.org/6.0/migration-guides/migration-6.0.html).
 
-Both recipe variants preserve core's `UNPACKDIR` when present and fall back to
-`WORKDIR` only for Scarthgap. The daemon archive unpacks to `source` on both releases;
+Kirkstone has its own pinned profiles and Rust mixin; its measured build,
+emulated runtime, kernel/signer limit and the Dunfell toolchain blocker are
+recorded in [older Yocto series](YOCTO_LEGACY_SERIES.md).
+
+All three profiles preserve core's `UNPACKDIR` when present and fall back to
+`WORKDIR` for older BitBake. The daemon archive unpacks to `source` on all three series;
 local install inputs use `UNPACKDIR`. Before configure, the recipe executes the
 staged compiler's `--version` and rejects Rust below 1.90.0. The mixin dependency
 belongs to the Scarthgap kas profile, rather than the reusable layer.

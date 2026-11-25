@@ -2,7 +2,7 @@
 """Reproducible SuiFleet daemon release bundles (SF-039).
 
     release.py build --out dist [--ref HEAD] [--image suifleet-release:local] [--reproduce]
-                     [--target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|i686-unknown-linux-gnu]
+                     [--target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|armv7-unknown-linux-gnueabihf|i686-unknown-linux-gnu]
 
 On the host: exports exactly the committed tree of REF with `git archive` (so
 uncommitted files can never leak into a release), then builds inside the
@@ -35,7 +35,12 @@ import tempfile
 
 # Supported release targets and their pinned cross linkers (docker/release.Dockerfile).
 # i686 is 32-bit Linux x86 (SF-076, docs/LINUX_X86.md).
-LINKERS = {"x86_64-unknown-linux-gnu": "gcc", "aarch64-unknown-linux-gnu": "aarch64-linux-gnu-gcc", "i686-unknown-linux-gnu": "i686-linux-gnu-gcc"}
+LINKERS = {
+    "x86_64-unknown-linux-gnu": "gcc",
+    "aarch64-unknown-linux-gnu": "aarch64-linux-gnu-gcc",
+    "armv7-unknown-linux-gnueabihf": "arm-linux-gnueabihf-gcc",
+    "i686-unknown-linux-gnu": "i686-linux-gnu-gcc",
+}
 TARGET = "aarch64-unknown-linux-gnu"
 NAMESPACE = "https://github.com/tyler-suifleet/suifleet/releases"
 
@@ -116,11 +121,21 @@ def container_build(args):
     binary = target_dir / TARGET / "release" / "suifleet"
 
     tarball = out / f"suifleet-{version}-{commit[:12]}-{TARGET}.tar.gz"
-    write_tarball(tarball, epoch, [
+    entries = [
         ("suifleet/bin/suifleet", binary.read_bytes(), 0o755),
         ("suifleet/LICENSE", (src / "LICENSE").read_bytes(), 0o644),
         ("suifleet/config.example.toml", (edge / "config.example.toml").read_bytes(), 0o644),
-    ])
+    ]
+    service_files = edge / "meta-suifleet/recipes-edge/suifleet/files"
+    for name in (
+        "config.toml.example", "signer.toml.example", "suifleet.service",
+        "suifleet-provision.service", "suifleet-enrollment.path",
+        "suifleet-signer.service", "suifleet-signer.socket",
+    ):
+        entries.append((f"suifleet/systemd/{name}", (service_files / name).read_bytes(), 0o644))
+    entries.append(("suifleet/libexec/suifleet-provision",
+                    (service_files / "suifleet-provision").read_bytes(), 0o755))
+    write_tarball(tarball, epoch, entries)
 
     # The exact build graph: normal dependencies for TARGET with the features
     # a release build resolves (cargo metadata would also unify dev features).
@@ -150,7 +165,9 @@ def container_build(args):
         "dpkg_deb": run("dpkg-deb", "--version", capture=True).splitlines()[0],
         "source": "git archive of the commit; no working-tree files",
     })
-    artifacts = [tarball, sbom, provenance]
+    archive_checksum = out / (tarball.name + ".sha256")
+    archive_checksum.write_text(sha256(tarball) + "  " + tarball.name + "\n")
+    artifacts = [tarball, archive_checksum, sbom, provenance]
     if TARGET in ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"):
         from build_deb import build as build_deb
         architecture = {"x86_64-unknown-linux-gnu": "amd64", "aarch64-unknown-linux-gnu": "arm64"}[TARGET]
