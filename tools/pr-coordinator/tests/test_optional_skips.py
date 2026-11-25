@@ -188,6 +188,8 @@ class OptionalSkips(unittest.TestCase):
         import hashlib
         from pathlib import Path
         root = Path(c.__file__).resolve().parents[2]
+        if not (root/'.github/workflows').is_dir():
+            self.skipTest('Runtime-only activation snapshot omits CI sources; repository CI verifies their pins')
         def blob(name):
             data = (root/name).read_bytes()
             return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
