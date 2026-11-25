@@ -13,25 +13,30 @@ scarthgap and wrynose), each with its pinned core-repository kas profile
 (`kas/packaging-kirkstone.yml`, `kas/packaging.yml`, `kas/packaging-wrynose.yml`).
 A newly declared series inherits every per-series step here.
 
-The recorded successful recipe builds on every declared series used both the
-software layer and the core repository's meta-suifleet-integration layer. That
-layer supplied OpenSSL install serialization (`PARALLEL_MAKEINST = "-j1"`,
-unconditional, so also active on Kirkstone's OpenSSL 3.0), Wrynose libcap
-target-toolchain relink fixes, Wrynose xzmore Bash interpreter/runtime-dependency
-fixes, and the AArch64 glibc usrmerge loader/linker-script guard. None of these
-core-recipe appends is included in the standalone export.
+The recorded successful integrated recipe builds used both the software layer and
+the core repository's meta-suifleet-integration layer. That layer's OpenSSL,
+libcap and xz fixes are now the software layer's opt-in `suifleet-core-fixes`
+class, which the integration layer inherits (OpenSSL serialization remains
+unconditional, so it is also active on Kirkstone's OpenSSL 3.0). Identical task
+signatures were verified on the Scarthgap and Wrynose profiles. Its remaining
+glibc usrmerge guard is local cache hygiene, not an upstream defect.
 
-Standalone consumers must supply equivalent distro fixes/guards and validate
-the resulting builds, or accept unvalidated status and possible build failures.
-The extracted export passed yocto-check-layer on each declared series
-(Kirkstone: PASS, 7 tests, 2 BSP/distro skips; see the core repository's
-docs/YOCTO_LEGACY_SERIES.md), but a layer check is not a recipe task-execution
-build. Before advertising standalone build support, build `suifleet`,
-`suifleet-node` and `suifleet-walrus-codec` from the extracted export without
-meta-suifleet-integration on every declared series, recording any separately
-supplied distro fixes and package QA results. That standalone build is tracked
-in SF-308 and has not been run on any series. Do not add the integration layer
-blindly: it also contains board/access/test policy.
+Standalone consumers that hit those OE-Core defects enable
+`INHERIT += "suifleet-core-fixes"`. On Scarthgap and Wrynose, the extracted export
+with the class enabled and without meta-suifleet-integration built `suifleet`,
+`suifleet-node`, `suifleet-walrus-codec` and `core-image-minimal` for
+`qemuarm64`. Package QA passed and the image booted in QEMU. The core
+repository's `docs/YOCTO_STANDALONE_VALIDATION.md` records the results.
+On Kirkstone, the earlier SF-309 export that first declared the series, before
+this class was added, passed yocto-check-layer (PASS, 7 tests, 2 BSP/distro
+skips; see the core repository's docs/YOCTO_LEGACY_SERIES.md). The current export
+with the class has not been layer-checked on Kirkstone, and a layer check is not
+a recipe task-execution build: no Kirkstone build without
+meta-suifleet-integration has been run. Repeat the standalone build for
+Kirkstone and any other series, machine or distro, recording any separately
+supplied distro fixes and package QA results, before claiming support for it.
+Those emulator results are not physical target acceptance. Do not add the
+integration layer blindly: it also contains board/access/test policy.
 
 ## Source availability and synchronization
 
