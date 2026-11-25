@@ -208,11 +208,15 @@ Keep each series in its own work tree; do not mix release TMPDIRs. A local
 codec artifact directory without changing source pins. The QEMU boot check
 uses the QEMU build directory, not the Pi one exported last above. Set
 `TMP` to that build's `TMPDIR` (`$KAS_BUILD_DIR/tmp` unless `site.conf`
-moves it) and put the native QEMU's library directory in `LD_LIBRARY_PATH`:
+moves it). The native `qemu-system-aarch64` (QEMU 6.2.0) links
+`libfdt.so.1`, which comes from `dtc-native` and is not on the host's default
+library path. Without `LD_LIBRARY_PATH` it fails to start in a clean shell:
 
 ```sh
 export KAS_BUILD_DIR="$KAS_WORK_DIR/build-qemu"
 TMP="$KAS_BUILD_DIR/tmp"
+export LD_LIBRARY_PATH="$TMP/sysroots-components/x86_64/dtc-native/usr/lib"
+"$TMP/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64" --version
 python3 scripts/test_yocto_boot.py --extended \
   --qemu "$TMP/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64" \
   --kernel "$TMP/deploy/images/qemuarm64/Image" \
