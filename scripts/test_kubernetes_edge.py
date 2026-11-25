@@ -31,6 +31,10 @@ ServiceAccount credential:
   a kubectl wrapper): a competing creation, a replacement and a relabel are
   not mutated, and pruning leaves relabelled or replaced objects alone, even a
   replacement that carries this component's labels.
+- A configuration-only update and rollback of a ConfigMap consumed through
+  envFrom, configMapKeyRef and a subPath mount is observed inside the Pods
+  before readiness succeeds, and a Deployment consuming a ConfigMap outside
+  its bundle is rejected offline.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   ConfigMap made immutable out of band stops the apply before any write; the
   apply recreates a mutable object after the administrator deletes it.
@@ -236,14 +240,58 @@ def variant(work, name, message, extra_configmap=None, image=None, foreign=None)
     return path
 
 
+def config_bundle(work, name, mode):
+    """A ConfigMap consumed only through env (envFrom and configMapKeyRef) and
+    a subPath mount: Kubernetes never refreshes these in running Pods, so the
+    Pods see a new value only if the change rolls them out."""
+    example = json.loads(BUNDLE.read_text())["resources"][1]
+    container = example["spec"]["template"]["spec"]["containers"][0]
+    deployment = {
+        "apiVersion": "apps/v1", "kind": "Deployment",
+        "metadata": {"name": "config-app", "labels": {"app": "config-app"}},
+        "spec": {"replicas": 1, "selector": {"matchLabels": {"app": "config-app"}}, "progressDeadlineSeconds": 120,
+                 "template": {"metadata": {"labels": {"app": "config-app"}}, "spec": {
+                     "terminationGracePeriodSeconds": 5,
+                     "securityContext": example["spec"]["template"]["spec"]["securityContext"],
+                     "containers": [{
+                         "name": "app", "image": container["image"],
+                         "command": ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done"],
+                         "envFrom": [{"configMapRef": {"name": "config-settings"}}],
+                         "env": [{"name": "KEYED", "valueFrom": {"configMapKeyRef": {"name": "config-settings", "key": "MODE"}}}],
+                         "resources": container["resources"], "securityContext": container["securityContext"],
+                         "volumeMounts": [{"name": "settings", "mountPath": "/cfg/mode", "subPath": "MODE", "readOnly": True}]}],
+                     "volumes": [{"name": "settings", "configMap": {"name": "config-settings"}}]}}}}
+    bundle = {"version": 1, "resources": [
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "config-settings"}, "data": {"MODE": mode}},
+        deployment]}
+    path = work / f"{name}.json"
+    path.write_text(json.dumps(bundle))
+    return path
+
+
+def observed_config(cluster):
+    """(env MODE, env KEYED, subPath file) as seen inside every running,
+    non-terminating config-app Pod."""
+    pods = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]
+    seen = []
+    for pod in pods:
+        if pod["metadata"].get("deletionTimestamp") or pod["status"].get("phase") != "Running":
+            continue
+        output = cluster.admin("exec", "-n", NAMESPACE, pod["metadata"]["name"], "--", "sh", "-c",
+                               'printf "%s|%s|%s" "$MODE" "$KEYED" "$(cat /cfg/mode)"').stdout
+        seen.append(tuple(output.split("|")))
+    return seen
+
+
 def served(cluster):
     pod = cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=web", "--field-selector=status.phase=Running",
                         "-o", "jsonpath={.items[0].metadata.name}").stdout
     return cluster.admin("exec", "-n", NAMESPACE, pod, "--", "wget", "-qO-", "http://web").stdout
 
 
-def wait_ready(profile_root, bundle, version):
-    wait(f"rollout of {bundle.name}", lambda: helper("ready", profile_root, bundle, version=version).returncode == 0,
+def wait_ready(profile_root, bundle, version, component=COMPONENT):
+    wait(f"rollout of {bundle.name}",
+         lambda: helper("ready", profile_root, bundle, version=version, component=component).returncode == 0,
          timeout=240, interval=2)
 
 
@@ -954,6 +1002,43 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, v1, "1.0.0")
     wait("v1 content after rollback", lambda: "SuiFleet v1" in served(cluster), timeout=90)
     check("service serves v1 content after rollback", True)
+
+    # Combined review 4602: a configuration-only update or rollback of a
+    # ConfigMap consumed through envFrom, configMapKeyRef or a subPath mount
+    # must reach the running Pods before readiness succeeds. Kubernetes never
+    # refreshes those in place; the helper binds the ConfigMap digest into the
+    # Pod template so the change rolls the Pods out.
+    outside = json.loads(config_bundle(work, "config-outside", "x").read_text())
+    outside["resources"] = outside["resources"][1:]
+    (work / "config-outside.json").write_text(json.dumps(outside))
+    result = run(sys.executable, str(HELPER), "validate", "--bundle", str(work / "config-outside.json"), ok=False)
+    check("helper validate rejects a Deployment consuming a ConfigMap outside the bundle",
+          result.returncode == 2 and "not in this bundle" in result.stderr, result.stderr)
+    config_v1, config_v2 = config_bundle(work, "config-v1", "alpha"), config_bundle(work, "config-v2", "beta")
+    check("config-only v1 applies", helper("apply", profiles, config_v1, component="config-app").returncode == 0)
+    wait_ready(profiles, config_v1, "1.0.0", component="config-app")
+    seen = observed_config(cluster)
+    check("pods observe the v1 configuration once ready", seen == [("alpha",) * 3], str(seen))
+    template_v1 = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
+    check("config-only v2 applies", helper("apply", profiles, config_v2, component="config-app", version="2.0.0").returncode == 0)
+    wait_ready(profiles, config_v2, "2.0.0", component="config-app")
+    seen = observed_config(cluster)
+    check("a config-only update reaches env, keyed env and subPath before readiness succeeds",
+          seen == [("beta",) * 3], str(seen))
+    template_v2 = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
+    check("the config-only update started a new rollout",
+          template_v2["metadata"]["generation"] > template_v1["metadata"]["generation"]
+          and template_v2["spec"]["template"] != template_v1["spec"]["template"])
+    check("config-only rollback applies", helper("apply", profiles, config_v1, component="config-app").returncode == 0)
+    wait_ready(profiles, config_v1, "1.0.0", component="config-app")
+    seen = observed_config(cluster)
+    check("a config-only rollback restores the v1 configuration in the pods before readiness succeeds",
+          seen == [("alpha",) * 3], str(seen))
+    retire_config = work / "config-retire.json"
+    retire_config.write_text(json.dumps({"version": 1, "resources": []}))
+    check("config-only test component retires",
+          helper("apply", profiles, retire_config, component="config-app").returncode == 0)
+    wait_ready(profiles, retire_config, "1.0.0", component="config-app")
 
     # Immutable ConfigMaps cannot be restored in place (the API server refuses
     # data changes and a return to mutable), so a rollback could not recover.
