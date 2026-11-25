@@ -129,7 +129,7 @@ def container_build(args):
     service_files = edge / "meta-suifleet/recipes-edge/suifleet/files"
     for name in (
         "config.toml.example", "signer.toml.example", "suifleet.service",
-        "suifleet-provision.service", "suifleet-enrollment.path",
+        "suifleet-provision.service", "suifleet-enrollment.path", "suifleet-first-boot-enrollment.service",
         "suifleet-signer.service", "suifleet-signer.socket",
     ):
         entries.append((f"suifleet/systemd/{name}", (service_files / name).read_bytes(), 0o644))

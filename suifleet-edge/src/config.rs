@@ -536,7 +536,7 @@ pub struct EnrollConfig {
     pub signer: Option<SignerConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedEnrollment {
     pub customer_id: String,
@@ -853,8 +853,11 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let raw = std::fs::read_to_string(path)?;
-        let mut cfg: Self = toml::from_str(&raw)?;
+        Self::load_text(path, &std::fs::read_to_string(path)?, None)
+    }
+
+    pub(crate) fn load_text(path: &Path, raw: &str, manifest: Option<DeploymentManifest>) -> anyhow::Result<Self> {
+        let mut cfg: Self = toml::from_str(raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
         cfg.oci_policy().validate()?;
         if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
@@ -899,8 +902,10 @@ impl Config {
                 .unwrap_or(Path::new("."))
                 .join(&cfg.sui.manifest_path)
         };
-        let manifest: DeploymentManifest =
-            serde_json::from_str(&std::fs::read_to_string(manifest_path)?)?;
+        let manifest = match manifest {
+            Some(manifest) => manifest,
+            None => serde_json::from_str(&std::fs::read_to_string(manifest_path)?)?,
+        };
         manifest.validate()?;
         anyhow::ensure!(
             cfg.walrus.aggregator_url.is_empty()

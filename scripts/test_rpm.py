@@ -107,7 +107,9 @@ metadata_expire=0
     signer = pwd.getpwnam("suifleet-signer")
     assert CONFIG.stat().st_gid == daemon.pw_gid and stat.S_IMODE(CONFIG.stat().st_mode) == 0o750
     assert STATE.stat().st_uid == daemon.pw_uid and stat.S_IMODE(STATE.stat().st_mode) == 0o700
-    for unit in ("suifleet.service", "suifleet-signer.socket", "suifleet-enrollment.path"):
+    first_boot = Path("/usr/lib/systemd/system/suifleet-first-boot-enrollment.service")
+    assert first_boot.is_file() and stat.S_IMODE(first_boot.stat().st_mode) == 0o644
+    for unit in ("suifleet.service", "suifleet-signer.socket", "suifleet-enrollment.path", first_boot.name):
         assert subprocess.run(["systemctl", "is-enabled", "--quiet", unit]).returncode
         assert subprocess.run(["systemctl", "is-active", "--quiet", unit]).returncode
 
