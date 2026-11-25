@@ -247,6 +247,8 @@ fn default_telemetry_buffer() -> usize {
 #[serde(default, deny_unknown_fields)]
 pub struct DaemonUpdateConfig {
     pub enabled: bool,
+    /// Use a platform-owned launcher and its authenticated control channel.
+    pub managed: bool,
     /// Deployments of this component name carry a new daemon binary.
     pub component: String,
     /// Default: `<state_dir>/daemon`.
@@ -259,6 +261,7 @@ impl Default for DaemonUpdateConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            managed: false,
             component: "suifleet-daemon".into(),
             install_dir: None,
             max_start_attempts: 3,
@@ -872,9 +875,15 @@ impl Config {
         // a component could make itself the unit's main process, which the
         // signing service trusts for status reports (SF-053, KEY_ISOLATION.md).
         anyhow::ensure!(
-            !(cfg.daemon_update.enabled && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            !(cfg.daemon_update.enabled && !cfg.daemon_update.managed && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
             "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
              components could replace the daemon the signing service trusts"
+        );
+        anyhow::ensure!(
+            !cfg.daemon_update.managed || (cfg.daemon_update.enabled
+                && cfg.daemon_update.install_dir.is_none()
+                && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            "managed daemon_update requires an enabled update, a service signer, and platform-owned update paths"
         );
         if let Some(reason) = unsupported_on(std::env::consts::OS, &cfg) {
             anyhow::bail!("{reason} (docs/MACOS_RUNTIME.md)");
@@ -1110,6 +1119,41 @@ mod tests {
     fn fixture() -> DeploymentManifest {
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn managed_daemon_update_requires_service_signer_and_platform_paths() {
+        let dir = std::env::temp_dir().join(format!("suifleet-config-managed-update-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            dir.join("deployment.json"),
+            include_bytes!("../../manifests/fixture.localnet.json"),
+        )
+        .unwrap();
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let signer = "[device.signer]\nkind='service'\nsocket='/run/suifleet/signer.sock'\n";
+        for (signer_config, enabled, paths, valid) in [
+            (signer, true, "", true),
+            (signer, false, "", false),
+            ("", true, "", false),
+            (signer, true, "install_dir='/var/lib/suifleet/client'\n", false),
+        ] {
+            std::fs::write(
+                &path,
+                format!("{base}{signer_config}[daemon_update]\nmanaged=true\nenabled={enabled}\n{paths}"),
+            )
+            .unwrap();
+            let result = Config::load(&path);
+            if valid {
+                assert!(result.unwrap().daemon_update.managed);
+            } else {
+                let error = result.err().expect("invalid managed update configuration");
+                assert!(error.to_string().contains("managed daemon_update requires"), "{error}");
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn shadows_need_a_thing_name_and_bounded_limits() {
         for (text, valid) in [
