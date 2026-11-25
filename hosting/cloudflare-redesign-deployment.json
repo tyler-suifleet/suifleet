@@ -1,0 +1,40 @@
+{
+ "schema": 1,
+ "provider": "Cloudflare Pages",
+ "scope": "website-and-docs",
+ "date": "2026-11-25",
+ "source_revision": "cd61135262d2d769cdc036c4970d02bd1b3bdd48",
+ "branch": "site-redesign",
+ "release_sha256": {
+  "website": "e798f8fc0a1ef45f608efe07302604daf3853aca5c83bbb4ae3126e41a64a7e3",
+  "docs": "2b29192312a60c942b2b4f55abf610a61da0f1023b0b5645d5849c6b59e3cc28"
+ },
+ "app_unchanged": true,
+ "projects": {
+  "website": {
+   "project": "suifleet-marketing",
+   "deployment_prefix": "3dfef34e",
+   "url": "https://3dfef34e.suifleet-marketing.pages.dev",
+   "production_branch": "production"
+  },
+  "docs": {
+   "project": "suifleet-docs",
+   "deployment_prefix": "828419d9",
+   "url": "https://828419d9.suifleet-docs.pages.dev",
+   "production_branch": "production"
+  }
+ },
+ "served_verification": {
+  "method": "SHA-256 of live response bodies compared with sealed public files",
+  "matched": [
+   "https://suifleet.io/",
+   "https://suifleet.io/pricing/",
+   "https://suifleet.io/security/",
+   "https://suifleet.io/assets/style.css",
+   "https://docs.suifleet.io/",
+   "https://docs.suifleet.io/install/"
+  ]
+ },
+ "local_tests": "86 site, 32 subscription-pricing, 9 cost-indexed-pricing and 10 docs unit tests; site and docs checks; landing, pricing, render, content, How it works, guide, docs browser and customer-flow suites",
+ "notes": "Deployed from the unmerged site-redesign branch at the user's direction; replaces the earlier sf-253 branch build on suifleet.io."
+}
