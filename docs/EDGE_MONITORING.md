@@ -237,7 +237,8 @@ Collector latency, timeouts and backoff run on the export thread, so they
 never delay console polling or the withdrawal of stale health. The export
 thread sends at most one log batch per turn and services a newer console poll
 (current metrics) before the next batch, so a continuously refilled log queue
-never holds back metric updates. A log batch in flight counts against
+never holds back metric updates. A metrics retry whose backoff has elapsed is
+also sent before the next batch, without waiting for a console poll. A log batch in flight counts against
 `max_buffer` for its whole request and when it is put back for a retry, and
 `suifleet_exporter_log_buffered` includes it. Memory is bounded by the
 component limit, the log buffer (`max_buffer` lines of at most 512 bytes) and

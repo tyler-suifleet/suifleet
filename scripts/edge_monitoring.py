@@ -952,11 +952,14 @@ def export_loop(exporter, transport, stop, wakeup):
     Each turn sends at most one log batch. While more lines are queued the
     worker keeps draining, but a newer console poll is serviced first (metrics
     plus the next batch), so a steadily refilled log queue never starves
-    metric updates such as a daemon-down transition."""
+    metric updates such as a daemon-down transition. A metrics retry whose
+    backoff has elapsed is likewise sent before the next batch, so its
+    recovery never waits behind a run of log requests."""
     more = False
     while not stop.is_set():
         if more and not wakeup.is_set():
-            more = export_once(exporter, transport, ("logs",))
+            retry = transport.failures["metrics"] and transport.ready("metrics")
+            more = export_once(exporter, transport, ("metrics", "logs") if retry else ("logs",))
             continue
         due = [t for s, t in transport.not_before.items() if transport.failures[s]]
         timeout = max(0.05, min(due) - transport.clock()) if due else None

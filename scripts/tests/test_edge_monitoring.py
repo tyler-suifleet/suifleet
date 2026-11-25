@@ -1082,6 +1082,43 @@ class AdapterTests(Base):
         kinds = [k for k, _ in posts]
         self.assertNotIn(["logs", "logs"], [kinds[i:i + 2] for i in range(len(kinds) - 1)])
 
+    def test_due_metric_retry_is_sent_between_log_batches(self):
+        # A metrics retry whose backoff elapses during a log request is sent
+        # before the next batch even though no console poll wakes the worker.
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9", timeout_seconds=30),
+                                           logs=dict(components=["svc"], max_buffer=4096))
+        now = [0.0]
+        transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
+        stop, wakeup = threading.Event(), threading.Event()
+        posts = []
+        exporter.poll(console)
+        with exporter.lock:
+            exporter.log_buffer.extend((0.0, "svc", f"line {i}") for i in range(2048))
+
+        def post(signal_name, payload):
+            posts.append((signal_name, now[0]))
+            if signal_name == "metrics" and len(posts) == 1:
+                transport._failure("metrics", None)       # retry eligible at t=5
+                return ("retry", None)
+            if signal_name == "logs":
+                now[0] += 20                              # slow but successful collector
+            if len(posts) >= 6:
+                stop.set()
+            transport._success(signal_name)
+            return ("ok", None)
+        wakeup.set()
+        with unittest.mock.patch.object(transport, "post", side_effect=post):
+            worker = threading.Thread(target=em.export_loop, args=(exporter, transport, stop, wakeup))
+            worker.start()
+            self.wait(lambda: stop.is_set(), seconds=10)
+            stop.set()
+            wakeup.set()
+            worker.join(10)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(posts[:3], [("metrics", 0.0), ("logs", 0.0), ("metrics", 20.0)])
+        self.assertEqual(posts[3], ("logs", 20.0))
+        self.assertEqual(transport.failures["metrics"], 0)
+
 
 
 if __name__ == "__main__":
