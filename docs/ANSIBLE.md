@@ -114,7 +114,7 @@ Delete the batch once every host is enrolled.
 Hosts need SSH, sudo and Python 3; `deb` hosts also need `python3-apt` (present on
 standard Debian and Ubuntu installs) for the `apt` module. Enrolling hosts also
 need a tmpfs the SSH account can write (`/dev/shm` by default, see
-`suifleet_claim_transfer_dir`), no swap that can write to a disk and no crash
+`suifleet_claim_transfer_dir`), no active swap (not even zram) and no crash
 handler that can store a core dump while they enroll
 ([claim storage](#claim-storage)). Use a controller with
 ansible-core 2.16 or later. The examples use only
@@ -224,38 +224,29 @@ The claim must never reach persistent storage on the host, neither as a file
 nor as swapped-out memory. Linux can swap tmpfs pages, and the processes
 that handle the claim (the transfer command, `runuser` and `suifleet
 --enroll`) hold it in memory. Before the claim is read, the role reads
-`/proc/swaps` and refuses the host unless every active swap
-device is one of:
+`/proc/swaps` and refuses the host if it lists **any** active swap; the
+message names the entries. Hibernation writes memory to swap, so it is
+covered by the same rule.
 
-- **zram without a writeback device** (`/sys/block/zramN/backing_dev` is
-  `none` or absent): compressed RAM, never written to a disk;
-- **a dm-crypt device** (device-mapper UUID `CRYPT-…`, for example
-  `cryptsetup` plain swap with a random key or LUKS): the kernel writes only
-  ciphertext.
+This includes swap that looks memory-only or encrypted, such as zram without
+a writeback device or dm-crypt swap. `/proc/swaps` names an entry only by the
+path it was opened through in the namespace that ran `swapon`. That text does
+not identify the block device: a node can be given any name, for example a
+disk node called `/dev/zram0`. No unprivileged kernel interface binds a swap
+entry to a device number, so attributes read from `/sys/block` under that
+name (`backing_dev`, `dm/uuid`) cannot be shown to describe the device in use.
 
-A swap file, a plain disk partition, zram that writes back to a disk, swap on
-LVM or another device-mapper target (even on top of dm-crypt) and anything
-unrecognized refuse the claim, and the message names the devices.
+The session's view of the swap list can be substituted: a file or an
+LXCFS-style FUSE view bind-mounted over `/proc/swaps` can list no swap while
+the kernel swaps to a disk. So the role reads it only once
+`/proc/self/mountinfo` shows that `/proc/swaps` is served by procfs at
+`/swaps`. Otherwise, or when the mount table cannot be read, the host is
+refused as unverifiable before the list is read. Enroll from a session that
+sees the kernel's `/proc`, not from inside a container that masks it.
 
-The session's view of the swap list and device attributes can be
-substituted (a file or an LXCFS-style FUSE view bind-mounted over
-`/proc/swaps` can list no swap while the kernel swaps to a disk; a tmpfs or
-another entry mounted over part of `/sys` can report a disk-backed device as
-safe), so the role uses them only once `/proc/self/mountinfo` shows they come
-from the kernel. `/proc/swaps` must be served by procfs at `/swaps`;
-otherwise, or when the mount table cannot be read, the host is refused as
-unverifiable before the list is read. A device counts as zram or dm-crypt
-only when the kernel's swap list names it `/dev/zramN` or `/dev/dm-N` (the
-name is never resolved through the session's `/dev`), `/sys/block` is served
-by sysfs at `/block`, the device's entry resolves to a sysfs directory of the
-same name under `/sys/devices`, and the attribute read (`backing_dev`,
-`dm/uuid`) is served by sysfs at that place; otherwise the device is unsafe.
-Enroll from a session that sees the kernel's `/proc` and `/sys`, not from
-inside a container that masks them. Hibernation
-writes memory to swap, so it is covered by the same rule. For a host with
-ordinary disk swap, run `swapoff -a` before enrolling it and `swapon -a`
-afterwards (recorded hosts never handle a claim again), or move it to zram
-or encrypted swap.
+For a host with swap, run `swapoff -a` before enrolling it and `swapon -a`
+afterwards (recorded hosts never handle a claim again). Disable zram swap
+the same way (`swapoff /dev/zramN`).
 
 A crash dump is also a copy of a process's memory. Before the claim is read,
 the role reads `kernel.core_pattern` and, without privilege escalation, the
@@ -355,8 +346,8 @@ allows it). The role does not check the controller.
   ```
 
   Never issue an enrolled device a new claim, and never replace its key.
-- **Swap refusal.** See [claim storage](#claim-storage): enroll with swap
-  off, on zram without writeback or on dm-crypt swap. Nothing was sent.
+- **Swap refusal.** See [claim storage](#claim-storage): enroll with all
+  swap off, including zram and encrypted swap. Nothing was sent.
 - **Crash dump refusal.** See [claim storage](#claim-storage): disable core
   dumps for the enrollment (limit 0 with a file pattern or systemd-coredump,
   or `Storage=none` with `ProcessSizeMax=0` under `[Coredump]`). Nothing was
@@ -404,23 +395,23 @@ The harness checks these phases:
    readable). Swap is checked next. The hosts share the test machine's
    kernel; the role's own classifier is run on them first, and when it
    reports that machine's swap unsafe (for example WSL's disk swap), a claim
-   transfer with it unchanged must be refused, naming the device. Accepted
-   real swap (zram without writeback, dm-crypt) skips that case. Then
-   `/proc/swaps` (and `/sys/block`) are replaced inside each host's mount
-   namespace; nothing is swapped on or off. The committed role must refuse a
-   transfer, as unverifiable, with a header-only file bind-mounted over
-   `/proc/swaps`. A test-only copy whose swap classifier trusts only that
-   `/proc/swaps` fixture (its device attribute checks unchanged) must refuse a
-   transfer, naming both devices, with zram `backing_dev` `none` and a
-   dm-crypt UUID on a tmpfs over `/sys/block`. The remaining swap fixtures run
-   through a test-only copy whose swap classifier's `kernel_view` and
-   `sysattr` checks always pass (synthetic classifier evidence, not evidence
-   about a real host's swap): a transfer must be refused, listing every unsafe
-   device, with a swap file, a disk partition, zram writing back to a disk, a
-   non-crypt device-mapper device and an unknown zram device. All other phases
-   see a `/proc/swaps` with no swap, through that copy; crash cases that use
-   the committed crash classifier run from a copy whose only change is that
-   swap stub.
+   transfer with it unchanged must be refused, naming the device. A machine
+   without swap skips that case. Then `/proc/swaps` (and, for one case,
+   `/sys/block`) are replaced inside each host's mount namespace; nothing is
+   swapped on or off. The committed role must refuse a transfer, as
+   unverifiable, with a header-only file bind-mounted over `/proc/swaps`. The
+   remaining swap fixtures run through a test-only copy whose swap
+   classifier's `kernel_view` check always passes (synthetic classifier
+   evidence, not evidence about a real host's swap). A transfer must be
+   refused, naming both devices, with `/dev/zram0` and `/dev/dm-0` listed and
+   zram `backing_dev` `none` and a dm-crypt UUID on a tmpfs over `/sys/block`:
+   the names do not identify the devices, so safe-looking attributes are not
+   trusted. A transfer must also be refused, listing every entry, with a swap
+   file, a disk partition, zram writing back to a disk, a non-crypt
+   device-mapper device and an unknown zram device. All other phases see a
+   `/proc/swaps` with no swap, through that copy; crash cases that use the
+   committed crash classifier run from a copy whose only change is that swap
+   stub.
    Crash dumps are checked the same way: when the classifier reports the
    machine's real `kernel.core_pattern` and SSH session core limit unsafe (WSL's piped
    crash handler is), a transfer with them must be refused. Then
@@ -456,8 +447,8 @@ The harness checks these phases:
    core files under a `limits.d` core limit of 0 for the deploy account, through
    the same synthetic copy, because that file pattern is a bind-mounted fixture.
    Then a claim transfer is
-   interrupted right after staging, for plain and Vault claims, with zram
-   without writeback and dm-crypt swap and with core files under a
+   interrupted right after staging, for plain and Vault claims, with no
+   swap and with core files under a
    `limits.d` core limit of 0 for the deploy account (all accepted): the claim must
    exist only in the tmpfs staging directory, not anywhere on the host's
    persistent filesystem (including Ansible's remote temporary directories)
