@@ -86,9 +86,8 @@ How the helper keeps two controllers from fighting:
    Writing ConfigMaps first means a Deployment never references a
    content-addressed ConfigMap (item 7) that does not exist yet. If a later
    write fails (a conflict, a rejection or a cluster error), earlier objects
-   may already carry the new bundle. Nothing the previous bundle may still
-   use is pruned in that run; only unreferenced content-addressed leftovers
-   of an earlier failed apply are freed first (see Quota headroom in item 7).
+   may already carry the new bundle. A failed apply deletes nothing; pruning
+   runs only after every write has succeeded (see Quota headroom in item 7).
    `ready` keeps failing until every object carries the new bundle's digest
    and pruning has converged, so the supervisor does not see a partial apply
    as ready. A later successful apply converges, and a supervisor rollback
@@ -159,22 +158,21 @@ How the helper keeps two controllers from fighting:
      ConfigMaps. The shipped quota of 20 ConfigMaps covers two such bundles
      plus the namespace's `kube-root-ca.crt` and one more ConfigMap. Raise
      the quota by twice the per-bundle limit for every additional SuiFleet
-     component in the namespace. Before creating ConfigMaps, `apply` deletes
-     this component's content-addressed ConfigMaps that the bundle does not
-     contain and no live Deployment references, such as those a partial
-     apply left behind, so a retry or a new bundle after a partial apply
-     also fits. Nothing can still read those, because only bundle
-     Deployments consume content-addressed names. Stable ConfigMaps are
-     never deleted before the writes: one from the last converged bundle may
-     still serve a consumer outside the bundle, so a failed apply leaves it
-     in place with its data, and only the prune after a successful apply
-     removes it. Stable ConfigMaps that a partial apply created therefore
-     keep counting against the quota until an apply succeeds. A partial
-     apply that updated only some of several Deployments can leave
-     references to two earlier bundles; the next update can then exceed the
-     headroom and fail with a quota error before writing any Deployment.
-     Re-applying the last converged bundle needs no new ConfigMaps and
-     always fits.
+     component in the namespace. `apply` deletes nothing before every write
+     has succeeded, not even a ConfigMap that looks like an unreferenced
+     leftover of a failed apply: a partial apply may already have moved a
+     Deployment's template off the last fully applied bundle's ConfigMaps,
+     and those are exactly what a rollback re-applies. Stable ConfigMaps of
+     the last fully applied bundle likewise stay with their data, for
+     consumers outside the bundle. Every object of the last fully applied
+     bundle therefore survives any number of failed applies, so re-applying
+     it (the supervisor rollback) creates no object and always fits, and
+     retrying the partially applied bundle itself fits within the two-bundle
+     headroom. A further, different bundle after a partial apply can exceed
+     the quota instead: it fails with a quota error at a ConfigMap creation,
+     before any Deployment is written, and leaves the previous objects in
+     place. Roll back or retry the partially applied bundle first; the
+     successful apply prunes the leftovers.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -536,9 +534,12 @@ It checks the following:
   ConfigMap at a content-addressed name stops the apply before any write.
 - Quota boundary: with `kube-root-ca.crt` and one other ConfigMap present,
   changing every ConfigMap of a 9-ConfigMap bundle peaks exactly at the
-  shipped quota of 20 and converges. After a partial apply at that bundle
-  size fills the quota (a further create fails with `exceeded quota`), the
-  next bundle frees the leftovers first and converges.
+  shipped quota of 20 and converges. A partial apply at that bundle size
+  that updates one Deployment and fails at the next fills the quota (a
+  further create fails with `exceeded quota`). A further bundle then fails
+  at a ConfigMap creation, deletes nothing and leaves the template as it
+  was; the rollback to the last fully applied bundle creates nothing, prunes
+  the leftovers and converges, and the further bundle then applies.
 - A stable-name ConfigMap made immutable out of band, and a content-addressed
   ConfigMap recreated with other content, each stop the apply before any
   write; readiness rejects the forged one, and the apply recreates both after
