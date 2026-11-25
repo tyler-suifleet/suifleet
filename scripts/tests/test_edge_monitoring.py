@@ -700,6 +700,27 @@ class AdapterTests(Base):
         self.assertNotIn(secret_name, json.dumps(records))
         self.assertIn(secret_name, exporter.tails)                # the selector itself is still used locally
 
+    def test_log_component_attribute_follows_the_console_secret_word_policy(self):
+        # Words the console's secret_value redacts even without the longer
+        # segments the regex scrubber needs (suifleet-edge/src/console.rs).
+        console_secrets = ["eyJa.b.c", "sfc_x", "suiprivkey", "AKIAABCDEFGHIJKLMNOP", "eyJ.."]
+        for name in console_secrets:
+            self.assertEqual(em.redact(name), em.REDACTED, name)
+            self.assertEqual(em.redact(f"start {name} done"), f"start {em.REDACTED} done", name)
+        # Ordinary names, dotted versions and object IDs are left as they are.
+        for name in ["sensor-reader", "eyJ-reader", "app.v1.2", "eyJa.b", "AKIAshort", "object 0x" + "ab" * 32 + " ok"]:
+            self.assertEqual(em.redact(name), name, name)
+        self.console.logs["eyJa.b.c"] = ["jwt ready"]
+        self.console.logs["sensor-reader"] = ["plain ready"]
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9/"),
+                                           logs=dict(components=["eyJa.b.c", "sensor-reader"], max_lines=10, max_buffer=10))
+        exporter.poll(console)
+        records = exporter.otlp_logs(list(exporter.log_buffer))["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+        attributed = {r["body"]["stringValue"]: {a["key"]: a["value"]["stringValue"] for a in r["attributes"]}["suifleet.component"]
+                      for r in records}
+        self.assertEqual(attributed, {"jwt ready": em.REDACTED, "plain ready": "sensor-reader"})
+        self.assertNotIn("eyJa.b.c", json.dumps(records))
+
     def test_truncated_collector_response_retries_and_keeps_logs(self):
         collector = FakeCollector()
         self.addCleanup(collector.close)

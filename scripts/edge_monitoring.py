@@ -81,6 +81,19 @@ _PATTERNS = (
 )
 _BASE64_LINE = re.compile(r"^\s*[A-Za-z0-9+/]{40,}={0,2}\s*$")
 REDACTED = "[redacted]"
+# The support console's word scrubber (suifleet-edge/src/console.rs word_char
+# and secret_value), applied as well so this adapter never exports a word the
+# console itself would classify as secret, e.g. a short JWT-shaped selector.
+_CONSOLE_WORD = re.compile(r"[A-Za-z0-9_\-+/.~]+")
+_CONSOLE_KEY_ID = re.compile(r"(?:AKIA|ASIA)[A-Z0-9]{16}")
+_CONSOLE_HEX = re.compile(r"[0-9a-fA-F]{64,}")
+
+
+def _console_secret_word(word):
+    return (word.lower().startswith("suiprivkey") or word.startswith("sfc_")
+            or bool(_CONSOLE_KEY_ID.fullmatch(word))
+            or (word.startswith("eyJ") and word.count(".") == 2)
+            or bool(_CONSOLE_HEX.fullmatch(word)))
 
 
 def redact(line):
@@ -102,7 +115,7 @@ def redact(line):
     line = _PAIR.sub(pair, line)
     for pattern in _PATTERNS:
         line = pattern.sub(REDACTED, line)
-    return line
+    return _CONSOLE_WORD.sub(lambda m: REDACTED if _console_secret_word(m.group(0)) else m.group(0), line)
 
 
 def bounded(text, limit):
@@ -684,7 +697,8 @@ class Exporter:
             self.tails[component] = lines
             now = self.clock()
             # The raw selector stays local: a name the scrubber would alter
-            # (for example 64-character hex) is exported only as the marker,
+            # (for example 64-character hex, or any word the console's own
+            # secret_value policy matches) is exported only as the marker,
             # matching how the console and the inventory metrics treat it.
             label = component if redact(component) == component else REDACTED
             with self.lock:
