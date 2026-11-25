@@ -389,6 +389,17 @@ def _quantity(value):
 # so drift paths quote them (see _child): a key is never read as a field name.
 # Every other field, including resources.claims names, compares as plain text.
 QUANTITY_PATH = re.compile(r'(?:\.resources\.(?:limits|requests)|\.overhead)\["[^"]*"\]$|\.emptyDir\.sizeLimit$')
+# ResourceList entries (resource limits/requests and overhead, but not the
+# *Quantity emptyDir sizeLimit) are rounded up to milli precision by the API
+# server's SetDefaults_ResourceList ("10.1m" is stored as "11m").
+MILLI_ROUNDED_PATH = re.compile(r'(?:\.resources\.(?:limits|requests)|\.overhead)\["[^"]*"\]$')
+
+
+def _round_up_milli(value):
+    """Quantity rounded away from zero to milli precision, as
+    resource.Quantity.RoundUp(-3) does."""
+    scaled = value * 1000
+    return Fraction(math.ceil(scaled) if scaled >= 0 else math.floor(scaled), 1000)
 FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -571,7 +582,8 @@ def spec_drift(desired, live, path):
     resource lists, ...) must have exactly the bundle's keys, even when an
     extra key's value is empty. A field the server omits matches a zero/empty
     desired value (Go omitempty), and resource quantities (resource limits and
-    requests, overhead, emptyDir sizeLimit) compare by value."""
+    requests, overhead, emptyDir sizeLimit) compare by value, resource lists
+    after the server's round-up to milli precision."""
     if live is None:
         if desired is None:
             return None
@@ -627,6 +639,10 @@ def spec_drift(desired, live, path):
         return None
     if QUANTITY_PATH.search(path):
         want, have = _quantity(desired), _quantity(live)
+        if want is not None and MILLI_ROUNDED_PATH.search(path):
+            # Compare against what the server stores; the live value is exact,
+            # so any other live value (including the unrounded one) is drift.
+            want = _round_up_milli(want)
         if want is not None and want == have:
             return None
     if desired == "" and isinstance(live, str):

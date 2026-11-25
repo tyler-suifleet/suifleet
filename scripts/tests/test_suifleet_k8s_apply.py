@@ -544,6 +544,36 @@ class DecisionTest(unittest.TestCase):
         del volume["emptyDir"]["sizeLimit"]  # *Quantity: presence still matters
         self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1])
 
+    def test_deployment_readiness_accounts_for_resource_list_milli_round_up(self):
+        # SetDefaults_ResourceList rounds resource limits/requests and overhead
+        # up to milli precision: a bundle request of 10.1m is stored as 11m.
+        bundle = example()
+        container = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]
+        container["resources"] = {"requests": {"cpu": "10.1m", "memory": "8Mi"},
+                                  "limits": {"cpu": "0.0001", "memory": "32Mi"}}
+        k8s.validate_bundle(bundle)
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        resources = live["spec"]["template"]["spec"]["containers"][0]["resources"]
+        resources["requests"]["cpu"], resources["limits"]["cpu"] = "11m", "1m"  # as the server stores them
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        for other in ("10m", "12m", "10100u"):  # distinct (or unrounded) live values are drift
+            resources["requests"]["cpu"] = other
+            self.assertIn('requests["cpu"]', k8s.object_ready(live, deploy, "web-app")[1], other)
+        resources["requests"]["cpu"] = "11m"
+        self.assertEqual(k8s.spec_drift({"cpu": "1.0005"}, {"cpu": "1001m"}, "spec.overhead"), None)
+        self.assertEqual(k8s.spec_drift({"cpu": "1.0005"}, {"cpu": "1000500u"}, "spec.overhead"),
+                         'spec.overhead["cpu"]')
+        # emptyDir sizeLimit is a *Quantity, not a ResourceList: never rounded.
+        parent = "spec.volumes[0].emptyDir"
+        self.assertIsNone(k8s.spec_drift({"sizeLimit": "1500u"}, {"sizeLimit": "1500u"}, parent))
+        self.assertEqual(k8s.spec_drift({"sizeLimit": "1500u"}, {"sizeLimit": "2m"}, parent),
+                         f"{parent}.sizeLimit")
+        # Map keys stay literal: a dotted annotation is never rounded.
+        self.assertEqual(k8s.spec_drift({"x.resources.limits.cpu": "10.1m"}, {"x.resources.limits.cpu": "11m"},
+                                        "spec.template.metadata.annotations"),
+                         'spec.template.metadata.annotations["x.resources.limits.cpu"]')
+
     def test_deployment_readiness_keeps_dotted_map_keys_literal(self):
         # A map key that merely ends in a field path (".emptyDir.sizeLimit",
         # ".resources.limits.cpu", ".timeoutSeconds") is still a literal key:
@@ -600,7 +630,8 @@ class DecisionTest(unittest.TestCase):
         cases = [("1", "1000m", True), ("0.5", "500m", True), ("1Gi", "1073741824", True), ("1e3", "1k", True),
                  (1, "1", True), ("1G", "1Gi", False), ("100m", "0.2", False),
                  (0.1, "100m", True), (0.5, "500m", True), (1.5, "1500m", True), (0.1, "200m", False),
-                 (1e-05, "10u", True), ("1E", "1000P", True), ("2E", "1000P", False), ("1Ei", "1024Pi", True)]
+                 (1e-05, "1m", True), (1e-05, "10u", False),  # resource lists round up to milli
+                 ("1E", "1000P", True), ("2E", "1000P", False), ("1Ei", "1024Pi", True)]
         for want, have, same in cases:
             drift = k8s.spec_drift({"resources": {"limits": {"cpu": want}}},
                                    {"resources": {"limits": {"cpu": have}}}, "spec.c")
