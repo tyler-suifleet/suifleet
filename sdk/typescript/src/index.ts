@@ -23,8 +23,8 @@ export interface ClientOptions {
   /** Configured component name owned by this process's UID ('' for administrators). */
   component?: string;
   /**
-   * Whole-request deadline, started when `request` is called. It covers every
-   * connection attempt and the backoff between them, so a request is never
+   * Whole-request deadline, started when `request` is called. It covers request
+   * encoding, every connection attempt and the backoff between them, so a request is never
    * first sent after it expires. The daemon ends connections after 120 s.
    * A finite number in (0, 2147483647] (Node's maximum timer delay); anything
    * else throws RangeError before connecting. Default 120000.
@@ -141,8 +141,10 @@ export class Client {
    * return the response `data`. The SDK never retries after a byte was sent.
    */
   async request<T = unknown>(operation: string, options: RequestOptions = {}): Promise<T> {
-    const frame = encodeRequest(operation, options.component ?? this.component, options.topic ?? '', options.payload);
+    // The deadline starts before encoding: serialization can run caller getters,
+    // and that time counts against the budget so the request is never first sent late.
     const deadline = performance.now() + this.timeoutMs;
+    const frame = encodeRequest(operation, options.component ?? this.component, options.topic ?? '', options.payload);
     let delay = this.connectRetryDelayMs;
     for (let attempt = 1; ; attempt++) {
       try {

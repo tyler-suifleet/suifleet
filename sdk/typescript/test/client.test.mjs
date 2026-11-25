@@ -206,6 +206,31 @@ test('a connect callback delayed past the deadline by an event-loop stall sends 
   assert.equal(frames.length, 0, 'a request was written after its deadline');
 });
 
+test('time spent encoding the payload counts against the deadline: nothing is sent late', async (t) => {
+  const path = join(directory, 'slow-encode.sock');
+  const frames = [];
+  const sockets = [];
+  const server = createServer((socket) => {
+    sockets.push(socket);
+    socket.on('data', (chunk) => frames.push(chunk));
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(path, resolve));
+  t.after(() => new Promise((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
+  // A valid JSON object whose getter consumes the whole budget during serialization.
+  const payload = {};
+  Object.defineProperty(payload, 'value', {
+    enumerable: true,
+    get() { const until = performance.now() + 100; while (performance.now() < until) { /* stall */ } return 1; },
+  });
+  const client = new Client({ socketPath: path, timeoutMs: 40 });
+  await assert.rejects(client.request('stream_append', { topic: 'telemetry', payload }),
+    (e) => e instanceof TransportError && e.outcome === 'not_sent' && /timed out after 40 ms/.test(e.message));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(sockets.length, 0, 'a connection was opened after the deadline');
+  assert.equal(frames.length, 0, 'a request was written after its deadline');
+});
+
 test('the response wait uses only the time left after connect backoff', async (t) => {
   const path = join(directory, 'late-silent.sock');
   const client = new Client({ socketPath: path, timeoutMs: 400, connectAttempts: 3, connectRetryDelayMs: 200 });
