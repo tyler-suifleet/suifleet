@@ -491,6 +491,28 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, v1, "1.0.0")
     check("readiness succeeds once the other manager relinquishes its binaryData", True)
 
+    # A map key with an empty value is still meaningful: nodeSelector
+    # {"example.com/pool": ""} requires that node label. Label the node so the
+    # other manager's edit rolls out healthily, then require readiness to
+    # reject it as drift.
+    cluster.admin("label", "node", "--all", "--overwrite", "example.com/pool=")
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps({
+        "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+        "spec": {"template": {"spec": {"nodeSelector": {"example.com/pool": ""}}}}}))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    selected = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)
+    result = helper("ready", profiles, v1)
+    check("readiness rejects a healthy rollout that adds an empty-valued nodeSelector key",
+          selected["spec"]["template"]["spec"].get("nodeSelector") == {"example.com/pool": ""}
+          and selected["status"].get("availableReplicas") == 1
+          and result.returncode == 1 and "spec.template.spec.nodeSelector.example.com/pool differs" in result.stderr,
+          result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    cluster.admin("label", "node", "--all", "example.com/pool-")
+    wait_ready(profiles, v1, "1.0.0")
+    check("readiness succeeds once the other manager relinquishes its nodeSelector", True)
+
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}

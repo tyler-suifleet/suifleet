@@ -281,7 +281,11 @@ plain-string field the server defaults (such as an httpGet `path`) matches
 that default too. Anything else the bundle omits,
 such as an injected init container or sidecar, extra `env`, a `nodeSelector`
 or an extra pod-template annotation (including `kubectl rollout restart`'s
-`restartedAt`), is drift and not ready. A field the server omits matches a
+`restartedAt`), is drift and not ready. Map fields (pod-template labels and
+annotations, `matchLabels`, `nodeSelector`, resource `limits`/`requests`,
+`overhead`) must hold exactly the bundle's keys: an extra key is drift even
+when its value is empty, because for example `nodeSelector:
+{"example.com/pool": ""}` still requires that node label. A field the server omits matches a
 zero/empty bundle value, and resource quantities compare by value (`0.1`,
 `"0.1"` and `100m` are equal; `1E` equals `1000P`; `1G` does not equal `1Gi`).
 Omitting `replicas` leaves scaling to, for example, a HorizontalPodAutoscaler.
@@ -368,6 +372,9 @@ It checks the following:
   annotations rolls out healthily but is not ready, `apply` reports the
   conflict, and readiness succeeds after that manager relinquishes the field
   and the bundle's template rolls out again.
+- Another manager adding the empty-valued `nodeSelector`
+  `{"example.com/pool": ""}` rolls out healthily on a node labelled to match
+  but is not ready. Readiness succeeds after that manager relinquishes it.
 - A kubectl wrapper injects administrator actions between the helper's
   ownership check and its write. A competing creation, a replacement by a
   customer object and a relabel are each refused (exit code 3) and left
