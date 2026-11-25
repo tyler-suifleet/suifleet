@@ -66,7 +66,7 @@ const client = new Client({
 | Volatile and durable pub/sub ([MESSAGING.md](MESSAGING.md)) | `publish(topic, payload)`, `receive(topic)`, `subscribe(filter, qos)`, `unsubscribe(filter)`, `ack(filter, id)`, `messages(filter, options)` async iterator; administrators: `messaging()` |
 | Durable streams ([STREAMS.md](STREAMS.md)) | `streamCreate`, `streamAppend`, `streamRead`, `streamDescribe`, `streamDelete`, `streamList`; trusted exporters: `streamExportAck`, `streamExportStatus` |
 | Shadows ([SHADOWS.md](SHADOWS.md)) | `shadowGet`, `shadowUpdate(name, state, {version, clientToken})`, `shadowDelete`, `shadowList`; administrators: `shadows()` |
-| Opaque data ([OPAQUE_DATA.md](OPAQUE_DATA.md)) | `putData(stream, key, bytes, options)` — same chunk geometry and descriptor as the Python SDK |
+| Opaque data ([OPAQUE_DATA.md](OPAQUE_DATA.md)) | `putData(stream, key, bytes, options)` — same chunk geometry and descriptor as the Python SDK. `options.metadata` is a string-to-string map (`DataMetadata`), as the daemon requires: at most 16 entries, keys of 1–64 UTF-8 bytes, values of at most 256 UTF-8 bytes, at most 6144 serialized bytes. `validateDataMetadata` checks it; the CLI's `--metadata` takes the same JSON object |
 | Client devices ([CLIENT_DEVICES.md](CLIENT_DEVICES.md)) | administrators: `clientDevices(action, fields)` |
 | CLI | `suifleet-ipc [--socket] [--component] [--topic] [--payload JSON] OPERATION`, `--file` for `data_put` |
 
@@ -85,7 +85,7 @@ precision (not reachable by the documented limits).
 | `TransportError` with `outcome: 'unknown'` | The request may have executed: timeout, closed connection, truncated response. An unmapped UID also sees a closed connection. | Never retry a mutation blindly. Inspect status, stream `newest`, shadow version or the deployment outcome first. |
 | `ProtocolError` (a `TransportError`, outcome `unknown`) | Unsupported response version, malformed or oversize frame. | As above; check SDK/daemon versions. |
 | `DataPutError` (`upload`, `chunk`, `receipts`) | A chunk failed. | Resume with the same `upload` and `startChunk: chunk` and the same bytes. |
-| `RangeError` | Refused locally before sending: request frame > 64 KiB, publish payload > 4096 serialized bytes, data > 64 MiB, invalid options. | Fix the input. |
+| `RangeError`, `TypeError` | Refused locally before sending: request frame > 64 KiB, publish payload > 4096 serialized bytes, data > 64 MiB, invalid options, `data_put` metadata that is not a string-to-string map within the daemon's limits. | Fix the input. |
 
 The SDK never resends a request after a byte was sent. Each request uses its own
 connection because v1 has no pipelining or streaming, so a daemon restart needs
@@ -167,7 +167,7 @@ reboots the platform or asserts firmware/boot health; platform tools own those.
 
 | Command | What it runs |
 |---|---|
-| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, `null` configuration. |
+| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, `null` configuration. |
 | `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; `null` configuration before the first install handled by the sensor example; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
 
 Fake-peer unit tests establish client framing and classification only; the
