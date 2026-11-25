@@ -41,6 +41,12 @@ case $pat in
         # hide a section header), a section header other than [Name] (systemd
         # stops reading a file at an invalid one) and any other line that is
         # not a comment or a Key=value assignment.
+        # cat-config also lists a main file found only in /run, /usr/local/lib
+        # or /usr/lib, which some systemd versions' handler never reads (252
+        # reads only /etc/systemd/coredump.conf besides the drop-ins), so its
+        # settings could look effective without being so. The only main file
+        # accepted is /etc/systemd/coredump.conf; any other listed file must be
+        # a coredump.conf.d/*.conf drop-in, which every version reads alike.
         eff=$(printf '%s\n' "$conf" | LC_ALL=C awk '
           function classify(l) {
             if (l ~ /[^\t\r -~]/) fail("unsupported")
@@ -61,6 +67,8 @@ case $pat in
             if ($0 == "" || $0 ~ /^# Main configuration file [^ ]+ not found$/) next
             if ($0 !~ /^# \//) fail("unlisted")
             path = substr($0, 3); n = 0; sec = ""
+            if (path != "/etc/systemd/coredump.conf" &&
+                path !~ /^\/(etc|run|usr\/local\/lib|usr\/lib|lib)\/systemd\/coredump\.conf\.d\/[^\/]+\.conf$/) fail("main")
             while ((r = (getline l < path)) > 0) lines[++n] = l
             close(path)
             if (r < 0) fail("unreadable")
@@ -79,6 +87,7 @@ case $pat in
         case $(printf '%s\n' "$eff" | sed -n 1p) in
           -) ;;
           unsupported) v unsafe "systemd-coredump's configuration uses syntax this check does not support (a non-ASCII byte, an unusual section header or a line that is not Key=value) and the core dump size limit is $lim" ;;
+          main) v unsafe "systemd-coredump's main configuration file is not /etc/systemd/coredump.conf, which not every systemd version reads, and the core dump size limit is $lim" ;;
           continued) v unsafe "systemd-coredump's configuration uses line continuations and the core dump size limit is $lim" ;;
           unreadable) v unsafe "a systemd-coredump configuration file could not be read and the core dump size limit is $lim" ;;
           *) v unsafe "systemd-coredump's configuration listing could not be matched to its files and the core dump size limit is $lim" ;;
