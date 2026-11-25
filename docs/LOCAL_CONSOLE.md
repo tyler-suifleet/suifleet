@@ -190,6 +190,12 @@ directory ([COMPONENT_IPC.md](COMPONENT_IPC.md)). The configuration file holds
 only token hashes. Keep tokens off the device, and give operators only the
 grants they need.
 
+## Monitoring integration
+
+A customer-owned Prometheus or OpenTelemetry pipeline can read this console's
+health, inventory, deployment and log views with a read-only user through the
+opt-in [edge monitoring adapter](EDGE_MONITORING.md) (SF-303).
+
 ## Verification
 
 ```bash
