@@ -49,9 +49,10 @@ const {chromium} = require(process.env.SUIFLEET_PLAYWRIGHT_MODULE || '../../dapp
           return {key:`${stage.id}/${stage.dataset.instruction}`, text:copy.textContent.trim(), part:Number(stage.dataset.part),
             page:[document.documentElement.scrollWidth,document.documentElement.scrollHeight],
             fits:copy.clientHeight>0 && copy.scrollHeight<=copy.clientHeight && copy.scrollWidth<=copy.clientWidth,
-            controls:[rect.top,rect.bottom]};
+            controls:[rect.top,rect.bottom], media:[...document.querySelectorAll("[data-how-section]")].filter(e=>!e.hidden).map(e=>({section:e.dataset.howSection,visible:e.getBoundingClientRect().height>0,videos:[...e.querySelectorAll("video")].filter(v=>v.getClientRects().length).length}))};
         });
         assert.ok(value.page[0]<=width && value.page[1]<=height, `document overflow ${width}x${height}: ${JSON.stringify(value)}`);
+        assert.deepEqual(value.media,[{section:value.key.split('/')[0],visible:true,videos:1}], 'every section needs a visible matching video');
         assert.ok(value.fits, `clipped explanation ${width}x${height}: ${JSON.stringify(value)}`);
         assert.ok(value.controls[0]>=0 && value.controls[1]<=height, 'navigation outside viewport');
         if (value.part===0) gathered.set(value.key, []);
@@ -80,6 +81,21 @@ const {chromium} = require(process.env.SUIFLEET_PLAYWRIGHT_MODULE || '../../dapp
         await page.waitForFunction(() => [...document.querySelectorAll('#overview video')].some(v => getComputedStyle(v).display!=='none' && v.currentTime>.2));
         await video.evaluate(v => {v.textTracks[0].mode='showing';v.pause();});
         assert.equal(await video.evaluate(v => v.textTracks[0].mode),'showing');
+      }
+      if (width===390 || width===1440) {
+        for (const [section,duration] of [['first-update',12],['update-flow',60],['your-platform',12],['behind-console',24]]) {
+          await page.getByLabel('Overview section').selectOption(section);
+          const player=page.locator(`[data-how-section="${section}"] video`);
+          await player.evaluate(async v=>{v.muted=true;v.preload='auto';v.load();try{await v.play()}catch(e){if(e.name!=='AbortError')throw e}});
+          await page.waitForFunction(id=>{const v=document.querySelector(`[data-how-section="${id}"] video`);return v.currentTime>.2},section);
+          assert.ok(Math.abs(await player.evaluate(v=>v.duration)-duration)<.15);
+          await player.evaluate(v=>{v.textTracks[0].mode='hidden'});
+          await page.waitForFunction(id=>document.querySelector(`[data-how-section="${id}"] video`).textTracks[0].cues?.length>0,section);
+          assert.equal(await player.evaluate(v=>v.videoWidth),1280);
+          await page.getByLabel('Overview section').selectOption('big-picture');
+          assert.equal(await player.evaluate(v=>v.paused),true,'inactive clip must pause');
+        }
+        console.log(`PASS four narrated section clips: actual playback, duration, captions and inactive pause at ${width}px`);
       }
       await page.mouse.wheel(0,800);
       assert.equal(await page.evaluate(() => scrollY),0);

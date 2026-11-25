@@ -16,26 +16,26 @@ Choose your wallet, or another sign-in method offered by your
 console.
 
 4
-00:00:15.810 --> 00:00:21.975
-This walkthrough uses a demo account. Approve the connection in
-your own wallet; your private key stays there.
+00:00:15.810 --> 00:00:20.973
+Review the connection request in your wallet, then approve it.
+Your private key stays in your wallet.
 
 5
-00:00:22.570 --> 00:00:25.983
+00:00:21.570 --> 00:00:24.983
 Check that the console shows the account you intended to
 connect.
 
 6
-00:00:26.570 --> 00:00:30.346
+00:00:25.570 --> 00:00:29.346
 On your first visit, create your default fleet and approve the
 request.
 
 7
-00:00:30.930 --> 00:00:34.877
+00:00:29.930 --> 00:00:33.877
 Select your fleet. You can now manage its devices from this
 workspace.
 
 8
-00:00:35.490 --> 00:00:41.271
+00:00:34.490 --> 00:00:40.271
 You’re signed in and your fleet is selected. Next, let’s check
 how many devices you can manage.
