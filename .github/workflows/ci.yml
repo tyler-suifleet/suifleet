@@ -152,6 +152,12 @@ jobs:
             -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
             python3 scripts/test_ipc.py
 
+      - name: TypeScript component SDK package against the real daemon with distinct Unix peer identities
+        run: |
+          docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
+            python3 scripts/test_ipc_node.py --package sdk/typescript/suifleet-component-ipc-1.0.0.tgz
+
       - name: Opaque IPC chunk custody, encrypted batching and verified retirement
         run: make test-opaque SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
