@@ -73,7 +73,7 @@ class CoreFixClassTests(unittest.TestCase):
             self.assertNotIn(forbidden.lower(), text.lower(), forbidden)
 
     def test_openssl_install_is_serialized_for_every_variant_and_series(self):
-        for series in ('scarthgap', 'wrynose'):
+        for series in ('kirkstone', 'scarthgap', 'wrynose'):
             for override, pn in (('class-target', 'openssl'), ('class-native', 'openssl-native'),
                                  ('class-nativesdk', 'nativesdk-openssl')):
                 self.assertEqual(anonymous_changes('openssl', series, override, pn),
@@ -85,6 +85,7 @@ class CoreFixClassTests(unittest.TestCase):
         self.assertEqual(anonymous_changes('libcap', 'wrynose', 'class-native', 'libcap-native'),
                          [('append', 'EXTRA_OEMAKE', LIBCAP_TOOLS)])
         self.assertEqual(anonymous_changes('libcap', 'scarthgap'), [])
+        self.assertEqual(anonymous_changes('libcap', 'kirkstone'), [])
 
     def test_xz_interpreter_only_for_wrynose_target(self):
         self.assertEqual(anonymous_changes('xz', 'wrynose'), [
@@ -94,12 +95,13 @@ class CoreFixClassTests(unittest.TestCase):
         self.assertEqual(anonymous_changes('xz', 'wrynose', 'class-native', 'xz-native'), [])
         self.assertEqual(anonymous_changes('xz', 'wrynose', 'class-nativesdk', 'nativesdk-xz'), [])
         self.assertEqual(anonymous_changes('xz', 'scarthgap'), [])
+        self.assertEqual(anonymous_changes('xz', 'kirkstone'), [])
         self.assertIn("sed -i '1s|^#!/bin/bash$|#!${bindir}/bash|' ${D}${bindir}/xzmore",
                       CLASS.read_text())
 
     def test_unrelated_recipes_are_untouched(self):
         for bpn in ('glibc', 'systemd', 'suifleet', 'openssl3', 'xz-utils', 'libcap-ng', ''):
-            for series in ('scarthgap', 'wrynose', ''):
+            for series in ('kirkstone', 'scarthgap', 'wrynose', ''):
                 self.assertEqual(anonymous_changes(bpn, series), [], (bpn, series))
 
     def test_integration_layer_reuses_the_single_definition(self):

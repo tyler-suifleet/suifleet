@@ -160,6 +160,13 @@ standalone requirements are OE-Core, meta-oe, the Scarthgap Rust mixin, the
 systemd and usrmerge distro features, and the optional codec artifact directory.
 These are documented in the layer README.
 
+Kirkstone was declared after these builds (SF-309, merged into this branch from
+main `50de139b`). The class acts on Kirkstone only through the unconditional
+OpenSSL serialization, which the integration layer's previous unconditional
+append also applied; the libcap and xz fixes stay Wrynose-only. Neither a
+Kirkstone task-signature comparison nor a Kirkstone build without the
+integration layer has been run. Kirkstone standalone support stays unclaimed.
+
 ### Offline tests
 
 `scripts/tests/test_yocto_core_fixes.py` (8 tests) runs from
