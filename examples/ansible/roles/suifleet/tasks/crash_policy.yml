@@ -17,8 +17,13 @@
 #   - kernel.core_pattern names a file and the SSH session's limit is 0 (the
 #     kernel writes nothing).
 #
-# Any other piped handler (apport, abrt, a vendor or WSL handler) is refused:
-# the kernel runs it whatever the limit and it may keep the dump. The probe
+# Handlers are identified by full path, not name: systemd-coredump must be
+# /usr/lib/systemd/systemd-coredump or /lib/systemd/systemd-coredump and
+# false/true must be in /usr/bin or /bin, resolving to one of those paths, as
+# an existing root-owned executable only root can modify. A same-name
+# collector elsewhere and any other piped handler (apport, abrt, a vendor or
+# WSL handler) are refused: the kernel runs it whatever the limit and it may
+# keep the dump. The probe
 # runs unescalated, like the claim transfer, so it reads the limit that the
 # module receiving the claim inherits. The root-run staging and enrollment
 # commands additionally set their own limit to 0 before the claim reaches

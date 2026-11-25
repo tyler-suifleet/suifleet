@@ -12,12 +12,35 @@ case $pat in
   '|'*)
     # The kernel runs a piped handler whatever the limit; only handlers known
     # to store nothing, or to honor the crashing process's limit, are safe.
+    # A handler is identified by its full path, never by its name alone: a
+    # site or vendor collector may share a supported handler's name but keep
+    # dumps. The path must be one of the distributions' install locations and
+    # must resolve (through symlinks such as a merged /usr's /lib) to one,
+    # to an existing root-owned executable regular file that only root can
+    # modify. Anything else is refused.
     h=${pat#|}
     while :; do case $h in ' '*) h=${h# };; *) break;; esac; done
     h=${h%% *}
-    h=${h##*/}
     case $h in
-      false|true) v ok ;;
+      /usr/lib/systemd/systemd-coredump|/lib/systemd/systemd-coredump) kind=systemd-coredump ;;
+      /usr/bin/false|/bin/false|/usr/bin/true|/bin/true) kind=discard ;;
+      *) v unsafe "the crash handler $h is not a supported handler at a verified location and may store core dumps whatever the size limit" ;;
+    esac
+    real=$(readlink -f -- "$h" 2>/dev/null) || real=
+    case $kind:$real in
+      systemd-coredump:/usr/lib/systemd/systemd-coredump|systemd-coredump:/lib/systemd/systemd-coredump) ;;
+      discard:/usr/bin/false|discard:/bin/false|discard:/usr/bin/true|discard:/bin/true) ;;
+      *) v unsafe "the crash handler $h resolves to ${real:-nothing}, which is not a supported handler at a verified location" ;;
+    esac
+    [ -f "$real" ] && [ ! -L "$real" ] && [ -x "$real" ] \
+      || v unsafe "the crash handler $h is not an installed executable file"
+    st=$(stat -c '%u %A' -- "$real" 2>/dev/null) || st=
+    case $st in
+      '0 -'????'-'??'-'?) ;;
+      *) v unsafe "the crash handler $h is not a root-owned file that only root can modify (${st:-unreadable})" ;;
+    esac
+    case $kind in
+      discard) v ok ;;
       systemd-coredump)
         # systemd-coredump stores nothing for a process whose limit is 0.
         # Otherwise it disables all dump processing and storage only with
@@ -97,7 +120,6 @@ case $pat in
         [ "$s" = none ] && [ "$m" = 0 ] && v ok
         v unsafe "systemd-coredump may write core dumps to disk (Storage=${s:-external}, ProcessSizeMax=${m:-default};" \
           "both none and 0 are required) and the core dump size limit is $lim" ;;
-      *) v unsafe "the crash handler $h may store core dumps whatever the size limit" ;;
     esac ;;
   *)
     # The kernel itself writes the file, and writes nothing when the limit is 0.
