@@ -97,7 +97,7 @@ Example `/etc/suifleet-monitoring/monitoring.json` (replace example values):
 |---|---|
 | `enabled` | Default `false`. When false or absent, the adapter prints that it is disabled and exits 0 without reading token files, polling or listening. |
 | `evidence` | Required when enabled: `simulated`, `physical` or `unclassified`. Attached to every metric and to the OTLP resource. It is an operator declaration so test rigs and real devices never share dashboards by accident; it is not hardware attestation. SuiFleet's own tests only produce `simulated`. |
-| `device` | Optional label, 1–128 characters of `[A-Za-z0-9._:-]`. Choose a non-secret name; it is not the Sui Device object ID unless you put it there. |
+| `device` | Label, 1–128 characters of `[A-Za-z0-9._:-]`. Optional for Prometheus-only use; **required with `otlp`**, where it is part of the OTLP resource identity and must be stable and unique among devices sharing the collector (otherwise their points would land in one series). Choose a non-secret name; it is not the Sui Device object ID unless you put it there. |
 | `interval_seconds` | Console poll and OTLP export cadence, 10–3600, default 60. Pick it with the daemon's poll and heartbeat cadence in mind; scraping `/metrics` more often only returns the last poll. |
 | `console.url` | `http://<loopback address>:<port>`; the console is loopback-only. |
 | `console.token_file` | One `sfc_…` token from `suifleet --console-token`. |

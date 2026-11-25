@@ -430,7 +430,7 @@ def run(bin_dir, evidence_path):
             wrong_headers.write_text('Authorization: Bearer not-the-gateway-token\n')
             wrong_headers.chmod(0o600)
             wrong_port = free_port()
-            wrong_cfg = adapter_config('wrong.json', enabled=True, evidence='simulated', interval_seconds=10,
+            wrong_cfg = adapter_config('wrong.json', enabled=True, evidence='simulated', device='sim-device-wrong', interval_seconds=10,
                 console=dict(url=f'http://127.0.0.1:{console_port}', token_file=str(console_auth_path)),
                 prometheus=dict(listen=f'127.0.0.1:{wrong_port}'),
                 otlp=dict(endpoint=f'http://127.0.0.1:{gateway.port}', headers_file=str(wrong_headers)))

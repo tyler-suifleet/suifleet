@@ -254,6 +254,7 @@ class ConfigTests(Base):
             dict(prometheus=None),
             dict(otlp=dict(endpoint="http://collector.example:4318")),
             dict(otlp=dict(endpoint="https://user:pw@collector.example")),
+            dict(device=None, otlp=dict(endpoint="http://127.0.0.1:4318")),   # OTLP needs a device id
             dict(otlp=dict(endpoint="https://collector.example?x=1")),
             dict(otlp=dict(endpoint="https://c.example", initial_backoff_seconds=10, max_backoff_seconds=5)),
             dict(logs=dict(components=["svc"])),
@@ -428,6 +429,23 @@ class AdapterTests(Base):
                 self.assertEqual(len(exporter.log_buffer), 2)   # nothing new buffered from the truncated read
                 self.assertTrue(exporter.poll(console))
                 self.assertEqual([line for _, _, line in exporter.log_buffer], ["one", "two", "three"])
+
+    def test_otlp_resources_of_devices_sharing_a_collector_are_distinct(self):
+        # Prometheus-only use may omit the device label.
+        self.assertIsNone(em.Config(self.config(device=None)).device)
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        resources = []
+        for device in ("line-3-gateway", "line-4-gateway"):
+            cfg, exporter, console = self.make(device=device, prometheus=None, otlp=dict(endpoint=collector.url))
+            transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+            exporter.poll(console)
+            em.export_once(exporter, transport)
+            body = [b for path, _, b, _ in collector.received if path == "/v1/metrics"][-1]
+            resource = {a["key"]: a["value"]["stringValue"] for a in body["resourceMetrics"][0]["resource"]["attributes"]}
+            self.assertEqual(resource["suifleet.device"], device)
+            resources.append(body["resourceMetrics"][0]["resource"])
+        self.assertNotEqual(resources[0], resources[1])
 
     def test_otlp_resource_identity_is_stable_across_console_outage(self):
         collector = FakeCollector()

@@ -255,6 +255,11 @@ class Config:
                 self.otlp["context"] = context
             elif otlp.get("ca_file") is not None:
                 raise ConfigError("otlp.ca_file needs an https endpoint")
+            if self.device is None:
+                # The OTLP resource is the series identity at a shared collector:
+                # without a device id, two adapters with the same evidence class
+                # would write contradictory points into one stream.
+                raise ConfigError("otlp needs device: a stable identifier unique among devices sharing the collector")
 
         self.logs = None
         if raw.get("logs") is not None:
