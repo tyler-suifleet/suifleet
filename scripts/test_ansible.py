@@ -18,7 +18,9 @@ Debian 13 refused for deb unless explicitly allowed), refusal, check mode on
 fresh hosts (no change), a control showing sudo input logging (enabled on
 every host) records a become command's stdin, the inventory enables
 ansible_become as a connection variable throughout, a claim transfer with
--e ansible_become=true is refused before staging, a claim transfer interrupted
+-e ansible_become=true is refused on the controller, transfers through a
+sudo-wrapped interpreter are refused by the host probe both with readable
+and with hidepid=2-hidden process ancestry (no staging), a claim transfer interrupted
 after staging (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
@@ -688,19 +690,45 @@ class Harness:
             assert int(sessions) > 0, (name, "no sudo I/O sessions were logged")
         print(f"PASS {phase}: no claim in the hosts' sudo I/O logs (input logging on)")
 
-    def escalated_claim_transfer_refused(self, vault):
-        """Extra vars outrank the role's task variables: escalation stays on, so the claim must not be sent."""
+    def refused_claim_transfer(self, phase, vault, *extra, expected):
+        """The claim transfer must stop before staging or sending anything."""
         (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
-        output, _ = self.ansible("claim transfer with -e ansible_become=true is refused", "/work/claim-interrupt.yml",
-                                 *vault, "-e", "ansible_become=true", expect_rc="nonzero")
-        assert "would run through" in output and "privilege escalation" in output, "the escalation probe did not refuse"
-        assert "interrupted after the claim transfer" not in output, "the claim transfer ran"
+        output, _ = self.ansible(phase, "/work/claim-interrupt.yml", *vault, *extra, expect_rc="nonzero")
+        assert all(text in output for text in expected), (phase, "refused for another reason", output[-3000:])
+        assert "interrupted after the claim transfer" not in output, (phase, "the claim transfer ran")
         for name, host in self.hosts.items():
             container = host["container"]
-            assert self.exec(container, "test", "-e", "/run/suifleet-enroll", check=False).returncode != 0, (name, "staged")
+            assert self.exec(container, "test", "-e", "/run/suifleet-enroll", check=False).returncode != 0, (name, phase, "staged")
             left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
-            assert left == "0", (name, "a transfer directory was created")
-        print("PASS claim transfer refused before reading the claim when escalation is forced through extra vars")
+            assert left == "0", (name, phase, "a transfer directory was created")
+
+    def escalated_claim_transfer_refused(self, vault):
+        """Escalation the role's task variables cannot remove, and unverifiable transport, refuse the claim."""
+        # Extra vars outrank task variables: the controller sees escalation still on.
+        self.refused_claim_transfer("claim transfer with -e ansible_become=true is refused", vault,
+                                    "-e", "ansible_become=true", expected=["Privilege escalation is enabled"])
+        print("PASS claim transfer refused on the controller when escalation is forced through extra vars")
+        # Escalation without Ansible's become: the interpreter itself runs through sudo
+        # (ansible-core takes the interpreter as one path, so a wrapper script).
+        wrapper = "/usr/local/bin/sf304-sudo-python"
+        sudo_python = ["-e", json.dumps({"ansible_python_interpreter": wrapper})]
+        try:
+            for host in self.hosts.values():
+                self.exec(host["container"], "sh", "-c", f"umask 022 && printf '#!/bin/sh\\nexec sudo -n -u nobody"
+                          f" /usr/bin/python3 \"$@\"\\n' > {wrapper} && chmod 0755 {wrapper}")
+            self.refused_claim_transfer("claim transfer through a sudo interpreter is refused", vault, *sudo_python,
+                                        expected=["privilege escalation or another user's process"])
+            print("PASS claim transfer refused when the module's process chain changes user (sudo interpreter)")
+            # The same escalation with /proc hidepid=2: the chain is unreadable, which is not evidence of safety.
+            for host in self.hosts.values():
+                self.exec(host["container"], "mount", "-o", "remount,hidepid=2", "/proc")
+            self.refused_claim_transfer("claim transfer with an unreadable process chain is refused", vault, *sudo_python,
+                                        expected=["Could not verify", "was not fully readable"])
+            print("PASS claim transfer refused when the module's process chain is not fully readable (hidepid=2)")
+        finally:
+            for host in self.hosts.values():
+                self.exec(host["container"], "mount", "-o", "remount,hidepid=0", "/proc")
+                self.exec(host["container"], "rm", "-f", wrapper)
 
     def interrupted_claim_transfer(self, vault):
         """Enrollment stops right after the claim transfer, before its cleanup."""
