@@ -659,6 +659,45 @@ def scenario(cluster, work, supervisor):
     check("apply returns to v1 after the sizeLimit bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
 
+    # Resource limits/requests are ResourceLists, which the API server rounds
+    # up to milli precision ("10.1m" is stored as "11m"); readiness must
+    # compare against the rounded value and still reject a genuine change.
+    def cpu_request():
+        pod = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]["spec"]
+        return pod["containers"][0]["resources"]["requests"]["cpu"]
+
+    bundle = json.loads(v1.read_text())
+    container = bundle["resources"][1]["spec"]["template"]["spec"]["containers"][0]
+    container["resources"]["requests"]["cpu"] = "10.1m"
+    rounded = work / "milli-round-up.json"
+    rounded.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, rounded)
+    check("helper applies a bundle with a cpu request of 10.1m", result.returncode == 0, result.stderr)
+    wait_ready(profiles, rounded, "1.0.0")
+    check("the server rounds the 10.1m cpu request up to 11m and readiness accepts it",
+          cpu_request() == "11m", repr(cpu_request()))
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                  stdin=json.dumps({
+                      "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+                      "spec": {"template": {"spec": {"containers": [
+                          {"name": container["name"], "resources": {"requests": {"cpu": "12m"}}}]}}}}))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    result = helper("ready", profiles, rounded)
+    check("readiness rejects another manager's cpu request change against a rounded bundle value",
+          cpu_request() == "12m" and result.returncode == 1 and 'requests["cpu"] differs' in result.stderr,
+          result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    result = helper("apply", profiles, rounded)
+    check("apply restores the rounded cpu request after the other manager relinquishes it", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, rounded, "1.0.0")
+    check("readiness succeeds once the cpu request is restored to 11m", cpu_request() == "11m", repr(cpu_request()))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the rounded-request bundle", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
     # A map key that ends in a quantity field path is still a literal key: a
     # pod-template annotation "example.com/setting.emptyDir.sizeLimit" changed
     # from "1" to "1000m" (equal as quantities) is drift, not canonicalisation.

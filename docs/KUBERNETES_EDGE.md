@@ -308,7 +308,10 @@ when its value is empty, because for example `nodeSelector:
 zero/empty bundle value, and Kubernetes quantities (resource
 `limits`/`requests`, `overhead` and emptyDir `sizeLimit`) compare by value
 (`0.1`, `"0.1"` and `100m` are equal; `1.5Gi` equals the server's `1536Mi`;
-`1E` equals `1000P`; `1G` does not equal `1Gi`). Other fields compare as text.
+`1E` equals `1000P`; `1G` does not equal `1Gi`). Resource `limits`/`requests`
+and `overhead` are compared after the API server's round-up to milli
+precision (a bundle request of `10.1m` is stored, and accepted, as `11m`; any
+other live value is drift); emptyDir `sizeLimit` is not rounded. Other fields compare as text.
 Map keys are always literal: an annotation key such as
 `example.com/setting.emptyDir.sizeLimit` compares as text, and drift messages
 quote map keys (`spec.template.metadata.annotations["example.com/x"]`, with
