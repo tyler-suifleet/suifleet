@@ -1,0 +1,27 @@
+[Unit]
+Description=Enroll a new SuiFleet device from provisioning media
+Requires=suifleet-provision.service
+After=suifleet-provision.service local-fs.target
+Before=suifleet.service
+ConditionPathExists=/etc/suifleet/first-boot.toml
+ConditionPathExists=!/etc/suifleet/config.toml
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/suifleet --first-boot-enroll /etc/suifleet
+ExecStartPost=/usr/bin/systemctl --no-block start suifleet-signer.socket suifleet.service
+TimeoutStartSec=240
+UMask=0077
+ProtectSystem=strict
+ReadWritePaths=/etc/suifleet -/boot -/media -/run/media -/mnt
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
