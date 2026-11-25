@@ -1,0 +1,7 @@
+# Install as /etc/suifleet/firmware.toml (root:root, 0600).
+# The local RAUC service uses its operator-owned system.conf and trust keyring.
+# SuiFleet appends the private local bundle copy as the argument to install.
+command = "/usr/bin/rauc install"
+timeout_seconds = 600
+spool_dir = "/var/lib/suifleet/firmware"
+work_dir = "/var/lib/suifleet-firmware"

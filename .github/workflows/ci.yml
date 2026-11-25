@@ -106,12 +106,16 @@ jobs:
         run: |
           oci_image=docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
           docker pull "$oci_image"
+          oci_tmp=$(mktemp -d /tmp/sfo.XXXXXXXX)
+          chmod 1777 "$oci_tmp"
+          trap 'rm -rf "$oci_tmp"' EXIT
           docker run --rm --network host --group-add "$(stat -c %g /var/run/docker.sock)" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v /usr/bin/docker:/usr/bin/docker:ro \
             -v "$PWD:/workspace" -w /workspace \
             -v "$PWD/.ci-cache/cargo-registry:/home/dev/.cargo/registry" \
             -v "$PWD/.ci-cache/cargo-git:/home/dev/.cargo/git" \
+            -v "$oci_tmp:$oci_tmp" -e SF_OCI_TEST_TMPDIR="$oci_tmp" \
             -e SF_OCI_TEST_IMAGE="$oci_image" \
             suifleet-dev:ci python3 scripts/test_oci.py
 
@@ -251,6 +255,32 @@ jobs:
           path: ci-logs/
           retention-days: 14
           if-no-files-found: warn
+
+  rocky-rpm:
+    name: Rocky Linux RPM lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build release bundle and reproducible RPMs
+        run: |
+          docker build -f docker/release.Dockerfile --build-arg USER_UID="$(id -u)" \
+            --build-arg USER_GID="$(id -g)" -t suifleet-release:ci docker/
+          python3 scripts/release.py build --target x86_64-unknown-linux-gnu --out dist-client --image suifleet-release:ci
+          docker build -f docker/rpm.Dockerfile -t suifleet-rpm:local docker/
+          for dir in rpm-a rpm-b rpm-upgrade; do
+            mkdir "$dir"
+            release=1
+            if [ "$dir" = rpm-upgrade ]; then release=2; fi
+            docker run --rm --network none --user "$(id -u):$(id -g)" \
+              -v "$PWD:/src:ro" -v "$PWD/$dir:/out" suifleet-rpm:local \
+              python3 -B /src/scripts/build_rpm.py --bundle /src/dist-client --out /out --release "$release"
+          done
+          diff -r rpm-a rpm-b
+
+      - name: Test signed DNF install, upgrade and removal
+        run: python3 -B scripts/test_rpm.py rpm-a/suifleet-*.rpm rpm-upgrade/suifleet-*.rpm
 
   linux-x86:
     name: 32-bit Linux x86 runtime

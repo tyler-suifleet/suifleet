@@ -40,6 +40,7 @@ Do not install unverified binaries.
 | Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
 | Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
+| Rocky Linux 10 (x86_64, systemd, Linux ≥6.5) | [RPM packaging](RPM_PACKAGING.md) | Buildable RPM and signed repository staging; public repository pending |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
 
 Windows and 32-bit x86 Linux have their own notes in
@@ -146,14 +147,12 @@ The daemon binary also implements the signer command. The provisioning helper
 and the systemd service, socket and path definitions are its companion files.
 Platform updater tools are supplied separately by the platform operator.
 
-The included units require systemd and the isolated signer requires Linux 6.5
-or later with the shipped caller identity checks. On a non-systemd or older
-kernel, the archive can run offline CLI operations on the supported ABI, but
-the isolated signer and enrollment path are outside that profile. The existing
-service signer also remains incompatible with daemon self-update, including on
-systemd hosts. An external supervisor would need independent lifecycle,
-privilege and signer validation before fleet use. Do not substitute a
-daemon-readable key for an isolated or user-owned signer requirement.
+The included units require systemd, and their signer configuration requires
+Linux 6.5 or later for caller identity checks. For a source installation on an
+older kernel or a host without systemd, follow the separate
+[portable signer setup](KEY_ISOLATION.md#portable-linux-signer) and its runtime
+requirements. The service signer remains incompatible with daemon self-update.
+Keep device keys isolated from the daemon account.
 Follow [key isolation](KEY_ISOLATION.md) for the current signer and PKCS#11
 build requirements. The standard bundles use the current service signer
 and do not enable the optional PKCS#11 feature. For user-owned hardware keys,

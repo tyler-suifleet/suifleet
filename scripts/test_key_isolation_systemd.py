@@ -168,7 +168,167 @@ signal.pause()
 '''
 
 
+def portable(args, etc, key, state, write_config, journal, wait, sim, check):
+    """Use the production launcher with a real daemon, signer and simulator."""
+    import pwd
+    import socket
+    from test_ota import ADDRESS, CAP
+
+    sock = Path("/run/suifleet-portable/signer.sock")
+    signer_config = etc / "signer.toml"
+    forged_record = state / "daemon.main"
+    signer_config.write_text(f'manifest_path = "deployment.json"\ndevice_cap_id = "{CAP}"\n'
+                             f'keypair_path = "{key}"\nportable = true\ncaller_record = "{forged_record}"\n[seal]\n')
+    sh("chmod", "0755", str(etc))
+    sh("chown", "root:suifleet-signer", str(signer_config))
+    signer_config.chmod(0o640)
+    sh("chown", "suifleet-signer:suifleet-signer", str(key))
+    write_config(f'[device.signer]\nkind = "service"\nsocket = "{sock}"\n')
+    state.mkdir(mode=0o700, exist_ok=True)
+    sh("chown", "suifleet:suifleet", str(state))
+
+    daemon_user = pwd.getpwnam("suifleet")
+    signer_user = pwd.getpwnam("suifleet-signer")
+    component = dict(user=daemon_user.pw_uid, group=daemon_user.pw_gid, extra_groups=[])
+    signer_account = dict(user=signer_user.pw_uid, group=signer_user.pw_gid, extra_groups=[])
+    probe_code = r"""
+import json, os, socket, sys
+from pathlib import Path
+if len(sys.argv) > 3:
+    pid = os.getpid()
+    start = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+    Path(sys.argv[3]).write_text(f"{pid} {start}\n")
+with socket.socket(socket.AF_UNIX) as conn:
+    conn.settimeout(5)
+    conn.connect(sys.argv[1])
+    conn.sendall((sys.argv[2] + "\n").encode())
+    with conn.makefile("r") as response:
+        print(json.dumps({"pid": os.getpid(), "result": json.loads(response.readline())}))
+"""
+
+    def probe(body, *arguments):
+        return json.loads(subprocess.check_output([sys.executable, "-c", probe_code, sock, json.dumps(body), *arguments],
+                                                  text=True, **component))["result"]
+
+    def start():
+        return subprocess.Popen(["/workspace/scripts/suifleet-portable-signer"])
+
+    def report(deployment, process):
+        wait(lambda: journal().get("initialized") or process.poll() is not None, "portable daemon did not initialize")
+        assert process.poll() is None, f"portable launcher exited before deployment ({process.returncode})"
+        sim.add(deployment)
+        wait(lambda: any(i == deployment for i, _ in sim.reports) or process.poll() is not None,
+             f"no verified report for {deployment}")
+        assert process.poll() is None, f"portable launcher exited during deployment ({process.returncode})"
+
+    def stop(process):
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=15)
+
+    def child_pid(launcher, argument):
+        children = Path(f"/proc/{launcher.pid}/task/{launcher.pid}/children").read_text().split()
+        return next(int(pid) for pid in children if argument in Path(f"/proc/{pid}/cmdline").read_bytes())
+
+    process = start()
+    try:
+        report("0x911", process)
+        socket_stat = sock.stat()
+        assert socket_stat.st_uid == 0
+        assert socket_stat.st_gid == daemon_user.pw_gid
+        assert socket_stat.st_mode & 0o777 == 0o660
+        assert subprocess.run(["test", "-w", sock], **signer_account).returncode == 1
+        check("real daemon produced a verified signer-backed report through the daemon-group-only socket")
+        assert probe({"op": "address"})["address"] == ADDRESS
+        assert "may not request signatures" in probe({"op": "sign", "tx": ""})["error"]
+        assert "may not request telemetry" in probe({"op": "sign_telemetry", "message": ""})["error"]
+        assert "may not use Seal" in probe({"op": "seal"})["error"]
+        assert subprocess.run(["test", "-r", key], **component).returncode == 1
+        assert subprocess.run(["test", "-r", signer_config], **component).returncode == 1
+        check("same-UID connections get the public address but no transaction, telemetry or Seal signatures; key and policy are private")
+
+        daemon_pid = child_pid(process, b"--portable-daemon-child")
+        assert subprocess.run(["test", "-r", f"/proc/{daemon_pid}/environ"], **component).returncode == 1
+        assert "may not request signatures" in probe({"op": "sign", "tx": ""}, forged_record)["error"]
+        assert forged_record.stat().st_uid == daemon_user.pw_uid
+        # A component can kill the daemon. The launcher must tear down the signer.
+        subprocess.run(["kill", "-KILL", str(daemon_pid)], check=True, **component)
+        assert process.wait(timeout=15) != 0
+        assert not sock.exists()
+        check("forged main-process state acquired no authority, daemon /proc/environ was private, and daemon death closed the signing endpoint")
+    finally:
+        stop(process)
+
+    process = start()
+    try:
+        report("0x912", process)
+        assert "may not request signatures" in probe({"op": "sign", "tx": ""})["error"]
+        check("restarted pair signed a new report over fresh connections and still refused a same-UID caller")
+        sh("kill", "-KILL", str(child_pid(process, b"--portable-signer-child")))
+        assert process.wait(timeout=15) != 0
+        assert not sock.exists()
+        check("signer death ended the paired service")
+    finally:
+        stop(process)
+
+    if args.force_pid_reuse:
+        # Run only inside a disposable booted guest. Keep the real signer up
+        # after the pinned process dies so the real kernel can recycle its PID.
+        child = subprocess.Popen(["/bin/sleep", "60"], **component)
+        task = os.open(f"/proc/{child.pid}", os.O_PATH | os.O_DIRECTORY)
+        try:
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(sock))
+                sock.chmod(0o666)
+                listener.listen()
+                with subprocess.Popen(
+                    ["/usr/bin/suifleet", "--portable-signer-child", signer_config, str(listener.fileno()),
+                     str(task), str(daemon_user.pw_uid)], pass_fds=(listener.fileno(), task), **signer_account
+                ) as signer:
+                    try:
+                        assert probe({"op": "address"})["address"] == ADDRESS
+                        child.kill()
+                        child.wait()
+                        Path("/proc/sys/kernel/ns_last_pid").write_text(str(child.pid - 1))
+                        impersonator = json.loads(subprocess.check_output(
+                            [sys.executable, "-c", probe_code, sock, '{"op":"sign","tx":""}'],
+                            text=True, **component))
+                        assert impersonator["pid"] == child.pid, impersonator
+                        assert "may not request signatures" in impersonator["result"]["error"], impersonator
+                        check("actual PID reuse in the guest did not revive the signer's held procfs task")
+                        orphan_probe = """
+import os, time
+parent = os.getpid()
+if os.fork():
+    os._exit(0)
+while os.getppid() == parent:
+    time.sleep(0.01)
+assert os.getppid() == 1, os.getppid()
+""" + probe_code
+                        orphan = json.loads(subprocess.check_output(
+                            [sys.executable, "-c", orphan_probe, sock, '{"op":"sign","tx":""}'],
+                            text=True, **component))
+                        assert "may not request signatures" in orphan["result"]["error"], orphan
+                        check("real reparented process under PID 1 was denied")
+                    finally:
+                        stop(signer)
+        finally:
+            os.close(task)
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            sock.unlink(missing_ok=True)
+    assert not sim.errors, sim.errors
+    print("EVIDENCE " + json.dumps({
+        "ticket": "SF-292", "forced_pid_reuse": args.force_pid_reuse,
+        "kernel": os.uname().release, "arch": os.uname().machine, "libc": os.confstr("CS_GNU_LIBC_VERSION"),
+        "init": Path("/proc/1/comm").read_text().strip(),
+    }))
+
+
 def inside(args):
+    if args.force_pid_reuse:
+        assert "suifleet_sf292_test=1" in Path("/proc/cmdline").read_text().split(), "requires a marked disposable VM"
     sys.path.insert(0, "/workspace/scripts")
     import test_ota
     from test_ota import ADDRESS, CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc
@@ -271,8 +431,9 @@ def inside(args):
     sh("chown", "root:suifleet", str(etc / "deployment.json"))
     # signer.toml names the manifest relative to itself; the signer reads it too.
     (etc / "deployment.json").chmod(0o644)
-    sh("systemctl", "daemon-reload")
     state = Path("/var/lib/suifleet")
+    if not args.portable:
+        sh("systemctl", "daemon-reload")
 
     def journal():
         try:
@@ -293,6 +454,15 @@ def inside(args):
 
     def reported(id):
         return any(i == id for i, _ in sim.reports)
+
+    if args.portable:
+        try:
+            portable(args, etc, key, state, write_config, journal, wait, sim, check)
+        finally:
+            shim.kill()
+            shim.wait()
+            server.shutdown()
+        return
 
     import pwd
 
@@ -506,10 +676,16 @@ def inside(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--portable", action="store_true", help="test the non-systemd profile inside a disposable guest")
+    parser.add_argument("--force-pid-reuse", action="store_true", help="force PID reuse inside a disposable booted VM")
     parser.add_argument("--head", help=argparse.SUPPRESS)
     parser.add_argument("--evidence", help="write evidence JSON here")
     parser.add_argument("--keep", action="store_true", help="keep the container for inspection")
     arguments = parser.parse_args()
+    if arguments.portable and not arguments.inside:
+        parser.error("--portable requires --inside in a disposable guest")
+    if arguments.force_pid_reuse and not arguments.portable:
+        parser.error("--force-pid-reuse requires --portable in a disposable booted VM")
     if arguments.inside:
         inside(arguments)
     else:

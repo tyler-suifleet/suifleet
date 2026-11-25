@@ -210,6 +210,15 @@ class Fixture(unittest.TestCase):
 class EndToEnd(Fixture):
     def test_live_draft_owner_redirect_repairs_preserves_dirty_work_and_resumes(self):
         child, directory = self.start_owner()
+        # A forked CLI is not proof it has executed its first instruction. This
+        # test asserts all three log entries, so await the first entry before
+        # deliberately interrupting it. Production may safely stop it earlier.
+        deadline = time.monotonic() + 20
+        while not self.log.exists() or not self.log.read_text().splitlines():
+            self.assertIsNone(child.poll(), 'initial fake worker exited before readiness')
+            self.assertLess(time.monotonic(), deadline, 'initial fake CLI never logged readiness')
+            time.sleep(0.05)
+        self.assertEqual(json.loads(self.log.read_text().splitlines()[0])['mode'], 'implement')
         # Unfinished owner work: a tracked edit, a staged new file and an untracked file.
         (self.worktree/'feature.txt').write_text('unfinished second step\n')
         (self.worktree/'staged.txt').write_text('staged work\n')
