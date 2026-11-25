@@ -1271,6 +1271,33 @@ class AdapterTests(Base):
         self.assertEqual(len(exporter.log_buffer), 0)
         self.assertEqual(exporter.log_records["exported"], 2)
 
+    def test_zero_padded_retry_after_uses_its_value_and_keeps_logs(self):
+        # Leading zeroes do not make a delay-seconds value large enough to hit the cap.
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=5, max_backoff_seconds=300),
+            logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        exporter.poll(console)
+        cases = [("0", 5.0), ("0000000000", 5.0), ("10", 10.0), ("0000000010", 10.0),
+                 ("0" * 400 + "120", 120.0), ("0" * 400 + "1" * 10, 300.0)]
+        for value, expected in cases:
+            with self.subTest(retry_after=value[-20:]):
+                collector.responses = [(503, {"Retry-After": value}, b""), (503, {"Retry-After": value}, b"")]
+                self.assertEqual(transport.post("metrics", exporter.otlp_metrics()), ("retry", None))
+                self.assertEqual(exporter.backoff["metrics"], expected)
+                em.export_once(exporter, transport)        # logs back off too, buffer retained
+                self.assertEqual(len(exporter.log_buffer), 2)
+                transport._success("metrics")
+                transport._success("logs")
+        self.assertEqual(em._retry_after("0000000000", 300), 0)
+        self.assertEqual(em._retry_after("0000000010", 300), 10)
+        self.assertEqual(em._retry_after("0" * 5000 + "7", 300), 7)
+        self.assertEqual(em._retry_after("0" * 5000 + "1234567890", 300), 300)
+        em.export_once(exporter, transport)                # collector recovers
+        self.assertEqual(len(exporter.log_buffer), 0)
+
     def test_http_date_retry_after_is_honored_and_keeps_logs(self):
         # RFC 9110 section 10.2.3: Retry-After may be an HTTP-date, not only delay-seconds.
         collector = FakeCollector()

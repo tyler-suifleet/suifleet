@@ -429,8 +429,10 @@ def _retry_after(value, cap, now=None):
     if not value or not value.isascii():
         return None
     if value.isdigit():
-        # Bound the text before int(): a huge value means "wait as long as allowed".
-        return int(value) if len(value) <= 9 else cap
+        # Bound the significant digits before int(): a huge value means "wait as
+        # long as allowed". Leading zeroes carry no magnitude ("0000000010" is 10).
+        digits = value.lstrip("0") or "0"
+        return int(digits) if len(digits) <= 9 else cap
     if len(value) > _MAX_HTTP_DATE:
         return None
     try:
