@@ -31,7 +31,9 @@ arguments from your board configuration. For your own image, enable
 If you customize BusyBox, keep the long options for `start-stop-daemon`,
 including `--output` for the init hook.
 Buildroot vendors the pinned source revision's `Cargo.lock` at download time,
-then builds with `--locked --offline`. Run `make legal-info` for the source
+then builds with `--locked --offline`. The package pins SF-293 integration
+revision `19ee9e089ea6a2ca2ba9f307f163a6b96c5645ee`, which includes portable
+pair lifetime supervision. Run `make legal-info` for the source
 and license archive, including the vendored Rust sources. Inspect individual
 crate notices in that archive when preparing redistribution materials.
 
@@ -76,7 +78,8 @@ stdout and stderr to the root-only `/run/suifleet-portable/launcher.log`.
 Check that log if the pair exits during startup. The log survives service
 restarts and clears on reboot when `/run` is volatile. Handle ongoing log
 retention through the board's service manager. The foreground launcher stops
-both children when either exits. Supervise the foreground pair if the site
+both children when either exits. Linux terminates both children if the
+launcher is killed. Supervise the foreground pair if the site
 requires automatic restart after a failure. Platform scripts own firmware
 installation, reboot, boot confirmation and firmware rollback.
 
@@ -134,14 +137,40 @@ The fixture deliberately triggers the launcher's binary permission check,
 verifies the error in the root-only log, and restores the binary mode before
 starting the service. It checks a fresh identity, claim-sponsored enrollment
 effects and cap ownership, harmless installation, and an authoritative Applied
-receipt from the node. It starts, restarts and stops the packaged service and checks
-that the signer endpoint disappears on stop. This uses an HTTP Walrus
+receipt from the node. It kills the launcher, verifies both child processes
+exit before restarting, and checks that the signer listens again after
+restart and that the endpoint disappears on stop. This uses an HTTP Walrus
 stand-in inside the isolated namespace. It exercises an application install
 in emulation. Physical and manual-wallet acceptance remains in
 [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32), with mainnet
 and production providers in [SF-087](https://github.com/tyler-suifleet/suifleet/issues/159).
 
 ## Validation on 2026-11-25
+
+### SF-293 pin and forced launcher exit
+
+Built `suifleet_x86_64_glibc_defconfig` in a clean Buildroot 2026.08.2 output
+directory with `make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl -j16`. Buildroot
+verified the regenerated Cargo archive and built the package offline with
+Rust 1.97.1. The `suifleet-legal-info` target verified the unchanged MIT
+license hash. The CPIO contained the packaged launcher, daemon, init hook,
+and CA bundle, with no SuiFleet configuration, keys, or journal directory.
+
+QEMU 7.2.22/KVM booted the CPIO with Debian kernel `6.1.0-56-amd64` and the
+test overlay. The guest printed `SF296_STARTUP_DIAGNOSTIC_PASS`,
+`SF296_FORCED_EXIT_PASS`, and `SF296_GUEST_PASS`. It verified both children
+exited after launcher `SIGKILL` and the signer listened again after restart.
+Isolated Sui 1.81.1 localnet (chain `c065dfa6`, protocol 138) verified
+enrollment effects, cap ownership, and the authoritative Applied receipt.
+The guest verified the installed app and its health.
+
+| Rootfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|
+| `5584cdca4eec158b566c17f97ec18531a1034e2f536dd3c956cdc71bf2b1afdb` | `5Vt8aV6UAUFrH7S7oh59qLgucXiRdQGUUbxjni5o4f4D` | `HwFXHznEK6pWfbezEDfnRzcKvbvR89YxZzTQpbWAwhaK` |
+
+The historical runs below used SF-292 source revision
+`773700486e111e74e8a5471057157ebbfda44814`. AArch64 glibc and x86-64 musl
+were not rerun with the SF-293 pin.
 
 ### Original x86-64 builds
 

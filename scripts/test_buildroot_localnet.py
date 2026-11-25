@@ -146,6 +146,8 @@ def host(claim_tool):
 def guest():
     import os
     import pwd
+    import signal
+    import socket as unix_socket
     from urllib.error import HTTPError
     import stat
     import time
@@ -253,8 +255,31 @@ def guest():
                 return False
 
         wait_for(reported)
+
+        launcher_pid = int(starting_pid)
+        children = Path(f"/proc/{launcher_pid}/task/{launcher_pid}/children")
+        child_pids = [int(pid) for pid in children.read_text().split()]
+        assert len(child_pids) == 2, child_pids
+        assert all(Path(f"/proc/{pid}/exe").resolve(strict=True) == binary for pid in child_pids)
+        os.kill(launcher_pid, signal.SIGKILL)
+        wait_for(lambda: all(not Path(f"/proc/{pid}").exists() for pid in [launcher_pid, *child_pids]))
+
+        def signer_listening():
+            with unix_socket.socket(unix_socket.AF_UNIX) as client:
+                try:
+                    client.connect(str(socket))
+                except (FileNotFoundError, ConnectionRefusedError):
+                    return False
+                return True
+
         subprocess.run([INIT, "restart"], check=True)
-        wait_for(socket.exists)
+        wait_for(signer_listening)
+        restarted_pid = int(pidfile.read_text())
+        assert restarted_pid != launcher_pid
+        print("SF296_FORCED_EXIT_PASS", flush=True)
+
+        subprocess.run([INIT, "restart"], check=True)
+        wait_for(signer_listening)
         subprocess.run([INIT, "stop"], check=True)
         assert not pidfile.exists() and not socket.exists()
         proof.update(kernel=os.uname().release, machine=os.uname().machine,

@@ -4,8 +4,8 @@
 #
 ################################################################################
 
-# Reviewed SF-292 integration revision, including the portable Linux signer.
-SUIFLEET_VERSION = 773700486e111e74e8a5471057157ebbfda44814
+# Reviewed SF-293 integration revision, including portable pair lifetime supervision.
+SUIFLEET_VERSION = 19ee9e089ea6a2ca2ba9f307f163a6b96c5645ee
 SUIFLEET_SITE = $(call github,tyler-suifleet,suifleet,$(SUIFLEET_VERSION))
 SUIFLEET_SUBDIR = suifleet-edge
 SUIFLEET_LICENSE = MIT
