@@ -246,6 +246,10 @@ class Config:
                 # characters on the request line; a permanent misconfiguration
                 # would otherwise look like an endless collector outage.
                 raise ConfigError("otlp.endpoint must be printable ASCII without spaces; percent-encode other characters")
+            if isinstance(endpoint, str) and ("?" in endpoint or "#" in endpoint):
+                # The OTLP route is appended to the raw string, so even an empty
+                # query or fragment delimiter would swallow it ("/c?/v1/metrics").
+                raise ConfigError("otlp.endpoint must be an http(s) URL with a valid port and without credentials, query or fragment")
             parsed = _split_url(endpoint)
             if parsed is None or parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.query \
                     or parsed.fragment or parsed.username or parsed.password or _port(parsed, default=0) is None:

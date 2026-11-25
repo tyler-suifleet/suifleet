@@ -430,6 +430,31 @@ class ConfigTests(Base):
         self.assertEqual(cfg.otlp["metrics_url"], "http://127.0.0.1:4318/caf%C3%A9/v1/metrics")
         self.assertEqual(cfg.otlp["logs_url"], "http://127.0.0.1:4318/caf%C3%A9/v1/logs")
 
+    def test_empty_query_or_fragment_delimiter_is_rejected_by_check_config(self):
+        # The route is appended to the raw endpoint, so a bare "?" or "#" would
+        # turn "/v1/metrics" into a query or fragment and every export would 404.
+        for endpoint in ("http://127.0.0.1:4318/collector?", "http://127.0.0.1:4318/collector#",
+                         "http://127.0.0.1:4318?", "http://127.0.0.1:4318#", "https://collector.example/?#"):
+            path = self.write("config.json", json.dumps(self.config(otlp=dict(endpoint=endpoint))))
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaisesRegex(em.ConfigError, "without credentials, query or fragment"):
+                    em.Config(self.config(otlp=dict(endpoint=endpoint)))
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                self.assertIn("configuration rejected",
+                              "".join(call.args[0] for call in stderr.write.call_args_list))
+        # Percent-encoded delimiters are ordinary path characters and stay verbatim.
+        cfg = em.Config(self.config(otlp=dict(endpoint="http://127.0.0.1:4318/a%3Fb%23c")))
+        self.assertEqual(cfg.otlp["metrics_url"], "http://127.0.0.1:4318/a%3Fb%23c/v1/metrics")
+
+    def test_collector_path_receives_the_otlp_route(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg = em.Config(self.config(prometheus=None, otlp=dict(endpoint=collector.url + "/collector/")))
+        transport = em.Transport(cfg, em.Exporter(cfg), clock=lambda: 0.0, rng=lambda: 0.5)
+        self.assertEqual(transport.post("metrics", {"resourceMetrics": []}), ("ok", None))
+        self.assertEqual(collector.arrived[-1], "/collector/v1/metrics")
+
     def test_percent_encoded_otlp_endpoint_reaches_the_collector(self):
         collector = FakeCollector()
         self.addCleanup(collector.close)
