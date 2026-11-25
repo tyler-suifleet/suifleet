@@ -133,7 +133,7 @@ def container_build(args):
         "suifleet-signer.service", "suifleet-signer.socket",
     ):
         entries.append((f"suifleet/systemd/{name}", (service_files / name).read_bytes(), 0o644))
-    first_boot_unit = edge / "meta-suifleet-integration/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service"
+    first_boot_unit = edge / "meta-suifleet-enrollment/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service"
     entries.append((f"suifleet/systemd/{first_boot_unit.name}", first_boot_unit.read_bytes(), 0o644))
     entries.append(("suifleet/libexec/suifleet-provision",
                     (service_files / "suifleet-provision").read_bytes(), 0o755))

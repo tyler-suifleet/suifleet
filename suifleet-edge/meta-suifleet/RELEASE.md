@@ -49,7 +49,7 @@ Use the [OpenEmbedded Layer Index form](https://layers.openembedded.org/layerind
 | License | MIT metadata, with recipe-specific payload licenses |
 
 The CAPTCHA submission remains deferred. Record submission confirmation and the listing URL separately in
-[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820).
+[SF-312](https://github.com/tyler-suifleet/suifleet/issues/838).
 The Index entry and optional Yocto Project Compatible certification have
 separate requirements.
 

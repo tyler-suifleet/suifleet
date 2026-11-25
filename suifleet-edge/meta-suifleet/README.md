@@ -31,7 +31,9 @@ packages are `suifleet-node` and `suifleet-walrus-codec`; the codec fetches its 
 
 The separate, core-repository `meta-suifleet-integration` contains Pi image/access
 policy, test components and a glibc usrmerge layout guard for its reused build
-caches. Existing kas profiles include both layers. Generic consumers should select
+caches. Core kas profiles also include the board-independent `meta-suifleet-enrollment`
+companion layer for automatic first-boot enrollment. See the
+[customer Yocto guide](https://github.com/tyler-suifleet/suifleet/blob/main/docs/CUSTOMER_YOCTO.md). Generic consumers should select
 their own BSP/distro and must not add the integration layer without reviewing its
 policy.
 

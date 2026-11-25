@@ -18,8 +18,8 @@ The public [meta-suifleet repository](https://github.com/tyler-suifleet/meta-sui
 contains the software layer. The core checkout keeps a mirror for packaging tests
 and native Linux installation. The separate integration layer contains Pi image
 and access policy, the test component and a cache-hygiene guard for glibc. Core
-kas profiles use both layers. Generic consumers bring their own distro and BSP
-and can opt into `INHERIT += "suifleet-core-fixes"` for the documented OE-Core
+kas profiles use the public software layer and both core companion layers.
+Generic consumers bring their own distro and BSP and can opt into `INHERIT += "suifleet-core-fixes"` for the documented OE-Core
 fixes. See [standalone validation](YOCTO_STANDALONE_VALIDATION.md) for prior
 per-source evidence and [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820)
 for public release validation. [SF-312](https://github.com/tyler-suifleet/suifleet/issues/838)
@@ -37,9 +37,10 @@ Other hosts/architectures need a deliberate profile change and validation.
 
 The recipe and codec use separately checksum-pinned public source tarballs
 from reviewed core commit `b9bb2ef6210624d732ab2de2075ea1826e5300c1` (client 0.2.3).
-The core integration layer applies the first-boot enrollment backport and
-installs its service. Record the core checkout revision alongside the kas
-configuration to identify the patch and unit used in the build.
+The board-independent `meta-suifleet-enrollment` companion layer applies the
+first-boot enrollment backport and installs its systemd service. Custom systemd
+images can add it alongside the pinned public layer. Record the core checkout
+revision alongside the kas configuration to identify the patch and unit used in the build.
 The Cargo.lock SHA-256 is
 `c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6`.
 The archive download and unpack layout are independent of the core checkout.
@@ -348,8 +349,8 @@ prints only the public address. Never run provisioning during image creation.
 unprivileged account in the existing sandbox and starts only when
 `/etc/suifleet/config.toml` exists. `suifleet-enrollment.path` notices that
 file's installation; the service also starts on subsequent enrolled boots.
-In the core kas profiles, `suifleet-first-boot-enrollment.service` consumes a per-device
-claim when the image has the [public batch settings](ENROLLMENT.md#automatic-linux-first-boot)
+With the enrollment companion layer enabled,
+`suifleet-first-boot-enrollment.service` consumes a per-device claim when the image has the [public batch settings](ENROLLMENT.md#automatic-linux-first-boot)
 and the unit's provisioning media is mounted and writable.
 
 Register the address through the current registry flow and obtain the

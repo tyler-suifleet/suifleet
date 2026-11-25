@@ -68,7 +68,7 @@ def build(bundle, out, release_number):
             "usr/share/licenses/suifleet/LICENSE": ((ROOT / "LICENSE").read_bytes(), 0o644),
             "etc/suifleet/release-trust.toml": ((ROOT / "release/trust.toml").read_bytes(), 0o644),
         }
-        first_boot_unit = ROOT / "suifleet-edge/meta-suifleet-integration/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service"
+        first_boot_unit = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service"
         payload[f"usr/lib/systemd/system/{first_boot_unit.name}"] = (first_boot_unit.read_bytes(), 0o644)
         for name in UNITS:
             payload[f"usr/lib/systemd/system/{name}"] = ((shipped / name).read_bytes(), 0o644)

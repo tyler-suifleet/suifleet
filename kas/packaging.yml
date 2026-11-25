@@ -7,6 +7,7 @@ repos:
   suifleet:
     layers:
       suifleet-edge/meta-suifleet-integration:
+      suifleet-edge/meta-suifleet-enrollment:
   meta-suifleet:
     url: https://github.com/tyler-suifleet/meta-suifleet.git
     branch: scarthgap

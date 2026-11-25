@@ -51,7 +51,7 @@ def fake_package(modules, store, name, version, license=None, files=()):
 
 class FirstBootEnrollmentServiceTests(unittest.TestCase):
     def test_network_ordering_and_bounded_restart(self):
-        units = ROOT / "suifleet-edge/meta-suifleet-integration/recipes-edge/suifleet/files"
+        units = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files"
         unit = ConfigParser(interpolation=None, strict=False)
         unit.read(units / "suifleet-first-boot-enrollment.service")
         self.assertIn("network-online.target", unit["Unit"]["Wants"].split())
