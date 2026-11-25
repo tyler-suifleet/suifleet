@@ -19,13 +19,22 @@ case $pat in
     case $h in
       false|true) v ok ;;
       systemd-coredump)
-        # systemd-coredump stores nothing for a process whose limit is 0,
-        # and nothing at all with Storage=none.
+        # systemd-coredump stores nothing for a process whose limit is 0.
+        # Otherwise it disables all dump processing and storage only with
+        # both Storage=none and ProcessSizeMax=0: with Storage=none alone it
+        # may still write the dump to disk temporarily while processing it.
         [ "$lim" = 0 ] && v ok
-        s=$(systemd-analyze cat-config systemd/coredump.conf 2>/dev/null \
-          | sed -n 's/^[[:space:]]*Storage[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' | tail -n 1)
-        [ "$s" = none ] && v ok
-        v unsafe "systemd-coredump stores core dumps (Storage=${s:-external}) and the core dump size limit is $lim" ;;
+        conf=$(systemd-analyze cat-config systemd/coredump.conf 2>/dev/null) \
+          || v unsafe "systemd-coredump's configuration could not be read and the core dump size limit is $lim"
+        setting() {
+          printf '%s\n' "$conf" \
+            | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p" | tail -n 1
+        }
+        s=$(setting Storage)
+        m=$(setting ProcessSizeMax)
+        [ "$s" = none ] && [ "$m" = 0 ] && v ok
+        v unsafe "systemd-coredump may write core dumps to disk (Storage=${s:-external}, ProcessSizeMax=${m:-default};" \
+          "both none and 0 are required) and the core dump size limit is $lim" ;;
       *) v unsafe "the crash handler $h may store core dumps whatever the size limit" ;;
     esac ;;
   *)
