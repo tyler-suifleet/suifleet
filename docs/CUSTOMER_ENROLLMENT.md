@@ -18,7 +18,7 @@ Connect the fleet operator account on the intended network. Install a client wit
 
 ## Expected result
 
-The roster reaches **Bound**, the named device appears in Devices, and its configured client sends reports. **Funded, unused** means the claim is ready. **Consumed, pending binding** means the chain recorded enrollment and the reservation still needs to be bound.
+First-boot enrollment records both the device object ID and the `DeviceCap` ID in `config.toml` and configures `signer.toml` with the `DeviceCap` ID. The roster reaches **Bound**, the named device appears in Devices, and its configured client sends reports. **Funded, unused** means the claim is ready. **Consumed, pending binding** means the chain recorded enrollment and the reservation still needs to be bound.
 
 ## Recovery and limits
 
