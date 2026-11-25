@@ -1,0 +1,161 @@
+---
+# Claim enrollment (docs/ENROLLMENT.md): the device key sends, the single-use
+# claim key sponsors gas. /etc/suifleet/enrollment.json records the result
+# (public IDs only) and makes this step run once per device. Operators never
+# handle device addresses: the dApp binds each enrolled claim to its serial.
+- name: Enroll hosts without an enrollment record
+  when: not suifleet_enrollment_record.stat.exists
+  vars:
+    batch: "{{ suifleet_enrollment_root }}/enrollment/{{ suifleet_serial }}"
+  block:
+    - name: Refuse a host that is configured but has no enrollment record
+      ansible.builtin.stat:
+        path: /etc/suifleet/config.toml
+      register: suifleet_unrecorded_config
+
+    - name: Stop before enrolling a configured device again
+      ansible.builtin.assert:
+        that: not suifleet_unrecorded_config.stat.exists
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }} has /etc/suifleet/config.toml but no
+          /etc/suifleet/enrollment.json. It is already enrolled or was configured
+          by hand. Restore the record from its existing IDs (docs/ANSIBLE.md#recovery);
+          never issue it a new claim.
+
+    - name: Require the enrollment batch and serial
+      ansible.builtin.assert:
+        that:
+          - suifleet_enrollment_root | length > 0
+          - suifleet_serial is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }} is not enrolled: set suifleet_enrollment_root and
+          a valid suifleet_serial matching its folder in the credential batch.
+
+    - name: Read the batch folder on the controller
+      delegate_to: localhost
+      become: false
+      ansible.builtin.stat:
+        path: "{{ batch }}/{{ item }}"
+        get_checksum: "{{ item == 'deployment.json' }}"
+        checksum_algorithm: sha256
+      loop: [claim.key, enroll.toml, deployment.json]
+      register: suifleet_batch_files
+      check_mode: false
+
+    - name: Refuse an incomplete batch folder or a different manifest
+      ansible.builtin.assert:
+        that:
+          - suifleet_batch_files.results | map(attribute='stat.exists') | min
+          - suifleet_batch_files.results[2].stat.checksum == suifleet_manifest.stat.checksum
+        quiet: true
+        fail_msg: >-
+          {{ batch }} must contain claim.key, enroll.toml and the same
+          deployment.json as suifleet_manifest_src.
+
+    - name: Check the enrollment configuration paths
+      vars:
+        enroll_toml: "{{ lookup('ansible.builtin.file', batch ~ '/enroll.toml') }}"
+      ansible.builtin.assert:
+        that:
+          - enroll_toml is search('(?m)^manifest_path = "deployment.json"$')
+          - enroll_toml is search('(?m)^claim_key_path = "claim.key"$')
+          - enroll_toml is search('(?m)^keypair_path = "/etc/suifleet/device.key"$')
+        quiet: true
+        fail_msg: >-
+          {{ batch }}/enroll.toml must use the batch-relative deployment.json and
+          claim.key and the device's own /etc/suifleet/device.key.
+
+    - name: Read the staging filesystem type
+      ansible.builtin.command:
+        argv: [stat, -f, -c, "%T", "{{ suifleet_enroll_staging | dirname }}"]
+      register: suifleet_staging_fs
+      changed_when: false
+      check_mode: false
+
+    - name: Require memory-backed claim staging
+      ansible.builtin.assert:
+        that: suifleet_staging_fs.stdout == 'tmpfs'
+        quiet: true
+        fail_msg: "{{ suifleet_enroll_staging | dirname }} must be a tmpfs so the claim never reaches persistent storage on the host."
+
+    - name: Report the pending enrollment
+      ansible.builtin.debug:
+        msg: "Would enroll {{ inventory_hostname }} with the claim for serial {{ suifleet_serial }}."
+      changed_when: true
+      when: ansible_check_mode
+
+    - name: Enroll with the device's own key
+      when: not ansible_check_mode
+      block:
+        # The current key holder (the daemon user before signer.toml exists)
+        # runs the enrollment, not root.
+        - name: Stage the single-use claim key in memory-backed storage
+          ansible.builtin.import_tasks: stage_claim.yml
+          vars:
+            suifleet_claim_file: "{{ batch }}/claim.key"
+            suifleet_claim_owner: "{{ suifleet_key.stat.pw_name }}"
+            suifleet_claim_group: "{{ suifleet_key.stat.gr_name }}"
+
+        - name: Stage the enrollment configuration and manifest
+          ansible.builtin.copy:
+            src: "{{ batch }}/{{ item }}"
+            dest: "{{ suifleet_enroll_staging }}/{{ item }}"
+            owner: "{{ suifleet_key.stat.pw_name }}"
+            group: "{{ suifleet_key.stat.gr_name }}"
+            mode: "0600"
+          loop: [enroll.toml, deployment.json]
+
+        - name: Enroll and record the public IDs
+          ansible.builtin.shell: |
+            set -eu
+            umask 077
+            partial=/etc/suifleet/.enrollment.json.partial
+            runuser -u "$HOLDER" -- /usr/bin/suifleet --enroll "$STAGING/enroll.toml" > "$partial"
+            grep -Eq '"device_cap_id":"0x[0-9a-f]{64}"' "$partial"
+            chown root:suifleet "$partial"
+            chmod 0640 "$partial"
+            mv -f "$partial" /etc/suifleet/enrollment.json
+          args:
+            creates: /etc/suifleet/enrollment.json
+          environment:
+            HOLDER: "{{ suifleet_key.stat.pw_name }}"
+            STAGING: "{{ suifleet_enroll_staging }}"
+      always:
+        - name: Erase the staged claim
+          ansible.builtin.file:
+            path: "{{ suifleet_enroll_staging }}"
+            state: absent
+
+# A run interrupted after the record was renamed into place, but before the
+# cleanup above, leaves the staged claim behind. Recorded hosts skip the
+# enrollment block, so erase abandoned staging here; this needs no credential
+# batch and never re-enrolls. Check mode reports it without erasing.
+- name: Erase claim staging left by an interrupted enrollment
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: absent
+
+- name: Read the enrollment record
+  ansible.builtin.slurp:
+    src: /etc/suifleet/enrollment.json
+  register: suifleet_enrollment_file
+  when: not ansible_check_mode or suifleet_enrollment_record.stat.exists
+
+- name: Parse the enrollment record
+  ansible.builtin.set_fact:
+    suifleet_enrollment: "{{ suifleet_enrollment_file.content | b64decode | from_json }}"
+  when: suifleet_enrollment_file is not skipped
+
+- name: Refuse a record for a different identity
+  ansible.builtin.assert:
+    that:
+      - suifleet_enrollment.device_address == suifleet_device_address
+      - suifleet_enrollment.device_object_id is match('^0x[0-9a-f]{64}$')
+      - suifleet_enrollment.device_cap_id is match('^0x[0-9a-f]{64}$')
+    quiet: true
+    fail_msg: >-
+      /etc/suifleet/enrollment.json does not belong to this device's key. Do not
+      replace device.key or copy records between hosts.
+  when: suifleet_enrollment is defined
