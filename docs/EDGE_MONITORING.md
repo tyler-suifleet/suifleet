@@ -169,7 +169,7 @@ the two apart.
 | `suifleet_exporter_otlp_metric_points_rejected_total` | counter | Metric data points refused in OTLP partial-success replies (`rejectedDataPoints`). |
 | `suifleet_exporter_otlp_backoff_seconds{signal}` | gauge | Current retry delay; 0 when healthy. |
 | `suifleet_exporter_log_records_total{result}` | counter | Log lines `exported`, `dropped` from the full buffer, `rejected` by the collector, or `unconfirmed` (sent and accepted with 2xx, but the reply could not be inspected for partial rejection). |
-| `suifleet_exporter_log_gaps_total` | counter | Polls whose tail did not overlap the previous one, so lines may have been missed. |
+| `suifleet_exporter_log_gaps_total` | counter | Per-component tail comparisons in which the new tail did not overlap the previous one, so lines may have been missed. Each such comparison adds 1, however many lines were lost; it is not a count of missing lines (see [Logs](#logs)). |
 | `suifleet_exporter_log_buffered` | gauge | Lines held for export, including a batch in flight (at most `max_buffer`). |
 
 Never exported: degraded-reason texts, deployment error texts, last-exit texts,
@@ -201,11 +201,20 @@ exported as `[redacted]` instead, so the selector never leaves the device;
 rename such a component to restore per-component attribution.
 
 New lines are found by overlapping the new tail with the previous one. This is
-bounded **tail sampling**, not complete log shipping:
+bounded **tail sampling**, not complete log shipping. Each tail is limited both
+to `max_lines` lines and to the console's window of the last 8 KiB of the log
+file ([LOCAL_CONSOLE.md](LOCAL_CONSOLE.md#protocol-v1)), whichever is smaller,
+so long lines can shorten it below `max_lines`:
 
-- a component that writes more than `max_lines` lines between polls loses the
-  excess, counted in `suifleet_exporter_log_gaps_total`;
-- consecutive identical lines can be collapsed by the overlap;
+- lines written between polls beyond what one tail holds are lost. The adapter
+  cannot tell how many: when a component's new tail shares no lines with its
+  previous one, `suifleet_exporter_log_gaps_total` increases by 1 as an
+  observation of possible loss, whether one line or thousands were missed;
+- repeated lines can make unrelated tails appear to overlap, so some loss is
+  not observed at all, and consecutive identical lines can be collapsed;
+- size `max_lines` and `interval_seconds` so that one tail comfortably covers what
+  a component writes in one poll interval; a rising gap counter means it does
+  not;
 - lines are timestamped when the adapter reads them;
 - after an adapter restart the current tail is sent again.
 
