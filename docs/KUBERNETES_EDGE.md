@@ -90,18 +90,41 @@ How the helper keeps two controllers from fighting:
    converges, and a supervisor rollback re-applies the previous bundle.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
-cluster keeps serving the last applied bundle. To retire the workload, deploy a
-version whose bundle has an empty `resources` list, or have the operator run
-`suifleet_k8s_apply.py remove --profile NAME --component NAME`. A retirement
-bundle is ready only once no object labelled for the component remains.
+cluster keeps serving the last applied bundle. There are two ways to retire
+the workload:
+
+- **Managed (preferred).** Deploy a version whose bundle has an empty
+  `resources` list. Its `run` reconciler prunes the old objects, and it is
+  ready only once no object labelled for the component remains. The
+  reconciler for that version keeps nothing alive, so no other controller
+  works against the retirement.
+- **Operator removal.** First stop the component's reconciliation: remove the
+  component from the device's deployment, or stop the SuiFleet client on that
+  device, so no `run` process for the component remains. The `run` recipe
+  below re-applies its bundle every interval and recreates deleted objects.
+  `remove` only acts on the cluster and cannot stop a reconciler. Then run
+  `suifleet_k8s_apply.py remove --profile NAME --component NAME`.
+
 `remove` deletes the component's objects with foreground deletion and then
-waits, up to `--timeout` seconds (default 300), until no object labelled for
-the component remains. A pruned Deployment stays listed until its ReplicaSets
-and Pods are gone. `remove` exits 0 only after that convergence. It exits 1
-(`not removed: …`) while an object remains, for example when a finalizer
-holds a Pod or an object was replaced between listing and deletion. Running
-it again does not re-delete terminating objects; it waits again and reports
-the current state.
+polls until no object labelled for the component remains. A pruned Deployment
+stays listed until its ReplicaSets and Pods are gone. `--timeout` (default
+300 seconds) bounds this wait after the deletes are issued. The polling
+kubectl calls run against that deadline: their API request timeout and process
+limit shrink to the remaining time, so a slow API server cannot extend the
+wait. The delete phase before it is not counted in `--timeout`. Each of its
+kubectl calls has a fixed 30-second API request timeout and 60-second process
+limit, with at most 8 attempts per object when it races a concurrent change.
+With `--timeout 0`, `remove` only issues the deletes and reports
+`not removed`.
+
+`remove` exits 0 when one poll observed that no labelled object remains. This
+result describes that moment only. If a reconciler is still running, or
+someone applies the component again, the objects can return after `remove`
+exits 0. That is why stopping reconciliation is a prerequisite. `remove` exits
+1 (`not removed: …`) when the deadline passes while an object remains, for
+example when a finalizer holds a Pod or an object was replaced between listing
+and deletion. Running it again does not re-delete terminating objects; it
+waits again and reports the current state.
 
 ## Security model
 

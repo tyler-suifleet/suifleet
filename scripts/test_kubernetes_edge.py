@@ -609,9 +609,12 @@ def scenario(cluster, work, supervisor):
     check("remove exits 1 (not removed) while a finalizer holds the Deployment's Pod",
           result.returncode == 1 and "not removed" in result.stderr and "deployments.apps/web" in result.stderr
           and set(held_pods) <= set(web_pods()) and "deployment.apps/web" in remaining_objects(), result.stderr)
+    started = time.monotonic()
     result = helper("remove", profiles, extra=("--component", COMPONENT, "--timeout", "5"))
+    elapsed = time.monotonic() - started
     check("retrying remove while held does not re-delete and still exits 1",
           result.returncode == 1 and "no object to delete" in result.stderr, result.stderr)
+    check("remove --timeout 5 returns near its deadline while held", elapsed < 15, f"{elapsed:.1f}s")
     for pod in held_pods:
         cluster.admin("patch", "pod", pod, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}')
     result = helper("remove", profiles, extra=("--component", COMPONENT))
