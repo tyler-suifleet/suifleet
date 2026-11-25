@@ -304,8 +304,25 @@ groups:
         expr: suifleet_device_healthy{evidence="physical"} == 0
         for: 10m
       - alert: SuiFleetDeploymentFailed
-        expr: increase(suifleet_deployment_outcomes{outcome="failed"}[1h]) > 0
+        expr: |
+          suifleet_deployment_outcomes{outcome="failed"}
+            > min_over_time(suifleet_deployment_outcomes{outcome="failed"}[1h])
+          and ignoring(outcome)
+            max_over_time(suifleet_deployment_outcomes_truncated[1h]) == 0
 ```
+
+`suifleet_deployment_outcomes` is a gauge snapshot of the journal, not a
+counter: the failed count can fall when journal entries change or a bounded
+read is partial. Do not apply `increase()` or `rate()` to it; Prometheus would
+treat any fall as a counter reset and report a spurious increase. The rule
+above fires while the failed count is above its lowest value in the past hour,
+and stays silent if any snapshot in that hour was partial
+(`suifleet_deployment_outcomes_truncated`), because a partial count can rise
+without a new failure. It is a net-increase signal: a new failure that
+coincides with an older failed entry leaving the journal, or one that occurs
+during a partial-read hour, does not fire. The real-server harness
+(`make test-edge-monitoring`) evaluates these example rules with `promtool test
+rules` against rising, falling and partial samples.
 
 OpenTelemetry Collector (core distribution) receiving the adapter's pushes:
 
