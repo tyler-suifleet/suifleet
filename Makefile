@@ -260,7 +260,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-transaction-feedback test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
+CI_STEPS := test-fleet-reporting test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-transaction-feedback test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-sdk-node test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -670,6 +670,27 @@ ifdef INSIDE_DEV_CONTAINER
 	python3 scripts/test_ipc.py
 else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc.py
+endif
+
+# SF-302 TypeScript/Node component SDK: locked toolchain, strict build, offline
+# unit/interface tests and the packed tarball (SHA-256 printed for provenance).
+SDK_NODE_PACKAGE := sdk/typescript/suifleet-component-ipc-1.0.0.tgz
+.PHONY: sdk-node test-sdk-node test-ipc-node
+sdk-node:
+	$(RUN) bash -c "cd sdk/typescript && pnpm install --frozen-lockfile && node_modules/.bin/tsc -p tsconfig.json && rm -f ./*.tgz && npm pack --ignore-scripts --pack-destination . >/dev/null && sha256sum ./*.tgz"
+
+test-sdk-node: sdk-node
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_ipc_interface.py
+	$(RUN) bash -c "cd sdk/typescript && node --version && node --test test/client.test.mjs"
+
+# The packed SDK and its unmodified examples against the real daemon as distinct
+# Unix peer UIDs; root only inside a disposable, network-isolated container.
+test-ipc-node: sdk-node
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_ipc_node.py --package $(SDK_NODE_PACKAGE)
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_ipc_node.py --package $(SDK_NODE_PACKAGE)
 endif
 
 # CloudWatch Logs (SF-060) with the daemon and the adapter under separate UIDs;
