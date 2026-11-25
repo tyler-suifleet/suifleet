@@ -46,7 +46,7 @@ Wrynose xzmore Bash interpreter/runtime-dependency fixes, and the AArch64
 glibc usrmerge loader/linker-script guard. These are not in this export.
 Standalone consumers must supply equivalent distro fixes/guards and validate
 their builds, or accept an unvalidated configuration that may fail. The extracted
-export alone passed yocto-check-layer on both series; no recipe task-execution
+export alone passed yocto-check-layer on all three series; no recipe task-execution
 build without the integration layer has been validated. See RELEASE.md before
 claiming standalone build support.
 

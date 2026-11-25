@@ -73,6 +73,10 @@ Both series have the package/image and emulated boot validation recorded below.
 Support here covers the ARM64 Pi client package and writable-root QEMU image;
 physical Pi image/boot acceptance remains SF-029/SF-031. See the [Wrynose migration guide](https://docs.yoctoproject.org/6.0/migration-guides/migration-6.0.html).
 
+Kirkstone has its own pinned profiles and Rust mixin; its measured build,
+emulated runtime, kernel/signer limit and the Dunfell toolchain blocker are
+recorded in [older Yocto series](YOCTO_LEGACY_SERIES.md).
+
 Both recipe variants preserve core's `UNPACKDIR` when present and fall back to
 `WORKDIR` only for Scarthgap. Git explicitly unpacks to `git` on both releases;
 local install inputs use `UNPACKDIR`. Before configure, the recipe executes the
