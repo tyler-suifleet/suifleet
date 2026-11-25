@@ -262,7 +262,13 @@ inherits. It refuses the host unless a crash could store nothing:
   does not reproduce exactly: any byte outside printable ASCII (including a
   UTF-8 byte order mark, which systemd strips), a section header other than
   `[Name]` (systemd stops reading the file at an invalid one) and any other
-  line that is not a comment or a `Key=value` assignment;
+  line that is not a comment or a `Key=value` assignment. The only main file
+  accepted is `/etc/systemd/coredump.conf`; every other listed file must be a
+  `coredump.conf.d/*.conf` drop-in. When `/etc/systemd/coredump.conf` is
+  absent, `cat-config` lists a main file found in `/run`, `/usr/local/lib` or
+  `/usr/lib` instead, but systemd 252's handler (Debian 12) reads only the
+  `/etc` file besides the drop-ins, so such a file's settings may not apply
+  and the host is refused;
 - **it pipes to `false` or `true`**: nothing is kept.
 
 Any other piped handler is refused, because the kernel runs it whatever the
@@ -367,7 +373,8 @@ The harness checks these phases:
    nonzero `ProcessSizeMax`, for the disabling settings outside `[Coredump]`
    or in a drop-in without a section header, for a path-like comment before
    settings that re-enable dumps, for a UTF-8 byte order mark, for a malformed
-   section header and for a line continuation
+   section header, for a line continuation and for the disabling settings only
+   in a main `coredump.conf` in `/usr/local/lib`
    (the containers' init and sshd inherit Docker's
    unlimited limit). No test
    process is crashed: `kernel.core_pattern` is global to the shared kernel,
