@@ -65,12 +65,10 @@ from the extracted export without the integration layer, is recorded in the core
 repository's `docs/YOCTO_STANDALONE_VALIDATION.md`. Apart from the class, that
 standalone configuration requires OE-Core, meta-oe, the Scarthgap Rust mixin, and
 the systemd/usrmerge distro features listed above. It needs no other distro
-setting. Kirkstone's recorded recipe builds still included the integration layer.
-Its yocto-check-layer pass applies to the earlier SF-309 export that declared
-Kirkstone, before this class was added; the current export has not been
-layer-checked on Kirkstone, and no Kirkstone build without the integration layer
-has been run. See RELEASE.md before claiming standalone
-build support for a series.
+setting. The earlier SF-309 Kirkstone recipe builds used the integration layer. Its
+layer-check pass covered the export before the opt-in class. See
+[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) for standalone
+validation of the public source distribution and RELEASE.md for release criteria.
 
 Builds contain examples only: no device keys, enrollment configuration, signer
 PINs or journals. Provision identities at runtime. Preserve /etc/suifleet and
