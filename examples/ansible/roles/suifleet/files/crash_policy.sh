@@ -5,6 +5,28 @@
 # line, then exactly one "VERDICT ok" or "VERDICT unsafe <reason>" line.
 # Reads only; needs no privilege.
 v() { printf 'VERDICT %s\n' "$*"; exit 0; }
+# The kernel runs a piped handler in the initial namespaces: it resolves the
+# handler's path, and the handler reads its configuration, in the host's
+# initial mount namespace and root, not in this session's. A container or
+# other isolated root can show a different binary or configuration at the
+# same paths, so what this session sees proves nothing about the actual
+# handler unless the session shares the host's view. That is verified, never
+# assumed, before any piped handler is accepted: this session must be in the
+# initial PID and user namespaces (their fixed inode numbers since Linux 3.8),
+# so /proc/1 is the host's init and file owners are the host's, and its mount
+# table, as seen from its root, must be exactly init's (mount IDs included;
+# a separate mount namespace or a chroot shows a different table). This takes
+# PID 1, which stays in the initial mount namespace, as the kernel's view.
+# Anything else, including an unreadable /proc/1/mountinfo, is refused.
+host_view() {
+  ns=$(readlink /proc/self/ns/pid 2>/dev/null)/$(readlink /proc/self/ns/user 2>/dev/null)
+  [ "$ns" = 'pid:[4026531836]/user:[4026531837]' ] \
+    || v unsafe "this session is not in the host's initial PID and user namespaces ($ns), for example in a container, so the piped crash handler $h, which the kernel runs in the host's view, cannot be verified"
+  init=$(cat /proc/1/mountinfo 2>/dev/null) && [ -n "$init" ] \
+    || v unsafe "init's mount table could not be read, so this session's view of the piped crash handler $h cannot be verified as the host's"
+  [ "$init" = "$(cat /proc/self/mountinfo 2>/dev/null)" ] \
+    || v unsafe "this session's mounts or root differ from init's, so the piped crash handler $h, which the kernel runs in the host's view, cannot be verified"
+}
 lim=$(ulimit -c) || v unsafe "the core dump size limit could not be read"
 pat=$(cat /proc/sys/kernel/core_pattern) || v unsafe "kernel.core_pattern could not be read"
 printf 'CORE limit=%s pattern=%s\n' "$lim" "$pat"
@@ -39,14 +61,16 @@ case $pat in
       '0 -'????'-'??'-'?) ;;
       *) v unsafe "the crash handler $h is not a root-owned file that only root can modify (${st:-unreadable})" ;;
     esac
+    # Every piped verdict below that accepts the host first proves this
+    # session sees the handler and its configuration as the kernel does.
     case $kind in
-      discard) v ok ;;
+      discard) host_view; v ok ;;
       systemd-coredump)
         # systemd-coredump stores nothing for a process whose limit is 0.
         # Otherwise it disables all dump processing and storage only with
         # both Storage=none and ProcessSizeMax=0: with Storage=none alone it
         # may still write the dump to disk temporarily while processing it.
-        [ "$lim" = 0 ] && v ok
+        [ "$lim" = 0 ] && { host_view; v ok; }
         conf=$(systemd-analyze cat-config systemd/coredump.conf 2>/dev/null) \
           || v unsafe "systemd-coredump's configuration could not be read and the core dump size limit is $lim"
         # Resolve the effective [Coredump] values as systemd does: only
@@ -117,7 +141,7 @@ case $pat in
         esac
         s=$(printf '%s\n' "$eff" | sed -n 2p)
         m=$(printf '%s\n' "$eff" | sed -n 3p)
-        [ "$s" = none ] && [ "$m" = 0 ] && v ok
+        [ "$s" = none ] && [ "$m" = 0 ] && { host_view; v ok; }
         v unsafe "systemd-coredump may write core dumps to disk (Storage=${s:-external}, ProcessSizeMax=${m:-default};" \
           "both none and 0 are required) and the core dump size limit is $lim" ;;
     esac ;;

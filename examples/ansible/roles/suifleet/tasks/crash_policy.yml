@@ -23,7 +23,15 @@
 # an existing root-owned executable only root can modify. A same-name
 # collector elsewhere and any other piped handler (apport, abrt, a vendor or
 # WSL handler) are refused: the kernel runs it whatever the limit and it may
-# keep the dump. The probe
+# keep the dump.
+#
+# The kernel runs a piped handler, which reads its own configuration, in the
+# host's initial namespaces, so a piped handler is accepted only when the SSH
+# session provably shares that view: the initial PID and user namespaces and
+# exactly init's mount table (no container, separate mount namespace or
+# chroot). Otherwise disable dumps with a session core limit of 0 and a file
+# kernel.core_pattern, which the kernel applies in the crashing process's own
+# namespace. The probe
 # runs unescalated, like the claim transfer, so it reads the limit that the
 # module receiving the claim inherits. The root-run staging and enrollment
 # commands additionally set their own limit to 0 before the claim reaches
