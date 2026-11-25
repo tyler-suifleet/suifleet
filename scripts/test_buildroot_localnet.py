@@ -156,6 +156,7 @@ def guest():
     key = etc / "device.key"
     pidfile = Path("/run/suifleet-portable/launcher.pid")
     socket = Path("/run/suifleet-portable/signer.sock")
+    launcher_log = socket.with_name("launcher.log")
     assert not key.exists() and not (etc / "config.toml").exists() and not pidfile.exists()
     assert not (state / "state.json").exists()
     os.umask(0o077)
@@ -213,6 +214,23 @@ def guest():
             if time.monotonic() >= deadline:
                 raise AssertionError("VM service condition timed out")
             time.sleep(0.25)
+
+    # Deliberately violate the launcher's binary trust check on the disposable rootfs.
+    binary = Path("/usr/bin/suifleet")
+    binary_mode = stat.S_IMODE(binary.stat().st_mode)
+    binary.chmod(binary_mode | stat.S_IWGRP)
+    try:
+        subprocess.run([INIT, "start"], check=True)
+        wait_for(lambda: launcher_log.exists() and
+                 "portable daemon binary must be root-owned" in launcher_log.read_text())
+        assert launcher_log.stat().st_uid == 0
+        assert stat.S_IMODE(launcher_log.stat().st_mode) == 0o600
+        assert not socket.exists()
+    finally:
+        binary.chmod(binary_mode)
+        subprocess.run([INIT, "stop"], check=True)
+
+    print("SF296_STARTUP_DIAGNOSTIC_PASS", flush=True)
 
     try:
         subprocess.run([INIT, "start"], check=True)

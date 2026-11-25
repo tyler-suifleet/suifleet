@@ -2,7 +2,9 @@
 
 launcher=/usr/sbin/suifleet-portable-signer
 python=/usr/bin/python3
-pidfile=/run/suifleet-portable/launcher.pid
+runtime=/run/suifleet-portable
+pidfile=$runtime/launcher.pid
+logfile=$runtime/launcher.log
 
 start() {
     # A reusable image has no fleet configuration. Install config.toml last.
@@ -13,10 +15,11 @@ start() {
         echo "SuiFleet: signer.toml is required" >&2
         return 1
     fi
-    install -d -m 0755 /run/suifleet-portable || return
+    install -d -m 0755 "$runtime" || return
     install -d -m 0700 -o suifleet -g suifleet /var/lib/suifleet || return
+    umask 077
     start-stop-daemon --start --quiet --oknodo --background --make-pidfile \
-        --pidfile "$pidfile" --exec "$python" --user root -- "$launcher"
+        --output "$logfile" --pidfile "$pidfile" --exec "$python" --user root -- "$launcher"
 }
 
 stop() {
