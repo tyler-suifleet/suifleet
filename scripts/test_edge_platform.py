@@ -27,8 +27,10 @@ class EdgePlatforms(unittest.TestCase):
             with self.subTest(profile=name):
                 for field in ("arch", "libc", "kernel", "init", "rust"):
                     self.assertTrue(profile[field])
-                if profile["status"] == "current":
+                if "evidence" in profile:
                     self.assertTrue((ROOT / profile["evidence"]).is_file())
+                if profile["status"] == "current":
+                    self.assertIn("evidence", profile)
                 else:
                     self.assertTrue(profile["blockers"])
                 for path in profile.get("kas", []):
@@ -38,25 +40,45 @@ class EdgePlatforms(unittest.TestCase):
         for profile, check in (
             ("linux-amd64-systemd", "ota-simulator"),
             ("linux-amd64-musl-5.15", "legacy-vm-smoke"),
+            ("yocto-kirkstone", "image-build"),
         ):
             with self.subTest(profile=profile):
                 result = self.query(profile, "--require-check", check)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(check, json.loads(result.stdout)["checks"])
 
+    def test_legacy_yocto_support_scope(self):
+        profiles = json.loads(MATRIX.read_text())["profiles"]
+        kirkstone = profiles["yocto-kirkstone"]
+        self.assertEqual(kirkstone["status"], "current")
+        self.assertEqual(
+            kirkstone["kas"],
+            ["kas/packaging-kirkstone.yml", "kas/packaging-kirkstone-qemu.yml"],
+        )
+        self.assertEqual(kirkstone["evidence"], "docs/YOCTO_LEGACY_SERIES.md")
+        self.assertIn("lack SO_PEERPIDFD", kirkstone["kernel"])
+        self.assertTrue(any("SF-031/#32" in reason for reason in kirkstone["blockers"]))
+        dunfell = profiles["yocto-dunfell"]
+        self.assertEqual(dunfell["status"], "blocked")
+        self.assertFalse(dunfell.get("kas"))
+        self.assertEqual(dunfell["evidence"], kirkstone["evidence"])
+        for profile in profiles.values():
+            self.assertNotIn("SF-292/#818", " ".join(profile.get("blockers", [])))
+
     def test_unsupported_requests_explain_the_blocker(self):
-        for profile, check, reason in (
-            ("linux-amd64-musl-5.15", "isolated-signer", "SF-292/#818"),
-            ("yocto-kirkstone", "image-build", "SF-295/#820"),
-            ("yocto-dunfell", "image-build", "SF-295/#820 strict log ingestion"),
-            ("linux-legacy-target", "strict-log-ingestion", "SF-296/#830 strict log ingestion"),
-            ("missing-profile", "ota-simulator", "available profiles"),
+        for profile, check, reasons in (
+            ("linux-amd64-musl-5.15", "isolated-signer", ("Portable signer integration is unqualified",)),
+            ("yocto-kirkstone", "isolated-signer", ("requires SO_PEERPIDFD", "SF-031/#32")),
+            ("yocto-dunfell", "image-build", ("lacks a compatible Rust >= 1.90 toolchain", "SF-295/#820 strict log ingestion")),
+            ("linux-legacy-target", "strict-log-ingestion", ("SF-296/#830 strict log ingestion",)),
+            ("missing-profile", "ota-simulator", ("available profiles",)),
         ):
             with self.subTest(profile=profile):
                 result = self.query(profile, "--require-check", check)
                 self.assertEqual(result.returncode, 2)
                 self.assertIn(profile, result.stderr)
-                self.assertIn(reason, result.stderr)
+                for reason in reasons:
+                    self.assertIn(reason, result.stderr)
                 self.assertEqual(result.stdout, "")
 
 
