@@ -115,6 +115,16 @@ class ValidationTest(unittest.TestCase):
             bundle["resources"][0]["immutable"] = allowed
             k8s.validate_bundle(bundle)
 
+    def test_numbers_never_pass_as_booleans(self):
+        # 0 == False and 1 == True in Python; a JSON number is not a Kubernetes boolean.
+        for number in (0, 1, 0.0, 1.0):
+            self.rejects(lambda b: b["resources"][0].update(immutable=number), "immutable must be a boolean")
+            for flag in ("hostNetwork", "hostPID", "hostIPC", "automountServiceAccountToken"):
+                self.rejects(lambda b: self.pod(b).update({flag: number}), flag)
+            for flag in ("privileged", "allowPrivilegeEscalation"):
+                self.rejects(lambda b: self.container(b).setdefault("securityContext", {}).update({flag: number}), flag)
+                self.rejects(lambda b: self.pod(b).setdefault("securityContext", {}).update({flag: number}), flag)
+
     def test_pod_host_access_and_privilege(self):
         for flag in ("hostNetwork", "hostPID", "hostIPC"):
             self.rejects(lambda b: self.pod(b).update({flag: True}), flag)

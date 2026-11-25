@@ -138,6 +138,16 @@ def _keys(where, value, allowed):
     _require(not unknown, f"{where} has unsupported field(s) {unknown}")
 
 
+def _off(value):
+    """An optional boolean that is absent or exactly false.
+
+    Tuple membership compares by equality, so ``0 in (None, False)`` and
+    ``1.0 in (True, False)`` hold; check identity so JSON numbers never pass
+    as Kubernetes booleans.
+    """
+    return value is None or value is False
+
+
 def _labels(where, labels):
     if labels is None:
         return
@@ -152,8 +162,8 @@ def _security_context(where, context, container):
     if context is None:
         return
     _require(isinstance(context, dict), f"{where} must be an object")
-    _require(context.get("privileged") in (None, False), f"{where}.privileged is not allowed")
-    _require(context.get("allowPrivilegeEscalation") in (None, False),
+    _require(_off(context.get("privileged")), f"{where}.privileged is not allowed")
+    _require(_off(context.get("allowPrivilegeEscalation")),
              f"{where}.allowPrivilegeEscalation must be false")
     _require(context.get("procMount") in (None, "Default"), f"{where}.procMount is not allowed")
     _require(context.get("runAsUser") != 0, f"{where}.runAsUser 0 is not allowed")
@@ -190,11 +200,11 @@ def _container(where, container):
 def _pod_spec(where, spec):
     _require(isinstance(spec, dict), f"{where} must be an object")
     for flag in ("hostNetwork", "hostPID", "hostIPC"):
-        _require(spec.get(flag) in (None, False), f"{where}.{flag} is not allowed")
+        _require(_off(spec.get(flag)), f"{where}.{flag} is not allowed")
     for field in ("nodeName", "serviceAccountName", "serviceAccount", "imagePullSecrets",
                   "ephemeralContainers", "resourceClaims", "os"):
         _require(field not in spec, f"{where}.{field} is not allowed")
-    _require(spec.get("automountServiceAccountToken") in (None, False),
+    _require(_off(spec.get("automountServiceAccountToken")),
              f"{where}.automountServiceAccountToken must be false")
     containers = spec.get("containers")
     _require(isinstance(containers, list) and containers, f"{where}.containers must be a non-empty list")
@@ -229,7 +239,8 @@ def _resource(index, resource):
         data = {} if data is None else data
         _require(isinstance(data, dict) and all(isinstance(v, str) for v in data.values()),
                  f"{where}.data must map keys to strings")
-        _require(resource.get("immutable") in (None, True, False), f"{where}.immutable must be a boolean")
+        _require(resource.get("immutable") is None or isinstance(resource.get("immutable"), bool),
+                 f"{where}.immutable must be a boolean")
         # Kubernetes never lets an immutable ConfigMap's data change or the flag
         # return to false, so a supervisor rollback could not restore the
         # previous bundle in place. Bundles therefore manage mutable ConfigMaps only.
