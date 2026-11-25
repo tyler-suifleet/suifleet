@@ -876,6 +876,17 @@ class Harness:
              {"coredump_conf": ["[Coredump]", "Storage=none", "ProcessSizeMax=0",
                                 "# /etc/systemd/coredump.conf.d/zz-sf304.conf", "Storage=external", "ProcessSizeMax=1G"]},
              "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=1G;"),
+            # systemd strips a UTF-8 byte order mark before a section header, so a BOM-bearing
+            # drop-in can carry effective [Coredump] settings; syntax the check does not reproduce
+            # exactly is refused rather than guessed.
+            ("systemd-coredump configuration with a UTF-8 byte order mark", self.SYSTEMD_COREDUMP,
+             {"coredump_conf": ["\ufeff[Coredump]", "Storage=none", "ProcessSizeMax=0"]},
+             "systemd-coredump's configuration uses syntax this check does not support"),
+            # systemd stops reading the file at an invalid section header, so the disabling
+            # settings after it never apply.
+            ("systemd-coredump configuration with a malformed section header", self.SYSTEMD_COREDUMP,
+             {"coredump_conf": ["[Coredump]", "[Bad", "Storage=none", "ProcessSizeMax=0"]},
+             "systemd-coredump's configuration uses syntax this check does not support"),
             ("systemd-coredump configuration with a line continuation", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["[Coredump]", "Storage=external \\", "Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump's configuration uses line continuations"),
