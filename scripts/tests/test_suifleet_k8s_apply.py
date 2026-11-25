@@ -421,7 +421,10 @@ class ConfigBindingTest(unittest.TestCase):
             with self.subTest(consume=consume):
                 cluster = ModelCluster()
                 cache = {}
-                for message, refuse in (("v1", False), ("v2", False), ("v3", True), ("v1", False), ("v2", False)):
+                # After the partial v3 the namespace holds v2 and v3 objects:
+                # only those two can be applied (recovery_gate) until one converges.
+                for message, refuse in (("v1", False), ("v2", False), ("v3", True), ("v2", False), ("v1", False),
+                                        ("v2", False)):
                     objects = self.objects(message, consume)
                     cluster.refuse_deployments = refuse
                     try:
@@ -480,9 +483,10 @@ class ConfigBindingTest(unittest.TestCase):
         last fully applied bundle's content-addressed ConfigMaps. Deleting
         those as unreferenced leftovers before the next update's writes would
         leave a rollback unable to recreate them within the shipped quota.
-        Nothing is deleted before every write succeeds, so a further update
-        fails at a ConfigMap creation (before any Deployment write) and the
-        rollback creates nothing and converges."""
+        Nothing is deleted before every write succeeds, and a further update
+        is refused before any write while the partial apply's objects remain
+        (review 4645: recovery_gate), so the rollback creates nothing and
+        converges, after which the further update applies."""
         cluster = ModelCluster(configmap_quota=20)
         v1 = self.with_worker(self.many("v1", k8s.MAX_CONFIGMAPS))
         k8s.apply(cluster, v1, "web-app", cluster)
@@ -495,9 +499,8 @@ class ConfigBindingTest(unittest.TestCase):
             k8s.apply(cluster, self.with_worker(self.many("v2", k8s.MAX_CONFIGMAPS)), "web-app", cluster)
         self.assertEqual(cluster.pod_reads(), ["v2"], "the partial apply advanced web's template")
         self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS)
-        # v3 (omitting the consumed ConfigMaps for nine stable ones) hits the
-        # quota at a ConfigMap creation; it deletes nothing and writes no
-        # Deployment.
+        # v3 (omitting the consumed ConfigMaps for nine stable ones) is refused
+        # before any write: it creates and deletes nothing.
         bundle = example()
         pod = deployment(bundle)["spec"]["template"]["spec"]
         pod.pop("volumes")
@@ -507,10 +510,12 @@ class ConfigBindingTest(unittest.TestCase):
         k8s.validate_bundle(bundle)
         v3 = self.with_worker(k8s.render(bundle, "suifleet-apps", "web-app", "1", "3" * 64))
         template = copy.deepcopy(cluster.template())
+        before = copy.deepcopy(cluster.store)
         cluster.order.clear()
-        with self.assertRaisesRegex(k8s.Rejected, "exceeded quota"):
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
             k8s.apply(cluster, v3, "web-app", cluster)
-        self.assertNotIn("Deployment", cluster.order)
+        self.assertEqual(cluster.order, [], "the refused bundle wrote nothing")
+        self.assertEqual(cluster.store, before)
         self.assertTrue(v1_names <= set(cluster.store["configmaps"]), "a failed apply deleted rollback ConfigMaps")
         self.assertEqual(cluster.template(), template)
         # The rollback to v1 creates nothing, so it fits, and converges.
@@ -523,6 +528,85 @@ class ConfigBindingTest(unittest.TestCase):
         self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
         self.assertEqual(set(cluster.store["configmaps"]), v1_names)
         self.assertEqual(cluster.pod_reads(), ["v1"])
+        # Converged again, so the further update applies.
+        k8s.apply(cluster, v3, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
+
+    def test_a_partial_prune_keeps_rollback_capacity(self):
+        """Review 4645: a prune can delete some of the previous bundle's
+        ConfigMaps and then fail. The rollback must recreate them, so a
+        further bundle is refused before any write until a retry or the
+        rollback converges; the rollback then fits the shipped quota."""
+        cluster = ModelCluster(configmap_quota=20)
+        v1 = self.many("v1", k8s.MAX_CONFIGMAPS)
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        v1_names = set(cluster.store["configmaps"])
+        # v2 writes everything, its prune deletes two v1 ConfigMaps, then fails.
+        cluster.deletes_allowed = 2
+        v2 = self.many("v2", k8s.MAX_CONFIGMAPS)
+        with self.assertRaisesRegex(k8s.Rejected, "delete .*injected"):
+            k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.deletes_allowed = None
+        self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS - 2)
+        self.assertEqual(len(v1_names - set(cluster.store["configmaps"])), 2)
+        self.assertFalse(k8s.ready(cluster, v2, "web-app")[0], "a partial prune is not ready")
+        # A third bundle (nine new stable ConfigMaps) is refused before any write.
+        bundle = example()
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        pod.pop("volumes")
+        pod["containers"][0].pop("volumeMounts")
+        bundle["resources"] = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": f"stable-{index}"},
+                                "data": {"v": "v3"}} for index in range(k8s.MAX_CONFIGMAPS)] + [deployment(bundle)]
+        k8s.validate_bundle(bundle)
+        v3 = k8s.render(bundle, "suifleet-apps", "web-app", "1", "3" * 64)
+        before = copy.deepcopy(cluster.store)
+        cluster.order.clear()
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        self.assertEqual((cluster.order, cluster.store), ([], before), "the refused bundle wrote nothing")
+        # The rollback recreates the two deleted ConfigMaps within the quota.
+        cluster.peak = 0
+        k8s.apply(cluster, v1, "web-app", cluster)
+        self.assertLessEqual(cluster.peak, 2 * k8s.MAX_CONFIGMAPS)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        self.assertEqual(set(cluster.store["configmaps"]), v1_names)
+        self.assertEqual(cluster.pod_reads(), ["v1"])
+        # Retrying the partially pruned bundle instead also converges.
+        cluster.deletes_allowed = 2
+        with self.assertRaisesRegex(k8s.Rejected, "injected"):
+            k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.deletes_allowed = None
+        k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
+        # Converged, so the further bundle now applies.
+        k8s.apply(cluster, v3, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
+
+    def test_recovery_gate_allows_converged_retries_rollbacks_and_retirement(self):
+        cluster = ModelCluster()
+        v1, v2, v3 = (self.objects(message) for message in ("v1", "v2", "v3"))
+        k8s.recovery_gate(cluster, "web-app", v1)  # empty namespace
+        k8s.apply(cluster, v1, "web-app", cluster)
+        k8s.recovery_gate(cluster, "web-app", v2)  # converged: a forward update is allowed
+        cluster.refuse_deployments = True
+        with self.assertRaises(k8s.Rejected):
+            k8s.apply(cluster, v2, "web-app", cluster)
+        self.assertEqual(len(k8s.live_digests(cluster, "web-app")), 2)
+        k8s.recovery_gate(cluster, "web-app", v1)  # rollback
+        k8s.recovery_gate(cluster, "web-app", v2)  # retry
+        k8s.recovery_gate(cluster, "web-app", [])  # retirement creates nothing
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.recovery_gate(cluster, "web-app", v3)
+        # Objects whose deletion is already committed do not hold a bundle.
+        for live in cluster.store["configmaps"].values():
+            if live["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION] == v2[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]:
+                live["metadata"]["deletionTimestamp"] = "2026-11-25T00:00:00Z"
+        k8s.recovery_gate(cluster, "web-app", v3)
 
     def test_retrying_a_partial_apply_fits_the_quota_and_converges(self):
         cluster = ModelCluster(configmap_quota=20)
@@ -545,11 +629,11 @@ class ConfigBindingTest(unittest.TestCase):
         cluster = ModelCluster()
         k8s.apply(cluster, self.objects("v1"), "web-app", cluster)
         cluster.refuse_deployments = True
-        for message in ("v2", "v3"):
+        for message in ("v2", "v2", "v3"):
             with self.assertRaises(k8s.Rejected):
                 k8s.apply(cluster, self.objects(message), "web-app", cluster)
-        self.assertEqual(sorted(cluster.store["configmaps"]),
-                         sorted([self.name("v1"), self.name("v2"), self.name("v3")]))
+        # v3 was refused before any write (recovery_gate): v1 and v2 remain.
+        self.assertEqual(sorted(cluster.store["configmaps"]), sorted([self.name("v1"), self.name("v2")]))
         self.assertEqual(cluster.pod_reads(), ["v1"])
 
     def with_stable(self, message, settings=None):
@@ -579,15 +663,14 @@ class ConfigBindingTest(unittest.TestCase):
         self.assertIsNotNone(stable, "the failed apply deleted a stable ConfigMap")
         self.assertEqual(stable["data"], {"mode": "previous"})
         self.assertEqual(cluster.pod_reads(), ["v1"])
-        # A second failed attempt still keeps it (and every leftover).
+        # A second failed attempt (a retry) still keeps it (and every leftover).
         with self.assertRaisesRegex(k8s.Rejected, "injected"):
-            k8s.apply(cluster, self.with_stable("v3"), "web-app", cluster)
+            k8s.apply(cluster, self.with_stable("v2"), "web-app", cluster)
         self.assertEqual(cluster.store["configmaps"]["customer-settings"]["data"], {"mode": "previous"})
         self.assertIn(self.name("v2"), cluster.store["configmaps"], "a failed apply deletes nothing")
         # Rolling back restores convergence with the stable map untouched.
         cluster.refuse_deployments = False
-        self.assertEqual(sorted(k8s.apply(cluster, v1, "web-app", cluster)),
-                         sorted([f"configmaps/{self.name('v2')}", f"configmaps/{self.name('v3')}"]))
+        self.assertEqual(k8s.apply(cluster, v1, "web-app", cluster), [f"configmaps/{self.name('v2')}"])
         self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
         # A successful update that omits it prunes it after every write.
         v2 = self.with_stable("v2")
@@ -621,6 +704,9 @@ class ModelCluster:
         self.counter, self.order = 0, []
         self.refuse_deployments = False
         self.tamper = None
+        # deletes_allowed: None allows every delete; a number lets that many
+        # more deletes succeed and refuses the next ones (a failing prune).
+        self.deletes_allowed = None
 
     def template(self):
         return self.store["deployments.apps"]["web"]["spec"]["template"]
@@ -685,6 +771,10 @@ class ModelCluster:
                               "updatedReplicas": 1, "readyReplicas": 1, "availableReplicas": 1}
 
     def delete(self, resource, current):
+        if self.deletes_allowed is not None:
+            if self.deletes_allowed <= 0:
+                raise k8s.Rejected(f"delete {resource}/{current['metadata']['name']} failed: injected")
+            self.deletes_allowed -= 1
         self.store[resource].pop(current["metadata"]["name"], None)
         return True
 

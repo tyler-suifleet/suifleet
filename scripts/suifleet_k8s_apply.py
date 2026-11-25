@@ -49,7 +49,9 @@ It is deliberately narrow:
   objects may already carry the new bundle. Readiness never reports success
   until every object carries this bundle's digest and pruning has converged
   (no other object labelled for the component remains), and the next apply
-  converges.
+  converges. While a partial apply or prune leaves objects of two bundles,
+  only those two bundles may be applied (recovery_gate), so a rollback
+  always fits the namespace quota.
 
 It manages workloads inside a cluster. It does not install, configure or
 update Kubernetes, nodes, the OS, firmware or the SuiFleet client, and it never
@@ -1199,6 +1201,45 @@ def preflight(writer, objects):
             raise Rejected(f"{item['kind']}/{item['metadata']['name']} in {writer.namespace} {irreversible}")
 
 
+def live_digests(kubectl, component):
+    """Bundle digests of this component's live (not terminating) objects.
+    One digest (or none) means the last apply and its prune completed; more
+    mean a partial apply or a partial prune left two bundles' objects."""
+    selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
+    digests = set()
+    for resource in ALLOWED_KINDS.values():
+        listed = kubectl.json("get", resource, "-l", selector) or {}
+        for item in listed.get("items") or []:
+            metadata = item.get("metadata") or {}
+            if metadata.get("deletionTimestamp"):
+                continue  # Deletion already committed; nothing a rollback can restore in place.
+            digests.add((metadata.get("annotations") or {}).get(BUNDLE_ANNOTATION))
+    return digests
+
+
+def recovery_gate(kubectl, component, objects):
+    """Refuse a bundle before any write while the namespace still holds the
+    objects of two bundles, unless it is one of them (a retry, or the
+    supervisor's rollback). A namespace is left this way by an apply that
+    failed after some writes, or by a prune that deleted some objects of the
+    previous bundle and then failed. Every live object then belongs to one
+    of the two bundles, so applying either one keeps the component within
+    their union (at most 2 * MAX_CONFIGMAPS ConfigMaps) and a rollback always
+    fits the quota. A third bundle could fill the quota with its own new
+    objects and leave the rollback unable to recreate what the prune
+    deleted. An empty (retirement) bundle creates nothing and is allowed."""
+    if not objects:
+        return
+    digest = objects[0]["metadata"]["annotations"][BUNDLE_ANNOTATION]
+    present = live_digests(kubectl, component)
+    if len(present) > 1 and digest not in present:
+        held = ", ".join(sorted(value or "(no bundle annotation)" for value in present))
+        raise Rejected(
+            f"component {component!r} is not converged: its objects in {kubectl.profile['namespace']} belong to "
+            f"bundles {held} (a partial apply or prune). Re-apply one of those bundles (the supervisor rollback or a "
+            f"retry) until it succeeds, or remove the component, before applying bundle {digest}")
+
+
 def apply(kubectl, objects, component, writer=None):
     """Apply every object (ConfigMaps first), then prune. ConfigMaps go first
     so that a Deployment never references a content-addressed ConfigMap that
@@ -1215,11 +1256,17 @@ def apply(kubectl, objects, component, writer=None):
     applied bundle's ConfigMaps, which are exactly what a rollback re-applies.
     Every object of the last fully applied bundle therefore still exists
     after any number of failed applies, so re-applying that bundle creates
-    no object and always fits the namespace quota. A further bundle after a
-    partial apply may exceed the quota instead, failing at a ConfigMap
-    creation before any Deployment is written."""
+    no object and always fits the namespace quota.
+
+    Pruning itself is not atomic either: it can delete some objects of the
+    previous bundle and then fail, after which a rollback must recreate
+    them. recovery_gate therefore refuses, before any write, a bundle that
+    is neither of the bundles a partially applied or partially pruned
+    namespace still holds, so no third bundle can consume the quota a
+    rollback needs."""
     writer = writer or Writer(kubectl, component)
-    preflight(writer, objects)
+    preflight(writer, objects)  # Read-only; its specific diagnoses come first.
+    recovery_gate(kubectl, component, objects)
     desired = {}
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
