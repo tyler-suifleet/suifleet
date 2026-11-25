@@ -182,6 +182,29 @@ test('one request deadline covers connect backoff: a late listener never receive
   assert.equal(requests, 0, 'a request was dispatched after its deadline');
 });
 
+test('a connect callback delayed past the deadline by an event-loop stall sends nothing', async (t) => {
+  const path = join(directory, 'stalled-connect.sock');
+  const frames = [];
+  const sockets = [];
+  // The accept handler blocks this process's event loop beyond timeoutMs, so the
+  // client's connect callback runs after the deadline with its timer still queued.
+  const server = createServer((socket) => {
+    sockets.push(socket);
+    socket.on('data', (chunk) => frames.push(chunk));
+    socket.on('error', () => {});
+    const until = performance.now() + 80;
+    while (performance.now() < until) { /* stall */ }
+  });
+  await new Promise((resolve) => server.listen(path, resolve));
+  t.after(() => new Promise((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
+  const client = new Client({ socketPath: path, timeoutMs: 50 });
+  await assert.rejects(client.restart(),
+    (e) => e instanceof TransportError && e.outcome === 'not_sent' && /timed out after 50 ms/.test(e.message));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(sockets.length, 1, 'the stalled connection was accepted');
+  assert.equal(frames.length, 0, 'a request was written after its deadline');
+});
+
 test('the response wait uses only the time left after connect backoff', async (t) => {
   const path = join(directory, 'late-silent.sock');
   const client = new Client({ socketPath: path, timeoutMs: 400, connectAttempts: 3, connectRetryDelayMs: 200 });

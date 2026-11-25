@@ -184,6 +184,13 @@ export class Client {
       const abort = () => finish(new TransportError(operation, sent ? 'unknown' : 'not_sent', 'aborted', { cause: signal?.reason }));
       signal?.addEventListener('abort', abort, { once: true });
       socket.once('connect', () => {
+        if (settled) return;
+        // The connect callback can run after an event-loop stall past the
+        // deadline while the timer is still queued: never dispatch late.
+        if (performance.now() >= deadline) {
+          finish(new TransportError(operation, 'not_sent', `timed out after ${this.timeoutMs} ms`));
+          return;
+        }
         sent = true;
         socket.write(frame);
       });
