@@ -375,6 +375,24 @@ class ConfigTests(Base):
             with self.subTest(text=text), self.assertRaises(em.ConfigError):
                 em.Config(self.config(otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers)))
 
+    def test_non_ascii_header_value_is_rejected_by_check_config(self):
+        # urllib cannot send a header value outside Latin-1; accepting it would
+        # turn a permanent configuration error into endless "unreachable" retries.
+        for value in ("t\u2603", "caf\u00e9"):
+            headers = self.write("h", f"Authorization: Bearer ok\nX-Project: {value}\n")
+            path = self.write("config.json", json.dumps(self.config(
+                otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers))))
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(em.ConfigError, "line 2 value must be printable ASCII"):
+                    em.Config(self.config(otlp=dict(endpoint="http://127.0.0.1:4318", headers_file=headers)))
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                written = "".join(call.args[0] for call in stderr.write.call_args_list)
+                self.assertIn("configuration rejected", written)
+                self.assertIn("line 2", written)
+                self.assertNotIn(value, written)
+                self.assertNotIn("Bearer ok", written)
+
     def test_rejected_configuration_message_has_no_secret(self):
         headers = self.write("h", "Authorization: Bearer topsecretvalue\nHost: x\n")
         path = self.write("config.json", json.dumps(self.config(

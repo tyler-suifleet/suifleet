@@ -345,6 +345,11 @@ def _parse_headers(text):
         name, value = name.strip(), value.strip()
         if not sep or not HEADER_NAME.fullmatch(name) or not value or any(ord(c) < 32 or ord(c) == 127 for c in value):
             raise ConfigError(f"otlp.headers_file line {number} must be 'Name: value'")
+        if not value.isascii():
+            # http.client can only serialize Latin-1 and RFC 9110 treats non-ASCII
+            # field octets as obsolete: refuse them here rather than fail every
+            # export later, where it would look like a collector outage.
+            raise ConfigError(f"otlp.headers_file line {number} value must be printable ASCII")
         if name.lower() in FORBIDDEN_HEADERS or name.lower() in {h.lower() for h in headers}:
             raise ConfigError(f"otlp.headers_file line {number} repeats or overrides a protected header")
         headers[name] = value
