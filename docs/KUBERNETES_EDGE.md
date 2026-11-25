@@ -86,7 +86,9 @@ How the helper keeps two controllers from fighting:
    Writing ConfigMaps first means a Deployment never references a
    content-addressed ConfigMap (item 7) that does not exist yet. If a later
    write fails (a conflict, a rejection or a cluster error), earlier objects
-   may already carry the new bundle, and nothing is pruned in that run.
+   may already carry the new bundle. Nothing the previous bundle may still
+   use is pruned in that run; only unreferenced content-addressed leftovers
+   of an earlier failed apply are freed first (see Quota headroom in item 7).
    `ready` keeps failing until every object carries the new bundle's digest
    and pruning has converged, so the supervisor does not see a partial apply
    as ready. A later successful apply converges, and a supervisor rollback
@@ -158,9 +160,16 @@ How the helper keeps two controllers from fighting:
      plus the namespace's `kube-root-ca.crt` and one more ConfigMap. Raise
      the quota by twice the per-bundle limit for every additional SuiFleet
      component in the namespace. Before creating ConfigMaps, `apply` deletes
-     this component's ConfigMaps that the bundle does not contain and no
-     live Deployment references, such as those a partial apply left behind,
-     so a retry or a new bundle after a partial apply also fits. A partial
+     this component's content-addressed ConfigMaps that the bundle does not
+     contain and no live Deployment references, such as those a partial
+     apply left behind, so a retry or a new bundle after a partial apply
+     also fits. Nothing can still read those, because only bundle
+     Deployments consume content-addressed names. Stable ConfigMaps are
+     never deleted before the writes: one from the last converged bundle may
+     still serve a consumer outside the bundle, so a failed apply leaves it
+     in place with its data, and only the prune after a successful apply
+     removes it. Stable ConfigMaps that a partial apply created therefore
+     keep counting against the quota until an apply succeeds. A partial
      apply that updated only some of several Deployments can leave
      references to two earlier bundles; the next update can then exceed the
      headroom and fail with a quota error before writing any Deployment.
