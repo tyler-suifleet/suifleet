@@ -117,6 +117,10 @@ See [Debian packaging](DEBIAN_PACKAGING.md) for supported profiles, exact versio
 pinning and data retention. Packages require systemd and Linux 6.5 or later for
 the isolated signer.
 
+To install, enroll and upgrade many existing hosts, use the reviewed
+[Ansible examples](ANSIBLE.md). They follow the same order and generate each
+device's key on the device.
+
 ## Generic Linux
 
 Select and authenticate a [versioned bundle](CUSTOMER_RELEASES.md). Extract
