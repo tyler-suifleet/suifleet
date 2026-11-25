@@ -1612,6 +1612,34 @@
       "id": 6609940312,
       "node_id": "I_kwDOSXKBE88AAAABifuvWA",
       "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhL3Euo"
+    },
+    "SF-322": {
+      "number": 960,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/960",
+      "id": 6610891967,
+      "node_id": "I_kwDOSXKBE88AAAABigo0vw",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhL3_PQ"
+    },
+    "SF-323": {
+      "number": 961,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/961",
+      "id": 6610901911,
+      "node_id": "I_kwDOSXKBE88AAAABigpblw",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhL3_4U"
+    },
+    "SF-324": {
+      "number": 963,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/963",
+      "id": 6610912830,
+      "node_id": "I_kwDOSXKBE88AAAABigqGPg",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhL4AhA"
+    },
+    "SF-325": {
+      "number": 962,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/962",
+      "id": 6610905218,
+      "node_id": "I_kwDOSXKBE88AAAABigpogg",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhL4AFc"
     }
   }
 }
