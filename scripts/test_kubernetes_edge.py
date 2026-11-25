@@ -477,6 +477,25 @@ def scenario(cluster, work, supervisor):
     check("apply returns to v1 after the defaulted-path bundles", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
 
+    # SetDefaults_Probe replaces an explicit 0 in the non-pointer probe int32s
+    # with the default; readiness must accept a healthy rollout of those defaults.
+    probe_defaults = {"timeoutSeconds": 1, "periodSeconds": 10, "successThreshold": 1, "failureThreshold": 3}
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["containers"][0]["readinessProbe"].update(
+        dict.fromkeys(probe_defaults, 0))
+    zeroed = work / "probe-zero.json"
+    zeroed.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, zeroed)
+    check("helper applies a bundle with explicit zero readiness probe timings", result.returncode == 0, result.stderr)
+    wait_ready(profiles, zeroed, "1.0.0")
+    live_probe = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+        "spec"]["template"]["spec"]["containers"][0]["readinessProbe"]
+    check("readiness accepts the server-defaulted probe timings for explicit zero bundle values",
+          all(live_probe.get(field) == default for field, default in probe_defaults.items()), json.dumps(live_probe))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the zero probe timing bundle", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
     # binaryData is outside the bundle schema; another manager adding it to an
     # owned ConfigMap (projected as an extra file) keeps SuiFleet's markers but
     # is not this bundle's content.

@@ -278,7 +278,10 @@ for it (for example `restartPolicy: Always`, probe thresholds, port `protocol`,
 the RollingUpdate strategy, an HTTP probe or lifecycle `path` of `/` and
 `scheme` of `HTTP`) or a zero value. An explicitly empty string for a
 plain-string field the server defaults (such as an httpGet `path`) matches
-that default too. Anything else the bundle omits,
+that default too, as does an explicit `0` for a probe's `timeoutSeconds`,
+`periodSeconds`, `successThreshold` or `failureThreshold` (non-pointer fields
+the server defaults to 1, 10, 1 and 3). Pointer fields such as
+`terminationGracePeriodSeconds` keep an explicit `0`. Anything else the bundle omits,
 such as an injected init container or sidecar, extra `env`, a `nodeSelector`
 or an extra pod-template annotation (including `kubectl rollout restart`'s
 `restartedAt`), is drift and not ready. Map fields (pod-template labels and
