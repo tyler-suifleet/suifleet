@@ -5534,8 +5534,8 @@
       "kind": "type:bug",
       "depends_on": [],
       "paths": [
-        "tools/pr-coordinator",
-        "docs/PR_COORDINATION.md"
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
       ],
       "resources": [],
       "description": "Reduce shared GitHub discovery churn and isolate primary resource exhaustion across the ticket engine and coordinator.",
