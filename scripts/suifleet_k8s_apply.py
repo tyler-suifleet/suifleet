@@ -97,6 +97,16 @@ MANAGED_BY = "app.kubernetes.io/managed-by"
 COMPONENT_LABEL = "suifleet.io/component"
 VERSION_ANNOTATION = "suifleet.io/version"
 BUNDLE_ANNOTATION = "suifleet.io/bundle-sha256"
+# Number of objects in the bundle (written by apply). All of one bundle's objects
+# listed, and nothing else, means its apply and prune completed.
+COUNT_ANNOTATION = "suifleet.io/bundle-objects"
+# Written by apply on each object (recovery_gate): the apply generation and
+# the bundle a rollback must still be able to restore -- the last completed
+# bundle when this sequence of applies began. A partial apply can overwrite
+# that bundle's own annotation on an object both bundles share, so its digest
+# is carried here instead.
+GENERATION_ANNOTATION = "suifleet.io/apply-generation"
+ROLLBACK_ANNOTATION = "suifleet.io/rollback-bundle-sha256"
 # Annotation on a content-addressed ConfigMap: its name in the bundle.
 CONFIG_NAME_ANNOTATION = "suifleet.io/config-name"
 # Hex digits of the data sha256 appended to a consumed ConfigMap's name.
@@ -1201,54 +1211,108 @@ def preflight(writer, objects):
             raise Rejected(f"{item['kind']}/{item['metadata']['name']} in {writer.namespace} {irreversible}")
 
 
-def live_digests(kubectl, component):
-    """Bundle digests of every object still listed for this component,
-    including terminating ones. One digest (or none) means the last apply
-    and its prune completed; more mean a partial apply, a partial prune or
-    a prune whose foreground deletions have not finished left two bundles'
-    objects.
-
-    A terminating object still counts: until its deletion completes, the
-    prune that removed the other objects of its bundle has not converged
-    (readiness reports it as stale), and the supervisor may still roll back
-    to that bundle, which must recreate everything the prune deleted. The
-    boundary is the deletion's completion: once no object of the old bundle
-    is listed, the new bundle was fully applied and fully pruned, so any
-    bundle fits beside it."""
+def _listed(kubectl, component):
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
-    digests = set()
+    items = []
     for resource in ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}
-        for item in listed.get("items") or []:
-            metadata = item.get("metadata") or {}
-            digests.add((metadata.get("annotations") or {}).get(BUNDLE_ANNOTATION))
-    return digests
+        items.extend(listed.get("items") or [])
+    return items
+
+
+def _annotation(item, key):
+    value = ((item.get("metadata") or {}).get("annotations") or {}).get(key)
+    return value if isinstance(value, str) else None
+
+
+def _generation(item):
+    value = _annotation(item, GENERATION_ANNOTATION)
+    return int(value) if value is not None and value.isascii() and value.isdigit() and len(value) <= 18 else 0
+
+
+def live_digests(kubectl, component):
+    """Bundle digests of every object still listed for this component,
+    including terminating ones."""
+    return {_annotation(item, BUNDLE_ANNOTATION) for item in _listed(kubectl, component)}
+
+
+def bundle_state(kubectl, component):
+    """(converged, held, generation, rollback) of the component's listed
+    objects, terminating ones included.
+
+    converged: nothing is listed, or every listed object belongs to one
+    bundle and all of that bundle's objects are listed (COUNT_ANNOTATION).
+    That holds only once an apply wrote every object and its prune --
+    including foreground deletions -- finished. A single digest alone does
+    not: a partial apply that overwrote every object it shares with the last
+    completed bundle and created some of its own leaves only its digest.
+
+    held: for a converged namespace, the completed bundle (if any). For a
+    non-converged one, the bundles it may still be brought to -- every
+    listed object's bundle plus the rollback bundle recorded by the latest
+    generation of writes (the last completed bundle, whose own annotations
+    those writes may have replaced). Rollback bundles recorded by older
+    generations are stale: their sequence completed.
+
+    generation/rollback: the latest generation and its recorded rollback
+    bundle (None when unrecorded)."""
+    items = _listed(kubectl, component)
+    digests = {_annotation(item, BUNDLE_ANNOTATION) for item in items}
+    if not items:
+        return True, set(), 0, None
+    generation = max(_generation(item) for item in items)
+    rollbacks = {_annotation(item, ROLLBACK_ANNOTATION) for item in items if _generation(item) == generation}
+    rollbacks.discard(None)
+    if len(rollbacks) > 1:
+        raise Rejected(f"component {component!r} records conflicting rollback bundles {sorted(rollbacks)} in "
+                       f"{kubectl.profile['namespace']}; an administrator must remove the component")
+    rollback = next(iter(rollbacks), None)
+    count = str(len(items))
+    converged = len(digests) == 1 and None not in digests and \
+        all(_annotation(item, COUNT_ANNOTATION) == count for item in items)
+    return converged, (digests if converged else digests | rollbacks) - {None}, generation, rollback
 
 
 def recovery_gate(kubectl, component, objects):
-    """Refuse a bundle before any write while the namespace still holds the
-    objects of two bundles, unless it is one of them (a retry, or the
-    supervisor's rollback). A namespace is left this way by an apply that
-    failed after some writes, by a prune that deleted some objects of the
-    previous bundle and then failed, or by a prune whose foreground
-    deletions have not finished (live_digests counts terminating objects).
-    Every listed object then belongs to one
-    of the two bundles, so applying either one keeps the component within
-    their union (at most 2 * MAX_CONFIGMAPS ConfigMaps) and a rollback always
-    fits the quota. A third bundle could fill the quota with its own new
-    objects and leave the rollback unable to recreate what the prune
-    deleted. An empty (retirement) bundle creates nothing and is allowed."""
+    """Refuse a bundle before any write while the namespace has not
+    converged, unless it is one of the bundles it still holds (a retry, or
+    the supervisor's rollback to the last completed bundle). A namespace is
+    left this way by an apply that failed after some writes, by a prune that
+    deleted some objects of the previous bundle and then failed, or by a
+    prune whose foreground deletions have not finished (bundle_state).
+
+    Every listed object then belongs to the last completed bundle or the
+    candidate, and the last completed bundle stays held even where the
+    candidate overwrote its annotations, so applying either one keeps the
+    component within their union (at most 2 * MAX_CONFIGMAPS ConfigMaps) and
+    a rollback always fits the quota. A third bundle could fill the quota
+    with its own new objects and leave the rollback unable to recreate what
+    the prune deleted. An empty (retirement) bundle creates nothing and is
+    allowed.
+
+    Returns the annotations apply writes on every object: a converged
+    namespace starts a new generation whose rollback bundle is the
+    completed one (re-applying that same bundle keeps the current values,
+    so a periodic reconciliation does not rewrite them); a non-converged one
+    keeps its generation and rollback bundle."""
     if not objects:
-        return
+        return {}
     digest = objects[0]["metadata"]["annotations"][BUNDLE_ANNOTATION]
-    present = live_digests(kubectl, component)
-    if len(present) > 1 and digest not in present:
-        held = ", ".join(sorted(value or "(no bundle annotation)" for value in present))
+    converged, held, generation, rollback = bundle_state(kubectl, component)
+    if converged:
+        if digest not in held:  # held is the completed bundle, or empty.
+            generation, rollback = generation + 1, next(iter(held), None)
+    elif digest not in held:
+        shown = ", ".join(sorted(held)) or "(no bundle annotation)"
         raise Rejected(
-            f"component {component!r} is not converged: its objects in {kubectl.profile['namespace']} belong to "
-            f"bundles {held} (a partial apply, a partial prune or a prune whose deletions have not finished). Wait for "
-            f"terminating objects to go, re-apply one of those bundles (the supervisor rollback or a retry) until it "
-            f"succeeds, or remove the component, before applying bundle {digest}")
+            f"component {component!r} is not converged: its objects in {kubectl.profile['namespace']} belong to or "
+            f"must still be restorable to bundles {shown} (a partial apply, a partial prune or a prune whose deletions "
+            f"have not finished). Wait for terminating objects to go, re-apply one of those bundles (the supervisor "
+            f"rollback or a retry) until it succeeds, or remove the component, before applying bundle {digest}")
+    stamp = {GENERATION_ANNOTATION: str(generation), COUNT_ANNOTATION: str(len(objects))}
+    if rollback is not None:
+        stamp[ROLLBACK_ANNOTATION] = rollback
+    return stamp
 
 
 def apply(kubectl, objects, component, writer=None):
@@ -1272,18 +1336,22 @@ def apply(kubectl, objects, component, writer=None):
     Pruning itself is not atomic either: it can delete some objects of the
     previous bundle and then fail, after which a rollback must recreate
     them. recovery_gate therefore refuses, before any write, a bundle that
-    is neither of the bundles a partially applied or partially pruned
-    namespace still holds, so no third bundle can consume the quota a
+    is neither the candidate nor the last completed bundle a partially
+    applied or partially pruned namespace still holds (the latter recorded
+    in ROLLBACK_ANNOTATION even where a partial apply replaced its own
+    annotations), so no third bundle can consume the quota a
     rollback needs. A prune counts as converged only once its foreground
     deletions have completed, not when they were issued."""
     writer = writer or Writer(kubectl, component)
     preflight(writer, objects)  # Read-only; its specific diagnoses come first.
-    recovery_gate(kubectl, component, objects)
+    stamp = recovery_gate(kubectl, component, objects)
     desired = {}
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
         name = item["metadata"]["name"]
-        writer.apply(item)
+        stamped = json.loads(json.dumps(item))
+        stamped["metadata"]["annotations"].update(stamp)
+        writer.apply(stamped)
         if resource == "configmaps":
             ok, reason = object_ready(writer.get(resource, name), item, component)
             if not ok:

@@ -613,6 +613,119 @@ class ConfigBindingTest(unittest.TestCase):
         cluster.finish_deletions()
         k8s.recovery_gate(cluster, "web-app", v3)
 
+    def shared_only(self, message, extra=False, web=False):
+        """Rendered bundle `message`: a stable ConfigMap `shared` (data
+        `message`), plus an unconsumed ConfigMap extra-`message` and a
+        Deployment `web` (consuming nothing) when asked."""
+        bundle = self.bundle(message)
+        web_object = deployment(bundle)
+        pod = web_object["spec"]["template"]["spec"]
+        pod.pop("volumes", None)
+        pod["containers"][0].pop("volumeMounts", None)
+        pod["containers"][0].pop("envFrom", None)
+        bundle["resources"] = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "shared"},
+                                "data": {"v": message}}]
+        if extra:
+            bundle["resources"].append({"apiVersion": "v1", "kind": "ConfigMap",
+                                        "metadata": {"name": f"extra-{message}"}, "data": {"v": message}})
+        if web:
+            bundle["resources"].append(web_object)
+        k8s.validate_bundle(bundle)
+        return k8s.render(bundle, "suifleet-apps", "web-app", "1", hashlib.sha256(message.encode()).hexdigest())
+
+    def test_rollback_stays_allowed_after_a_partial_apply_overwrites_every_shared_object(self):
+        """Review 4654: v1 is one stable ConfigMap `shared`. A partial v2
+        overwrites `shared` (replacing v1's bundle annotation) and creates
+        extra-v2 before its Deployment write fails, so every listed object
+        carries v2's digest. That is not a converged namespace: v2 is
+        incomplete, a further candidate v3 is refused before any write, and
+        the rollback to v1 -- recorded in ROLLBACK_ANNOTATION -- stays
+        allowed (twice failed candidate applies included) and converges."""
+        cluster = ModelCluster(configmap_quota=20)
+        v1 = self.shared_only("v1")
+        v2, v3 = (self.shared_only(message, extra=True, web=True) for message in ("v2", "v3"))
+        digest = lambda objects: objects[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
+        k8s.apply(cluster, v1, "web-app", cluster)
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        cluster.refuse_deployments = True
+        for _ in range(2):  # The candidate and its retry both fail after the ConfigMap writes.
+            with self.assertRaisesRegex(k8s.Rejected, "injected"):
+                k8s.apply(cluster, v2, "web-app", cluster)
+            self.assertEqual(k8s.live_digests(cluster, "web-app"), {digest(v2)}, "v1's annotation was replaced")
+            converged, held, _, rollback = k8s.bundle_state(cluster, "web-app")
+            self.assertFalse(converged)
+            self.assertEqual((held, rollback), ({digest(v1), digest(v2)}, digest(v1)))
+        before = (copy.deepcopy(cluster.store), list(cluster.order))
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        self.assertEqual((cluster.store, cluster.order), before, "the refused bundle wrote nothing")
+        # The rollback creates nothing, restores shared and prunes extra-v2.
+        self.assertEqual(k8s.apply(cluster, v1, "web-app", cluster), ["configmaps/extra-v2"])
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        self.assertEqual(cluster.store["configmaps"]["shared"]["data"], {"v": "v1"})
+        self.assertTrue(k8s.bundle_state(cluster, "web-app")[0])
+        # Converged again: v3 applies.
+        cluster.refuse_deployments = False
+        k8s.apply(cluster, v3, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
+        self.assertLessEqual(cluster.peak, 3)
+
+    def test_a_rollback_that_fails_keeps_both_bundles_held(self):
+        """A rollback that itself fails after overwriting `shared` keeps the
+        same generation and rollback record: only v1 and v2 stay allowed."""
+        cluster = ModelCluster()
+        v1 = self.shared_only("v1", web=True)
+        v2, v3 = (self.shared_only(message, extra=True, web=True) for message in ("v2", "v3"))
+        digest = lambda objects: objects[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        cluster.refuse_deployments = True
+        with self.assertRaises(k8s.Rejected):
+            k8s.apply(cluster, v2, "web-app", cluster)
+        with self.assertRaises(k8s.Rejected):
+            k8s.apply(cluster, v1, "web-app", cluster)  # Rewrites shared to v1, then fails.
+        self.assertEqual(k8s.bundle_state(cluster, "web-app")[1:], ({digest(v1), digest(v2)}, 2, digest(v1)))
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        cluster.refuse_deployments = False
+        k8s.apply(cluster, v2, "web-app", cluster)  # The retry converges.
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
+        self.assertEqual(k8s.bundle_state(cluster, "web-app"), (True, {digest(v2)}, 2, digest(v1)))
+
+    def test_an_older_rollback_record_is_stale_after_convergence(self):
+        """Rollback records of an earlier, completed generation do not hold
+        their bundle: after v2 converged and v3's prune of v2 partially
+        failed, only v2 and v3 are allowed, not v1."""
+        cluster = ModelCluster()
+        v1, v2, v3 = (self.shared_only(message, extra=True) for message in ("v1", "v2", "v3"))
+        digest = lambda objects: objects[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
+        for objects in (v1, v2):
+            k8s.apply(cluster, objects, "web-app", cluster)
+        self.assertEqual(k8s.bundle_state(cluster, "web-app"), (True, {digest(v2)}, 2, digest(v1)))
+        cluster.deletes_allowed = 0  # v3's prune of extra-v2 fails.
+        with self.assertRaisesRegex(k8s.Rejected, "injected"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        self.assertEqual(k8s.bundle_state(cluster, "web-app")[1:], ({digest(v2), digest(v3)}, 3, digest(v2)))
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v1, "web-app", cluster)
+
+    def test_reapplying_the_converged_bundle_rewrites_nothing(self):
+        """`run` re-applies its bundle every interval: once converged that
+        is a no-op, keeping the generation and rollback record."""
+        cluster = ModelCluster()
+        v1, v2 = self.shared_only("v1", extra=True), self.shared_only("v2", extra=True)
+        k8s.apply(cluster, v1, "web-app", cluster)
+        k8s.apply(cluster, v2, "web-app", cluster)
+        versions = {name: live["metadata"]["resourceVersion"] for name, live in cluster.store["configmaps"].items()}
+        state = k8s.bundle_state(cluster, "web-app")
+        for _ in range(3):
+            self.assertEqual(k8s.apply(cluster, v2, "web-app", cluster), [])
+        self.assertEqual({name: live["metadata"]["resourceVersion"]
+                          for name, live in cluster.store["configmaps"].items()}, versions)
+        self.assertEqual(k8s.bundle_state(cluster, "web-app"), state)
+
     def renamed(self, objects, name):
         """`objects` with its Deployment renamed to `name`."""
         objects = copy.deepcopy(objects)
