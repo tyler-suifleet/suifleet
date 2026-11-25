@@ -901,6 +901,22 @@ pub fn handle(
     result.unwrap_or_else(|error| json!({ "error": format!("{error:#}") }))
 }
 
+/// Bind child cleanup to the launcher after all credential changes.
+/// The parent check closes the race where the launcher exits before prctl.
+#[cfg(target_os = "linux")]
+pub fn bind_portable_lifetime(launcher: libc::pid_t) -> anyhow::Result<()> {
+    // SAFETY: prctl uses only scalar arguments and getppid reads our parent.
+    anyhow::ensure!(
+        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) == 0 },
+        "cannot bind portable child lifetime to the launcher"
+    );
+    anyhow::ensure!(
+        launcher > 1 && unsafe { libc::getppid() } == launcher,
+        "portable launcher exited before child startup"
+    );
+    Ok(())
+}
+
 /// Enter the daemon account in the already-executed trusted binary. Doing
 /// this before starting Tokio avoids both a multithreaded credential transition
 /// and an exec under the shared component UID before dumpability is disabled.

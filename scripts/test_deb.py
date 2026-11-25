@@ -15,7 +15,7 @@ BASES = {
 DOCKERFILE = '''ARG BASE
 FROM ${BASE}
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv ca-certificates adduser python3 procps lintian && rm -rf /var/lib/apt/lists/* && systemctl mask systemd-logind.service getty.target console-getty.service systemd-udevd.service
+RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv ca-certificates adduser python3 procps lintian apt-utils gnupg && rm -rf /var/lib/apt/lists/* && systemctl mask systemd-logind.service getty.target console-getty.service systemd-udevd.service
 # Privileged systemd containers must not reset the host binfmt registrations.
 RUN systemctl mask systemd-binfmt.service
 STOPSIGNAL SIGRTMIN+3
@@ -38,15 +38,84 @@ def unsafe_accounts(package):
     print("PASS package rejects preexisting daemon/signer UID collision")
 
 
+def pin_version(path, version):
+    path.write_text(f"Package: suifleet\nPin: version {version}\nPin-Priority: 990\n\n"
+                    "Package: suifleet\nPin: version *\nPin-Priority: -1\n")
+
+
+def signed_apt_sources(package, upgrade, version):
+    import os
+    import shutil
+
+    from build_apt_snapshot import build
+
+    apt_root = Path("/tmp/suifleet-apt")
+    apt_root.mkdir(mode=0o755)
+    key_dir = apt_root / "gnupg"
+    key_dir.mkdir(mode=0o700)
+    os.environ["GNUPGHOME"] = str(key_dir)
+    gpg = ["gpg", "--batch"]
+    run(*gpg, "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key",
+        "Disposable SuiFleet APT test", "ed25519", "sign", "1d")
+    keys = subprocess.check_output([*gpg, "--with-colons", "--list-secret-keys"], text=True)
+    fingerprint = next(line.split(":")[9] for line in keys.splitlines() if line.startswith("fpr:"))
+    build(apt_root / "initial", [package], fingerprint)
+    build(apt_root / "upgrade", [upgrade], fingerprint)
+
+    sources = Path("/etc/apt/sources.list.d")
+    for source in sources.iterdir():
+        if source.suffix in (".list", ".sources"):
+            source.unlink()
+    Path("/etc/apt/sources.list").write_text("")
+    keyring = apt_root / "publisher.gpg"
+    (sources / "suifleet.list").write_text("".join(
+        f"deb [signed-by={keyring}] file:{apt_root / name} ./\n" for name in ("initial", "upgrade")))
+    update = ["apt-get", "-o", "APT::Update::Error-Mode=any", "update"]
+    rejected = subprocess.run(update, capture_output=True, text=True)
+    assert rejected.returncode != 0 and "NO_PUBKEY" in rejected.stderr
+    keyring.write_bytes(subprocess.check_output([*gpg, "--export", fingerprint]))
+    snapshot = apt_root / "initial"
+    run("gpgv", "--keyring", str(keyring), str(snapshot / "Release.gpg"), str(snapshot / "Release"))
+    metadata = snapshot / "InRelease"
+    signed = metadata.read_bytes()
+    metadata.write_bytes(signed.replace(b"Origin: SuiFleet", b"Origin: Elsewhere", 1))
+    rejected = subprocess.run(update, capture_output=True, text=True)
+    assert rejected.returncode != 0 and "BADSIG" in rejected.stderr
+    metadata.write_bytes(signed)
+    run(*update)
+
+    pin = Path("/etc/apt/preferences.d/suifleet")
+    pin_version(pin, version)
+    # APT must enforce the indexed package digest after accepting InRelease.
+    published = next((apt_root / "initial/pool").glob("*.deb"))
+    original = published.read_bytes()
+    published.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+    rejected = subprocess.run(["apt-get", "install", "-y", "suifleet"], capture_output=True, text=True)
+    assert rejected.returncode != 0 and "Hash Sum mismatch" in rejected.stderr
+    shutil.copyfile(package, published)
+    print("PASS APT refused an unknown signer, modified metadata and a modified package")
+    return pin
+
+
 def inside(package):
     import os
     import pwd
-    import shutil
     import stat
     import socket
     import sys
     package = Path(package)
-    run("apt-get", "install", "-y", str(package))
+    # Real package upgrade of the same payload with a higher Debian revision.
+    stage = Path("/tmp/deb-upgrade")
+    run("dpkg-deb", "-R", str(package), str(stage))
+    control = stage / "DEBIAN/control"
+    text = control.read_text()
+    version = next(line[9:] for line in text.splitlines() if line.startswith("Version: "))
+    control.write_text(text.replace("Version: " + version, "Version: " + version + ".1"))
+    upgrade = Path("/tmp/upgrade.deb")
+    run("dpkg-deb", "--root-owner-group", "--build", str(stage), str(upgrade))
+    pin = signed_apt_sources(package, upgrade, version)
+    run("apt-get", "install", "-y", "suifleet")
+    assert subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", "suifleet"], text=True) == version
     assert not Path("/etc/suifleet/device.key").exists()
     assert not Path("/etc/suifleet/config.toml").exists()
     for unit in ("suifleet.service", "suifleet-enrollment.path", "suifleet-signer.socket"):
@@ -132,29 +201,22 @@ def inside(package):
         assert hashlib.sha256(key.read_bytes()).hexdigest() == digest
 
     run("systemctl", "--no-reload", "enable", "suifleet-enrollment.path", "suifleet-signer.socket")
-    # Real package upgrade of the same payload with a higher Debian revision.
-    stage = Path("/tmp/deb-upgrade")
-    run("dpkg-deb", "-R", str(package), str(stage))
-    control = stage / "DEBIAN/control"
-    text = control.read_text()
-    version = next(line[9:] for line in text.splitlines() if line.startswith("Version: "))
-    control.write_text(text.replace("Version: " + version, "Version: " + version + ".1"))
-    upgrade = Path("/tmp/upgrade.deb")
-    run("dpkg-deb", "--root-owner-group", "--build", str(stage), str(upgrade))
-    run("apt-get", "install", "-y", str(upgrade))
+    pin_version(pin, version + ".1")
+    run("apt-get", "install", "-y", "--only-upgrade", "suifleet")
+    assert subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", "suifleet"], text=True) == version + ".1"
     preserved()
     run("apt-get", "remove", "-y", "suifleet")
     preserved()
     assert not Path("/etc/systemd/system/multi-user.target.wants/suifleet-enrollment.path").is_symlink()
     assert not Path("/etc/systemd/system/sockets.target.wants/suifleet-signer.socket").is_symlink()
     assert not Path("/usr/bin/suifleet").exists()
-    run("apt-get", "install", "-y", str(package))
+    pin_version(pin, version)
+    run("apt-get", "install", "-y", "suifleet")
     preserved()
     run("apt-get", "purge", "-y", "suifleet")
     preserved(False)
     assert not trust.exists()
     assert pwd.getpwnam("suifleet") and pwd.getpwnam("suifleet-signer")
-    shutil.rmtree(stage)
     print("PASS real install/upgrade/remove/reinstall/purge, offline identity CLI, permissions and data preservation")
 
 
