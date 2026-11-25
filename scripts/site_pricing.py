@@ -67,7 +67,7 @@ def render(prices, policy, plan_digest):
             '<h2>Managed plan</h2>',
             f'<p>The platform price plus {usd(managed["premium_usd_per_device_month"])} per device per month, '
             f'with a {usd(managed["monthly_minimum_usd"])} monthly minimum. Includes onboarding, help integrating '
-            'SuiFleet into your device image, and a support SLA as proposed scope. Confirm service availability, response commitments and exclusions in the written agreement; no SLA is activated by this page. The premium funds support time.</p>',
+            'SuiFleet into your device image, and support tailored to your team. Response commitments, service availability and exclusions are agreed in your written support plan.</p>',
             '<h2>Getting started</h2>',
             f'<p>At-cost tier: up to {at_cost["max_devices"]:,} devices per organization with no SuiFleet margin. '
             f'Pay only network and hosting costs, estimated at about {usd(at_cost["estimated_usd_per_device_month"])} '
@@ -95,7 +95,7 @@ def render(prices, policy, plan_digest):
             f'{data["includedRetentionDays"]} days. Additional writes: {usd(data["writeUsdPerGB"])} per GB; '
             f'storage: {usd(data["storageUsdPerGBMonth"])} per GB-month. Logs count as device data. Reading data back has no Walrus egress fee.</p>',
             '<h2>Included, optional and customer-funded costs</h2><ul>'
-            '<li><strong>Included:</strong> the all-in subscription proposal covers network fees for the agreed reporting and storage settings. SuiFleet would fund those operating resources from the subscription; do not add the same network estimate to that bill again.</li>'
+            '<li><strong>Included:</strong> an all-in subscription quote includes network fees for its agreed reporting and storage settings. These operating resources are funded through that subscription, so they are not charged again as a separate network estimate.</li>'
             '<li><strong>Optional:</strong> faster reporting, longer retention, encrypted delivery, extra data and Managed support use the prices above and the scope in your quote. Live telemetry is outside the base product.</li>'
             '<li><strong>Customer-funded arrangements:</strong> volume rates below about $0.07 per device assume customer-funded SUI network costs. Those rates alone are not an all-in total. A quote must identify the network costs, storage, provider services and working funds you supply separately, including any activation costs.</li></ul>'
             '<p>Request a written quote that states device capacity, reporting frequency, data volume and retention, included services, separately funded resources and the total payable. Provider services and actual workloads can change the total.</p>',
@@ -106,7 +106,7 @@ def render(prices, policy, plan_digest):
             'WAL pays Walrus writes and retention. Uploads can also require SUI relay fees. Saving fleet settings does not deposit money.</p></details>',
             '<p><a href="{{app:settings/}}">Explore settings in the console</a>. Console estimates and deployment-specific tariffs are separate from a written commercial quote.</p>',
             '<details><summary>Optional detail: SUI price and renewals</summary>',
-            f'<p>Prices stay fixed in USD for the term. When a prepaid annual invoice is paid, the proposal buys '
+            f'<p>Prices stay fixed in USD for the term. When a prepaid annual invoice is paid, the annual subscription allocates funds to purchase '
             f'{Decimal(policy["hedge"]["term_sui_purchased_fraction"]).normalize() * 100:.0f}% of the term’s estimated SUI quantity. '
             'This protects that quantity against token-price rises; gas-price or workload increases can still require more SUI. '
             f'If the USD cost of SUI operations at renewal is at least {policy["renewal_repricing_trigger_multiple"]}× the quote basis, '
