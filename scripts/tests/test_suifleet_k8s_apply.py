@@ -602,11 +602,85 @@ class ConfigBindingTest(unittest.TestCase):
         k8s.recovery_gate(cluster, "web-app", [])  # retirement creates nothing
         with self.assertRaisesRegex(k8s.Rejected, "not converged"):
             k8s.recovery_gate(cluster, "web-app", v3)
-        # Objects whose deletion is already committed do not hold a bundle.
+        # Objects still terminating hold their bundle until deletion completes
+        # (review 4652); only then is the namespace converged.
+        v2_digest = v2[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
         for live in cluster.store["configmaps"].values():
-            if live["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION] == v2[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]:
+            if live["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION] == v2_digest:
                 live["metadata"]["deletionTimestamp"] = "2026-11-25T00:00:00Z"
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.recovery_gate(cluster, "web-app", v3)
+        cluster.finish_deletions()
         k8s.recovery_gate(cluster, "web-app", v3)
+
+    def renamed(self, objects, name):
+        """`objects` with its Deployment renamed to `name`."""
+        objects = copy.deepcopy(objects)
+        next(item for item in objects if item["kind"] == "Deployment")["metadata"]["name"] = name
+        return objects
+
+    def test_a_foreground_prune_in_progress_keeps_rollback_room(self):
+        """Review 4652: an update that replaces a Deployment name prunes the
+        old Deployment with foreground deletion, so it stays terminating
+        after the previous bundle's ConfigMaps are gone. Until that deletion
+        completes, the namespace still holds two bundles: a third bundle is
+        refused before any write, and the rollback (which must recreate the
+        nine pruned ConfigMaps) fits the shipped quota."""
+        cluster = ModelCluster(configmap_quota=20, foreground={"deployments.apps"})
+        v1 = self.renamed(self.many("v1", k8s.MAX_CONFIGMAPS), "old-web")
+        v2, v3 = (self.many(message, k8s.MAX_CONFIGMAPS) for message in ("v2", "v3"))
+        digest = lambda objects: objects[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.roll_out()
+        self.assertTrue(cluster.store["deployments.apps"]["old-web"]["metadata"].get("deletionTimestamp"))
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"),
+                         (False, "stale deployments.apps/old-web not yet pruned (1 remaining)"))
+        self.assertEqual(k8s.live_digests(cluster, "web-app"), {digest(v1), digest(v2)})
+        # A third bundle is refused before any write while old-web terminates.
+        before = (copy.deepcopy(cluster.store), list(cluster.order))
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        self.assertEqual((cluster.store, cluster.order), before, "the refused bundle wrote nothing")
+        # The rollback recreates v1's ConfigMaps within the quota; old-web
+        # itself cannot be written until its deletion completes.
+        with self.assertRaisesRegex(k8s.Rejected, "being deleted"):
+            k8s.apply(cluster, v1, "web-app", cluster)
+        self.assertEqual(len(cluster.store["configmaps"]), 2 * k8s.MAX_CONFIGMAPS)
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        # Deletion completes: v1 and v2 objects remain, so v3 is still refused
+        # and the rollback converges.
+        cluster.finish_deletions()
+        self.assertEqual(k8s.live_digests(cluster, "web-app"), {digest(v1), digest(v2)})
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v3, "web-app", cluster)
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.finish_deletions()
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        self.assertEqual(len(cluster.store["configmaps"]), k8s.MAX_CONFIGMAPS)
+        self.assertEqual(cluster.peak, 2 * k8s.MAX_CONFIGMAPS)
+
+    def test_a_completed_foreground_prune_converges(self):
+        """Review 4652: once the replaced Deployment's deletion completes, no
+        object of the previous bundle is listed; the update is ready and a
+        further bundle applies within the quota."""
+        cluster = ModelCluster(configmap_quota=20, foreground={"deployments.apps"})
+        v1 = self.renamed(self.many("v1", k8s.MAX_CONFIGMAPS), "old-web")
+        v2, v3 = (self.many(message, k8s.MAX_CONFIGMAPS) for message in ("v2", "v3"))
+        k8s.apply(cluster, v1, "web-app", cluster)
+        k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.finish_deletions()
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
+        self.assertEqual(len(k8s.live_digests(cluster, "web-app")), 1)
+        k8s.apply(cluster, v3, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
+        self.assertEqual(cluster.peak, 2 * k8s.MAX_CONFIGMAPS)
 
     def test_retrying_a_partial_apply_fits_the_quota_and_converges(self):
         cluster = ModelCluster(configmap_quota=20)
@@ -693,7 +767,7 @@ class ModelCluster:
     ConfigMap never changes, and a Deployment template change bumps the
     generation. roll_out() marks the current template rolled out."""
 
-    def __init__(self, configmap_quota=None):
+    def __init__(self, configmap_quota=None, foreground=()):
         # configmap_quota models a ResourceQuota on configmaps, including the
         # namespace's kube-root-ca.crt (not in the store); peak records the
         # most SuiFleet ConfigMaps that existed at once.
@@ -707,6 +781,10 @@ class ModelCluster:
         # deletes_allowed: None allows every delete; a number lets that many
         # more deletes succeed and refuses the next ones (a failing prune).
         self.deletes_allowed = None
+        # foreground: resources whose deletes leave the object terminating
+        # (deletionTimestamp set, still listed) until finish_deletions(), as
+        # foreground deletion of a Deployment with dependents does.
+        self.foreground = set(foreground)
 
     def template(self):
         return self.store["deployments.apps"]["web"]["spec"]["template"]
@@ -742,6 +820,8 @@ class ModelCluster:
                                                name in (self.refuse_deployments or ())):
             raise k8s.Rejected(f"kubectl apply Deployment/{name} failed: injected")
         old = self.store[resource].get(name)
+        if old is not None and old["metadata"].get("deletionTimestamp"):
+            raise k8s.Rejected(f"{item['kind']}/{name} is being deleted; retry after deletion completes")
         new = copy.deepcopy(item)
         if self.tamper and resource == "configmaps":
             self.tamper(new)
@@ -775,8 +855,16 @@ class ModelCluster:
             if self.deletes_allowed <= 0:
                 raise k8s.Rejected(f"delete {resource}/{current['metadata']['name']} failed: injected")
             self.deletes_allowed -= 1
-        self.store[resource].pop(current["metadata"]["name"], None)
+        if resource in self.foreground:
+            self.store[resource][current["metadata"]["name"]]["metadata"]["deletionTimestamp"] = "2026-11-25T00:00:00Z"
+        else:
+            self.store[resource].pop(current["metadata"]["name"], None)
         return True
+
+    def finish_deletions(self):
+        for objects in self.store.values():
+            for name in [name for name, live in objects.items() if live["metadata"].get("deletionTimestamp")]:
+                del objects[name]
 
 
 class DecisionTest(unittest.TestCase):

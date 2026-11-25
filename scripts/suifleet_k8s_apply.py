@@ -1202,17 +1202,25 @@ def preflight(writer, objects):
 
 
 def live_digests(kubectl, component):
-    """Bundle digests of this component's live (not terminating) objects.
-    One digest (or none) means the last apply and its prune completed; more
-    mean a partial apply or a partial prune left two bundles' objects."""
+    """Bundle digests of every object still listed for this component,
+    including terminating ones. One digest (or none) means the last apply
+    and its prune completed; more mean a partial apply, a partial prune or
+    a prune whose foreground deletions have not finished left two bundles'
+    objects.
+
+    A terminating object still counts: until its deletion completes, the
+    prune that removed the other objects of its bundle has not converged
+    (readiness reports it as stale), and the supervisor may still roll back
+    to that bundle, which must recreate everything the prune deleted. The
+    boundary is the deletion's completion: once no object of the old bundle
+    is listed, the new bundle was fully applied and fully pruned, so any
+    bundle fits beside it."""
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     digests = set()
     for resource in ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}
         for item in listed.get("items") or []:
             metadata = item.get("metadata") or {}
-            if metadata.get("deletionTimestamp"):
-                continue  # Deletion already committed; nothing a rollback can restore in place.
             digests.add((metadata.get("annotations") or {}).get(BUNDLE_ANNOTATION))
     return digests
 
@@ -1221,8 +1229,10 @@ def recovery_gate(kubectl, component, objects):
     """Refuse a bundle before any write while the namespace still holds the
     objects of two bundles, unless it is one of them (a retry, or the
     supervisor's rollback). A namespace is left this way by an apply that
-    failed after some writes, or by a prune that deleted some objects of the
-    previous bundle and then failed. Every live object then belongs to one
+    failed after some writes, by a prune that deleted some objects of the
+    previous bundle and then failed, or by a prune whose foreground
+    deletions have not finished (live_digests counts terminating objects).
+    Every listed object then belongs to one
     of the two bundles, so applying either one keeps the component within
     their union (at most 2 * MAX_CONFIGMAPS ConfigMaps) and a rollback always
     fits the quota. A third bundle could fill the quota with its own new
@@ -1236,8 +1246,9 @@ def recovery_gate(kubectl, component, objects):
         held = ", ".join(sorted(value or "(no bundle annotation)" for value in present))
         raise Rejected(
             f"component {component!r} is not converged: its objects in {kubectl.profile['namespace']} belong to "
-            f"bundles {held} (a partial apply or prune). Re-apply one of those bundles (the supervisor rollback or a "
-            f"retry) until it succeeds, or remove the component, before applying bundle {digest}")
+            f"bundles {held} (a partial apply, a partial prune or a prune whose deletions have not finished). Wait for "
+            f"terminating objects to go, re-apply one of those bundles (the supervisor rollback or a retry) until it "
+            f"succeeds, or remove the component, before applying bundle {digest}")
 
 
 def apply(kubectl, objects, component, writer=None):
@@ -1263,7 +1274,8 @@ def apply(kubectl, objects, component, writer=None):
     them. recovery_gate therefore refuses, before any write, a bundle that
     is neither of the bundles a partially applied or partially pruned
     namespace still holds, so no third bundle can consume the quota a
-    rollback needs."""
+    rollback needs. A prune counts as converged only once its foreground
+    deletions have completed, not when they were issued."""
     writer = writer or Writer(kubectl, component)
     preflight(writer, objects)  # Read-only; its specific diagnoses come first.
     recovery_gate(kubectl, component, objects)
