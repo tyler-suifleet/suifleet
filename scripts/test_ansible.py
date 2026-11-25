@@ -57,7 +57,8 @@ inputs, rerun (changed=0), a configuration-only change timestamped within a
 second of the daemon's start (detected; retry restarts; rerun changed=0), an
 interrupted signing-socket unit-only update on the binary host (retry
 recreates the socket with its new mode and restarts signer and daemon; rerun
-changed=0), rolling restart. It checks preserved identity and
+changed=0), rolling-restart preview in check mode (succeeds; no process or
+identity changes), rolling restart. It checks preserved identity and
 enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
 cap owners), claim erasure, and that no device or claim key appears in
 Ansible output, controller files or host journals (keys are passed to the
@@ -1409,6 +1410,14 @@ class Harness:
         after, rollout = self.rapid_config_rollout(vault, rollout, after)
         after, rollout = self.socket_unit_update(vault, rollout, after)
 
+        _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")
+        for name in self.hosts:
+            # The restart task reports the pending restart; the health checks are skipped.
+            assert recap[name]["failed"] == 0 and recap[name]["unreachable"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
+            state, _ = self.host_state(name)
+            for field in ("main_pid", "signer_pid", "key_sha256", "address", "enrollment_sha256"):
+                assert state[field] == after[name][field], (name, field, "changed by the restart preview")
+        print("PASS rolling restart preview restarted nothing and preserved identity")
         self.ansible("rolling restart", "restart.yml")
         for name in self.hosts:
             state, _ = self.host_state(name)
