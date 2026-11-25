@@ -112,7 +112,7 @@ Example `/etc/suifleet-monitoring/monitoring.json` (replace example values):
 | `otlp.endpoint` | Collector base URL; the adapter posts to `/v1/metrics` and `/v1/logs`. HTTPS is required unless the collector is on loopback. No credentials, query or fragment in the URL; an explicit port must be 1–65535. The URL must be printable ASCII without spaces; percent-encode any other path characters (for example `%C3%A9`). |
 | `otlp.headers_file` | Optional `Name: value` lines (at most 16), for example `Authorization: Bearer …` or a tenant header. Host, Content-Type, Content-Length, Connection and Transfer-Encoding cannot be overridden. Values must be printable ASCII; `--check-config` rejects anything else. |
 | `otlp.ca_file` | Optional PEM bundle for a private CA (HTTPS only). Otherwise the system trust store is used. TLS 1.2+ is required; session-key logging is disabled. |
-| `otlp.timeout_seconds` | 1–30, default 5. A wall-clock limit on each whole request (connect, TLS handshake, upload and response), not only on each socket read, so a collector that keeps trickling bytes cannot hold an export past it. |
+| `otlp.timeout_seconds` | 1–30, default 5. A wall-clock limit on each whole request (name resolution, every TCP connect attempt, TLS handshake, upload and response), not only on each socket read, so a slow resolver, unreachable addresses or a collector that keeps trickling bytes cannot hold an export past it. |
 | `otlp.initial_backoff_seconds`, `otlp.max_backoff_seconds` | Retry delay after a failure, doubling up to the maximum (defaults 5 and 300). |
 | `otlp.logs` | Default `true`; set `false` to send metrics only. |
 | `logs.components` | 1–16 supervised component names whose log tails are exported (OTLP only; Prometheus does not ingest logs). |
@@ -256,6 +256,12 @@ so this deadline, not the bearer token, protects the listener's availability.
 Each console request is likewise bounded to 5 s in total and each collector
 request to `otlp.timeout_seconds`; a response still arriving at its deadline is
 treated as incomplete (console: unreachable; collector success: unconfirmed).
+The budget covers connection setup too: every address attempt and the TLS
+handshake share it. Name resolution has no timeout of its own, so it runs on a
+helper thread that the request stops waiting for at its deadline; at most 4
+abandoned lookups may be outstanding (each ends within the system resolver's
+own timeouts), and further requests fail as unreachable until one finishes.
+Literal IP addresses, such as the loopback console, need no lookup.
 Collector latency, timeouts and backoff run on the export thread, so they
 never delay console polling or the withdrawal of stale health. The export
 thread sends at most one log batch per turn and services a newer console poll
