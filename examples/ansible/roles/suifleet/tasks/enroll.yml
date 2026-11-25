@@ -138,11 +138,14 @@
     state: absent
 
 # A run killed during the claim transfer (stage_claim.yml) can leave the SSH
-# account's private transfer directory on its tmpfs.
+# account's private transfer directory on its tmpfs. These tasks run as the
+# SSH account even if the inventory sets ansible_become (stage_claim.yml).
 - name: Read the SSH account's user ID
   ansible.builtin.command:
     argv: [id, -u]
   become: false
+  vars:
+    ansible_become: false
   register: suifleet_transfer_uid
   changed_when: false
   check_mode: false
@@ -153,6 +156,8 @@
     patterns: "suifleet-claim.*"
     file_type: directory
   become: false
+  vars:
+    ansible_become: false
   register: suifleet_transfer_left
   check_mode: false
 
@@ -161,6 +166,8 @@
     path: "{{ item.path }}"
     state: absent
   become: false
+  vars:
+    ansible_become: false
   loop: "{{ suifleet_transfer_left.files | selectattr('uid', 'equalto', suifleet_transfer_uid.stdout | int) | list }}"
   loop_control:
     label: "{{ item.path }}"

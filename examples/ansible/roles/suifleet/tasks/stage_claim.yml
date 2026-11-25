@@ -19,27 +19,60 @@
 # travels without become, as the SSH account, into a private directory
 # on a memory-backed filesystem. A root task then moves it to the
 # staging directory; that task's module carries only paths.
-- name: Check that modules reach the host through pipelining
+#
+# The ansible_become connection variable (inventory, group_vars, host_vars)
+# overrides the become task keyword, so these tasks also set it to false
+# as a task variable, which outranks inventory. Extra vars
+# (-e ansible_become=true) outrank task variables; the probe below detects
+# any escalation that remains and refuses before the claim is read.
+- name: Check that modules reach the host pipelined and unescalated
   ansible.builtin.command:
-    argv: [sh, -c, 'tr "\0" " " < /proc/$PPID/cmdline']
+    argv:
+      - sh
+      - -c
+      # Prints the command line of the module interpreter (first line) and
+      # of each visible ancestor. Every Ansible become plugin wraps the
+      # module in "echo BECOME-SUCCESS-…", which also appears in the
+      # SSH account's shell that starts sudo, su or doas.
+      - >-
+        p=$PPID;
+        while [ "${p:-0}" -gt 1 ]; do
+        c=$(tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline") || break;
+        printf '%s\n' "$c";
+        p=$(sed -n 's/^PPid:[[:space:]]*//p' 2>/dev/null < "/proc/$p/status") || break;
+        done
   become: false
+  vars:
+    ansible_become: false
   register: suifleet_module_parent
   changed_when: false
   check_mode: false
 
 - name: Refuse to send the claim without pipelining
   ansible.builtin.assert:
-    that: suifleet_module_parent.stdout is not search('AnsiballZ_')
+    that: suifleet_module_parent.stdout_lines[:1] | select('search', 'AnsiballZ_') | list | length == 0
     quiet: true
     fail_msg: >-
       Ansible wrote its module to a file on {{ inventory_hostname }}, so
       the claim would reach persistent storage. Enable SSH pipelining
       (examples/ansible/ansible.cfg) and leave ANSIBLE_KEEP_REMOTE_FILES unset.
 
+- name: Refuse to send the claim through privilege escalation
+  ansible.builtin.assert:
+    that: suifleet_module_parent.stdout is not search('BECOME-SUCCESS-')
+    quiet: true
+    fail_msg: >-
+      The claim transfer to {{ inventory_hostname }} would run through
+      privilege escalation, which can record the claim in persistent logs
+      (sudoers log_input). Do not pass ansible_become as an extra variable
+      (-e); the role enables become for its other tasks itself.
+
 - name: Read the claim transfer filesystem type
   ansible.builtin.command:
     argv: [stat, -f, -c, "%T", "{{ suifleet_claim_transfer_dir }}"]
   become: false
+  vars:
+    ansible_become: false
   register: suifleet_transfer_fs
   changed_when: false
   check_mode: false
@@ -75,6 +108,8 @@
           - "{{ suifleet_claim_transfer_dir }}"
         stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
       become: false
+      vars:
+        ansible_become: false
       register: suifleet_claim_transfer
       no_log: true
       diff: false
@@ -108,6 +143,8 @@
         path: "{{ suifleet_claim_transfer.stdout }}"
         state: absent
       become: false
+      vars:
+        ansible_become: false
       when:
         - suifleet_claim_transfer.stdout is defined
         - suifleet_claim_transfer.stdout is match('^' ~ (suifleet_claim_transfer_dir | regex_escape) ~ '/suifleet-claim[.][A-Za-z0-9]{10}$')
