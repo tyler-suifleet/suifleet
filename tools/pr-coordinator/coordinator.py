@@ -233,7 +233,7 @@ def verified_optional_skip(pr, check):
 
 
 def annotate_optional_skips(pr, repository, read, immutable_read):
-    """Prove only the pinned deployment jobs are inapplicable to a PR run.
+    """Prove pinned deployment/content jobs are inapplicable to a PR run.
 
     Do not rewrite conclusions or accept skips on push/manual/live workflows.
     Mutable run/job/check evidence is fetched anew for every approval snapshot.
