@@ -112,7 +112,9 @@ Delete the batch once every host is enrolled.
 ## Run
 
 Hosts need SSH, sudo and Python 3; `deb` hosts also need `python3-apt` (present on
-standard Debian and Ubuntu installs) for the `apt` module. Use a controller with
+standard Debian and Ubuntu installs) for the `apt` module. Enrolling hosts also
+need a tmpfs the SSH account can write (`/dev/shm` by default, see
+`suifleet_claim_transfer_dir`). Use a controller with
 ansible-core 2.16 or later. The examples use only
 `ansible.builtin` modules. The tested controller is pinned in
 [`requirements-controller.txt`](../examples/ansible/requirements-controller.txt):
@@ -170,16 +172,23 @@ restarted once.
 - **Claims are single-use and never reach persistent storage.** The
   controller reads the claim into memory (Ansible Vault files are decrypted in
   memory, not into its local temporary directory). It reaches the host as the
-  `no_log` standard input of a command, inside the pipelined module stream,
-  and the current key holder (the daemon user, not root) writes it into a
-  private staging directory on a memory-backed `/run`. Ansible's file copy,
+  `no_log` standard input of a command, inside the pipelined module stream.
+  That command runs **without privilege escalation**, as the SSH account:
+  sudo can record a command's standard input (sudoers `log_input`), and with
+  pipelining that input is the whole module, claim included. The SSH account
+  writes the claim into a private directory on `suifleet_claim_transfer_dir`
+  (default `/dev/shm`, which must be a tmpfs). A root task, whose module
+  carries only paths, then has the current key holder (the daemon user, not
+  root) copy it into a private staging directory on a memory-backed `/run`,
+  and the transfer directory is erased. Ansible's file copy,
   which goes through the remote temporary directory, is never used for the
   claim. Enrollment refuses to send a claim unless modules are pipelined, so
   keep `pipelining = True` and leave `ANSIBLE_KEEP_REMOTE_FILES` unset. The
   staging directory is erased after enrollment, when it fails, at the start
   of the next attempt and on every run of an enrolled host (a run interrupted
-  after the record was written but before its cleanup); an interrupted run
-  leaves the claim only on that tmpfs until the next run or a reboot. Revoke a claim that was exposed before use.
+  after the record was written but before its cleanup). Every run also erases
+  the SSH account's transfer directories left by a killed run. An interrupted
+  run leaves the claim only on those tmpfs mounts until the next run or a reboot. Revoke a claim that was exposed before use.
 - **One enrollment per device.** `/etc/suifleet/enrollment.json` records the
   public IDs, and a recorded host never enrolls again. A host that has
   `config.toml` but no record is refused rather than given a new claim.
@@ -230,6 +239,9 @@ namespace:
   as an unprivileged sudo user: Debian 12 and Ubuntu 24.04 (`deb`) and Debian
   12 (`systemd-binary`). A host without systemd checks the refusal.
 - **Controller.** The pinned ansible-core. One claim is Vault-encrypted.
+- **sudo input logging.** The hosts' sudoers set `Defaults log_input,
+  !compress_io`, so sudo writes every become command's standard input to
+  `/var/log/sudo-io` in plain form.
 
 The harness checks these phases:
 
@@ -237,18 +249,26 @@ The harness checks these phases:
    `deb`; Ubuntu 24.10 and Debian 13 are refused for `deb` unless explicitly
    allowed.
 2. Refusal of the host without systemd.
-3. Check mode on fresh hosts changes nothing. Then a claim transfer is
+3. Check mode on fresh hosts changes nothing. A control play sends a
+   disposable marker as the `no_log` standard input of a become command (how
+   the claim used to travel), and the marker must appear in every host's sudo
+   I/O logs. Then a claim transfer is
    interrupted right after staging, for plain and Vault claims: the claim must
    exist only in the tmpfs staging directory, not anywhere on the host's
    persistent filesystem (including Ansible's remote temporary directories)
-   or in the controller's files and Ansible home.
+   or in the controller's files and Ansible home, and no transfer copy may
+   remain in `/dev/shm`. No claim may appear in the sudo I/O logs, after this
+   phase or after enrollment.
 4. Install, on-device identity, enrollment, configuration and start, in three
    rollout batches.
 5. A rerun with the credential batch deleted reports `changed=0`, and so does
    check mode. Then staging is planted as if enrollment stopped after writing
-   its record but before its cleanup: check mode reports it without erasing,
-   the retry (still without the batch) erases it without re-enrolling or
-   restarting a service, and a rerun reports `changed=0`.
+   its record but before its cleanup, together with an abandoned transfer
+   directory of the SSH account and a same-named directory of another
+   account: check mode reports it without erasing, the retry (still without
+   the batch) erases the staging and the SSH account's transfer copy, keeps
+   the other account's directory, and neither re-enrolls nor restarts a
+   service; a rerun reports `changed=0`.
 6. An upgrade preview in check mode leaves bytes, package versions and service
    processes unchanged.
 7. Package and binary upgrade, then a rerun with `changed=0`.
@@ -291,4 +311,8 @@ versions and service PIDs unchanged), the interrupted rollout and its retry
 restarted onto the installed inputs), and converged reruns and check mode with
 `changed=0` on all three hosts. The three enrollments succeeded on the
 disposable chain, each paid by its own claim. The run used no public network
-or testnet funds.
+or testnet funds. A rerun on 2026-11-25 with sudo input logging enabled on
+every host passed all phases (30 Ansible runs): the control marker sent
+through become was recorded in each host's `/var/log/sudo-io`, and no claim
+appeared there after the interrupted transfer, after enrollment or in the
+final scan.
