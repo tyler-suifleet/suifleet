@@ -1,0 +1,40 @@
+#!/bin/sh
+
+launcher=/usr/sbin/suifleet-portable-signer
+python=/usr/bin/python3
+pidfile=/run/suifleet-portable/launcher.pid
+
+start() {
+    # A reusable image has no fleet configuration. Install config.toml last.
+    if [ ! -f /etc/suifleet/config.toml ]; then
+        return 0
+    fi
+    if [ ! -f /etc/suifleet/signer.toml ]; then
+        echo "SuiFleet: signer.toml is required" >&2
+        return 1
+    fi
+    install -d -m 0755 /run/suifleet-portable || return
+    install -d -m 0700 -o suifleet -g suifleet /var/lib/suifleet || return
+    start-stop-daemon --start --quiet --oknodo --background --make-pidfile \
+        --pidfile "$pidfile" --exec "$python" --user root -- "$launcher"
+}
+
+stop() {
+    [ -f "$pidfile" ] || return 0
+    # The launcher forwards SIGTERM and allows up to ten seconds for cleanup.
+    if start-stop-daemon --stop --quiet --pidfile "$pidfile" --exec "$python" --user root; then
+        remaining=15
+        while start-stop-daemon --stop --test --quiet --pidfile "$pidfile" --exec "$python" --user root; do
+            [ "$remaining" -gt 0 ] || return 1
+            remaining=$((remaining - 1))
+            sleep 1
+        done
+    fi
+    rm -f "$pidfile"
+}
+
+case "$1" in
+    start|stop) "$1" ;;
+    restart) stop && start ;;
+    *) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac
