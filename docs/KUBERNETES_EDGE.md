@@ -308,10 +308,13 @@ when its value is empty, because for example `nodeSelector:
 zero/empty bundle value, and Kubernetes quantities (resource
 `limits`/`requests`, `overhead` and emptyDir `sizeLimit`) compare by value
 (`0.1`, `"0.1"` and `100m` are equal; `1.5Gi` equals the server's `1536Mi`;
-`1E` equals `1000P`; `1G` does not equal `1Gi`). Resource `limits`/`requests`
-and `overhead` are compared after the API server's round-up to milli
-precision (a bundle request of `10.1m` is stored, and accepted, as `11m`; any
-other live value, including the unrounded text, is drift); emptyDir `sizeLimit` is not rounded.
+`1E` equals `1000P`; `1G` does not equal `1Gi`). Every quantity is compared
+after the API server's parse-time round-up (away from zero) to nano precision
+(an emptyDir `sizeLimit` of `0.1n` is stored, and accepted, as `1n`).
+Resource `limits`/`requests` and `overhead` are further compared after the
+server's round-up to milli precision (a bundle request of `10.1m` is stored,
+and accepted, as `11m`); emptyDir `sizeLimit` gets no milli round-up. Any other
+live value, including the unrounded text, is drift.
 An omitted, `null` or empty container `imagePullPolicy` is applied as the
 default the API server derives from that container's image: `Always` for a
 `latest` tag (`repo:latest@sha256:…`), otherwise `IfNotPresent` (a digest-pinned

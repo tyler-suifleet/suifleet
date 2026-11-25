@@ -655,6 +655,21 @@ def scenario(cluster, work, supervisor):
           result.stderr)
     wait_ready(profiles, sized, "1.0.0")
     check("readiness succeeds once the sizeLimit is restored", size_limit() == "1536Mi", repr(size_limit()))
+
+    # ParseQuantity rounds a nonzero quantity away from zero to nano precision,
+    # so a sizeLimit with a sub-nano fraction is stored rounded up; readiness
+    # must expect the rounded value instead of timing out.
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["volumes"].append(
+        {"name": "scratch", "emptyDir": {"sizeLimit": "1073741824.0000000001"}})
+    nano = work / "size-limit-nano.json"
+    nano.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, nano)
+    check("helper applies a bundle with a sub-nano emptyDir sizeLimit fraction", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, nano, "1.0.0")
+    check("the server rounds the sub-nano sizeLimit up to nano precision and readiness accepts it",
+          size_limit() == "1073741824000000001n", repr(size_limit()))
     result = helper("apply", profiles, v1)
     check("apply returns to v1 after the sizeLimit bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
