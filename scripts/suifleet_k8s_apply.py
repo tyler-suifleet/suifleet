@@ -438,6 +438,14 @@ SERVER_DEFAULTS = _server_defaults()
 # or the rollingUpdate IntOrStrings) keep an explicit value and are excluded.
 EMPTY_STRING_DEFAULTS = {path: allowed for path, allowed in SERVER_DEFAULTS.items()
                          if ".rollingUpdate." not in path and all(isinstance(v, str) for v in allowed)}
+# Defaulted fields that are plain (non-pointer) int32s in the Go API types:
+# SetDefaults_Probe replaces an explicit 0 timeoutSeconds, periodSeconds,
+# successThreshold or failureThreshold with its default, exactly as for an
+# omitted one. Pointer ints (revisionHistoryLimit, progressDeadlineSeconds,
+# terminationGracePeriodSeconds, defaultMode) keep an explicit 0 and are excluded.
+ZERO_INT_DEFAULTS = {path: allowed for path, allowed in SERVER_DEFAULTS.items()
+                     if path.rsplit(".", 1)[-1] in ("timeoutSeconds", "periodSeconds", "successThreshold",
+                                                     "failureThreshold") and "Probe." in path}
 # Omitted fields intentionally left to another controller (an HPA owns replicas).
 DELEGATED_FIELDS = {"spec.replicas"}
 
@@ -529,6 +537,11 @@ def spec_drift(desired, live, path):
             return None
     if desired == "" and isinstance(live, str):
         allowed = EMPTY_STRING_DEFAULTS.get(re.sub(r"\[[0-9]+\]", "[]", path), ())
+        if live in allowed:
+            return None
+    if isinstance(desired, (int, float)) and not isinstance(desired, bool) and desired == 0 and \
+            type(live) is int:
+        allowed = ZERO_INT_DEFAULTS.get(re.sub(r"\[[0-9]+\]", "[]", path), ())
         if live in allowed:
             return None
     return path

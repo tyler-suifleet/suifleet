@@ -371,6 +371,48 @@ class DecisionTest(unittest.TestCase):
                                          {"httpGet": {"port": 8080, "path": "/", "scheme": "HTTP"}},
                                          f"{pod}.containers[0].lifecycle.preStop"))
 
+    def test_deployment_readiness_tolerates_defaulted_zero_probe_fields(self):
+        # SetDefaults_Probe replaces an explicit 0 in these non-pointer int32
+        # fields with the default, exactly as for an omitted field.
+        defaults = {"timeoutSeconds": 1, "periodSeconds": 10, "successThreshold": 1, "failureThreshold": 3}
+        for field, default in defaults.items():
+            for desired in ("omitted", 0):
+                bundle = example()
+                probe = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]
+                probe.pop(field, None)
+                if desired == 0:
+                    probe[field] = 0
+                k8s.validate_bundle(bundle)
+                deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+                live = self.healthy(deploy)
+                live_probe = live["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]
+                live_probe[field] = default
+                self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"),
+                                 f"server-defaulted {field} for a {desired!r} bundle value")
+                live_probe[field] = default + 4
+                self.assertIn(f"readinessProbe.{field}", k8s.object_ready(live, deploy, "web-app")[1],
+                              f"a non-default live {field} is still drift")
+            # A specified nonzero value must match exactly.
+            bundle = example()
+            probe = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]
+            probe[field] = default + 1
+            deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+            live = self.healthy(deploy)
+            live["spec"]["template"]["spec"]["containers"][0]["readinessProbe"][field] = default
+            self.assertIn(f"readinessProbe.{field}", k8s.object_ready(live, deploy, "web-app")[1])
+        pod = "spec.template.spec"
+        for probe in ("livenessProbe", "startupProbe"):
+            self.assertIsNone(k8s.spec_drift({"periodSeconds": 0}, {"periodSeconds": 10},
+                                             f"{pod}.initContainers[0].{probe}"))
+        # Pointer ints keep an explicit zero; it is not replaced by the default.
+        self.assertEqual(k8s.spec_drift({"terminationGracePeriodSeconds": 0}, {"terminationGracePeriodSeconds": 30},
+                                        pod), f"{pod}.terminationGracePeriodSeconds")
+        self.assertEqual(k8s.spec_drift({"progressDeadlineSeconds": 0}, {"progressDeadlineSeconds": 600}, "spec"),
+                         "spec.progressDeadlineSeconds")
+        self.assertEqual(k8s.spec_drift({"timeoutSeconds": False}, {"timeoutSeconds": 1},
+                                        f"{pod}.containers[0].readinessProbe"),
+                         f"{pod}.containers[0].readinessProbe.timeoutSeconds", "bool is not int")
+
     def test_deployment_readiness_tolerates_canonical_quantities_and_delegated_replicas(self):
         bundle = example()
         resources = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["resources"]
