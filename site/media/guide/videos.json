@@ -14,14 +14,14 @@
     {
       "step": "sign-in",
       "file": "sign-in.webm",
-      "file_sha256": "2ce808a766c70b5302777f59a43596e68c6fb57b5ed788097b9c01c54bb25e5c",
+      "file_sha256": "4f7f9a30bcd0f49fa0aa212425a3a589f4a5c4c3bb6574c7e48390e3d575a5fa",
       "fallback": "sign-in.mp4",
-      "fallback_sha256": "e3a5f6c9c6f34d502f828b26eb76b9b1fdbced46af96f6be185b7d611e8ca3e2",
+      "fallback_sha256": "f8cd2386f306da65ff3f9536e3858dfe3871ddfaeab14eb84d8f5e88c80d9d44",
       "poster": "sign-in.jpg",
       "poster_sha256": "5ea3fe3c9669786dc915293e5fd5f076fdc40e2b2feed1041284c81899f6a1b6",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 41.76,
+      "duration_seconds": 40.76,
       "caption": "Screencast: Sign in.",
       "console_commit": "ad3da5a98f79ec769aad46f7fc6109fcbd6e65ea",
       "transactions": [
@@ -63,56 +63,56 @@
           },
           {
             "kind": "action-2",
-            "text": "This walkthrough uses a demo account. Approve the connection in your own wallet; your private key stays there.",
+            "text": "Review the connection request in your wallet, then approve it. Your private key stays in your wallet.",
             "start": 15.36,
-            "duration": 7.08,
+            "duration": 6.08,
             "speech_start": 15.809999999999999,
-            "speech_end": 21.97533333333333,
+            "speech_end": 20.972666666666665,
             "source_start": 20.44,
             "source_end": 26.080000000000002
           },
           {
             "kind": "action-3",
             "text": "Check that the console shows the account you intended to connect.",
-            "start": 22.119999999999997,
+            "start": 21.119999999999997,
             "duration": 4.32,
-            "speech_start": 22.569999999999997,
-            "speech_end": 25.98333333333333,
+            "speech_start": 21.569999999999997,
+            "speech_end": 24.98333333333333,
             "source_start": 26.080000000000002,
             "source_end": 30.360000000000003
           },
           {
             "kind": "action-4",
             "text": "On your first visit, create your default fleet and approve the request.",
-            "start": 26.119999999999997,
+            "start": 25.119999999999997,
             "duration": 4.68,
-            "speech_start": 26.569999999999997,
-            "speech_end": 30.345999999999997,
+            "speech_start": 25.569999999999997,
+            "speech_end": 29.345999999999997,
             "source_start": 30.360000000000003,
             "source_end": 36.2
           },
           {
             "kind": "action-5",
             "text": "Select your fleet. You can now manage its devices from this workspace.",
-            "start": 30.479999999999997,
+            "start": 29.479999999999997,
             "duration": 4.88,
-            "speech_start": 30.929999999999996,
-            "speech_end": 34.876666666666665,
+            "speech_start": 29.929999999999996,
+            "speech_end": 33.876666666666665,
             "source_start": 36.2,
             "source_end": 43.120000000000005
           },
           {
             "kind": "outro",
             "text": "You\u2019re signed in and your fleet is selected. Next, let\u2019s check how many devices you can manage.",
-            "start": 35.04,
+            "start": 34.04,
             "duration": 6.72,
-            "speech_start": 35.49,
-            "speech_end": 41.27133333333334
+            "speech_start": 34.49,
+            "speech_end": 40.27133333333334
           }
         ]
       },
       "captions": "sign-in.en.vtt",
-      "captions_sha256": "24a141ea1d1e41b78e3f15822edf8f7c65641343500d4b0b84eff314c3813e5d",
+      "captions_sha256": "f5af890294be9bbcb4a909350e4c01573c2a8c16bdcc033a4a1191af4cdf82d6",
       "tutorial_source": {
         "file_sha256": "2479925e24535704d454310e7130b6a87e0df4d5f85d592be1f249b7bb304ad5",
         "width": 1280,
@@ -194,9 +194,9 @@
     {
       "step": "capacity-plan",
       "file": "capacity-plan.webm",
-      "file_sha256": "bc45238ffe33c9eab28cde064aba5d1f2bad03ba965b0fa8b4fb1ffc401a5579",
+      "file_sha256": "0819a056664c446037b707b1692aeec52b6ad715a472f559cd38c204051c6b75",
       "fallback": "capacity-plan.mp4",
-      "fallback_sha256": "67e27c67d2a9ae078b097009bcd585c786451bf86477e7d48f95efa278973a66",
+      "fallback_sha256": "781352281f190400a280eb95c410b7154db44a6d1315291add2a2d141e78d9c7",
       "poster": "capacity-plan.jpg",
       "poster_sha256": "135b1e397976326a33dd2dff32d6b696227724d0f94ca70e6041ed90909b5159",
       "width": 1280,
@@ -234,7 +234,7 @@
           },
           {
             "kind": "action-1",
-            "text": "This demonstration uses a test plan. Review the device allowance and price shown in your own console.",
+            "text": "Review the plan\u2019s device allowance and price. Choose the capacity that fits your fleet before continuing.",
             "start": 13.639999999999999,
             "duration": 6.96,
             "speech_start": 14.089999999999998,
@@ -283,7 +283,7 @@
         ]
       },
       "captions": "capacity-plan.en.vtt",
-      "captions_sha256": "159efd8bcd6121fbd55710297af2eb4b1ae0dffbbe580e7a9525ae30fc1aadea",
+      "captions_sha256": "bb3b692cbf401a550e97c7e71374109730c72348253b27c33e73db1635faf5a0",
       "tutorial_source": {
         "file_sha256": "46e0f9c3046704c6bbc67e1fc34e0e2b631cb255374060a61b94c1492d74f333",
         "width": 1280,
@@ -1717,7 +1717,7 @@
     "voice_description": "Female, American English; synthetic Kokoro Heart voice",
     "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
     "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
-    "script_sha256": "7ded6ab876532c0a808e9de4a45b293d8af18c9dbce4511934967e5b1454e6c2"
+    "script_sha256": "2d47161c8df51733d049fb13b7cececb62f641b65980bda0055101aec5e298c6"
   },
   "limitations": [
     "Scripted test wallet, not manual Slush acceptance.",
@@ -1746,7 +1746,7 @@
     "source_sha256": {
       "site/guide/render_lessons.py": "c5405429a8c3716f3e4cec2ed7e6eb6f4069fdb8d6fe5933e69dd98c04cf224a",
       "site/guide/lesson_cards.cjs": "8e39fafc953f2b6ae55d2244f5ad929a44ae1da9e3035e20a9e2d10a038302e5",
-      "site/guide/lessons.json": "7ded6ab876532c0a808e9de4a45b293d8af18c9dbce4511934967e5b1454e6c2",
+      "site/guide/lessons.json": "2d47161c8df51733d049fb13b7cececb62f641b65980bda0055101aec5e298c6",
       "site/guide/narration.json": "b30853526c00920afc0db049649a9a8b8a9f71769a0a07aa0a7e92c6e62c4dea",
       "site/guide/captions.py": "1b24a06c78849eb39038c65621dbca5079559d6eb628d16d01932e5794a7c119",
       "site/guide/encode_guide.py": "5f6e40b75e738ed22d17a2887cd054a30a30c59456cf647ce9553807777effc8",
@@ -1763,15 +1763,15 @@
     "script_snapshot": "site/guide/recorded"
   },
   "selective_refresh": {
-    "ticket": "SF-274",
-    "method": "Regenerated changed lesson scripts/cards using verified caption-free historical action intervals; retained other media bytes. Not fresh console capture.",
+    "ticket": "SF-317",
+    "method": "Refreshed sign-in and capacity narration from original caption-free footage; eight lessons retain exact prior bytes. Not fresh console capture.",
     "prior": {
-      "manifest_sha256": "fdbbba22167759542129888538cfd83124f161e76394e2f2facdb5b7112f6d86",
+      "manifest_sha256": "0f14f77506366247f97df94bbdc778b8ff0c10d3771ca722ee1d79a3738f002d",
       "production": {
         "source_sha256": {
           "site/guide/render_lessons.py": "c5405429a8c3716f3e4cec2ed7e6eb6f4069fdb8d6fe5933e69dd98c04cf224a",
           "site/guide/lesson_cards.cjs": "8e39fafc953f2b6ae55d2244f5ad929a44ae1da9e3035e20a9e2d10a038302e5",
-          "site/guide/lessons.json": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61",
+          "site/guide/lessons.json": "7ded6ab876532c0a808e9de4a45b293d8af18c9dbce4511934967e5b1454e6c2",
           "site/guide/narration.json": "b30853526c00920afc0db049649a9a8b8a9f71769a0a07aa0a7e92c6e62c4dea",
           "site/guide/captions.py": "1b24a06c78849eb39038c65621dbca5079559d6eb628d16d01932e5794a7c119",
           "site/guide/encode_guide.py": "5f6e40b75e738ed22d17a2887cd054a30a30c59456cf647ce9553807777effc8",
@@ -1784,7 +1784,8 @@
           "site/motion-sample/art/editorial-scene.png": "681e178c457ddfeaade782bdd8ab62fd12533ac8f53cb18e2c4b8b559d09555f"
         },
         "source_manifest_sha256": "aeb33834aa08c1f7276d7df54bc11ca674a51c3582f6e486ac02c64b239cffca",
-        "note": "Edited historical app footage with branded graphics and new narration; waits may be sped up. Not fresh live acceptance."
+        "note": "Edited historical app footage with branded graphics and new narration; waits may be sped up. Not fresh live acceptance.",
+        "script_snapshot": "site/guide/recorded"
       },
       "narration": {
         "engine": "kokoro-onnx",
@@ -1793,61 +1794,169 @@
         "voice_description": "Female, American English; synthetic Kokoro Heart voice",
         "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
         "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
-        "script_sha256": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61"
+        "script_sha256": "7ded6ab876532c0a808e9de4a45b293d8af18c9dbce4511934967e5b1454e6c2"
+      },
+      "selective_refresh": {
+        "ticket": "SF-274",
+        "method": "Regenerated changed lesson scripts/cards using verified caption-free historical action intervals; retained other media bytes. Not fresh console capture.",
+        "prior": {
+          "manifest_sha256": "fdbbba22167759542129888538cfd83124f161e76394e2f2facdb5b7112f6d86",
+          "production": {
+            "source_sha256": {
+              "site/guide/render_lessons.py": "c5405429a8c3716f3e4cec2ed7e6eb6f4069fdb8d6fe5933e69dd98c04cf224a",
+              "site/guide/lesson_cards.cjs": "8e39fafc953f2b6ae55d2244f5ad929a44ae1da9e3035e20a9e2d10a038302e5",
+              "site/guide/lessons.json": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61",
+              "site/guide/narration.json": "b30853526c00920afc0db049649a9a8b8a9f71769a0a07aa0a7e92c6e62c4dea",
+              "site/guide/captions.py": "1b24a06c78849eb39038c65621dbca5079559d6eb628d16d01932e5794a7c119",
+              "site/guide/encode_guide.py": "5f6e40b75e738ed22d17a2887cd054a30a30c59456cf647ce9553807777effc8",
+              "site/guide/narrate_guide.py": "da0246d56e1ced92c6954b2c6bcaee0d693daae88b8139fdd41c2fb1edda6cf4",
+              "scripts/video-test.Dockerfile": "7d057d6529e7bf52cc90ac321bf46aa990d2006241f6c42a1760b77e6b0b694c"
+            },
+            "assets_sha256": {
+              "site/src/assets/logo.svg": "400d0317ed09a06ab9a6be1e5f985accc6058eb7926dd37f79bc32e5aa25e225",
+              "site/src/assets/inter-variable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+              "site/motion-sample/art/editorial-scene.png": "681e178c457ddfeaade782bdd8ab62fd12533ac8f53cb18e2c4b8b559d09555f"
+            },
+            "source_manifest_sha256": "aeb33834aa08c1f7276d7df54bc11ca674a51c3582f6e486ac02c64b239cffca",
+            "note": "Edited historical app footage with branded graphics and new narration; waits may be sped up. Not fresh live acceptance."
+          },
+          "narration": {
+            "engine": "kokoro-onnx",
+            "engine_version": "0.4.9",
+            "voice": "af_heart",
+            "voice_description": "Female, American English; synthetic Kokoro Heart voice",
+            "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+            "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+            "script_sha256": "cf139c8028980da5cbcc42c5fa915b9eaf96aeadbd51ac7d52568e255f9bcd61"
+          }
+        },
+        "regenerated": [
+          "publish-version",
+          "deploy-group"
+        ],
+        "retained_sha256": {
+          "sign-in": {
+            "file": "2ce808a766c70b5302777f59a43596e68c6fb57b5ed788097b9c01c54bb25e5c",
+            "fallback": "e3a5f6c9c6f34d502f828b26eb76b9b1fdbced46af96f6be185b7d611e8ca3e2",
+            "captions": "24a141ea1d1e41b78e3f15822edf8f7c65641343500d4b0b84eff314c3813e5d",
+            "poster": "5ea3fe3c9669786dc915293e5fd5f076fdc40e2b2feed1041284c81899f6a1b6"
+          },
+          "capacity-plan": {
+            "file": "bc45238ffe33c9eab28cde064aba5d1f2bad03ba965b0fa8b4fb1ffc401a5579",
+            "fallback": "67e27c67d2a9ae078b097009bcd585c786451bf86477e7d48f95efa278973a66",
+            "captions": "159efd8bcd6121fbd55710297af2eb4b1ae0dffbbe580e7a9525ae30fc1aadea",
+            "poster": "135b1e397976326a33dd2dff32d6b696227724d0f94ca70e6041ed90909b5159"
+          },
+          "fund": {
+            "file": "57e9f32630a6d3faf802dc2c807a0f6d3ade7cfb095c7db628ecea419a1f4f85",
+            "fallback": "0fd0c75111f1832cef91afac6107cfe394804bd95ff2427056f34b780e0790b0",
+            "captions": "4131fc096b6e794e67a55f64dda7dc459c7967f3e9f26130a6f38b433e1044ee",
+            "poster": "411e3e031d64e6b2d9a8ced4738d8d101036a41a33a7964be46c38bf95362a13"
+          },
+          "register-device": {
+            "file": "36a751aeef8a4bc52557a42d7678c365aac7759ae01a03cb7009d26c3859064c",
+            "fallback": "ec9125e52e4dcb1d4e05605c51122c5f2c9a38cf6e4c35e6d35c2dc5331848e9",
+            "captions": "5d64bf01d04ad6bc1d5934d0778e418c589e4ef9fe19bf7cbfdc1f9ad5644f81",
+            "poster": "d031c85e1ce17af4bf46078e912259fbd5d118704bf8113500c756a14060c003"
+          },
+          "enroll-batch": {
+            "file": "5fd4c4e1c5c137ca7f6443968ce944067d6a25d0fc025f25aa61dcf884d463a7",
+            "fallback": "3bfc45cc8556a64e0729bd6eeb14fe7a683e5e8635320ac05907114f2c720e19",
+            "captions": "75b06ce72d4bad143167abd7113231dc5a5f7767728d9fec3376c1ff4aa5e4cd",
+            "poster": "61dcca86fec3ba60e61806866b8c2a2499312b4bd1efc54a846ad37737b2eac0"
+          },
+          "access-policy": {
+            "file": "61c60bf45c8989241e6e6e4a1e11ee87abdf901667b6b0dd63fbdfd6bb257e69",
+            "fallback": "bb8a870e7ce353056572ccf307eef13e5ced1d98b6e2af7bc9ba98ce8f8c8633",
+            "captions": "d26305d4941900eb78fc3b4374a2ccd56b8bcf6c0c2553467dbf8842525819cd",
+            "poster": "142d434e9dcf43642d2cbf6f0be6369be53311b557152bd17dbd0ed75fc8347b"
+          },
+          "staged-rollout": {
+            "file": "2117e6c00581aa546cb7e37de7112713cb6b9cf50e529a6977c1bbd8d96606a6",
+            "fallback": "a8834ceec303eec0436cfdf8dc1e15e591b39093b26d5327bf86da8ca7643845",
+            "captions": "793a491cfaa6a03011f2db88e01801bcc7006001f9bdacb797c91bf715cb2234",
+            "poster": "4536b7e1647edad34986e4738b5fc42ec92a6bac5fee2439a55dd0eedc1dba31"
+          },
+          "fleet-settings": {
+            "file": "6cd70a8b424cda40cd4a6f6165e6689f0a78fdd89200ac9ac0bca2ca79e8d1e8",
+            "fallback": "f707d4818fafc822110c015768322d010489fcdc1e4639709b94b9ac88888c9d",
+            "captions": "203de893c03adaeb7063977b976da0c1bf9aab2b2ab5d0937757214311e81d0e",
+            "poster": "eb13930212915fb30fef9e394f1c4c5e0ebb3534bfc3d591e9ce547be87683c2"
+          }
+        }
       }
     },
     "regenerated": [
-      "publish-version",
-      "deploy-group"
+      "sign-in",
+      "capacity-plan"
     ],
+    "render_inputs": {
+      "source_sha256": {
+        "site/guide/render_lessons.py": "c5405429a8c3716f3e4cec2ed7e6eb6f4069fdb8d6fe5933e69dd98c04cf224a",
+        "site/guide/lesson_cards.cjs": "8e39fafc953f2b6ae55d2244f5ad929a44ae1da9e3035e20a9e2d10a038302e5",
+        "site/guide/lessons.json": "662bd9e91cf806e553b680ed904223fa5fe9fe7f5fbdb248929ce313370df00d",
+        "site/guide/narration.json": "02401cf781b89c435bacc8700fe25d7dfc6e92d6344836755bb55c18816ca0bb",
+        "site/guide/captions.py": "1b24a06c78849eb39038c65621dbca5079559d6eb628d16d01932e5794a7c119",
+        "site/guide/encode_guide.py": "5f6e40b75e738ed22d17a2887cd054a30a30c59456cf647ce9553807777effc8",
+        "site/guide/narrate_guide.py": "da0246d56e1ced92c6954b2c6bcaee0d693daae88b8139fdd41c2fb1edda6cf4",
+        "scripts/video-test.Dockerfile": "7d057d6529e7bf52cc90ac321bf46aa990d2006241f6c42a1760b77e6b0b694c"
+      },
+      "assets_sha256": {
+        "site/src/assets/logo.svg": "400d0317ed09a06ab9a6be1e5f985accc6058eb7926dd37f79bc32e5aa25e225",
+        "site/src/assets/inter-variable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+        "site/motion-sample/art/editorial-scene.png": "681e178c457ddfeaade782bdd8ab62fd12533ac8f53cb18e2c4b8b559d09555f"
+      },
+      "source_manifest_sha256": "aeb33834aa08c1f7276d7df54bc11ca674a51c3582f6e486ac02c64b239cffca",
+      "note": "Edited historical app footage with branded graphics and new narration; waits may be sped up. Not fresh live acceptance."
+    },
     "retained_sha256": {
-      "sign-in": {
-        "file": "2ce808a766c70b5302777f59a43596e68c6fb57b5ed788097b9c01c54bb25e5c",
-        "fallback": "e3a5f6c9c6f34d502f828b26eb76b9b1fdbced46af96f6be185b7d611e8ca3e2",
-        "captions": "24a141ea1d1e41b78e3f15822edf8f7c65641343500d4b0b84eff314c3813e5d",
-        "poster": "5ea3fe3c9669786dc915293e5fd5f076fdc40e2b2feed1041284c81899f6a1b6"
-      },
-      "capacity-plan": {
-        "file": "bc45238ffe33c9eab28cde064aba5d1f2bad03ba965b0fa8b4fb1ffc401a5579",
-        "fallback": "67e27c67d2a9ae078b097009bcd585c786451bf86477e7d48f95efa278973a66",
-        "captions": "159efd8bcd6121fbd55710297af2eb4b1ae0dffbbe580e7a9525ae30fc1aadea",
-        "poster": "135b1e397976326a33dd2dff32d6b696227724d0f94ca70e6041ed90909b5159"
-      },
       "fund": {
         "file": "57e9f32630a6d3faf802dc2c807a0f6d3ade7cfb095c7db628ecea419a1f4f85",
         "fallback": "0fd0c75111f1832cef91afac6107cfe394804bd95ff2427056f34b780e0790b0",
-        "captions": "4131fc096b6e794e67a55f64dda7dc459c7967f3e9f26130a6f38b433e1044ee",
-        "poster": "411e3e031d64e6b2d9a8ced4738d8d101036a41a33a7964be46c38bf95362a13"
+        "poster": "411e3e031d64e6b2d9a8ced4738d8d101036a41a33a7964be46c38bf95362a13",
+        "captions": "4131fc096b6e794e67a55f64dda7dc459c7967f3e9f26130a6f38b433e1044ee"
       },
       "register-device": {
         "file": "36a751aeef8a4bc52557a42d7678c365aac7759ae01a03cb7009d26c3859064c",
         "fallback": "ec9125e52e4dcb1d4e05605c51122c5f2c9a38cf6e4c35e6d35c2dc5331848e9",
-        "captions": "5d64bf01d04ad6bc1d5934d0778e418c589e4ef9fe19bf7cbfdc1f9ad5644f81",
-        "poster": "d031c85e1ce17af4bf46078e912259fbd5d118704bf8113500c756a14060c003"
+        "poster": "d031c85e1ce17af4bf46078e912259fbd5d118704bf8113500c756a14060c003",
+        "captions": "5d64bf01d04ad6bc1d5934d0778e418c589e4ef9fe19bf7cbfdc1f9ad5644f81"
       },
       "enroll-batch": {
         "file": "5fd4c4e1c5c137ca7f6443968ce944067d6a25d0fc025f25aa61dcf884d463a7",
         "fallback": "3bfc45cc8556a64e0729bd6eeb14fe7a683e5e8635320ac05907114f2c720e19",
-        "captions": "75b06ce72d4bad143167abd7113231dc5a5f7767728d9fec3376c1ff4aa5e4cd",
-        "poster": "61dcca86fec3ba60e61806866b8c2a2499312b4bd1efc54a846ad37737b2eac0"
+        "poster": "61dcca86fec3ba60e61806866b8c2a2499312b4bd1efc54a846ad37737b2eac0",
+        "captions": "75b06ce72d4bad143167abd7113231dc5a5f7767728d9fec3376c1ff4aa5e4cd"
       },
-      "access-policy": {
-        "file": "61c60bf45c8989241e6e6e4a1e11ee87abdf901667b6b0dd63fbdfd6bb257e69",
-        "fallback": "bb8a870e7ce353056572ccf307eef13e5ced1d98b6e2af7bc9ba98ce8f8c8633",
-        "captions": "d26305d4941900eb78fc3b4374a2ccd56b8bcf6c0c2553467dbf8842525819cd",
-        "poster": "142d434e9dcf43642d2cbf6f0be6369be53311b557152bd17dbd0ed75fc8347b"
+      "publish-version": {
+        "file": "52fd41cf436839c44598fa57d94f3038c9d9f1ef375f35d1cbb93dff11f40749",
+        "fallback": "e62a76505eab5590639cf5dfdf2c1d2193904e0c7c71461a17583c433b998a35",
+        "poster": "2df1aa3393ffdf02b884a8dbfcf4654980f8ab60cd3e861a2bb30ed866e32638",
+        "captions": "578328bf0403009ec6c589a2a78cf85b201c756dddf41c3e9dc863529ac73f0e"
+      },
+      "deploy-group": {
+        "file": "270dbc0bc62b85cb7514e9099d2db336a5c25e3f57dc13db2c3e717782f50714",
+        "fallback": "f14a1e8a662756312cba6c39af03b550f1e26e43ee33a0bcb7f4153145810d3f",
+        "poster": "252cd68c5856903e81813d1353b5f324b1b74f4866009efd95e48aaaba1491b5",
+        "captions": "fd97e5efb343a7ac52ad1624dfc1c25b761f6125c8dbd008528001380f411892"
       },
       "staged-rollout": {
         "file": "2117e6c00581aa546cb7e37de7112713cb6b9cf50e529a6977c1bbd8d96606a6",
         "fallback": "a8834ceec303eec0436cfdf8dc1e15e591b39093b26d5327bf86da8ca7643845",
-        "captions": "793a491cfaa6a03011f2db88e01801bcc7006001f9bdacb797c91bf715cb2234",
-        "poster": "4536b7e1647edad34986e4738b5fc42ec92a6bac5fee2439a55dd0eedc1dba31"
+        "poster": "4536b7e1647edad34986e4738b5fc42ec92a6bac5fee2439a55dd0eedc1dba31",
+        "captions": "793a491cfaa6a03011f2db88e01801bcc7006001f9bdacb797c91bf715cb2234"
+      },
+      "access-policy": {
+        "file": "61c60bf45c8989241e6e6e4a1e11ee87abdf901667b6b0dd63fbdfd6bb257e69",
+        "fallback": "bb8a870e7ce353056572ccf307eef13e5ced1d98b6e2af7bc9ba98ce8f8c8633",
+        "poster": "142d434e9dcf43642d2cbf6f0be6369be53311b557152bd17dbd0ed75fc8347b",
+        "captions": "d26305d4941900eb78fc3b4374a2ccd56b8bcf6c0c2553467dbf8842525819cd"
       },
       "fleet-settings": {
         "file": "6cd70a8b424cda40cd4a6f6165e6689f0a78fdd89200ac9ac0bca2ca79e8d1e8",
         "fallback": "f707d4818fafc822110c015768322d010489fcdc1e4639709b94b9ac88888c9d",
-        "captions": "203de893c03adaeb7063977b976da0c1bf9aab2b2ab5d0937757214311e81d0e",
-        "poster": "eb13930212915fb30fef9e394f1c4c5e0ebb3534bfc3d591e9ce547be87683c2"
+        "poster": "eb13930212915fb30fef9e394f1c4c5e0ebb3534bfc3d591e9ce547be87683c2",
+        "captions": "203de893c03adaeb7063977b976da0c1bf9aab2b2ab5d0937757214311e81d0e"
       }
     }
   },
