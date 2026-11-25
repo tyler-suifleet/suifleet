@@ -487,8 +487,13 @@ def scenario(cluster, work, supervisor):
               and (after["uid"] != before) == (name != "relabelled"), result.stderr)
         if owner == "suifleet":
             # The surviving same-owner object is stale for v1: readiness reports
-            # the incomplete prune instead of success.
-            result = helper("ready", profiles, v1)
+            # the incomplete prune instead of success. Readiness reports
+            # desired objects first, so let the v1 rollout settle (old
+            # replicas may still be terminating) before asserting on it.
+            outcome = []
+            wait("v1 rollout settled while the same-owner object survives", lambda: outcome.append(
+                helper("ready", profiles, v1)) or "not ready: Deployment/" not in outcome[-1].stderr, timeout=180, interval=2)
+            result = outcome[-1]
             check("readiness reports an incomplete prune after a same-owner replacement",
                   result.returncode == 1 and "configmaps/v2-extra not yet pruned" in result.stderr, result.stderr)
         cluster.admin("delete", "configmap", "v2-extra", "-n", NAMESPACE)
