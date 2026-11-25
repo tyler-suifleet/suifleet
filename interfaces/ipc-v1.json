@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "description": "Native SuiFleet component IPC protocol v1 (docs/COMPONENT_IPC.md). Not AWS Greengrass IPC. Shared by the daemon (suifleet-edge/src/ipc.rs), the Python SDK (sdk/python/suifleet_ipc.py) and the TypeScript SDK (sdk/typescript). scripts/tests/test_ipc_interface.py checks all three.",
+  "protocol_version": 1,
+  "max_frame_bytes": 65536,
+  "request_fields": ["version", "operation", "component", "topic", "payload"],
+  "response_fields": {
+    "success": ["version", "ok", "data"],
+    "failure": ["version", "ok", "error"],
+    "failure_optional": ["oldest"]
+  },
+  "operations": [
+    "list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
+    "subscribe", "unsubscribe", "ack", "messaging", "client_devices",
+    "data_put", "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list",
+    "stream_export_ack", "stream_export_status",
+    "shadow_get", "shadow_update", "shadow_delete", "shadow_list", "shadows"
+  ],
+  "administrator_only": ["install", "list", "messaging", "shadows", "client_devices"],
+  "error_codes": {
+    "generic": ["request_failed"],
+    "stream": ["declared", "evicted", "exists", "full", "invalid", "not-enough-messages", "not-found", "quota", "retired", "unavailable"],
+    "shadow": ["conflict", "invalid", "not-found", "quota", "too-large", "unavailable"]
+  },
+  "limits": {
+    "publish_payload_bytes": 4096,
+    "volatile_inbox_messages": 32,
+    "data_put_chunk_bytes": 24576,
+    "data_put_max_bytes": 67108864
+  }
+}
