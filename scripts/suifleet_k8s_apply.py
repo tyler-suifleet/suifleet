@@ -1108,11 +1108,21 @@ def main(argv=None):
     parser.add_argument("--profile-root", default=DEFAULT_PROFILE_ROOT)
     parser.add_argument("--component", default=os.environ.get("SUIFLEET_COMPONENT"))
     parser.add_argument("--version", default=os.environ.get("SUIFLEET_COMPONENT_VERSION", ""))
-    parser.add_argument("--interval", type=float, default=30.0)
+    parser.add_argument("--interval", type=float, default=30.0,
+                        help="run: seconds between reconciliations; must be finite and greater than 0")
     parser.add_argument("--timeout", type=float, default=300.0,
-                        help="remove: seconds to wait, after the deletes are issued, for the objects (and their Pods) to disappear; polling API calls are cut off at this deadline")
+                        help="remove: seconds to wait, after the deletes are issued, for the objects (and their Pods) to disappear; polling API calls are cut off at this deadline; must be finite and 0 or greater")
     args = parser.parse_args(argv)
     try:
+        # Reject unusable pacing before any profile, connection or write: a
+        # zero, negative or NaN interval would re-apply with no pause, and an
+        # infinite or NaN timeout cannot bound the removal wait.
+        if args.command == "run":
+            _require(math.isfinite(args.interval) and args.interval > 0,
+                     "--interval must be a finite number of seconds greater than 0")
+        if args.command == "remove":
+            _require(math.isfinite(args.timeout) and args.timeout >= 0,
+                     "--timeout must be a finite number of seconds, 0 or greater")
         if args.command != "remove":
             _require(args.bundle, "--bundle is required")
             bundle, digest = load_bundle(args.bundle)

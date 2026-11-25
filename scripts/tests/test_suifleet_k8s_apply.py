@@ -1306,6 +1306,49 @@ class CliTest(unittest.TestCase):
             self.assertEqual(k8s.main(["apply", "--bundle", str(EXAMPLE), "--component", "web", "--profile", "edge",
                                        "--profile-root", directory]), 2)
 
+    def test_unusable_interval_or_timeout_never_reaches_the_cluster(self):
+        calls = []
+
+        def record(name, result=None):
+            def fake(*args, **kwargs):
+                calls.append(name)
+                return result
+            return fake
+
+        def stop_after_first_apply(*args, **kwargs):
+            calls.append("apply")
+            raise k8s.Conflict("stop the loop")
+
+        patches = [mock.patch.object(k8s, "load_profile", record("load_profile", {"namespace": "suifleet-edge"})),
+                   mock.patch.object(k8s, "connect", record("connect", object())),
+                   mock.patch.object(k8s, "apply", stop_after_first_apply),
+                   mock.patch.object(k8s, "remove", record("remove", (True, "removed"))),
+                   mock.patch.object(k8s.time, "sleep", record("sleep"))]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        common = ["--component", "web", "--profile", "edge"]
+        run = ["run", "--bundle", str(EXAMPLE)] + common
+        for interval in ("0", "-1", "-0", "nan", "inf", "-inf"):
+            calls.clear()
+            self.assertEqual(k8s.main(run + ["--interval=" + interval]), 2, interval)
+            self.assertEqual(calls, [], interval)
+        for timeout in ("-1", "-0.5", "nan", "inf", "-inf"):
+            calls.clear()
+            self.assertEqual(k8s.main(["remove"] + common + ["--timeout=" + timeout]), 2, timeout)
+            self.assertEqual(calls, [], timeout)
+        # Accepted values still reach the cluster, including the documented
+        # zero removal timeout and an interval only used by run.
+        calls.clear()
+        self.assertEqual(k8s.main(["remove"] + common + ["--timeout", "0"]), 0)
+        self.assertEqual(calls, ["load_profile", "connect", "remove"])
+        calls.clear()
+        self.assertEqual(k8s.main(run + ["--interval", "0.5"]), 3)
+        self.assertEqual(calls, ["load_profile", "connect", "apply"])
+        calls.clear()
+        self.assertEqual(k8s.main(["apply", "--bundle", str(EXAMPLE)] + common + ["--interval", "0"]), 3)
+        self.assertEqual(calls, ["load_profile", "connect", "apply"])
+
 
 if __name__ == "__main__":
     unittest.main()
