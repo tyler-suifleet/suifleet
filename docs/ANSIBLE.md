@@ -243,6 +243,10 @@ the kernel swaps to a disk. So the role reads it only once
 `/swaps`. Otherwise, or when the mount table cannot be read, the host is
 refused as unverifiable before the list is read. Enroll from a session that
 sees the kernel's `/proc`, not from inside a container that masks it.
+The list itself is parsed by the shell alone, without a pipe through another
+tool, so a failed or missing tool cannot make active swap look like none; a
+list without its header, or one the parser cannot account for, is refused as
+unreadable.
 
 For a host with swap, run `swapoff -a` before enrolling it and `swapon -a`
 afterwards (recorded hosts never handle a claim again). Disable zram swap

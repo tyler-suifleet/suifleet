@@ -38,13 +38,26 @@ kernel_view /proc/swaps proc /swaps || {
 }
 list=$(cat /proc/swaps) || v unreadable
 case $list in Filename*) ;; *) v unreadable;; esac
-printf '%s\n' "$list" | sed 1d | {
-  bad=0
-  while read -r f rest; do
-    [ -n "$f" ] || continue
-    printf 'SWAP unsafe %s\n' "$f"
-    bad=1
-  done
-  [ "$bad" = 0 ] || v unsafe
-  v ok
-}
+# The entries are parsed by the shell alone, never through a pipe or another
+# command: a pipeline's status is its last stage's, so a failed or missing
+# stage (for example sed) would hand the loop no input and read as no swap.
+# The shell's own builtins cannot fail that way; a "while read" from a
+# here-document is avoided too, since some shells write it to a temporary
+# file whose failure would also read as empty.
+nl='
+'
+case $list in *"$nl"*) body=${list#*"$nl"} ;; *) body= ;; esac
+bad=0
+set -f
+IFS=$nl
+for line in $body; do
+  IFS=' 	'
+  set -- $line
+  [ $# -gt 0 ] || continue
+  printf 'SWAP unsafe %s\n' "$1"
+  bad=1
+done
+[ "$bad" = 0 ] || v unsafe
+# Cross-check: "ok" only when nothing but whitespace follows the header.
+case $body in *[![:space:]]*) v unreadable;; esac
+v ok
