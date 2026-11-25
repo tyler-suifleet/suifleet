@@ -66,6 +66,6 @@ const renderReadiness = p => renderToStaticMarkup(createElement(PilotReadiness, 
 let html = renderReadiness({ capacity:{ used:0n,limit:0n,administrator:true },balance:'0' });
 assert.match(html,/No places available/);assert.match(html,/Checking the device operating budget/);assert.doesNotMatch(html,/Capacity is available/);assert.doesNotMatch(html,/fleet budget/i);
 html=renderReadiness({ capacity:{used:0n,limit:2n,administrator:true},balance:'10',budgetChecked:true,deviceBudget:0n });
-assert.match(html,/Capacity is available/);assert.match(html,/device operating budget is empty/);assert.match(html,/separate requirements/);assert.doesNotMatch(html,/healthy|installed successfully/);assert.doesNotMatch(html,/fleet budget/i);
+assert.match(html,/Capacity is available/);assert.match(html,/device operating budget is empty/);assert.match(html,/device reporting funds and storage funds are separate/);assert.doesNotMatch(html,/healthy|installed successfully/);assert.doesNotMatch(html,/fleet budget/i);
 html=renderReadiness({budgetFailed:true});assert.match(html,/could not be verified/);assert.doesNotMatch(html,/No device budget is available/);
 console.log('PASS: actual readiness UI distinguishes missing capacity, account funds, empty budgets and failed verification');

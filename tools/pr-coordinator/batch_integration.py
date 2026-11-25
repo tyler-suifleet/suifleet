@@ -1188,8 +1188,12 @@ class BatchController:
                 raise RuntimeError('integrated stacked member live base changed')
 
         assert_live_base()
-        self.git(project, 'fetch', '--no-tags', 'origin', pr['baseRefName'])
-        if self.git(project, 'rev-parse', 'FETCH_HEAD') != pr['baseRefOid']:
+        # FETCH_HEAD belongs to the whole repository, including other lanes.
+        # Fetch into a batch/member-specific ref and retain the live-base checks.
+        base_ref = f"refs/pr-coordinator/reconcile/{batch['id']}/{member['pr']}"
+        self.git(project, 'fetch', '--no-tags', '--no-write-fetch-head', 'origin',
+                 f"+refs/heads/{pr['baseRefName']}:{base_ref}")
+        if self.git(project, 'rev-parse', base_ref) != pr['baseRefOid']:
             raise RuntimeError('integrated stacked member fetched base changed')
         for base in (pr['comparisonBaseOid'], pr['baseRefOid']):
             self.git(project, 'merge-base', '--is-ancestor', base, 'origin/main')
@@ -1755,6 +1759,8 @@ class BatchController:
                      canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
                 active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
         for batch in active:
+            if batch['id'] in getattr(self.c, 'advanced_batches', set()):
+                continue  # Already advanced from its fresh snapshot this pass.
             others = {m['pr'] for row in active if row['id'] != batch['id'] and row['status'] not in TERMINAL
                       for m in json.loads(row['members'])}
             pool = [m for m in candidates if m['pr'] not in others]
@@ -1803,12 +1809,18 @@ class BatchController:
                     self.publish_candidate(project, batch)
                     status = batch['status']
                 if status in ('awaiting_ci','awaiting_review','ready','approving_members'):
-                    self.adopt_approvals(project, batch)
                     from coordinator import checks_blocker, gate
-                    self.validate_members(project, batch)
                     candidate = self.candidate(project, batch)
                     if candidate['state'] != 'OPEN' or candidate.get('isDraft'):
                         raise BatchInvalidated('integration candidate is not open and ready')
+                    if status == 'approving_members':
+                        # An uncertain POST must not pin a candidate after its base
+                        # moves. For a current candidate, adopt before hashing
+                        # member feedback so our own receipt is recognized.
+                        if self.main(project) != batch['base']:
+                            raise BatchInvalidated('integration base changed')
+                        self.adopt_approvals(project, batch)
+                    self.validate_members(project, batch)
                     owner = self.synthetic_owner(batch)
                     review = self.c.store.review(project['id'], batch['pr'])
                     # Published, exact-candidate source findings are actionable

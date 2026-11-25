@@ -745,6 +745,40 @@ class BatchTests(unittest.TestCase):
         f.tick();self.assertEqual(f.row()['status'],'approving_members');self.assertEqual(len(attempts),1)
         self.assertEqual(f.git('rev-parse','main',cwd=f.remote),f.base)
 
+    def test_stale_base_retires_batch_with_uncertain_member_approval(self):
+        f = self.fixture()
+        f.tick()
+        f.green()
+        f.tick()
+        f.approve()
+        original = f.gh
+
+        def lose(project, args):
+            if '/reviews' in args[1] and 'POST' in args:
+                raise RuntimeError('approval outcome unknown')
+            return original(project, args)
+
+        with patch.object(f, 'gh', side_effect=lose):
+            f.tick()
+        batch = f.row()
+        self.assertEqual(batch['status'], 'approving_members')
+        self.assertEqual(f.controller.approval_rows(batch)[0]['status'], 'uncertain')
+
+        f.git('commit', '--allow-empty', '-qm', 'Advance integration base')
+        f.git('push', '-q', 'origin', 'main')
+        new_base = f.git('rev-parse', 'main', cwd=f.remote)
+        self.assertNotEqual(new_base, f.base)
+        with patch.object(f.controller, 'adopt_approvals', wraps=f.controller.adopt_approvals) as adopt:
+            f.tick()
+        adopt.assert_not_called()
+        retired = next(row for row in f.controller.rows(f.project) if row['id'] == batch['id'])
+        self.assertEqual(retired['status'], 'invalidated')
+        self.assertEqual(f.candidate_prs[batch['pr']]['state'], 'CLOSED')
+        self.assertEqual(f.controller.approval_rows(retired)[0]['status'], 'uncertain')
+        self.assertFalse(f.approval_posts)
+        self.assertFalse(f.reconciled)
+        self.assertEqual(f.git('rev-parse', 'main', cwd=f.remote), new_base)
+
     def test_new_human_request_blocks_publication_despite_cached_pr_snapshot(self):
         f=self.fixture();f.tick();f.green();f.tick();f.approve();original=f.gh;pr_reader=f.pr
         cached={n:f.pr(f.project,n) for n in f.source_prs}

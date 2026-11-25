@@ -7,21 +7,36 @@ are publicly fetchable without credentials and their checks have passed.
 
 ## Standalone build validation prerequisite
 
-The recorded successful recipe builds used both the software layer and the core
-repository's meta-suifleet-integration layer. That layer supplied Scarthgap
-OpenSSL install serialization (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap
-target-toolchain relink fixes, Wrynose xzmore Bash interpreter/runtime-dependency
-fixes, and the AArch64 glibc usrmerge loader/linker-script guard. None of these
-core-recipe appends is included in the standalone export.
+The checks below apply to every series declared in
+`LAYERSERIES_COMPAT_meta-suifleet` in conf/layer.conf (currently kirkstone,
+scarthgap and wrynose), each with its pinned core-repository kas profile
+(`kas/packaging-kirkstone.yml`, `kas/packaging.yml`, `kas/packaging-wrynose.yml`).
+A newly declared series inherits every per-series step here.
 
-Standalone consumers must supply equivalent distro fixes/guards and validate
-the resulting builds, or accept unvalidated status and possible build failures.
-The extracted export passed yocto-check-layer on both pinned series, but that
-is not a recipe task-execution build. Before advertising standalone build
-support, build `suifleet`, `suifleet-node` and `suifleet-walrus-codec` from the
-extracted export without meta-suifleet-integration on both pinned series,
-recording any separately supplied distro fixes and package QA results. Do not
-add the integration layer blindly: it also contains board/access/test policy.
+The recorded successful integrated recipe builds used both the software layer and
+the core repository's meta-suifleet-integration layer. That layer's OpenSSL,
+libcap and xz fixes are now the software layer's opt-in `suifleet-core-fixes`
+class, which the integration layer inherits (OpenSSL serialization remains
+unconditional, so it is also active on Kirkstone's OpenSSL 3.0). Identical task
+signatures were verified on the Scarthgap and Wrynose profiles. Its remaining
+glibc usrmerge guard is local cache hygiene, not an upstream defect.
+
+Standalone consumers that hit those OE-Core defects enable
+`INHERIT += "suifleet-core-fixes"`. On Scarthgap and Wrynose, the extracted export
+with the class enabled and without meta-suifleet-integration built `suifleet`,
+`suifleet-node`, `suifleet-walrus-codec` and `core-image-minimal` for
+`qemuarm64`. Package QA passed and the image booted in QEMU. The core
+repository's `docs/YOCTO_STANDALONE_VALIDATION.md` records the results.
+On Kirkstone, the earlier SF-309 export that first declared the series, before
+this class was added, passed yocto-check-layer (PASS, 7 tests, 2 BSP/distro
+skips; see the core repository's docs/YOCTO_LEGACY_SERIES.md). The current export
+with the class has not been layer-checked on Kirkstone, and a layer check is not
+a recipe task-execution build: no Kirkstone build without
+meta-suifleet-integration has been run. Repeat the standalone build for
+Kirkstone and any other series, machine or distro, recording any separately
+supplied distro fixes and package QA results, before claiming support for it.
+Those emulator results are not physical target acceptance. Do not add the
+integration layer blindly: it also contains board/access/test policy.
 
 ## Source availability and synchronization
 
@@ -51,7 +66,7 @@ public release, publish a reviewed immutable source distribution as follows:
    distribute these files for SUIFLEET_WALRUS_CODEC_DIR or implement and test
    checksum-pinned public fetch entries before advertising archive availability.
 5. Run recipe builds, package QA, image inspection and yocto-check-layer against
-   both pinned series; preserve compiler/layer revisions and artifact hashes.
+   every declared series; preserve compiler/layer revisions and artifact hashes.
    Check anonymous source/artifact downloads from a clean credential-free host.
    Never bundle runtime identities, config.toml, device.key, PINs or journals.
 
@@ -100,8 +115,12 @@ After authorized standalone publication, fill the form using verified values:
 | Maintainer | Tyler Bush, tyler.jonathan.bush@gmail.com |
 | License | MIT metadata; recipe payloads retain their own licenses |
 
-Create scarthgap/wrynose branches only after each exact branch has build/check
-receipts; do not submit master/main as proof of both. Verify remote IDs and
+Create one branch per declared series (kirkstone/scarthgap/wrynose) only after
+that exact branch has its own standalone build, package QA and layer-check
+receipts; do not submit master/main as proof of any series, and drop a series
+from that branch's LAYERSERIES_COMPAT rather than list it unvalidated.
+Repository publication and index listing are owned by SF-295/#820 and
+SF-230/#518 respectively. Verify remote IDs and
 anonymous clone, then submit and record the real resulting listing URL and
 maintainer acceptance in SF-230/#518. No repository or listing is claimed here.
 
