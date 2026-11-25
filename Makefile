@@ -492,6 +492,16 @@ test-bulk-enrollment-localnet:
 		CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell node scripts/test_bulk_enrollment_localnet.cjs \
 		$(if $(SUIFLEET_EVIDENCE),--evidence $(SUIFLEET_EVIDENCE))'
 
+# SF-304 Ansible examples (host, needs Docker and a warm Move cache): pinned
+# ansible-core against disposable systemd hosts over SSH and a network-none
+# localnet; install/enroll/upgrade/restart, check mode and idempotence.
+.PHONY: test-ansible
+test-ansible:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bin suifleet --example chain_facts
+	python3 scripts/test_ansible.py --move-volume "$${SUIFLEET_MOVE_CACHE:-$(notdir $(CURDIR))_move-cache}" \
+		--dev-image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" \
+		$(if $(SUIFLEET_EVIDENCE),--evidence $(SUIFLEET_EVIDENCE))
+
 # Live gate (spends testnet gas; docs/TESTNET.md): base contracts published,
 # upgraded in place to this tree, real daemon, on-chain receipts.
 # SUIFLEET_WALRUS=testnet stores recipes/artifacts in real Walrus testnet.
