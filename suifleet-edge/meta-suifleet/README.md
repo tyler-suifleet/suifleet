@@ -14,10 +14,13 @@ The packaged daemon is deliberately pinned to 0.2.3 at
 `b9bb2ef6210624d732ab2de2075ea1826e5300c1`, not the latest development client.
 Do not advertise current-client feature completeness for this pin.
 
-Declared series: scarthgap and wrynose, using only the full revisions in the
-core repository's `kas/packaging.yml` and `kas/packaging-wrynose.yml`.
-Scarthgap requires the pinned meta-lts-mixins scarthgap/rust toolchain;
-Wrynose uses core Rust. Rust >= 1.90 is checked by the recipe. Dependencies are
+Declared series: kirkstone, scarthgap and wrynose, using only the full revisions
+in the core repository's `kas/packaging-kirkstone.yml`, `kas/packaging.yml` and
+`kas/packaging-wrynose.yml`. Kirkstone and Scarthgap require the pinned
+meta-lts-mixins `kirkstone/rust` and `scarthgap/rust` toolchains respectively;
+Wrynose uses core Rust. Kirkstone's 5.10/5.15 kernels lack `SO_PEERPIDFD`, so
+its signer runs the weaker caller binding recorded in the core repository's
+`docs/YOCTO_LEGACY_SERIES.md`; Dunfell has no usable Rust and is not supported. Rust >= 1.90 is checked by the recipe. Dependencies are
 OE-Core (`core`) and meta-openembedded/meta-oe (`openembedded-layer`). Systemd,
 usrmerge and a writable persistent root were used in the validated integrated
 builds described below.
@@ -36,14 +39,14 @@ policy, test components and core-recipe build workarounds. Existing kas profiles
 include both layers. Generic consumers should select their own BSP/distro and
 must not add the integration layer without reviewing its policy.
 
-All recorded recipe builds on both pinned series included that integration
+All recorded recipe builds on every declared series included that integration
 layer. They applied Scarthgap OpenSSL install serialization
 (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap target-toolchain relink fixes,
 Wrynose xzmore Bash interpreter/runtime-dependency fixes, and the AArch64
 glibc usrmerge loader/linker-script guard. These are not in this export.
 Standalone consumers must supply equivalent distro fixes/guards and validate
 their builds, or accept an unvalidated configuration that may fail. The extracted
-export alone passed yocto-check-layer on both series; no recipe task-execution
+export alone passed yocto-check-layer on all three series; no recipe task-execution
 build without the integration layer has been validated. See RELEASE.md before
 claiming standalone build support.
 
@@ -58,6 +61,6 @@ Send patches through pull requests. Until standalone publication, open changes a
 repository and reference its existing issue. Never include credentials or live
 state. Keep source revision, crate include, lock digest and codec provenance in
 sync; retain signing/identity boundaries and package QA. Supply exact recipe
-build and yocto-check-layer logs for both declared series, artifact checksums and
+build and yocto-check-layer logs for every declared series, artifact checksums and
 limitations. Hardware, mainnet and production-provider acceptance are separate.
 See RELEASE.md for export and submission procedure.
