@@ -668,6 +668,21 @@ a:focus-visible, summary:focus-visible, .button:focus-visible { outline: 3px sol
   .guide-page .site-header .wrap { padding: 0 var(--gutter); }
 }
 @media (max-width: 600px) {
+  .section { padding: 64px 0; }
+  .row + .row { margin-top: 80px; }
+  .row { gap: 28px; }
+  .row .cta-row { margin-top: 24px; }
+  .row .cta-row .button { flex: 0 0 auto; min-height: 44px; padding: 0 22px; font-size: .9375rem; }
+  .secure .page-head { text-align: left; }
+  .secure .page-head .lead { margin-left: 0; }
+  .info-card { padding: 22px; border-radius: 20px; }
+  .plan { gap: 14px; padding: 24px; border-radius: 22px; }
+  .plan .amount { font-size: 2.25rem; }
+  .plans { gap: 12px; }
+  .price-band { padding: 28px 24px; }
+  .price { font-size: 3rem; }
+  .guide-stage-picker select { font-size: 13px; }
+  .guide-progress span { font-size: 11px; }
   .summary-table td, .summary-table th, .table-wrap th, .table-wrap td { padding: 12px 10px; font-size: .875rem; }
   .summary-table .min-mark { display: block; width: max-content; margin: 4px 0 0; }
 }
@@ -675,8 +690,8 @@ a:focus-visible, summary:focus-visible, .button:focus-visible { outline: 3px sol
   .header-row { gap: 10px; height: 64px; }
   .brand { gap: 8px; font-size: 1.2rem; }
   .brand img { width: 34px; }
-  .header-cta { padding: 0 14px; font-size: .875rem; }
-  .cta-row .button { flex: 1 1 100%; }
+  .header-cta { padding: 0 16px; font-size: .875rem; }
+  .hero .cta-row .button, .closing .cta-row .button, .pricing .cta-row .button { flex: 1 1 100%; }
   .tile { min-height: 0; padding: 20px; }
   .ui-card { padding: 18px; border-radius: 20px; }
   .ui-stages { gap: 6px; }

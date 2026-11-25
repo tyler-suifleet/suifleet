@@ -114,9 +114,10 @@ def render(prices, policy, plan_digest, costs=None):
             f'<div class="amount">{usd(rate)} <small>/ device / month</small></div>',
             '<ul class="checks">',
             f'<li>{config["logs"]}</li>',
-            f'<li>Update checks {defaults["checkIntervalMs"].lower()}</li>',
-            f'<li>{defaults["healthIntervalMs"]} health reports</li>',
-            '<li>Staged rollouts and the full console</li>',
+            *([f'<li>Update checks {defaults["checkIntervalMs"].lower()}</li>',
+               f'<li>{defaults["healthIntervalMs"]} health reports</li>',
+               '<li>Staged rollouts and the full console</li>'] if config is CONFIGURATIONS[0]
+              else [f'<li>Everything else in {CONFIGURATIONS[0]["name"]}</li>']),
             '</ul>', '</article>']))
     head = '<tr><th>Devices</th>' + ''.join(f'<th>{c["name"]}</th>' for c in CONFIGURATIONS) + '</tr>'
     detail_rows = ''.join(f'<tr><td>{n:,}</td>' + ''.join(cell(c, n) for c in CONFIGURATIONS) + '</tr>' for n in DETAIL_FLEETS)
@@ -141,7 +142,7 @@ def render(prices, policy, plan_digest, costs=None):
         '<div class="plans three">', *cards, '</div>',
         f'<p class="fine">Fleets pay at least {minimum} a month. Network costs as of {as_of}.</p>',
         '<div class="cta-row center"><a class="button primary" href="/guide/">Start with one device</a>'
-        '<a class="button" href="{{app:settings/}}">Estimate in the console</a></div>',
+        '<a class="arrow-link" href="{{app:settings/}}">Estimate in the console →</a></div>',
         '<details class="estimates">',
         '<summary><span class="show">See price estimates</span><span class="hide">Hide price estimates</span></summary>',
         '<div class="estimates-body">',
