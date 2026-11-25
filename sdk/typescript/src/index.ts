@@ -122,9 +122,10 @@ export class Client {
   constructor(options: ClientOptions = {}) {
     this.socketPath = options.socketPath ?? DEFAULT_SOCKET;
     this.component = options.component ?? '';
-    this.timeoutMs = options.timeoutMs ?? 120_000;
-    this.connectAttempts = options.connectAttempts ?? 1;
-    this.connectRetryDelayMs = options.connectRetryDelayMs ?? 250;
+    // Only an omitted (undefined) option takes its default; null is validated and refused.
+    this.timeoutMs = options.timeoutMs === undefined ? 120_000 : options.timeoutMs;
+    this.connectAttempts = options.connectAttempts === undefined ? 1 : options.connectAttempts;
+    this.connectRetryDelayMs = options.connectRetryDelayMs === undefined ? 250 : options.connectRetryDelayMs;
     if (!Number.isInteger(this.connectAttempts) || this.connectAttempts < 1) throw new RangeError('connectAttempts must be a positive integer');
     if (typeof this.timeoutMs !== 'number' || !Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0 || this.timeoutMs > MAX_TIMER_DELAY_MS) {
       throw new RangeError(`timeoutMs must be a finite number in (0, ${MAX_TIMER_DELAY_MS}]`);
@@ -274,27 +275,33 @@ export class Client {
    * because the daemon may have consumed a message.
    *
    * `pollIntervalMs` (default 500) and `maxReconnectDelayMs` (default 5000)
-   * must be finite numbers in [0, 2147483647]; the first `next()` rejects with
-   * RangeError before any `receive` otherwise. Reconnect backoff starts at
-   * `pollIntervalMs` and doubles up to `maxReconnectDelayMs`.
+   * must be finite numbers in [0, 2147483647]; only an omitted option takes
+   * its default (null is refused). The first `next()` rejects with RangeError
+   * before any `receive` otherwise. Reconnect backoff starts at
+   * `min(pollIntervalMs, maxReconnectDelayMs)` and doubles up to
+   * `maxReconnectDelayMs`, so the idle poll interval never exceeds the
+   * reconnect ceiling.
    */
   async *messages(filter: string, options: { pollIntervalMs?: number; maxReconnectDelayMs?: number; signal?: AbortSignal } = {}):
     AsyncGenerator<{ message: ReceivedMessage; ack: () => Promise<boolean> }, void, undefined> {
-    const interval = options.pollIntervalMs ?? 500;
-    const maxDelay = options.maxReconnectDelayMs ?? 5000;
+    const interval = options.pollIntervalMs === undefined ? 500 : options.pollIntervalMs;
+    const maxDelay = options.maxReconnectDelayMs === undefined ? 5000 : options.maxReconnectDelayMs;
     // Node fires larger or non-finite timers after 1 ms, which would hammer the daemon.
     for (const [name, value] of [['pollIntervalMs', interval], ['maxReconnectDelayMs', maxDelay]] as const) {
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_TIMER_DELAY_MS) {
         throw new RangeError(`${name} must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);
       }
     }
-    let delay = interval;
+    // The idle poll interval may be longer than the reconnect ceiling; the first
+    // reconnect delay (and the reset after a successful receive) must not be.
+    const firstDelay = Math.min(interval, maxDelay);
+    let delay = firstDelay;
     const signal = options.signal;
     while (!signal?.aborted) {
       let message: ReceivedMessage | null;
       try {
         message = await this.request<ReceivedMessage | null>('receive', signal === undefined ? { topic: filter } : { topic: filter, signal });
-        delay = interval;
+        delay = firstDelay;
       } catch (error) {
         // A receive that was already sent may have been consumed by the daemon
         // (volatile and QoS 0 reads are destructive), so cancelling it must not

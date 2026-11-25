@@ -115,8 +115,9 @@ export class OutboundBuffer {
 
   constructor(client: Client, options: OutboundBufferOptions = {}) {
     this.client = client;
-    this.maxItems = options.maxItems ?? 256;
-    this.maxBytes = options.maxBytes ?? 1024 * 1024;
+    // Only an omitted (undefined) option takes its default; null is validated and refused.
+    this.maxItems = options.maxItems === undefined ? 256 : options.maxItems;
+    this.maxBytes = options.maxBytes === undefined ? 1024 * 1024 : options.maxBytes;
     if (!Number.isInteger(this.maxItems) || this.maxItems < 1) throw new RangeError('maxItems must be a positive integer');
     if (!Number.isInteger(this.maxBytes) || this.maxBytes < 1) throw new RangeError('maxBytes must be a positive integer');
   }
@@ -188,8 +189,9 @@ export class OutboundBuffer {
     if (this.uncertain) throw new Error('outbound buffer is blocked by an uncertain delivery; call resolveUncertain');
     if (this.flushing) throw new Error('flush already in progress');
     // Validate before anything is sent: NaN or Infinity would bypass the retry cap.
-    const maxAttempts = options.maxAttempts ?? 5;
-    const retryDelayMs = options.retryDelayMs ?? 200;
+    // Only an omitted (undefined) option takes its default; null is refused.
+    const maxAttempts = options.maxAttempts === undefined ? 5 : options.maxAttempts;
+    const retryDelayMs = options.retryDelayMs === undefined ? 200 : options.retryDelayMs;
     if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new RangeError('maxAttempts must be a positive integer');
     if (typeof retryDelayMs !== 'number' || !Number.isFinite(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > MAX_TIMER_DELAY_MS) {
       throw new RangeError(`retryDelayMs must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);

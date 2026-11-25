@@ -19,8 +19,7 @@ after(() => rmSync(directory, { recursive: true, force: true }));
 let counter = 0;
 
 /** Fake daemon: `handle(request, socket)` returns a response object, a raw string/Buffer, or undefined. */
-async function serve(handle) {
-  const path = join(directory, `s${counter++}.sock`);
+async function serve(handle, path = join(directory, `s${counter++}.sock`)) {
   const requests = [];
   const server = createServer((socket) => {
     let data = '';
@@ -569,13 +568,13 @@ test('timeoutMs and connectRetryDelayMs outside the Node timer range are refused
       assert.deepEqual(await new Client({ socketPath: server.path, timeoutMs }).request('status'), { echoed: true });
     }
     // Larger or non-finite delays would fire after 1 ms; they never reach the socket.
-    for (const timeoutMs of [MAX_TIMER_DELAY_MS + 1, Infinity, NaN, 0, -1, '1000']) {
+    for (const timeoutMs of [MAX_TIMER_DELAY_MS + 1, Infinity, NaN, 0, -1, '1000', null]) {
       assert.throws(() => new Client({ socketPath: server.path, timeoutMs }), RangeError, String(timeoutMs));
     }
-    for (const connectRetryDelayMs of [MAX_TIMER_DELAY_MS + 1, Infinity, NaN, -1]) {
+    for (const connectRetryDelayMs of [MAX_TIMER_DELAY_MS + 1, Infinity, NaN, -1, null]) {
       assert.throws(() => new Client({ socketPath: server.path, connectRetryDelayMs }), RangeError, String(connectRetryDelayMs));
     }
-    for (const connectAttempts of [Infinity, NaN, 0, 1.5]) {
+    for (const connectAttempts of [Infinity, NaN, 0, 1.5, null]) {
       assert.throws(() => new Client({ socketPath: server.path, connectAttempts }), RangeError, String(connectAttempts));
     }
     assert.equal(server.requests.length, 2);
@@ -590,10 +589,10 @@ test('OutboundBuffer.flush refuses invalid maxAttempts and retryDelayMs before a
   const server = await serve(() => ({ version: 1, ok: false, error: 'full' }));
   const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
   buffer.append('s', 1);
-  for (const maxAttempts of [NaN, Infinity, -Infinity, 0, -1, 1.5, '3']) {
+  for (const maxAttempts of [NaN, Infinity, -Infinity, 0, -1, 1.5, '3', null]) {
     await assert.rejects(buffer.flush({ maxAttempts, retryDelayMs: 1 }), RangeError, String(maxAttempts));
   }
-  for (const retryDelayMs of [NaN, Infinity, -1, MAX_TIMER_DELAY_MS + 1, '1']) {
+  for (const retryDelayMs of [NaN, Infinity, -1, MAX_TIMER_DELAY_MS + 1, '1', null]) {
     await assert.rejects(buffer.flush({ maxAttempts: 2, retryDelayMs }), RangeError, String(retryDelayMs));
   }
   assert.equal(server.requests.length, 0);
@@ -616,7 +615,7 @@ test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node
     const empty = await serve(() => ok(null));
     const client = new Client({ socketPath: empty.path, component: 'sub' });
     for (const option of ['pollIntervalMs', 'maxReconnectDelayMs']) {
-      for (const value of [MAX_TIMER_DELAY_MS + 1, Infinity, -Infinity, NaN, -1, '10']) {
+      for (const value of [MAX_TIMER_DELAY_MS + 1, Infinity, -Infinity, NaN, -1, '10', null]) {
         const controller = new AbortController();
         await assert.rejects(client.messages('a/#', { [option]: value, signal: controller.signal }).next(), RangeError, `${option}=${value}`);
         controller.abort();
@@ -649,4 +648,46 @@ test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node
     process.off('warning', onWarning);
   }
   assert.ok(!warnings.includes('TimeoutOverflowWarning'), warnings.join(','));
+});
+
+test('messages() reconnects within maxReconnectDelayMs even when pollIntervalMs is longer', async () => {
+  // The idle poll interval (about 25 days here) must not become the reconnect delay,
+  // neither for the first failure nor after the reset that follows a successful receive.
+  const path = join(directory, 'late-cap.sock');
+  const messages = [{ id: 1, topic: 'a/b', sender: 'p', payload: 1, published_ms: 1 },
+    { id: 2, topic: 'a/b', sender: 'p', payload: 2, published_ms: 2 }];
+  const startListener = () => serve((r) => ok(r.operation === 'receive' ? messages.shift() ?? null : { acknowledged: true }), path);
+  const controller = new AbortController();
+  const guard = setTimeout(() => controller.abort(), 2000);
+  const iterator = new Client({ socketPath: path, component: 'sub' })
+    .messages('a/#', { pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: 10, signal: controller.signal });
+  try {
+    // First failure: no listener yet; it appears 40 ms later.
+    let pending = iterator.next();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    let server = await startListener();
+    const first = await pending;
+    assert.equal(first.done, false);
+    assert.equal(first.value.message.id, 1);
+    // The daemon goes away after a successful receive and returns 40 ms later.
+    await server.close();
+    pending = iterator.next();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    server = await startListener();
+    const second = await pending;
+    assert.equal(second.done, false);
+    assert.equal(second.value.message.id, 2);
+    assert.equal(controller.signal.aborted, false);
+    controller.abort();
+    await server.close();
+  } finally {
+    clearTimeout(guard);
+    await iterator.return();
+  }
+});
+
+test('OutboundBuffer refuses null maxItems and maxBytes instead of defaulting them', () => {
+  const client = new Client({ socketPath: join(directory, 'absent.sock') });
+  assert.throws(() => new OutboundBuffer(client, { maxItems: null }), RangeError);
+  assert.throws(() => new OutboundBuffer(client, { maxBytes: null }), RangeError);
 });
