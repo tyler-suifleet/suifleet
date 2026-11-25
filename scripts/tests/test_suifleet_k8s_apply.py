@@ -795,6 +795,54 @@ class ConfigBindingTest(unittest.TestCase):
         self.assertEqual(k8s.ready(cluster, v3, "web-app"), (True, "ready"))
         self.assertEqual(cluster.peak, 2 * k8s.MAX_CONFIGMAPS)
 
+    def deployment_only(self, message, name):
+        """Rendered bundle `message` holding just a Deployment `name` that
+        consumes no ConfigMap."""
+        bundle = self.bundle(message)
+        web_object = deployment(bundle)
+        web_object["metadata"]["name"] = name
+        pod = web_object["spec"]["template"]["spec"]
+        pod.pop("volumes", None)
+        pod["containers"][0].pop("volumeMounts", None)
+        pod["containers"][0].pop("envFrom", None)
+        bundle["resources"] = [web_object]
+        k8s.validate_bundle(bundle)
+        return k8s.render(bundle, "suifleet-apps", "web-app", "1", hashlib.sha256(message.encode()).hexdigest())
+
+    def test_a_terminating_retirement_is_not_converged(self):
+        """Review 4664: retiring a Deployment-only bundle with the empty
+        bundle leaves its Deployment listed, terminating, under foreground
+        deletion until its Pods are gone. Its digest and count still match
+        a complete bundle, but the namespace is not converged: a
+        different-name successor is refused before any write until the
+        deletion completes, and the retired bundle stays held."""
+        cluster = ModelCluster(foreground={"deployments.apps"})
+        v1 = self.deployment_only("v1", "web")
+        v2 = self.deployment_only("v2", "replacement")
+        digest = lambda objects: objects[0]["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        k8s.apply(cluster, [], "web-app", cluster)
+        self.assertTrue(cluster.store["deployments.apps"]["web"]["metadata"].get("deletionTimestamp"))
+        self.assertEqual(k8s.ready(cluster, [], "web-app"),
+                         (False, "stale deployments.apps/web not yet pruned (1 remaining)"))
+        converged, held, _, _ = k8s.bundle_state(cluster, "web-app")
+        self.assertFalse(converged)
+        self.assertEqual(held, {digest(v1)})
+        before = (copy.deepcopy(cluster.store), list(cluster.order))
+        with self.assertRaisesRegex(k8s.Rejected, "not converged"):
+            k8s.apply(cluster, v2, "web-app", cluster)
+        self.assertEqual((cluster.store, cluster.order), before, "the refused bundle wrote nothing")
+        k8s.recovery_gate(cluster, "web-app", v1)  # the retired bundle stays held
+        cluster.finish_deletions()
+        self.assertEqual(k8s.ready(cluster, [], "web-app"), (True, "ready"))
+        self.assertEqual(k8s.bundle_state(cluster, "web-app")[:2], (True, set()))
+        k8s.apply(cluster, v2, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
+        self.assertEqual(sorted(cluster.store["deployments.apps"]), ["replacement"])
+
     def test_retrying_a_partial_apply_fits_the_quota_and_converges(self):
         cluster = ModelCluster(configmap_quota=20)
         k8s.apply(cluster, self.many("v1", k8s.MAX_CONFIGMAPS), "web-app", cluster)

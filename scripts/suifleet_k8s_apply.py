@@ -1241,11 +1241,15 @@ def bundle_state(kubectl, component):
     objects, terminating ones included.
 
     converged: nothing is listed, or every listed object belongs to one
-    bundle and all of that bundle's objects are listed (COUNT_ANNOTATION).
-    That holds only once an apply wrote every object and its prune --
-    including foreground deletions -- finished. A single digest alone does
-    not: a partial apply that overwrote every object it shares with the last
-    completed bundle and created some of its own leaves only its digest.
+    bundle, all of that bundle's objects are listed (COUNT_ANNOTATION) and
+    none of them is terminating. That holds only once an apply wrote every
+    object and its prune -- including foreground deletions -- finished. A
+    single digest alone does not: a partial apply that overwrote every object
+    it shares with the last completed bundle and created some of its own
+    leaves only its digest. Nor does a complete count: an empty retirement
+    bundle's foreground prune leaves every object of the retired bundle
+    listed, terminating, until its ReplicaSets and Pods are gone, and those
+    Pods may still serve. Terminating objects still count toward `held`.
 
     held: for a converged namespace, the completed bundle (if any). For a
     non-converged one, the bundles it may still be brought to -- every
@@ -1269,7 +1273,8 @@ def bundle_state(kubectl, component):
     rollback = next(iter(rollbacks), None)
     count = str(len(items))
     converged = len(digests) == 1 and None not in digests and \
-        all(_annotation(item, COUNT_ANNOTATION) == count for item in items)
+        all(_annotation(item, COUNT_ANNOTATION) == count and
+            not (item.get("metadata") or {}).get("deletionTimestamp") for item in items)
     return converged, (digests if converged else digests | rollbacks) - {None}, generation, rollback
 
 
