@@ -5486,6 +5486,26 @@
       "validation": "Focused scheduling/concurrency and coordinator regression tests; no unrelated application builds."
     },
     {
+      "key": "SF-315",
+      "title": "Fit How it works into a single desktop and mobile viewport",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site"
+      ],
+      "resources": [],
+      "description": "Viewport-sized How it works with accessible topic/text navigation and the existing overview video.",
+      "evidence": "User reports How it works requires page scrolling while the guide fits within the viewport.",
+      "acceptance": [
+        "No document or text overflow across desktop, narrow phone and short landscape viewports.",
+        "All explanatory content remains reachable and existing playback/captions and product guide work."
+      ],
+      "validation": "Static site build/tests and real browser layout, navigation and media checks."
+    },
+    {
       "key": "SF-316",
       "title": "Collect exited PR workers across coordinator lanes",
       "priority": "P0",
