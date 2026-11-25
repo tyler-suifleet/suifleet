@@ -4,15 +4,18 @@
 
 The recipes fetch SHA-256-pinned tarballs at immutable Git blob paths in
 [the source-distributions branch](https://github.com/tyler-suifleet/meta-suifleet/tree/source-distributions).
-The daemon archive contains its Cargo files, source, packaging inputs,
-shared interfaces, test fixtures and root MIT license. The codec archive
+The daemon archive contains its Cargo files, every Cargo workspace member
+(including `suifleet-edge/windows-runtime`), examples, source, packaging
+inputs, shared interfaces, test fixtures and root MIT license. The codec archive
 contains the five files produced by the core repository's
 `scripts/package_walrus_codec.py`, including third-party notices and
 source provenance.
 
 For updates, export committed files with `git archive` from reviewed core
 main. Audit the exact file set for private state and credentials before
-publishing. Build the codec from the same commit using that commit's frozen
+publishing. Extract the daemon archive in an empty directory and run
+`cargo metadata --offline --locked --no-deps --manifest-path suifleet-edge/Cargo.toml`
+to check the workspace from the archive alone. Build the codec from the same commit using that commit's frozen
 pnpm lockfile and Node version. Normalize tar ownership and timestamps and
 compress both archives with `gzip -n`. Publish under new filenames containing
 the full source commit. Verify anonymous downloads and update the two archive
