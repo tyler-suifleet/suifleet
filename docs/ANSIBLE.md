@@ -280,7 +280,21 @@ collector elsewhere that shares a supported handler's name (for example
 `/usr/local/bin/systemd-coredump`), or a `true` that resolves to a multi-call
 binary, is refused. Any other piped handler is refused, because the kernel
 runs it whatever the limit and it may keep the dump: Apport (Ubuntu's
-default), ABRT, the WSL crash handler or a vendor handler. The message gives the reason. To enroll
+default), ABRT, the WSL crash handler or a vendor handler. The message gives the reason.
+
+The kernel runs a piped handler in the host's initial namespaces: it resolves
+the handler's path, and the handler reads its configuration, in the host's
+initial mount namespace and root, not the SSH session's. A container or
+other isolated root can show a different binary or `coredump.conf` at the same
+paths. So a piped handler is accepted only when the session provably shares
+the host's view: it must be in the initial PID and user namespaces (fixed
+namespace inode numbers since Linux 3.8, so `/proc/1` is the host's init) and
+its `/proc/self/mountinfo` must equal init's `/proc/1/mountinfo` (mount IDs
+included; a separate mount namespace or a chroot differs). PID 1 is taken as
+the kernel's view. Otherwise every piped handler, even systemd-coredump with
+`Storage=none` and `ProcessSizeMax=0` or a session limit of 0, is refused; on
+such a host use a file `kernel.core_pattern` with a session limit of 0, which
+the kernel applies in the crashing process's own namespace. To enroll
 such a host, stop the handler for the enrollment (for example
 `systemctl stop apport`, which restores a file pattern), add
 a drop-in in `/etc/systemd/coredump.conf.d/` whose `[Coredump]` section sets
@@ -381,12 +395,18 @@ The harness checks these phases:
    or in a drop-in without a section header, for a path-like comment before
    settings that re-enable dumps, for a UTF-8 byte order mark, for a malformed
    section header, for a line continuation and for the disabling settings only
-   in a main `coredump.conf` in `/usr/local/lib`
+   in a main `coredump.conf` in `/usr/local/lib`. Because the test hosts are
+   containers, which do not share the host's initial namespaces, transfers
+   must also be refused, as unverifiable, for systemd-coredump with
+   `Storage=none` and `ProcessSizeMax=0`, for systemd-coredump with a session
+   limit of 0 and for `/usr/bin/false`; a test-only copy of the classifier
+   whose namespace check always passes must accept those three, showing the
+   namespace check is the only reason they were refused
    (the containers' init and sshd inherit Docker's
    unlimited limit). No test
    process is crashed: `kernel.core_pattern` is global to the shared kernel,
    so a real crash would reach the machine's own handler. Enrollment runs with
-   systemd-coredump, `Storage=none` and `ProcessSizeMax=0`.
+   core files under a `limits.d` core limit of 0 for the deploy account.
    Then a claim transfer is
    interrupted right after staging, for plain and Vault claims, with zram
    without writeback and dm-crypt swap and with core files under a
