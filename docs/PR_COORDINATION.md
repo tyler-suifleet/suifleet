@@ -1929,3 +1929,13 @@ durable results. Linux parent-death signalling also stops scheduling children if
 the supervisor is killed abruptly. Keep the existing `KillMode=process` unit.
 Disabling `parallel_pipeline` and restarting restores the combined loop; retained
 jobs, batch reservations and merge evidence stay in the same database.
+
+SF-318 discovery scheduling also checks local state before fetching an expensive
+PR snapshot: a full reviewer pool, an active worker, or a source review that has
+not finished is a scheduling wait. Active integration candidates and untracked
+or local-test infrastructure PRs retain discovery. Reserved batch members are
+re-read by the batch's existing validation/publication fences. These hints never
+supply approval, ownership, CI, head/base or feedback evidence: selected work
+still obtains a fresh snapshot and the final fences remain unchanged. Old cache
+and coordinator pauses are preserved through activation until their recorded
+expiry, and server Retry-After deadlines are never shortened.
