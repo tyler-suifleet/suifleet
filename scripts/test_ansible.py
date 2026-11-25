@@ -870,6 +870,12 @@ class Harness:
             ("systemd-coredump with the disabling settings in a drop-in without a section header", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=default;"),
+            # A comment that looks like cat-config's "# /path" file header must not end the
+            # [Coredump] section: the assignments after it still count and re-enable dumps.
+            ("systemd-coredump with a path-like comment before settings that re-enable dumps", self.SYSTEMD_COREDUMP,
+             {"coredump_conf": ["[Coredump]", "Storage=none", "ProcessSizeMax=0",
+                                "# /etc/systemd/coredump.conf.d/zz-sf304.conf", "Storage=external", "ProcessSizeMax=1G"]},
+             "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=1G;"),
             ("systemd-coredump configuration with a line continuation", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["[Coredump]", "Storage=external \\", "Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump's configuration uses line continuations"),
