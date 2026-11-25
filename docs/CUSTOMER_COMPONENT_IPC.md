@@ -4,7 +4,7 @@ Use the local Unix-stream API to read component configuration, report health and
 
 ## Prerequisites
 
-Use Python 3.10+ for the supplied SDK, an installed daemon and separate platform-managed Unix identities for IPC clients. Shared daemon-user components cannot receive individual component ACLs. Provisioning users and directories is the platform's responsibility.
+Use Python 3.10+ for the supplied Python SDK or Node.js 20+ for the [Node.js SDK](CUSTOMER_NODE_SDK.md), an installed daemon and separate platform-managed Unix identities for IPC clients. Shared daemon-user components cannot receive individual component ACLs. Provisioning users and directories is the platform's responsibility.
 
 ## Steps
 
