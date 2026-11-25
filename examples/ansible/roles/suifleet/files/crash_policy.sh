@@ -28,22 +28,49 @@ case $pat in
           || v unsafe "systemd-coredump's configuration could not be read and the core dump size limit is $lim"
         # Resolve the effective [Coredump] values as systemd does: only
         # assignments inside a [Coredump] section count, the section resets at
-        # each file (cat-config prints "# /path" before each file, in
-        # precedence order) and the last assignment wins. Line continuations
-        # could hide or forge an assignment, so they are refused outright.
+        # each file and the last assignment wins. cat-config prints "# /path"
+        # before each file, in precedence order, but a comment inside a file
+        # can look the same, so the boundaries are not taken from the text:
+        # each listed file is read directly and exactly its lines are consumed
+        # (and must match), so its comments can never start another file.
+        # Anything else in the listing, a file that cannot be read and line
+        # continuations (which could hide or forge an assignment) are refused.
         eff=$(printf '%s\n' "$conf" | awk '
-          /^# \// { sec = ""; next }
-          { sub(/^[ \t]+/, ""); sub(/[ \t\r]+$/, "") }
-          $0 == "" || /^[#;]/ { next }
-          /\\$/ { cont = 1 }
-          /^\[.*\]$/ { sec = substr($0, 2, length($0) - 2); next }
-          sec != "Coredump" { next }
-          /^Storage[ \t]*=/ { s = $0; sub(/^Storage[ \t]*=[ \t]*/, "", s) }
-          /^ProcessSizeMax[ \t]*=/ { m = $0; sub(/^ProcessSizeMax[ \t]*=[ \t]*/, "", m) }
-          END { printf "%s\n%s\n%s\n", (cont ? "continued" : "-"), s, m }') \
+          function classify(l) {
+            sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l)
+            if (l == "" || l ~ /^[#;]/) return
+            if (l ~ /\\$/) cont = 1
+            if (l ~ /^\[.*\]$/) { sec = substr(l, 2, length(l) - 2); return }
+            if (sec != "Coredump") return
+            if (l ~ /^Storage[ \t]*=/) { s = l; sub(/^Storage[ \t]*=[ \t]*/, "", s) }
+            if (l ~ /^ProcessSizeMax[ \t]*=/) { m = l; sub(/^ProcessSizeMax[ \t]*=[ \t]*/, "", m) }
+          }
+          function fail(r) { bad = r; exit }
+          left == 0 {
+            if ($0 == "" || $0 ~ /^# Main configuration file [^ ]+ not found$/) next
+            if ($0 !~ /^# \//) fail("unlisted")
+            path = substr($0, 3); n = 0; sec = ""
+            while ((r = (getline l < path)) > 0) lines[++n] = l
+            close(path)
+            if (r < 0) fail("unreadable")
+            left = n; i = 0; next
+          }
+          { if ($0 != lines[++i]) fail("changed"); classify($0); left-- }
+          END {
+            # The shell drops the trailing newlines of the whole listing,
+            # which removes the last file'"'"'s trailing blank lines.
+            while (bad == "" && left && lines[i + 1] == "") { i++; left-- }
+            if (bad == "" && left) bad = "changed"
+            if (bad == "" && cont) bad = "continued"
+            printf "%s\n%s\n%s\n", (bad == "" ? "-" : bad), s, m
+          }') \
           || v unsafe "systemd-coredump's configuration could not be parsed and the core dump size limit is $lim"
-        [ "$(printf '%s\n' "$eff" | sed -n 1p)" = - ] \
-          || v unsafe "systemd-coredump's configuration uses line continuations and the core dump size limit is $lim"
+        case $(printf '%s\n' "$eff" | sed -n 1p) in
+          -) ;;
+          continued) v unsafe "systemd-coredump's configuration uses line continuations and the core dump size limit is $lim" ;;
+          unreadable) v unsafe "a systemd-coredump configuration file could not be read and the core dump size limit is $lim" ;;
+          *) v unsafe "systemd-coredump's configuration listing could not be matched to its files and the core dump size limit is $lim" ;;
+        esac
         s=$(printf '%s\n' "$eff" | sed -n 2p)
         m=$(printf '%s\n' "$eff" | sed -n 3p)
         [ "$s" = none ] && [ "$m" = 0 ] && v ok
