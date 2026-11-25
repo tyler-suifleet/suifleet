@@ -37,7 +37,7 @@ def build(binary, out, version, arch, epoch):
         # Firmware helpers are deliberately opt-in source integrations, not part
         # of this application package. No privileged updater is installed.
         for name in ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket",
-                     "suifleet-provision.service", "suifleet-enrollment.path"):
+                     "suifleet-provision.service", "suifleet-enrollment.path", "suifleet-first-boot-enrollment.service"):
             copy(files / name, "lib/systemd/system/" + name)
         copy(files / "suifleet-provision", "usr/libexec/suifleet-provision", 0o755)
         for name in ("signer.toml.example", "config.toml.example"):

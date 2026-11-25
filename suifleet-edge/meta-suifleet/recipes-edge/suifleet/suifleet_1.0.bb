@@ -5,6 +5,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=11afb1fbbd23890e736d2e4025d3e2c9"
 
 SRC_URI = " \
     git://github.com/tyler-suifleet/suifleet.git;protocol=https;nobranch=1;destsuffix=git \
+    file://first-boot-enrollment.patch \
     file://suifleet.service \
     file://suifleet-firmware.service \
     file://suifleet-firmware.path \
@@ -12,6 +13,7 @@ SRC_URI = " \
     file://firmware.toml.example \
     file://suifleet-provision.service \
     file://suifleet-provision \
+    file://suifleet-first-boot-enrollment.service \
     file://suifleet-enrollment.path \
     file://suifleet-signer.service \
     file://suifleet-signer.socket \
@@ -75,7 +77,7 @@ USERADD_PACKAGES = "${PN}"
 USERADD_PARAM:${PN} = "--system --no-create-home --home-dir /var/lib/suifleet --shell /sbin/nologin --user-group suifleet; \
     --system --no-create-home --home-dir /nonexistent --shell /sbin/nologin --user-group suifleet-signer"
 
-SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
+SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
@@ -84,6 +86,7 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${SUIFLEET_UNPACKDIR}/suifleet.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.path \
         ${SUIFLEET_UNPACKDIR}/suifleet-provision.service ${SUIFLEET_UNPACKDIR}/suifleet-enrollment.path \
+        ${SUIFLEET_UNPACKDIR}/suifleet-first-boot-enrollment.service \
         ${SUIFLEET_UNPACKDIR}/suifleet-signer.service ${SUIFLEET_UNPACKDIR}/suifleet-signer.socket \
         ${D}${systemd_system_unitdir}/
     install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-provision ${D}${libexecdir}/suifleet-provision
