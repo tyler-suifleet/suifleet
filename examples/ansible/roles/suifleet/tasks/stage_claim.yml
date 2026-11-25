@@ -23,30 +23,85 @@
 # The ansible_become connection variable (inventory, group_vars, host_vars)
 # overrides the become task keyword, so these tasks also set it to false
 # as a task variable, which outranks inventory. Extra vars
-# (-e ansible_become=true) outrank task variables; the probe below detects
-# any escalation that remains and refuses before the claim is read.
+# (-e ansible_become=true) outrank task variables. The controller checks
+# the effective value first, before anything reaches the host.
+#
+# The host-side probe below then requires positive evidence that the
+# claim's module runs pipelined and unescalated: it must read the
+# complete process chain from the module interpreter up to the SSH
+# session (sshd), every process in it must run as the module's own user,
+# and no command line may carry Ansible's become wrapper. Anything it
+# cannot read (hidepid, an exited parent, a chain that ends without an SSH
+# session) refuses the claim rather than passing.
+- name: Refuse to send the claim with privilege escalation enabled
+  ansible.builtin.assert:
+    that: not (ansible_become | default(false) | bool)
+    quiet: true
+    fail_msg: >-
+      Privilege escalation is enabled for the claim transfer to
+      {{ inventory_hostname }}, which can record the claim in persistent
+      logs (sudoers log_input). Do not pass ansible_become as an extra
+      variable (-e); the role enables become for its other tasks itself.
+  vars:
+    ansible_become: false
+
 - name: Check that modules reach the host pipelined and unescalated
   ansible.builtin.command:
     argv:
       - sh
       - -c
-      # Prints the command line of the module interpreter (first line) and
-      # of each visible ancestor. Every Ansible become plugin wraps the
-      # module in "echo BECOME-SUCCESS-…", which also appears in the
-      # SSH account's shell that starts sudo, su or doas.
+      # Prints "ANCESTOR <command line>" for the module interpreter (first)
+      # and each ancestor up to the SSH session, then exactly one VERDICT
+      # line: ok, incomplete, escalated or identity. Every Ansible become
+      # plugin wraps the module in "echo BECOME-SUCCESS-…", and sudo, su
+      # or doas run with another user ID than the module's caller.
       - >-
-        p=$PPID;
-        while [ "${p:-0}" -gt 1 ]; do
-        c=$(tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline") || break;
-        printf '%s\n' "$c";
-        p=$(sed -n 's/^PPid:[[:space:]]*//p' 2>/dev/null < "/proc/$p/status") || break;
+        v() { printf 'VERDICT %s\n' "$1"; exit 0; };
+        me=$(sed -n 's/^Uid:[[:space:]]*//p' /proc/self/status) && [ -n "$me" ] || v incomplete;
+        p=$PPID; n=0;
+        while :; do
+        c=$(tr '\0' ' ' < "/proc/$p/cmdline") && [ -n "$c" ] || v incomplete;
+        s=$(cat "/proc/$p/status") || v incomplete;
+        printf 'ANCESTOR %s\n' "$c";
+        case $c in *BECOME-SUCCESS-*) v escalated;; esac;
+        u=$(printf '%s\n' "$s" | sed -n 's/^Uid:[[:space:]]*//p');
+        [ "$u" = "$me" ] || v identity;
+        case $c in sshd*) v ok;; esac;
+        p=$(printf '%s\n' "$s" | sed -n 's/^PPid:[[:space:]]*//p');
+        case $p in ''|*[!0-9]*) v incomplete;; esac;
+        n=$((n + 1));
+        [ "$p" -gt 1 ] && [ "$n" -lt 32 ] || v incomplete;
         done
   become: false
   vars:
     ansible_become: false
   register: suifleet_module_parent
   changed_when: false
+  failed_when: suifleet_module_parent.rc != 0
   check_mode: false
+
+- name: Refuse to send the claim through privilege escalation
+  ansible.builtin.assert:
+    that: suifleet_module_parent.stdout_lines | last | default('') not in ['VERDICT escalated', 'VERDICT identity']
+    quiet: true
+    fail_msg: >-
+      The claim transfer to {{ inventory_hostname }} would run through
+      privilege escalation or another user's process, which can record the
+      claim in persistent logs (sudoers log_input). Do not pass
+      ansible_become as an extra variable (-e) and do not wrap
+      ansible_python_interpreter in sudo, su or doas.
+
+- name: Refuse to send the claim without a verified transport
+  ansible.builtin.assert:
+    that:
+      - suifleet_module_parent.stdout_lines | last | default('') == 'VERDICT ok'
+      - suifleet_module_parent.stdout_lines[:1] | select('match', '^ANCESTOR ') | list | length == 1
+    quiet: true
+    fail_msg: >-
+      Could not verify that the claim transfer to {{ inventory_hostname }}
+      runs unescalated inside an SSH session: the module's process chain up
+      to sshd was not fully readable (for example /proc mounted with
+      hidepid, or a connection that is not SSH). The claim is not sent.
 
 - name: Refuse to send the claim without pipelining
   ansible.builtin.assert:
@@ -56,16 +111,6 @@
       Ansible wrote its module to a file on {{ inventory_hostname }}, so
       the claim would reach persistent storage. Enable SSH pipelining
       (examples/ansible/ansible.cfg) and leave ANSIBLE_KEEP_REMOTE_FILES unset.
-
-- name: Refuse to send the claim through privilege escalation
-  ansible.builtin.assert:
-    that: suifleet_module_parent.stdout is not search('BECOME-SUCCESS-')
-    quiet: true
-    fail_msg: >-
-      The claim transfer to {{ inventory_hostname }} would run through
-      privilege escalation, which can record the claim in persistent logs
-      (sudoers log_input). Do not pass ansible_become as an extra variable
-      (-e); the role enables become for its other tasks itself.
 
 - name: Read the claim transfer filesystem type
   ansible.builtin.command:
