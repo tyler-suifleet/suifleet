@@ -1,0 +1,142 @@
+---
+# The same files and accounts as the Yocto recipe and the Debian package
+# (docs/INSTALL_DEVICE_CLIENT.md#generic-linux). Firmware helpers are not
+# installed; enable them only through docs/OPERATIONS.md#execution-privileges.
+- name: Create the separate daemon and signer groups
+  ansible.builtin.group:
+    name: "{{ item }}"
+    system: true
+  loop: [suifleet, suifleet-signer]
+
+- name: Create the unprivileged daemon and signer users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    group: "{{ item.name }}"
+    groups: []
+    system: true
+    create_home: false
+    home: "{{ item.home }}"
+    shell: /usr/sbin/nologin
+  loop:
+    - {name: suifleet, home: /var/lib/suifleet}
+    - {name: suifleet-signer, home: /nonexistent}
+
+# The binary is staged and its SHA-256 checked on the host before it replaces
+# /usr/bin/suifleet (an atomic rename by the copy module).
+- name: Create the private staging directory
+  ansible.builtin.file:
+    path: /var/cache/suifleet
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Stage the authenticated binary
+  ansible.builtin.copy:
+    src: "{{ suifleet_binary_src }}"
+    dest: /var/cache/suifleet/suifleet.staged
+    owner: root
+    group: root
+    mode: "0700"
+  register: suifleet_binary_staged
+
+# In check mode a pending copy leaves the old staged bytes in place, so the
+# host-side checks run only on bytes actually present; the controller-side
+# digest was already verified in preflight.
+- name: Check the staged binary on the host
+  ansible.builtin.stat:
+    path: /var/cache/suifleet/suifleet.staged
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_binary_remote
+  check_mode: false
+  when: not (ansible_check_mode and suifleet_binary_staged is changed)
+
+- name: Refuse a staged binary that differs from the pinned SHA-256
+  ansible.builtin.assert:
+    that:
+      - suifleet_binary_remote.stat.exists
+      - suifleet_binary_remote.stat.checksum == suifleet_binary_sha256
+    quiet: true
+    fail_msg: The staged binary on the host does not match the pinned SHA-256.
+  when: suifleet_binary_remote is not skipped
+
+- name: Report the pending binary installation
+  ansible.builtin.debug:
+    msg: Would install the staged binary as /usr/bin/suifleet.
+  changed_when: true
+  when: ansible_check_mode and suifleet_binary_staged is changed
+
+- name: Install the verified binary
+  ansible.builtin.copy:
+    src: /var/cache/suifleet/suifleet.staged
+    remote_src: true
+    dest: /usr/bin/suifleet
+    owner: root
+    group: root
+    mode: "0755"
+  register: suifleet_binary_copy
+  when: not (ansible_check_mode and suifleet_binary_staged is changed)
+
+- name: Install the provisioning helper
+  ansible.builtin.copy:
+    src: "{{ suifleet_units_src }}/suifleet-provision"
+    dest: /usr/libexec/suifleet-provision
+    owner: root
+    group: root
+    mode: "0755"
+  register: suifleet_helper_copy
+
+- name: Install the systemd units
+  ansible.builtin.copy:
+    src: "{{ suifleet_units_src }}/{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - suifleet.service
+    - suifleet-signer.service
+    - suifleet-signer.socket
+    - suifleet-provision.service
+    - suifleet-enrollment.path
+  register: suifleet_units_copy
+
+- name: Create the configuration directory
+  ansible.builtin.file:
+    path: /etc/suifleet
+    state: directory
+    owner: root
+    group: suifleet
+    mode: "0750"
+
+- name: Create the daemon state directory
+  ansible.builtin.file:
+    path: /var/lib/suifleet
+    state: directory
+    owner: suifleet
+    group: suifleet
+    mode: "0700"
+
+- name: Install the configuration templates beside the real files
+  ansible.builtin.copy:
+    src: "{{ suifleet_units_src }}/{{ item.name }}"
+    dest: "/etc/suifleet/{{ item.name }}"
+    owner: root
+    group: "{{ item.group }}"
+    mode: "0640"
+  loop:
+    - {name: signer.toml.example, group: suifleet-signer}
+    - {name: config.toml.example, group: suifleet}
+
+- name: Reload systemd after unit changes
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: suifleet_units_copy is changed
+
+- name: Record whether the client code changed
+  ansible.builtin.set_fact:
+    suifleet_code_changed: >-
+      {{ suifleet_binary_staged is changed or suifleet_binary_copy is changed
+         or suifleet_helper_copy is changed
+         or suifleet_units_copy is changed }}

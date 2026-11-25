@@ -123,6 +123,10 @@ still apply. [Generic Linux](#generic-linux) remains a manual evaluation option.
 Package publication will provide architecture, supported distribution versions,
 checksums and signature-verification instructions before a download is offered.
 
+To install, enroll and upgrade many existing hosts, use the reviewed
+[Ansible examples](ANSIBLE.md). They follow the same order and generate each
+device's key on the device.
+
 ## Generic Linux
 
 These source commands require access to the public build inputs; they are an
