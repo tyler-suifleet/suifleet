@@ -46,8 +46,9 @@ ServiceAccount credential:
   bundle over the ConfigMap limit are rejected offline, and an owned mutable
   ConfigMap at a content-addressed name stops the apply before any write.
   Changing every ConfigMap of a bundle at the limit peaks exactly at the
-  shipped quota and converges; after a partial apply fills the quota, the
-  next bundle frees the leftovers first and converges. A failed update that
+  shipped quota and converges. After a partial apply fills the quota and
+  moves the template, a further bundle fails at a ConfigMap creation and
+  deletes nothing, and the rollback fits and converges. A failed update that
   omits a stable ConfigMap keeps it with its data; a successful one prunes it.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   stable-name ConfigMap made immutable out of band (or a content-addressed one
@@ -294,7 +295,9 @@ def config_bundle(work, name, mode):
 
 def quota_bundle(work, name, message, count=publisher.MAX_CONFIGMAPS):
     """A Deployment consuming `count` ConfigMaps (the per-bundle limit by
-    default), each through envFrom."""
+    default), each through envFrom, followed by a zero-replica Deployment
+    quota-worker that consumes none (a partial apply can update quota-app
+    and then fail at quota-worker)."""
     path = config_bundle(work, name, message)
     bundle = json.loads(path.read_text())
     config, deployment = bundle["resources"]
@@ -308,6 +311,13 @@ def quota_bundle(work, name, message, count=publisher.MAX_CONFIGMAPS):
     container["envFrom"] = [{"configMapRef": {"name": f"quota-{index}"}} for index in range(count)]
     bundle["resources"] = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": f"quota-{index}"},
                             "data": {f"Q{index}": message}} for index in range(count)] + [deployment]
+    worker = json.loads(json.dumps(deployment))
+    worker["metadata"]["name"] = "quota-worker"
+    worker["metadata"]["labels"] = worker["spec"]["selector"]["matchLabels"] = \
+        worker["spec"]["template"]["metadata"]["labels"] = {"app": "quota-worker"}
+    worker["spec"]["replicas"] = 0
+    worker["spec"]["template"]["spec"]["containers"][0].pop("envFrom")
+    bundle["resources"].append(worker)
     path.write_text(json.dumps(bundle))
     return path
 
@@ -1016,8 +1026,8 @@ def scenario(cluster, work, supervisor):
         before = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]["uid"]
         race.arm(["delete", "--raw"], *commands)
         result = helper("apply", profiles, v1, profile="race")
-        # The racing delete is the final prune (the pre-write freeing pass
-        # never touches a stable ConfigMap); it deletes only the listed UID.
+        # The racing delete is the prune after the writes (the only delete
+        # an apply issues); it deletes only the listed UID.
         after = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
         found, data = labels_of("v2-extra")
         check(f"pruning leaves a {name} object alone",
@@ -1243,39 +1253,60 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, quota[1], "2.0.0", component="quota-app")
     check("the update converged and pruned the previous ConfigMaps",
           len(configmaps()) == 2 + publisher.MAX_CONFIGMAPS, str(configmaps()))
-    # A partial apply leaves its ConfigMaps behind at the quota; the next
-    # bundle frees those unreferenced leftovers before creating its own.
+    # Review 4628: a partial apply (ConfigMaps and quota-app written, the
+    # quota-worker write denied) leaves its ConfigMaps at the quota and moves
+    # quota-app's template off the last fully applied bundle's ConfigMaps. A
+    # further bundle must not delete those (a rollback re-applies them): it
+    # fails at a ConfigMap creation before any Deployment write, and the
+    # rollback creates nothing and converges.
     cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
         {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
-         "metadata": {"name": "test-freeze-quota-app"},
+         "metadata": {"name": "test-freeze-quota-worker"},
          "spec": {"failurePolicy": "Fail",
                   "matchConstraints": {"resourceRules": [{"apiGroups": ["apps"], "apiVersions": ["v1"],
                                                           "operations": ["UPDATE"], "resources": ["deployments"]}]},
-                  "validations": [{"expression": "object.metadata.name != 'quota-app'",
-                                   "message": "test: quota-app Deployment writes are frozen"}]}},
+                  "validations": [{"expression": "object.metadata.name != 'quota-worker'",
+                                   "message": "test: quota-worker Deployment writes are frozen"}]}},
         {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding",
-         "metadata": {"name": "test-freeze-quota-app"},
-         "spec": {"policyName": "test-freeze-quota-app", "validationActions": ["Deny"],
+         "metadata": {"name": "test-freeze-quota-worker"},
+         "spec": {"policyName": "test-freeze-quota-worker", "validationActions": ["Deny"],
                   "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
 
     def quota_frozen():
-        return cluster.admin("annotate", "deployment", "quota-app", "-n", NAMESPACE, "test-probe=1", "--overwrite",
+        return cluster.admin("annotate", "deployment", "quota-worker", "-n", NAMESPACE, "test-probe=1", "--overwrite",
                              "--dry-run=server", ok=False).returncode != 0
 
-    wait("the quota-app Deployment write freeze to take effect", quota_frozen, timeout=60)
+    def quota_app_refs():
+        spec = json.loads(cluster.admin("get", "deployment", "quota-app", "-n", NAMESPACE, "-o", "json").stdout)["spec"]
+        return sorted(ref["configMapRef"]["name"] for ref in spec["template"]["spec"]["containers"][0]["envFrom"])
+
+    converged = [published(quota[1], f"quota-{index}") for index in range(publisher.MAX_CONFIGMAPS)]
+    wait("the quota-worker Deployment write freeze to take effect", quota_frozen, timeout=60)
     result = helper("apply", profiles, quota[2], component="quota-app", version="3.0.0")
-    check("a partially applied update at the limit fails at the Deployment write",
-          result.returncode == 2 and "frozen" in result.stderr, result.stderr[-500:])
-    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-quota-app")
-    wait("the quota-app Deployment write freeze to lift", lambda: not quota_frozen(), timeout=60)
+    check("a partially applied update at the limit updates quota-app, then fails at the quota-worker write",
+          result.returncode == 2 and "frozen" in result.stderr
+          and quota_app_refs() == sorted(published(quota[2], f"quota-{index}") for index in range(publisher.MAX_CONFIGMAPS)),
+          result.stderr[-500:])
     extra = cluster.publisher("create", "configmap", "quota-extra", "-n", NAMESPACE, ok=False)
-    check("the partial apply's leftovers fill the namespace ConfigMap quota",
+    check("the partial apply's ConfigMaps fill the namespace ConfigMap quota",
           len(configmaps()) == 2 + 2 * publisher.MAX_CONFIGMAPS and extra.returncode != 0
           and "exceeded quota" in extra.stderr, f"{configmaps()} {extra.stderr}")
+    template = quota_app_refs()
     result = helper("apply", profiles, quota[3], component="quota-app", version="4.0.0")
+    check("a further update fails at a ConfigMap creation and deletes nothing",
+          result.returncode != 0 and "exceeded quota" in result.stderr
+          and set(converged) <= set(configmaps()) and quota_app_refs() == template, result.stderr[-800:])
+    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-quota-worker")
+    wait("the quota-worker Deployment write freeze to lift", lambda: not quota_frozen(), timeout=60)
+    result = helper("apply", profiles, quota[1], component="quota-app", version="2.0.0")
     leftovers = [published(quota[2], f"quota-{index}") for index in range(publisher.MAX_CONFIGMAPS)]
-    check("the next update frees the unreferenced leftovers first and fits the quota",
+    check("the rollback to the last fully applied bundle fits the full quota and prunes the leftovers",
           result.returncode == 0 and all(f"configmaps/{name}" in result.stderr for name in leftovers), result.stderr[-800:])
+    wait_ready(profiles, quota[1], "2.0.0", component="quota-app")
+    check("the rollback converged on the last fully applied bundle's ConfigMaps",
+          quota_app_refs() == sorted(converged) and len(configmaps()) == 2 + publisher.MAX_CONFIGMAPS, str(configmaps()))
+    result = helper("apply", profiles, quota[3], component="quota-app", version="4.0.0")
+    check("the further update then fits the quota", result.returncode == 0, result.stderr[-500:])
     wait_ready(profiles, quota[3], "4.0.0", component="quota-app")
     check("quota test component retires",
           helper("apply", profiles, retire_config, component="quota-app").returncode == 0)
@@ -1320,7 +1351,7 @@ def scenario(cluster, work, supervisor):
     check("an update omitting a stable ConfigMap fails at the Deployment write",
           result.returncode == 2 and "frozen" in result.stderr, result.stderr[-500:])
     result = helper("apply", profiles, stable[1], component="stable-app", version="2.0.0")
-    check("its retry (through the pre-write freeing pass) fails again without deleting the stable ConfigMap",
+    check("its retry fails again without deleting the stable ConfigMap",
           result.returncode == 2 and "frozen" in result.stderr
           and "configmaps/customer-settings" not in result.stderr, result.stderr[-500:])
     check("the failed applies keep the stable ConfigMap with its prior data",
