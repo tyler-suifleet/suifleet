@@ -1421,6 +1421,13 @@ class Coordinator:
 
     def gh(self, project, args):
         account = project['github_account']
+        # Preserve any live old-runtime pause during activation. New rate-limit
+        # decisions belong solely to the resource-aware shared transport.
+        legacy = self.store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_backoff'").fetchone()
+        if legacy:
+            pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?',(account,)).fetchone()
+            if pause and pause[0] > time.time():
+                raise RuntimeError('Legacy GitHub cooldown preserved until '+str(int(pause[0])))
         auth_env = {key: value for key, value in os.environ.items()
                     if key not in ('GH_TOKEN', 'GITHUB_TOKEN')}
         token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account],
