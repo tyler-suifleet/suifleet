@@ -5504,6 +5504,28 @@
         "All explanatory content remains reachable and existing playback/captions and product guide work."
       ],
       "validation": "Static site build/tests and real browser layout, navigation and media checks."
+    },
+    {
+      "key": "SF-317",
+      "title": "Make website and guide commercially ready",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "scripts/site_pricing.py"
+      ],
+      "resources": [],
+      "description": "Customer-perspective review and commercial copy cleanup across the website and guide.",
+      "evidence": "User identified confusing demo-wallet wording and requested a commercial-ready website.",
+      "acceptance": [
+        "Public website copy is clear and professional without internal verification notes.",
+        "Guide narration and captions match updated instructions; preserve honest security and capture provenance.",
+        "Desktop/mobile navigation, layout and media pass browser checks."
+      ],
+      "validation": "Static site build/regressions; Chromium desktop/mobile media checks; changed-media decode and provenance."
     }
   ]
 }
