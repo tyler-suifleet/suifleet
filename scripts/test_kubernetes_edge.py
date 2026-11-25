@@ -336,7 +336,16 @@ def scenario(cluster, work, supervisor):
     loose = helper("apply", profiles, BUNDLE)
     check("helper refuses a group/other-readable kubeconfig", loose.returncode == 2 and "0600" in loose.stderr, loose.stderr)
     (edge / "kubeconfig").chmod(0o600)
-    check("insecure/loose profile attempts created nothing",
+    # Unusable pacing is rejected with a valid profile, before any cluster call.
+    for value in ("0", "-1", "nan", "inf"):
+        paced = helper("run", profiles, BUNDLE, extra=(f"--interval={value}",))
+        check(f"helper run rejects --interval={value} before applying",
+              paced.returncode == 2 and "--interval" in paced.stderr, paced.stderr)
+    for value in ("-1", "nan", "inf"):
+        bounded = helper("remove", profiles, extra=(f"--timeout={value}",))
+        check(f"helper remove rejects --timeout={value} before deleting",
+              bounded.returncode == 2 and "--timeout" in bounded.stderr, bounded.stderr)
+    check("insecure/loose profile and rejected pacing attempts created nothing",
           cluster.admin("get", "deployments,configmaps", "-n", NAMESPACE, "-l", f"suifleet.io/component={COMPONENT}", "-o", "name").stdout.strip() == "")
 
     # Offline validation before any cluster contact.

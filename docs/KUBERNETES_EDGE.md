@@ -115,7 +115,8 @@ wait. The delete phase before it is not counted in `--timeout`. Each of its
 kubectl calls has a fixed 30-second API request timeout and 60-second process
 limit, with at most 8 attempts per object when it races a concurrent change.
 With `--timeout 0`, `remove` only issues the deletes and reports
-`not removed`.
+`not removed`. A negative, infinite or NaN `--timeout` is rejected (exit 2)
+before the profile is loaded or any cluster call is made.
 
 `remove` exits 0 when one poll observed that no labelled object remains. This
 result describes that moment only. If a reconciler is still running, or
@@ -263,7 +264,9 @@ attestation of the pods is out of scope.
    ```
 
 `run` applies, prunes, then re-applies every interval, so an owned object that
-someone deletes is recreated. It exits non-zero on a conflict, rejection or
+someone deletes is recreated. `--interval` (default 30 seconds) must be finite
+and greater than 0; a zero, negative, infinite or NaN interval is rejected
+(exit 2) before the profile is loaded or any cluster call is made. It exits non-zero on a conflict, rejection or
 cluster error, and the supervisor's restart budget then applies. `ready`
 succeeds only when every object in the bundle exists, is not being deleted, is
 owned by this component and carries *this* bundle's digest, version and
