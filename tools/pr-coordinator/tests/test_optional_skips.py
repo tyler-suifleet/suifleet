@@ -47,6 +47,7 @@ class OptionalSkips(unittest.TestCase):
         for workflow_blob in (
             "9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0",
             "639a9fdfe76247089caf70f2fbf754bb6c3046ad",
+            "f86e2c737f1891f9aba0ad6e86050bae6fe3e84b",
         ):
             for name in c.OPTIONAL_DEPLOYMENT_JOBS:
                 with self.subTest(name=name, workflow_blob=workflow_blob):
@@ -139,3 +140,57 @@ class OptionalSkips(unittest.TestCase):
         self.assertIsNone(c.checks_blocker(self.pr))
         self.pr['statusCheckRollup'].append(dict(__typename='CheckRun',name='security',status='COMPLETED',conclusion='SKIPPED'))
         self.assertIsNotNone(c.checks_blocker(self.pr))
+
+
+    def setup_content(self, name='check'):
+        self.setup_evidence(name)
+        self.run['path'] = c.OPTIONAL_CONTENT_WORKFLOW
+        self.build['name'] = 'scope'
+        self.tree['tree'] = [
+            dict(path=c.OPTIONAL_CONTENT_WORKFLOW, type='blob', sha=c.OPTIONAL_CONTENT_BLOB),
+            dict(path='scripts/content_scope.py', type='blob', sha=c.OPTIONAL_CONTENT_SCOPE_BLOB)]
+
+    def test_content_skips_require_pinned_scope_and_run_provenance(self):
+        for name in c.OPTIONAL_CONTENT_JOBS:
+            self.setup_content(name)
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+            self.annotate()
+            self.assertIsNone(c.checks_blocker(self.pr))
+            self.assertEqual(self.check['conclusion'], 'SKIPPED')
+            self.check['_optional_skip']['scope_blob'] = 'wrong'
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+
+    def test_content_unknown_scope_and_required_security_skips_remain_blocking(self):
+        mutations = [
+            lambda: self.tree['tree'][1].update(sha='changed-scope'),
+            lambda: self.tree['tree'].pop(),
+            lambda: self.tree['tree'][0].update(sha='changed-workflow'),
+            lambda: self.build.update(conclusion='skipped'),
+            lambda: self.build.update(name='build'),
+            lambda: self.run.update(event='workflow_dispatch'),
+            lambda: self.run.update(head_sha='stale'),
+            lambda: self.run['pull_requests'][0]['base'].update(sha='stale'),
+            lambda: self.verified['app'].update(slug='foreign'),
+            lambda: self.jobs.update(total_count=101),
+        ]
+        for mutate in mutations:
+            self.setup_content(); mutate(); self.annotate()
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+        self.setup_content(); self.annotate()
+        self.pr['statusCheckRollup'].append(dict(__typename='CheckRun',name='security',
+            status='COMPLETED',conclusion='SKIPPED'))
+        self.assertIsNotNone(c.checks_blocker(self.pr))
+        self.pr['statusCheckRollup'].pop()
+        self.pr['_testnet_required'] = True
+        self.assertIsNotNone(c.checks_blocker(self.pr))
+
+    def test_current_workflows_and_classifier_match_the_reviewed_pins(self):
+        import hashlib
+        from pathlib import Path
+        root = Path(c.__file__).resolve().parents[2]
+        def blob(name):
+            data = (root/name).read_bytes()
+            return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+        self.assertIn(blob(c.OPTIONAL_DEPLOYMENT_WORKFLOW), c.OPTIONAL_DEPLOYMENT_BLOBS)
+        self.assertEqual(blob(c.OPTIONAL_CONTENT_WORKFLOW), c.OPTIONAL_CONTENT_BLOB)
+        self.assertEqual(blob('scripts/content_scope.py'), c.OPTIONAL_CONTENT_SCOPE_BLOB)
