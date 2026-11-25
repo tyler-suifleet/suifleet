@@ -1052,6 +1052,11 @@ def _number(value):
 
 # ---------------------------------------------------------------- OTLP transport
 
+# OTLP/HTTP: among 4xx/5xx responses only these may be retried
+# (https://opentelemetry.io/docs/specs/otlp/#retryable-response-codes).
+RETRYABLE_STATUSES = frozenset((429, 502, 503, 504))
+
+
 class Transport:
     """POSTs OTLP JSON with bounded exponential backoff per signal."""
 
@@ -1066,7 +1071,8 @@ class Transport:
         return self.clock() >= self.not_before[signal_name]
 
     def post(self, signal_name, payload):
-        """Returns 'ok', 'unconfirmed' or 'rejected' (do not resend) or 'retry'."""
+        """Returns (result, rejected_count): result is 'ok', 'unconfirmed' or
+        'rejected' (never resend this payload) or 'retry' (resend after backoff)."""
         url = self.cfg["metrics_url"] if signal_name == "metrics" else self.cfg["logs_url"]
         body = json.dumps(payload, separators=(",", ":")).encode()
         headers = {**self.cfg["headers"], "Content-Type": "application/json"}
@@ -1113,15 +1119,24 @@ class Transport:
             # "ok", so a refused point or record is never shown as delivered.
             self._record(signal_name, "partial" if rejected else "ok")
             return ("ok", rejected)
-        if status in (400, 413, 422):
-            # Permanent: the collector refused this payload; never resend it.
-            self._success(signal_name)
-            self._record(signal_name, "rejected")
+        if status is None or status in RETRYABLE_STATUSES:
+            # Connection failure or an OTLP/HTTP retryable status: keep the
+            # batch and resend it after backoff.
+            self._failure(signal_name, retry_after)
+            self._record(signal_name, "unreachable" if status is None else "retry")
+            return ("retry", None)
+        if status in (401, 403):
+            # A refused credential will refuse the same batch again: drop it,
+            # but back off so later fresh batches do not hammer the collector.
+            self._failure(signal_name, retry_after)
+            self._record(signal_name, "unauthorized")
             return ("rejected", None)
-        result = "unauthorized" if status in (401, 403) else ("unreachable" if status is None else "retry")
-        self._failure(signal_name, retry_after)
-        self._record(signal_name, result)
-        return ("retry", None)
+        # Every other non-2xx status (400, 404, 413, 415, 500, ...) is permanent
+        # under the OTLP/HTTP retry rules: the collector refused this payload,
+        # so never resend it. Later fresh batches are still sent.
+        self._success(signal_name)
+        self._record(signal_name, "rejected")
+        return ("rejected", None)
 
     def _record(self, signal_name, result):
         with self.exporter.lock:
@@ -1256,7 +1271,11 @@ def export_loop(exporter, transport, stop, wakeup):
             retry = transport.failures["metrics"] and transport.ready("metrics")
             more = export_once(exporter, transport, ("metrics", "logs") if retry else ("logs",))
             continue
-        due = [t for s, t in transport.not_before.items() if transport.failures[s]]
+        # A logs backoff with an empty queue has nothing to resend (a refused
+        # batch is dropped), so only signals with pending work are scheduled.
+        with exporter.lock:
+            pending = ("metrics", "logs") if exporter.log_buffer else ("metrics",)
+        due = [transport.not_before[s] for s in pending if transport.failures[s]]
         timeout = max(0.05, min(due) - transport.clock()) if due else None
         polled = wakeup.wait(timeout)
         if stop.is_set():
@@ -1266,7 +1285,7 @@ def export_loop(exporter, transport, stop, wakeup):
             more = export_once(exporter, transport)
         else:
             # Retry only the signals that are backing off and now due.
-            ready = tuple(s for s in ("metrics", "logs") if transport.failures[s] and transport.ready(s))
+            ready = tuple(s for s in pending if transport.failures[s] and transport.ready(s))
             more = export_once(exporter, transport, ready) if ready else False
 
 

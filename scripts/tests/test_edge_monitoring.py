@@ -949,9 +949,9 @@ class AdapterTests(Base):
         em.export_once(exporter, transport)                       # still backing off: nothing sent
         self.assertEqual(len(collector.received), before)
         now[0] += 3.1
-        collector.responses = [(500, {}, b""), (200, {}, b"{}")]
+        collector.responses = [(502, {}, b""), (200, {}, b"{}")]
         em.export_once(exporter, transport)
-        self.assertEqual(exporter.backoff["metrics"], 4.0)       # second failure doubles
+        self.assertEqual(exporter.backoff["metrics"], 4.0)       # second failure (502) doubles
         self.assertEqual(exporter.backoff["logs"], 0.0)          # logs recovered
         self.assertEqual(len(exporter.log_buffer), 0)
         now[0] += 4.1
@@ -1339,6 +1339,135 @@ class AdapterTests(Base):
         self.assertIsNone(em._retry_after("Fri," + " " * 80 + "31 Dec 9999 23:59:59 GMT", 60, now=wall))
         em.export_once(exporter, transport)                # collector recovers
         self.assertEqual(len(exporter.log_buffer), 0)
+
+    def test_permanent_refusal_drops_batch_and_retryable_status_keeps_it(self):
+        # OTLP/HTTP retry rules: only 429/502/503/504 (and connection failures)
+        # may be retried; every other refusal is final for the submitted batch.
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=1, max_backoff_seconds=4),
+            logs=dict(components=["svc"], max_lines=50, max_buffer=50))
+        now = [0.0]
+        transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
+        lines = []
+        for status in (415, 500, 404, 501, 400, 413, 422):
+            with self.subTest(status=status):
+                line = f"refused {status}"
+                lines.append(line)
+                self.console.logs["svc"] = list(lines)
+                exporter.poll(console)
+                self.assertEqual(len(exporter.log_buffer), 1)
+                before = {k: exporter.log_records[k] for k in ("exported", "rejected")}
+                sent = len(collector.received)
+                collector.responses = [(200, {}, b"{}"), (status, {"Retry-After": "3"}, b"")]
+                more = em.export_once(exporter, transport)
+                self.assertFalse(more)
+                self.assertEqual(len(collector.received), sent + 2)
+                self.assertEqual(len(exporter.log_buffer), 0)               # never requeued
+                self.assertEqual(exporter.log_records["rejected"], before["rejected"] + 1)
+                self.assertEqual(exporter.log_records["exported"], before["exported"])
+                self.assertEqual(exporter.backoff["logs"], 0.0)             # no backoff, no retry
+                self.assertTrue(transport.ready("logs"))
+                em.export_once(exporter, transport)                         # nothing resent
+                self.assertNotIn(line, json.dumps([b for _, _, b, _ in collector.received[sent + 2:]]))
+        self.assertEqual(exporter.otlp_results[("logs", "retry")], 0)
+        self.assertEqual(exporter.otlp_results[("logs", "rejected")], 7)
+
+        # A permanent metrics refusal is not retried either.
+        collector.responses = [(500, {}, b"")]
+        self.assertEqual(transport.post("metrics", exporter.otlp_metrics()), ("rejected", None))
+        self.assertEqual(exporter.backoff["metrics"], 0.0)
+        self.assertEqual(exporter.otlp_results[("metrics", "retry")], 0)
+
+        # Retryable statuses keep the batch and deliver it after backoff.
+        for status in (429, 502, 503, 504):
+            with self.subTest(status=status):
+                line = f"kept {status}"
+                lines.append(line)
+                self.console.logs["svc"] = list(lines)
+                exporter.poll(console)
+                before = {k: exporter.log_records[k] for k in ("exported", "rejected")}
+                collector.responses = [(200, {}, b"{}"), (status, {}, b"")]
+                em.export_once(exporter, transport)
+                self.assertEqual(len(exporter.log_buffer), 1)               # retained
+                self.assertGreater(exporter.backoff["logs"], 0)
+                self.assertEqual(exporter.log_records["rejected"], before["rejected"])
+                now[0] += 10
+                em.export_once(exporter, transport)                         # resent, accepted
+                self.assertEqual(len(exporter.log_buffer), 0)
+                self.assertEqual(exporter.log_records["exported"], before["exported"] + 1)
+                self.assertIn(line, json.dumps(collector.received[-1][2]))
+                self.assertEqual(exporter.backoff["logs"], 0.0)
+        self.assertEqual(exporter.otlp_results[("logs", "retry")], 4)
+
+    def test_unauthorized_drops_batch_backs_off_and_sends_later_fresh_batches(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=1, max_backoff_seconds=4),
+            logs=dict(components=["svc"], max_lines=50, max_buffer=50))
+        now = [0.0]
+        transport = em.Transport(cfg, exporter, clock=lambda: now[0], rng=lambda: 0.5)
+        for status in (401, 403):
+            with self.subTest(status=status):
+                self.console.logs["svc"] = ["first", "second"] if status == 401 else ["first", "second", "third"]
+                exporter.poll(console)
+                before = {k: exporter.log_records[k] for k in ("exported", "rejected")}
+                collector.responses = [(200, {}, b"{}"), (status, {}, b"")]
+                em.export_once(exporter, transport)
+                self.assertEqual(len(exporter.log_buffer), 0)               # refused batch dropped
+                self.assertEqual(exporter.log_records["rejected"], before["rejected"] + (2 if status == 401 else 1))
+                self.assertEqual(exporter.backoff["logs"], 1.0)             # but later sends back off
+                self.assertFalse(transport.ready("logs"))
+                now[0] += 2
+                transport._success("logs")
+        self.assertEqual(exporter.otlp_results[("logs", "unauthorized")], 2)
+        self.assertEqual(exporter.otlp_results[("logs", "retry")], 0)
+        # A later fresh batch is delivered once the credential works again.
+        self.console.logs["svc"] = ["first", "second", "third", "fresh"]
+        exporter.poll(console)
+        em.export_once(exporter, transport)
+        self.assertEqual(exporter.log_records["exported"], 1)
+        self.assertIn("fresh", json.dumps(collector.received[-1][2]))
+
+    def test_export_loop_does_not_spin_after_a_refused_log_batch(self):
+        # After a 401 drops the only queued batch, the logs backoff has nothing
+        # to resend; the worker must wait for the next poll, not busy-loop.
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9"),
+                                           logs=dict(components=["svc"], max_buffer=50))
+        transport = em.Transport(cfg, exporter, rng=lambda: 0.5)
+        stop, wakeup = threading.Event(), threading.Event()
+        posts = []
+
+        def post(signal_name, payload):
+            posts.append(signal_name)
+            if signal_name == "logs":
+                transport._failure("logs", None)
+                transport.not_before["logs"] = 0.0          # backoff already elapsed
+                return ("rejected", None)
+            return ("ok", None)
+        self.console.logs["svc"] = ["one"]
+        exporter.poll(console)
+        wakeup.set()
+        calls = []
+        real = em.export_once
+
+        def counting(*args, **kwargs):
+            calls.append(args[2:] or kwargs)
+            return real(*args, **kwargs)
+        with unittest.mock.patch.object(transport, "post", side_effect=post), \
+                unittest.mock.patch.object(em, "export_once", side_effect=counting):
+            worker = threading.Thread(target=em.export_loop, args=(exporter, transport, stop, wakeup))
+            worker.start()
+            self.wait(lambda: "logs" in posts, seconds=10)
+            time.sleep(0.5)
+            stop.set()
+            wakeup.set()
+            worker.join(10)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(posts, ["metrics", "logs"])
+        self.assertLessEqual(len(calls), 2)                  # no repeated empty retries
 
     def test_otlp_unauthorized_backs_off(self):
         collector = FakeCollector(require="Bearer right")
