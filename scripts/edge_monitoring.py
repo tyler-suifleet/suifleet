@@ -753,10 +753,13 @@ class Transport:
             status, data = None, b""
         if status is not None and 200 <= status < 300:
             rejected = _partial_rejected(data, signal_name)
+            if rejected not in (None, _INVALID) and rejected > _payload_items(payload, signal_name):
+                rejected = _INVALID                # more refused than sent: impossible
             self._success(signal_name)
             if rejected is _INVALID:
-                # Accepted (2xx) but the body could not be inspected: never
-                # resend, and do not report the records as confirmed exported.
+                # Accepted (2xx) but the body could not be inspected or its
+                # count is impossible: never resend, never count it, and do not
+                # report the records as confirmed exported.
                 self._record(signal_name, "invalid_response")
                 return ("unconfirmed", None)
             # A positive partial-success count is recorded as "partial", not
@@ -832,6 +835,16 @@ def _partial_rejected(data, signal_name):
     return value
 
 
+def _payload_items(payload, signal_name):
+    """Number of data points (metrics) or log records (logs) in an OTLP payload."""
+    if signal_name == "metrics":
+        return sum(len((metric.get("sum") or metric.get("gauge") or {}).get("dataPoints", ()))
+                   for resource in payload["resourceMetrics"] for scope in resource["scopeMetrics"]
+                   for metric in scope["metrics"])
+    return sum(len(scope["logRecords"]) for resource in payload["resourceLogs"]
+               for scope in resource["scopeLogs"])
+
+
 def export_once(exporter, transport, signals=("metrics", "logs")):
     """Send current metrics and pending logs to the OTLP endpoint if not backing off."""
     if "metrics" in signals and transport.ready("metrics"):
@@ -853,7 +866,7 @@ def export_once(exporter, transport, signals=("metrics", "logs")):
             for _ in batch:
                 exporter.log_buffer.popleft()
             if result == "ok":
-                refused = min(rejected or 0, len(batch))
+                refused = rejected or 0              # bounded by the batch in Transport.post
                 exporter.log_records["exported"] += len(batch) - refused
                 exporter.log_records["rejected"] += refused
             elif result == "unconfirmed":
