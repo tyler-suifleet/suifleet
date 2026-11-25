@@ -135,6 +135,9 @@ sudo systemctl enable --now suifleet-signer.socket suifleet-enrollment.path
 sudo systemctl start suifleet.service
 ```
 
+If you configured the Yocto firmware helper for the destination deployment,
+restart its trigger with `sudo systemctl start suifleet-firmware.path`.
+
 Enrollment reuses the original signing key and installs new Device and
 DeviceCap IDs after verifying the destination deployment and claim. If it fails,
 the device remains parked. Correct the reported issue and retry with the same

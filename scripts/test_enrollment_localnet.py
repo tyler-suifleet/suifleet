@@ -18,6 +18,9 @@ roles and a PKCS#11 (SoftHSM2) device signer, with the real daemon.
 Needs a disposable localnet (as for the other localnet tests), the daemon
 built with `--features pkcs11`, and softhsm2 + opensc (pkcs11-tool) for the
 PKCS#11 case (make test-enrollment-localnet).
+
+The --migration-only case requires BusyBox and util-linux flock to exercise the
+migration helper with the command set available on a minimal Yocto image.
 """
 import argparse
 import configparser
@@ -26,6 +29,7 @@ import grp
 import json
 import os
 from pathlib import Path
+import pwd
 import shutil
 import socket
 import socketserver
@@ -382,6 +386,21 @@ def check_migration(root, old, manifest, policy, operator, claim, client, transa
     from test_device_migration import CONFIG, KEY, MIGRATE, PENDING, STATE
     from test_device_migration import check_parked, create_legacy_key, legacy_files
 
+    busybox = shutil.which("busybox")
+    flock = shutil.which("flock")
+    assert busybox and flock, "Install BusyBox and util-linux flock for migration testing"
+    tools = root / "migration-bin"
+    tools.mkdir()
+    # Match the Poky BusyBox applets used by the helper. In particular its
+    # defconfig omits install. flock is an explicit recipe runtime dependency.
+    for applet in ("cat", "chmod", "chown", "id", "mkdir", "mktemp", "mv", "stat", "sync", "touch"):
+        (tools / applet).symlink_to(busybox)
+    (tools / "flock").symlink_to(flock)
+    migration_env = {**os.environ, "PATH": str(tools)}
+
+    def migrate(action, **kwargs):
+        return subprocess.run([busybox, "sh", MIGRATE, action], env=migration_env, **kwargs)
+
     address = create_legacy_key(DAEMON)
     key_bytes = KEY.read_bytes()
     package = old["call_package_id"]
@@ -395,9 +414,13 @@ def check_migration(root, old, manifest, policy, operator, claim, client, transa
     old_device = created(registered, "::device_registry::Device")[0]
     old_cap = created(registered, "::device_cap::DeviceCap")[0]
     files = legacy_files(old, old_device, old_cap, address)
-    subprocess.run([MIGRATE, "package-upgrade"], check=True)
+    migrate("package-upgrade", check=True)
     check_parked(files, address, key_bytes)
-    subprocess.run([MIGRATE, "prepare"], check=True)
+    migrate("prepare", check=True)
+    migrate("prepare", check=True)
+    assert stat.S_IMODE(STATE.stat().st_mode) == 0o700
+    assert STATE.stat().st_uid == pwd.getpwnam("suifleet").pw_uid
+    assert STATE.stat().st_gid == grp.getgrnam("suifleet").gr_gid
     archive = Path((PENDING / "archive").read_text().strip())
 
     media = root / "enrollment"
@@ -416,21 +439,21 @@ def check_migration(root, old, manifest, policy, operator, claim, client, transa
     )
     config = CONFIG / "config.toml"
     config.write_text('[device.signer]\nkind = "service"\n')
-    preinstalled = subprocess.run([MIGRATE, "enroll"], capture_output=True, text=True, timeout=30)
+    preinstalled = migrate("enroll", capture_output=True, text=True, timeout=30)
     assert preinstalled.returncode != 0 and "Use first-boot media" in preinstalled.stderr
     assert config.exists() and PENDING.is_dir()
     config.unlink()
 
     deployment = folder / "deployment.json"
     deployment.write_bytes(json.dumps(old).encode())
-    rejected = subprocess.run([MIGRATE, "enroll"], capture_output=True, text=True, timeout=30)
+    rejected = migrate("enroll", capture_output=True, text=True, timeout=30)
     assert rejected.returncode != 0 and PENDING.is_dir() and not (CONFIG / "config.toml").exists()
     assert not (CONFIG / "signer.toml").exists() and not (CONFIG / "deployment.json").exists()
     assert json.loads((folder / "enrollment-status.json").read_text())["enrollment"] == "invalid-enrollment-media-or-config"
     assert (folder / "claim.key").read_bytes() == claim[0].read_bytes()
 
     deployment.write_bytes(trusted)
-    subprocess.run([MIGRATE, "enroll"], check=True, timeout=220)
+    migrate("enroll", check=True, timeout=220)
     assert not PENDING.exists() and not (folder / "claim.key").exists()
     enrolled = configparser.ConfigParser()
     enrolled.read(CONFIG / "config.toml")

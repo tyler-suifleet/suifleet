@@ -98,7 +98,9 @@ case "$1" in
                     fail 'Relocate the mounted SuiFleet state directory before migrating'
                 mv "$state" "$archive/state"
             fi
-            install -d -m 0700 -o suifleet -g suifleet "$state"
+            mkdir -p -m 0700 "$state"
+            chmod 0700 "$state"
+            chown suifleet:suifleet "$state"
             for name in config.toml deployment.json signer.toml first-boot.toml firmware.toml env; do
                 if exists "$config/$name"; then
                     # A power loss may have interrupted the previous prepare.
