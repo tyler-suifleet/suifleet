@@ -167,6 +167,37 @@ test('abort during connection retry backoff is not_sent with the abort reason as
   assert.ok(Date.now() - started < 900, 'abort interrupts the backoff instead of waiting it out');
 });
 
+test('one request deadline covers connect backoff: a late listener never receives the request', async (t) => {
+  const path = join(directory, 'late-deadline.sock');
+  const client = new Client({ socketPath: path, timeoutMs: 30, connectAttempts: 2, connectRetryDelayMs: 150 });
+  let requests = 0;
+  const server = createServer((socket) => socket.once('data', () => { requests++; socket.end(`${JSON.stringify(ok({ sequence: 1 }))}\n`); }));
+  setTimeout(() => server.listen(path), 75);
+  t.after(() => new Promise((resolve) => server.close(() => resolve())));
+  const started = Date.now();
+  await assert.rejects(client.request('stream_append', { topic: 's', payload: { payload: 1 } }),
+    (e) => e instanceof TransportError && e.outcome === 'not_sent' && /timed out after 30 ms/.test(e.message));
+  assert.ok(Date.now() - started < 140, 'backoff is clamped to the request deadline');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(requests, 0, 'a request was dispatched after its deadline');
+});
+
+test('the response wait uses only the time left after connect backoff', async (t) => {
+  const path = join(directory, 'late-silent.sock');
+  const client = new Client({ socketPath: path, timeoutMs: 400, connectAttempts: 3, connectRetryDelayMs: 200 });
+  const received = [];
+  const sockets = [];
+  const server = createServer((socket) => { sockets.push(socket); socket.once('data', (chunk) => { received.push(chunk); }); });
+  setTimeout(() => server.listen(path), 50);
+  t.after(() => new Promise((resolve) => { server.close(() => resolve()); for (const socket of sockets) socket.destroy(); }));
+  const started = Date.now();
+  await assert.rejects(client.restart(),
+    (e) => e instanceof TransportError && e.outcome === 'unknown' && /timed out/.test(e.message));
+  const elapsed = Date.now() - started;
+  assert.equal(received.length, 1);
+  assert.ok(elapsed >= 390 && elapsed < 560, `whole request ended at ${elapsed} ms, not a fresh per-exchange timeout`);
+});
+
 test('publish payloads above 4096 serialized bytes are refused locally', async () => {
   const client = new Client({ socketPath: join(directory, 'none.sock') });
   await assert.rejects(client.publish('t', 'x'.repeat(4095)), RangeError);

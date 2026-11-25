@@ -8,6 +8,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { createConnection } from 'node:net';
+import { performance } from 'node:perf_hooks';
 import {
   DATA_CHUNK_SIZE, DEFAULT_SOCKET, DataPutError, MAX_DATA_SIZE, MAX_FRAME, MAX_PUBLISH_PAYLOAD, ProtocolError, TransportError,
   decodeResponse, encodeRequest, validateDataMetadata,
@@ -21,7 +22,12 @@ export interface ClientOptions {
   socketPath?: string;
   /** Configured component name owned by this process's UID ('' for administrators). */
   component?: string;
-  /** Whole-request timeout. The daemon ends connections after 120 s. Default 120000. */
+  /**
+   * Whole-request deadline, started when `request` is called. It covers every
+   * connection attempt and the backoff between them, so a request is never
+   * first sent after it expires. The daemon ends connections after 120 s.
+   * Default 120000.
+   */
   timeoutMs?: number;
   /**
    * Connection attempts per request (>= 1, default 1). Only failures before any
@@ -128,16 +134,19 @@ export class Client {
    */
   async request<T = unknown>(operation: string, options: RequestOptions = {}): Promise<T> {
     const frame = encodeRequest(operation, options.component ?? this.component, options.topic ?? '', options.payload);
+    const deadline = performance.now() + this.timeoutMs;
     let delay = this.connectRetryDelayMs;
     for (let attempt = 1; ; attempt++) {
       try {
-        return decodeResponse(operation, await this.exchange(operation, frame, options.signal)) as T;
+        return decodeResponse(operation, await this.exchange(operation, frame, deadline, options.signal)) as T;
       } catch (error) {
         const retry = error instanceof TransportError && error.outcome === 'not_sent'
           && error.errno !== undefined && RETRYABLE_CONNECT.has(error.errno) && attempt < this.connectAttempts;
         if (!retry) throw error;
+        // Backoff never extends past the request deadline; the next exchange
+        // then fails as not_sent instead of dispatching late.
         try {
-          await sleep(delay, options.signal);
+          await sleep(Math.max(0, Math.min(delay, deadline - performance.now())), options.signal);
         } catch (reason) {
           // Cancelled during backoff: nothing was sent, so keep the documented classification.
           throw new TransportError(operation, 'not_sent', 'aborted', { cause: reason });
@@ -147,10 +156,15 @@ export class Client {
     }
   }
 
-  private exchange(operation: string, frame: Buffer, signal?: AbortSignal): Promise<Buffer> {
+  private exchange(operation: string, frame: Buffer, deadline: number, signal?: AbortSignal): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(new TransportError(operation, 'not_sent', 'aborted', { cause: signal.reason }));
+        return;
+      }
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) {
+        reject(new TransportError(operation, 'not_sent', `timed out after ${this.timeoutMs} ms`));
         return;
       }
       let sent = false;
@@ -166,7 +180,7 @@ export class Client {
         socket.destroy();
         if (error) reject(error); else resolve(line as Buffer);
       };
-      const timer = setTimeout(() => finish(new TransportError(operation, sent ? 'unknown' : 'not_sent', `timed out after ${this.timeoutMs} ms`)), this.timeoutMs);
+      const timer = setTimeout(() => finish(new TransportError(operation, sent ? 'unknown' : 'not_sent', `timed out after ${this.timeoutMs} ms`)), remaining);
       const abort = () => finish(new TransportError(operation, sent ? 'unknown' : 'not_sent', 'aborted', { cause: signal?.reason }));
       signal?.addEventListener('abort', abort, { once: true });
       socket.once('connect', () => {
