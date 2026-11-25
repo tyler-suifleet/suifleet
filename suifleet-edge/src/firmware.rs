@@ -285,6 +285,7 @@ pub async fn run_helper(config: &FirmwareHelperConfig) -> anyhow::Result<usize> 
         fchown(&file, uid, gid)?;
         file.sync_all()?;
         results.rename(&temporary, &format!("{stem}.json"))?;
+        results.sync()?;
         tracing::info!(id = %stem, ok = outcome.ok, interrupted = outcome.interrupted,
             message = %outcome.message, "firmware request processed");
         Ok(())
@@ -293,14 +294,17 @@ pub async fn run_helper(config: &FirmwareHelperConfig) -> anyhow::Result<usize> 
     // A claim nobody holds was left by a helper that died mid-update.
     for name in names.iter().filter(|name| name.ends_with(".claimed")) {
         let stem = name.trim_end_matches(".claimed");
-        let abandoned = match requests.open_regular(name) {
-            Ok(file) => try_lock(&file, libc::LOCK_EX),
-            Err(_) => true,
+        let _claim_lock = match requests.open_regular(name) {
+            Ok(file) if !try_lock(&file, libc::LOCK_EX) => continue,
+            Ok(file) => Some(file),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => None,
         };
-        if !abandoned {
-            continue; // Another helper instance is still applying it.
-        }
-        if valid_id(stem) {
+        // A helper can stop after publishing its result but before removing
+        // the claim. Preserve the command's published result in that window.
+        if valid_id(stem) && results.open_regular(&format!("{stem}.json")).is_ok() {
+            results.sync()?;
+        } else if valid_id(stem) {
             respond(
                 stem,
                 &Outcome {
@@ -332,10 +336,16 @@ pub async fn run_helper(config: &FirmwareHelperConfig) -> anyhow::Result<usize> 
             Err(e) => Err(anyhow::anyhow!("request rejected: {e}")),
         };
         let (result, _claim_lock) = match request {
-            Ok(mut file) => (
-                process(config, &requests, &stem, &mut file, &staged).await,
-                Some(file),
-            ),
+            Ok(mut file) => {
+                // Persist the rename before launching any installer. A reboot
+                // must not restore this request to the pending queue.
+                requests.sync()?;
+                spool.sync()?;
+                (
+                    process(config, &requests, &stem, &mut file, &staged).await,
+                    Some(file),
+                )
+            }
             Err(error) => (Err(error), None),
         };
         let outcome = Outcome {
@@ -526,6 +536,13 @@ impl Dir {
         }
         Ok(())
     }
+    fn sync(&self) -> std::io::Result<()> {
+        if unsafe { libc::fsync(self.raw()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
         let (from, to) = (Self::name(from)?, Self::name(to)?);
         if unsafe { libc::renameat(self.raw(), from.as_ptr(), self.raw(), to.as_ptr()) } != 0 {

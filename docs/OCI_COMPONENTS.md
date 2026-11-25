@@ -1,4 +1,4 @@
-# OCI container components (SF-036)
+# OCI container components (SF-036 and SF-300)
 
 The Linux supervisor selects one local engine per daemon state root. Set
 `SUIFLEET_OCI_ENGINE` in the daemon service environment. The packaged service
@@ -92,14 +92,92 @@ automatic emulation or architecture fallback. The
 engine's cached image platform and repository digest are checked before use.
 Images declaring implicit `VOLUME`s fail. Choose images compatible with a non-root
 numeric UID[:GID], read-only root filesystem, all capabilities dropped and
-`no-new-privileges`. Host paths, sockets, devices, port publishing, privileged
-mode and arbitrary engine flags are unavailable. `network` is explicitly `none`
-or an engine-supported `bridge` (which permits outbound traffic). Host networking is rejected.
-The only optional application write space is a non-executable, nodev/nosuid `/tmp`
-tmpfs. Container configuration/environment and the device's configuration files,
-keys and registry credentials are never mounted into containers. This initial
-adapter does not expose component IPC, persistent data volumes or secrets inside
-the container; use an application-specific authenticated service for those needs.
+`no-new-privileges`. The descriptor cannot specify host paths, port publishing,
+privileged mode or arbitrary engine flags. `network` is explicitly `none`
+or an engine-supported `bridge` (which permits outbound traffic); host networking is rejected.
+The descriptor can request a non-executable, nodev/nosuid `/tmp` tmpfs for writes.
+The device's configuration files, signing keys and registry credentials stay
+outside the container.
+
+## Device-local grants for descriptor version 2
+
+Version 2 adds three optional fields to the same authenticated descriptor.
+Persistence, device and IPC grants require Docker. Both Podman modes reject
+requests for these grants before contacting the engine.
+Set `version` to 2 and `user` to the locally granted UID:GID. This example
+requests all three grants for UID and GID 31001.
+
+```json
+{
+  "persistence": "retain",
+  "devices": ["ttyUSB0"],
+  "ipc": true
+}
+```
+
+Each request needs a matching entry in the device's local configuration. Use a
+dedicated numeric UID and the same GID for the component. Reserve both IDs for
+the component on the host, including across native applications and other local
+services. Docker must run in its normal Linux rootful mode with user namespace
+remapping disabled so that kernel ownership and peer UIDs agree with the grant.
+
+```toml
+[components.oci_grants.sensor]
+uid = 31001
+persistence = true
+devices = ["ttyUSB0"]
+ipc = true
+
+[ipc]
+socket = "/run/suifleet/ipc.sock"
+
+[ipc.components.sensor]
+uid = 31001
+operations = ["health", "publish"]
+publish = ["sensor/readings"]
+```
+
+- **Data.** Under the configured daemon state directory, provision `oci-data`
+  owned by the daemon and mode 0700. Provision `oci-data/sensor` as a directory
+  owned by 31001:31001 and mode 0700. The adapter binds that directory at
+  `/var/lib/suifleet-data` without nested mounts. The state directory and socket
+  must be visible at the same absolute paths to the daemon and Docker, under
+  trusted host directories. Data survives container replacement, restart and
+  retirement. The operator owns backup, disk quotas, format migrations and
+  eventual deletion. Use the same name and IDs only when
+  the new version is authorized to read retained data. A failed update can
+  already have changed the data. Image rollback does not roll back application
+  data. To delete it, first retire or stop the app and confirm Docker cleanup.
+- **Devices.** The grant accepts exact Linux `ttyUSB0`–`ttyUSB255` or
+  `ttyACM0`–`ttyACM255` character devices. It verifies the expected kernel
+  major/minor and uses fixed paths like `/dev/suifleet-ttyUSB0` in the
+  container. Set the host node's owner, group and mode for the component UID or
+  GID so Docker can preserve those permissions. Use an operator-managed udev rule tied to the expected
+  hardware and keep node assignments stable. The daemon must see the exact
+  trusted node even with its private `/dev`. For the shipped systemd unit,
+  provision a local service drop-in with `BindReadOnlyPaths=/dev/ttyUSB0`
+  for the specific node. The Docker engine must see the same node on the host.
+  Restart the service after replacing a node mounted in its private `/dev`
+  so that the daemon validates the current host node. Each configured node
+  belongs to one component. Block devices, arbitrary device paths and device-node
+  creation permissions are unavailable.
+- **IPC.** The adapter binds only the configured daemon socket at
+  `/run/suifleet-ipc.sock`, read-only. The server uses the kernel's
+  `SO_PEERCRED` UID and the existing component ACL on every request. Use the
+  component's actual name and follow [the local IPC protocol](COMPONENT_IPC.md).
+  Keep startup and readiness independent of request completion. The daemon
+  serializes IPC dispatch with bootstrap and deployment, so applications should
+  retry requests after startup or while another deployment is in progress.
+  The container can connect to the socket with its network disabled. It cannot
+  select a different principal by changing a request field.
+
+The daemon checks grant requests during deployment preparation and again before
+every start, including recovery. A rejected request leaves the running version
+in place during preparation. Grant edits apply after a daemon restart, which
+also reconciles leftover containers. Version 1 and version 2 descriptors with
+no requests still run without these device-local grants. These facilities
+apply to application components. Platform scripts retain responsibility for
+firmware installation, boot selection, reboot and firmware rollback.
 
 Memory is 6 MiB–64 GiB with swap limited to the same combined total, CPUs are
 1–64, PID count is 1–4096, and tmpfs cannot exceed the memory limit (zero disables
@@ -145,8 +223,8 @@ always disabled. Descriptor readiness is an argv command executed as the contain
 user; without one, the container must survive the configured startup interval.
 A failed replacement restores the previous descriptor/image and confirms it only
 after readiness. Shutdown uses the container's configured stop signal and the
-supervisor stop timeout, then force removal. Writable container state is ephemeral;
-rollback does not restore external application state or firmware/boot health.
+supervisor stop timeout, then force removal. Writable container state outside an explicitly retained data mount is ephemeral.
+Rollback confirms application readiness only.
 
 Before any container create, a durable marker records engine use. Containers have
 state-root and component labels and deterministic version names. Start reconciles
@@ -170,9 +248,12 @@ SF_OCI_TEST_IMAGE=docker.io/library/alpine@sha256:294b683cb724975bec92580e1e6856
 Repeat the host command with `SUIFLEET_OCI_ENGINE=podman-rootful` and
 `SUIFLEET_OCI_ENGINE=podman-rootless` for the two local Podman profiles. Pre-cache
 the same digest in each selected store. The Podman registry negative tests an
-untrusted local endpoint, while the plain HTTP auth forwarding fixture runs on
-Docker. The engine test covers actual create/start, readiness, non-root/capability and
-filesystem restrictions, engine resource settings, crash/restart, a local HTTP
+untrusted local endpoint. The plain HTTP auth forwarding fixture runs on Docker.
+The Docker grant test covers retained data across replacement, restart and
+retirement, real UID-based IPC authorization, a virtual character-device grant,
+and sibling isolation. The engine lifecycle test covers actual create/start,
+readiness, non-root/capability and filesystem restrictions, engine resource
+settings, crash/restart, a local HTTP
 401 registry, missing auth profile, failed-readiness replacement rollback, clean
 shutdown, orphaned engine-container cleanup after a killed client, and cache-only bootstrap. It uses no production credentials, public Sui
 network, physical device or firmware updater. The script cleans its own labeled

@@ -5464,6 +5464,88 @@
         "Responsive browser navigation, playback/captions/retry, site tests/build/links pass; record comparison screenshots."
       ],
       "validation": "Run scoped regression tests and real browser checks at320/390px and desktop. Preserve existing review/CI and deferred human/Pi/mainnet acceptance."
+    },
+    {
+      "key": "SF-314",
+      "title": "Decouple review dispatch, CI recovery and integration scheduling",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Independent scheduling lanes prevent slow CI recovery and integration from delaying source reviews and feedback handoffs.",
+      "evidence": "Four integration candidates occupy capacity while sequential scans delay otherwise eligible source and final reviews.",
+      "acceptance": [
+        "Independent source, completion, CI recovery and integration scheduling; one main publisher and existing claims/security gates retained.",
+        "Meaningful offline concurrency and regression tests; install verified committed-main runtime and verify lane activity."
+      ],
+      "validation": "Focused scheduling/concurrency and coordinator regression tests; no unrelated application builds."
+    },
+    {
+      "key": "SF-315",
+      "title": "Fit How it works into a single desktop and mobile viewport",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site"
+      ],
+      "resources": [],
+      "description": "Viewport-sized How it works with accessible topic/text navigation and the existing overview video.",
+      "evidence": "User reports How it works requires page scrolling while the guide fits within the viewport.",
+      "acceptance": [
+        "No document or text overflow across desktop, narrow phone and short landscape viewports.",
+        "All explanatory content remains reachable and existing playback/captions and product guide work."
+      ],
+      "validation": "Static site build/tests and real browser layout, navigation and media checks."
+    },
+    {
+      "key": "SF-316",
+      "title": "Collect exited PR workers across coordinator lanes",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Use runnable PID/start identities when a completion lane observes workers launched by another lane, and reap exited launch children.",
+      "evidence": "Six worker wrappers with durable exits were zombies yet remained running in the review ledger, delaying source reviews, candidate review and repair.",
+      "acceptance": [
+        "Collect durable review and repair exits across lanes without treating zombies as live.",
+        "Retain same-session helper and ownership fences, and test the cross-lane regression."
+      ],
+      "validation": "Focused offline coordinator regressions and diff check. Install only through reviewed merged-main activation."
+    },
+    {
+      "key": "SF-318",
+      "title": "Reduce GitHub quota waste and isolate rate-limit recovery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Reduce shared GitHub discovery churn and isolate primary resource exhaustion across the ticket engine and coordinator.",
+      "evidence": "Routine writes evict all discovery metadata and cooldowns block unrelated API resources, stalling ownership and review work.",
+      "acceptance": [
+        "Keep stable Project metadata cached across routine updates while preserving fresh authority checks.",
+        "Isolate primary resource exhaustion, honor shared secondary pauses and coalesce discovery across processes.",
+        "Test offline and install verified merged runtimes with recorded provenance."
+      ],
+      "validation": "Shared cache/transport regressions, coordinator rate handling tests and installed runtime verification."
     }
   ]
 }

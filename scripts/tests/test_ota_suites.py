@@ -98,10 +98,12 @@ class RunnerTests(unittest.TestCase):
                     except ProcessLookupError:pass
 
     def test_manifest_retains_every_ota_mode(self):
-        self.assertEqual(len(runner.SUITES),29)
-        self.assertEqual(len({s[0] for s in runner.SUITES}),29)
+        self.assertEqual(len(runner.SUITES), 31)
+        self.assertEqual(len({s[0] for s in runner.SUITES}), 31)
         ota = [s[2:] for s in runner.SUITES if s[1]=='test_ota.py']
         self.assertEqual(set(ota),{(),('--poll-reads',),('--platform-installer',),('--firmware-helper',)})
+        firmware = {s[2:] for s in runner.SUITES if s[1] == 'test_firmware_restart.py'}
+        self.assertEqual(firmware, {(), ('--installer', 'swupdate'), ('--installer', 'rauc')})
         fleet = [s for s in runner.SUITES if s[1]=='test_fleet_data_ota.py']
         self.assertEqual(len(fleet),5)
         self.assertTrue(any('--stream-retention' in s and '--quilt' in s for s in fleet))

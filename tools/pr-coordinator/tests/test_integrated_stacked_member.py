@@ -123,7 +123,7 @@ class IntegratedStackedMemberTests(unittest.TestCase):
                                                   '-p', f.base, '-m', 'unintegrated')
                 else:
                     def git(project, *args):
-                        if args == ('rev-parse', 'FETCH_HEAD'): return f.heads[1]
+                        if args[0] == 'rev-parse' and args[1].startswith('refs/pr-coordinator/reconcile/'): return f.heads[1]
                         return original(project, *args)
                     f.controller.git = git
                 with self.assertRaises((RuntimeError, subprocess.CalledProcessError)):

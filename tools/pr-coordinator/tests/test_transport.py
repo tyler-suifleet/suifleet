@@ -66,7 +66,7 @@ class ScanIsolation(unittest.TestCase):
             for n in (1,2):
                 engine.store.db.execute("INSERT INTO jobs(project,pr,family,kind,head,feedback,status,directory,pid,started,created) VALUES('test',?,'Claude','fix','head','feedback','running',?,12,'start',0)",(n,d))
             owner={'branch':'work','status':'in_progress','key':'T1','token':'private'}
-            with patch.object(c,'process_identity',return_value='start'),patch.object(engine,'pr',side_effect=[RuntimeError('transport'),{'headRefName':'work'}]),patch.object(engine,'ticket') as ticket,patch.object(engine,'publish_results'):
+            with patch.object(c,'runnable_identity',return_value='start'),patch.object(engine,'pr',side_effect=[RuntimeError('transport'),{'headRefName':'work'}]),patch.object(engine,'ticket') as ticket,patch.object(engine,'publish_results'):
                 engine.collect({'id':'test'},[owner])
                 ticket.assert_called_once()
             self.assertEqual(engine.store.db.execute("SELECT count(*) FROM jobs WHERE status='running'").fetchone()[0],2)
