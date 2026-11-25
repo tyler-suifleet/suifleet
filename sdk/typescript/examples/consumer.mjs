@@ -20,7 +20,7 @@ const signal = AbortSignal.timeout(Number(process.env.CONSUMER_TIMEOUT_MS ?? 60_
 
 await client.subscribe(filter, 1);
 const received = [];
-for await (const delivery of client.messages(filter, { pollIntervalMs: 200, signal })) {
+for await (const delivery of client.messages(filter, { qos: 1, pollIntervalMs: 200, signal })) {
   received.push(delivery.message);
   await delivery.ack(); // acknowledge only after processing
   if (received.length >= count) break;

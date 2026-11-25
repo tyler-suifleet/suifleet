@@ -38,6 +38,7 @@ async function serve(handle, path = join(directory, `s${counter++}.sock`)) {
   return { path, requests, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 const ok = (data) => ({ version: 1, ok: true, data });
+const fail = (error) => ({ version: 1, ok: false, error });
 
 test('request frame is the v1 wire object', () => {
   const frame = encodeRequest('publish', 'svc', 'svc/events', { t: 1 });
@@ -341,7 +342,7 @@ test('messages() yields durable messages and acks them by id', async () => {
   const client = new Client({ socketPath: server.path, component: 'sub' });
   const controller = new AbortController();
   const seen = [];
-  for await (const delivery of client.messages('a/#', { pollIntervalMs: 10, signal: controller.signal })) {
+  for await (const delivery of client.messages('a/#', { qos: 1, pollIntervalMs: 10, signal: controller.signal })) {
     seen.push(delivery.message.id);
     assert.equal(await delivery.ack(), true);
     if (seen.length === 1) setTimeout(() => queue.push({ id: 5, topic: 'a/c', sender: 'p', payload: 2, published_ms: 2 }), 30);
@@ -351,11 +352,58 @@ test('messages() yields durable messages and acks them by id', async () => {
   await server.close();
 });
 
+test('messages() QoS 0: the id-bearing daemon shape is not durable and ack sends nothing', async () => {
+  // The daemon returns the same {id, topic, sender, payload, published_ms} for QoS 0 and QoS 1.
+  // A QoS 0 reader without the ack operation would get request_failed if the SDK sent one.
+  const queue = [{ id: 7, topic: 'a/b', sender: 'p', payload: 1, published_ms: 1 }, { id: 8, topic: 'a/c', sender: 'p', payload: 2, published_ms: 2 }];
+  const server = await serve((r) => r.operation === 'receive' ? ok(queue.shift() ?? null) : fail('request_failed'));
+  const client = new Client({ socketPath: server.path, component: 'sub' });
+  const controller = new AbortController();
+  const seen = [];
+  for await (const delivery of client.messages('a/#', { qos: 0, pollIntervalMs: 10, signal: controller.signal })) {
+    assert.equal(delivery.durable, false);
+    assert.equal(await delivery.ack(), true);
+    seen.push(delivery.message.id);
+    if (seen.length === 2) controller.abort();
+  }
+  assert.deepEqual(seen, [7, 8]);
+  assert.deepEqual(server.requests.map((r) => r.operation), ['receive', 'receive']);
+  await server.close();
+});
+
+test('messages() QoS 1 acks subscription messages but never a legacy inbox message', async () => {
+  const queue = [{ sender: 'legacy', payload: 0 }, { id: 9, topic: 'a/b', sender: 'p', payload: 1, published_ms: 1 }];
+  const server = await serve((r) => r.operation === 'receive' ? ok(queue[0] ?? null)
+    : r.operation === 'ack' ? ok({ acknowledged: queue[0]?.id === r.payload && Boolean(queue.shift()) }) : fail('request_failed'));
+  const client = new Client({ socketPath: server.path, component: 'sub' });
+  const controller = new AbortController();
+  const seen = [];
+  for await (const delivery of client.messages('a/#', { qos: 1, pollIntervalMs: 10, signal: controller.signal })) {
+    seen.push([delivery.durable, delivery.message.id ?? null]);
+    if (!delivery.durable) queue.shift(); // the daemon removed the volatile message on read
+    assert.equal(await delivery.ack(), true);
+    if (seen.length === 2) controller.abort();
+  }
+  assert.deepEqual(seen, [[false, null], [true, 9]]);
+  assert.deepEqual(server.requests.map((r) => [r.operation, r.payload]), [['receive', null], ['receive', null], ['ack', 9]]);
+  await server.close();
+});
+
+test('messages() refuses a missing or invalid qos before any receive', async () => {
+  const server = await serve(() => ok(null));
+  const client = new Client({ socketPath: server.path, component: 'sub' });
+  for (const options of [undefined, {}, { qos: null }, { qos: 2 }, { qos: '1' }, { qos: true }]) {
+    await assert.rejects(client.messages('a/#', options).next(), RangeError, JSON.stringify(options));
+  }
+  assert.equal(server.requests.length, 0);
+  await server.close();
+});
+
 test('messages() abort of a sent receive throws unknown; idle or unsent abort ends cleanly', async () => {
   // In flight: the daemon has the receive (and may have popped a message) but has not replied.
   const silent = await serve(() => undefined);
   const inFlight = new AbortController();
-  const iterator = new Client({ socketPath: silent.path, component: 'sub' }).messages('a/#', { signal: inFlight.signal });
+  const iterator = new Client({ socketPath: silent.path, component: 'sub' }).messages('a/#', { qos: 1, signal: inFlight.signal });
   const next = iterator.next();
   while (silent.requests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
   inFlight.abort();
@@ -366,7 +414,7 @@ test('messages() abort of a sent receive throws unknown; idle or unsent abort en
   // Idle: the queue is empty and the iterator is sleeping between polls.
   const empty = await serve(() => ok(null));
   const idle = new AbortController();
-  const idleNext = new Client({ socketPath: empty.path, component: 'sub' }).messages('a/#', { pollIntervalMs: 10_000, signal: idle.signal }).next();
+  const idleNext = new Client({ socketPath: empty.path, component: 'sub' }).messages('a/#', { qos: 1, pollIntervalMs: 10_000, signal: idle.signal }).next();
   while (empty.requests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
   await new Promise((resolve) => setTimeout(resolve, 20));
   idle.abort();
@@ -378,14 +426,14 @@ test('messages() abort of a sent receive throws unknown; idle or unsent abort en
   // Not sent: no daemon socket, so every attempt fails before a byte is written.
   const unsent = new AbortController();
   const unsentNext = new Client({ socketPath: join(directory, 'absent.sock') })
-    .messages('a/#', { pollIntervalMs: 10, maxReconnectDelayMs: 20, signal: unsent.signal }).next();
+    .messages('a/#', { qos: 1, pollIntervalMs: 10, maxReconnectDelayMs: 20, signal: unsent.signal }).next();
   setTimeout(() => unsent.abort(), 50);
   assert.deepEqual(await unsentNext, { value: undefined, done: true });
 
   // Already aborted: no request is made at all.
   const before = new AbortController();
   before.abort();
-  assert.deepEqual(await new Client({ socketPath: join(directory, 'absent.sock') }).messages('a/#', { signal: before.signal }).next(),
+  assert.deepEqual(await new Client({ socketPath: join(directory, 'absent.sock') }).messages('a/#', { qos: 1, signal: before.signal }).next(),
     { value: undefined, done: true });
 });
 
@@ -679,7 +727,7 @@ test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node
     for (const option of ['pollIntervalMs', 'maxReconnectDelayMs']) {
       for (const value of [MAX_TIMER_DELAY_MS + 1, Infinity, -Infinity, NaN, -1, '10', null]) {
         const controller = new AbortController();
-        await assert.rejects(client.messages('a/#', { [option]: value, signal: controller.signal }).next(), RangeError, `${option}=${value}`);
+        await assert.rejects(client.messages('a/#', { qos: 1, [option]: value, signal: controller.signal }).next(), RangeError, `${option}=${value}`);
         controller.abort();
       }
     }
@@ -687,7 +735,7 @@ test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node
 
     // The largest honored poll interval is kept: one receive, then an idle wait until abort.
     const idle = new AbortController();
-    const idleNext = client.messages('a/#', { pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: MAX_TIMER_DELAY_MS, signal: idle.signal }).next();
+    const idleNext = client.messages('a/#', { qos: 1, pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: MAX_TIMER_DELAY_MS, signal: idle.signal }).next();
     while (empty.requests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(empty.requests.length, 1);
@@ -701,7 +749,7 @@ test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node
     const original = absent.request.bind(absent);
     absent.request = (...args) => { attempts++; return original(...args); };
     const unsent = new AbortController();
-    const unsentNext = absent.messages('a/#', { pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: MAX_TIMER_DELAY_MS, signal: unsent.signal }).next();
+    const unsentNext = absent.messages('a/#', { qos: 1, pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: MAX_TIMER_DELAY_MS, signal: unsent.signal }).next();
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(attempts, 1);
     unsent.abort();
@@ -722,7 +770,7 @@ test('messages() reconnects within maxReconnectDelayMs even when pollIntervalMs 
   const controller = new AbortController();
   const guard = setTimeout(() => controller.abort(), 2000);
   const iterator = new Client({ socketPath: path, component: 'sub' })
-    .messages('a/#', { pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: 10, signal: controller.signal });
+    .messages('a/#', { qos: 1, pollIntervalMs: MAX_TIMER_DELAY_MS, maxReconnectDelayMs: 10, signal: controller.signal });
   try {
     // First failure: no listener yet; it appears 40 ms later.
     let pending = iterator.next();

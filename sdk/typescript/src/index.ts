@@ -61,11 +61,46 @@ export interface PublishResult { delivered: number; durable: number; volatile: n
 
 /** Message from a bounded, volatile SF-027 inbox (no id, no ack). */
 export interface InboxMessage { sender: string; payload: JsonValue }
-/** Message from a durable SF-032 subscription. QoS 1 messages wait for `ack`. */
-export interface DurableMessage { id: number; topic: string; sender: string; payload: JsonValue; published_ms: number }
-export type ReceivedMessage = InboxMessage | DurableMessage;
-export function isDurable(message: ReceivedMessage): message is DurableMessage {
-  return typeof (message as DurableMessage).id === 'number';
+/**
+ * Message from an SF-032 subscription. The daemon uses this same shape, with
+ * an `id`, for QoS 0 and QoS 1: an `id` does not mean the message is durable or
+ * needs `ack`. Only the subscription's QoS decides that.
+ */
+export interface SubscriptionMessage { id: number; topic: string; sender: string; payload: JsonValue; published_ms: number }
+export type ReceivedMessage = InboxMessage | SubscriptionMessage;
+/** Wire shape only (has an `id`); says nothing about QoS or durability. */
+export function isSubscriptionMessage(message: ReceivedMessage): message is SubscriptionMessage {
+  return typeof (message as SubscriptionMessage).id === 'number';
+}
+
+/** One value from `messages()`. */
+export interface Delivery {
+  message: ReceivedMessage;
+  /**
+   * True only for a subscription message read from a QoS 1 iterator: it stays
+   * queued (and is delivered again) until `ack`. QoS 0 and volatile inbox
+   * messages were already removed by the read.
+   */
+  durable: boolean;
+  /**
+   * Acknowledge a durable delivery with an IPC `ack` and return the daemon's
+   * `acknowledged`. For a non-durable delivery nothing is sent and it returns
+   * true, so a QoS 0 reader needs no `ack` permission.
+   */
+  ack: () => Promise<boolean>;
+}
+
+export interface MessagesOptions {
+  /**
+   * QoS of the subscription named by `filter` (required): the value passed to
+   * `subscribe`. 1 acknowledges each subscription message through IPC; 0 never
+   * sends `ack`. For a legacy volatile inbox topic pass 0. Anything else
+   * rejects the first `next()` with RangeError before any `receive`.
+   */
+  qos: 0 | 1;
+  pollIntervalMs?: number;
+  maxReconnectDelayMs?: number;
+  signal?: AbortSignal;
 }
 
 export type StrategyOnFull = 'RejectNewData' | 'OverwriteOldestData';
@@ -267,9 +302,11 @@ export class Client {
   }
 
   /**
-   * Durable subscription iterator. For QoS 1, call `ack` (or `delivery.ack()`)
-   * before pulling the next value; otherwise the same message is delivered
-   * again (at-least-once). Polls `receive` while the queue is empty. Failures
+   * Subscription iterator. `options.qos` must be the subscription's QoS: the
+   * daemon's message shape is the same for both, so the SDK cannot infer it.
+   * For QoS 1, call `delivery.ack()` before pulling the next value; otherwise
+   * the same message is delivered again (at-least-once). For QoS 0 the read
+   * already removed the message and `delivery.ack()` sends nothing. Polls `receive` while the queue is empty. Failures
    * that sent no byte (daemon restarting) are retried until `signal` aborts;
    * any other failure ends the iteration with that error. Aborting while idle
    * or before a request is sent ends the iteration normally; aborting a
@@ -284,8 +321,12 @@ export class Client {
    * `maxReconnectDelayMs`, so the idle poll interval never exceeds the
    * reconnect ceiling.
    */
-  async *messages(filter: string, options: { pollIntervalMs?: number; maxReconnectDelayMs?: number; signal?: AbortSignal } = {}):
-    AsyncGenerator<{ message: ReceivedMessage; ack: () => Promise<boolean> }, void, undefined> {
+  async *messages(filter: string, options: MessagesOptions): AsyncGenerator<Delivery, void, undefined> {
+    // Checked at runtime too: plain JavaScript callers can omit it, and a wrong
+    // guess either sends an ack a QoS 0 reader may not be allowed (request_failed
+    // after the read already consumed the message) or never acks QoS 1.
+    const qos = (options as Partial<MessagesOptions> | undefined)?.qos;
+    if (qos !== 0 && qos !== 1) throw new RangeError('messages() needs options.qos: 0 or 1, the subscription\'s QoS');
     const interval = options.pollIntervalMs === undefined ? 500 : options.pollIntervalMs;
     const maxDelay = options.maxReconnectDelayMs === undefined ? 5000 : options.maxReconnectDelayMs;
     // Node fires larger or non-finite timers after 1 ms, which would hammer the daemon.
@@ -321,9 +362,11 @@ export class Client {
         continue;
       }
       const received = message;
+      const durable = qos === 1 && isSubscriptionMessage(received);
       yield {
         message: received,
-        ack: async () => isDurable(received) ? (await this.ack(filter, received.id)).acknowledged : true,
+        durable,
+        ack: async () => durable ? (await this.ack(filter, (received as SubscriptionMessage).id)).acknowledged : true,
       };
     }
   }

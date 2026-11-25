@@ -23,7 +23,7 @@ const deltaTopic = `$aws/things/${thing}/shadow/name/${name}/update/delta`;
 
 await client.subscribe(deltaTopic, 1);
 const applied = [];
-for await (const delivery of client.messages(deltaTopic, { pollIntervalMs: 200, signal })) {
+for await (const delivery of client.messages(deltaTopic, { qos: 1, pollIntervalMs: 200, signal })) {
   // Notifications can be truncated or stale: always read the current document.
   const document = await client.shadowGet(name);
   const delta = document.state.delta;

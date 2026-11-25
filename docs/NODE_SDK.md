@@ -69,7 +69,7 @@ integer.
 | Generic | `request(operation, {component, topic, payload, signal})` |
 | Configuration and health | `configuration()` (`config`; `null` before the component has a committed configuration), `health(state)` |
 | Management | `status()`, `start()`, `stop()`, `restart()`, `logs()`; administrators: `install(id)`, `list()` |
-| Volatile and durable pub/sub ([MESSAGING.md](MESSAGING.md)) | `publish(topic, payload)`, `receive(topic)`, `subscribe(filter, qos)`, `unsubscribe(filter)`, `ack(filter, id)`, `messages(filter, options)` async iterator; administrators: `messaging()` |
+| Volatile and durable pub/sub ([MESSAGING.md](MESSAGING.md)) | `publish(topic, payload)`, `receive(topic)`, `subscribe(filter, qos)`, `unsubscribe(filter)`, `ack(filter, id)`, `messages(filter, { qos })` async iterator; administrators: `messaging()` |
 | Durable streams ([STREAMS.md](STREAMS.md)) | `streamCreate`, `streamAppend`, `streamRead`, `streamDescribe`, `streamDelete`, `streamList`; trusted exporters: `streamExportAck`, `streamExportStatus` |
 | Shadows ([SHADOWS.md](SHADOWS.md)) | `shadowGet`, `shadowUpdate(name, state, {version, clientToken})`, `shadowDelete`, `shadowList`; administrators: `shadows()` |
 | Opaque data ([OPAQUE_DATA.md](OPAQUE_DATA.md)) | `putData(stream, key, bytes, options)` — same chunk geometry and descriptor as the Python SDK. `options.metadata` is a string-to-string map (`DataMetadata`), as the daemon requires: at most 16 entries, keys of 1–64 UTF-8 bytes, values of at most 256 UTF-8 bytes, at most 6144 serialized bytes. `validateDataMetadata` checks it; the CLI's `--metadata` takes the same JSON object |
@@ -99,11 +99,21 @@ no session recovery: the next request reconnects. Durable subscriptions,
 streams and shadows persist across restarts in the daemon; volatile inboxes and
 self-reported health do not.
 
-`messages(filter)` polls `receive` while the queue is empty and keeps polling
-across `not_sent` failures (daemon restarting) until its `signal` aborts. For
-QoS 1, acknowledge each delivery before pulling the next one; an unacknowledged
-message is delivered again, including after a restart (at-least-once). Volatile
-inbox and QoS 0 reads are destructive. Aborting the `signal` while the
+`messages(filter, { qos })` polls `receive` while the queue is empty and keeps
+polling across `not_sent` failures (daemon restarting) until its `signal`
+aborts. `qos` is required and must be the QoS the subscription was created
+with: the daemon returns the same message shape, including `id`, for QoS 0 and
+QoS 1, so an `id` does not make a message durable and the SDK cannot infer
+the QoS. A missing or invalid `qos` rejects the first `next()` with
+`RangeError` before any `receive`. Each delivery has `message`, `durable` and
+`ack()`. With `qos: 1`, a subscription message is `durable`: acknowledge it
+before pulling the next one; an unacknowledged message is delivered again,
+including after a restart (at-least-once). With `qos: 0`, and for volatile
+inbox messages (no `id`; pass `qos: 0` for a legacy inbox topic), reads are
+destructive, `durable` is false and `ack()` sends nothing and returns true, so
+a QoS 0 reader needs no `ack` operation in its ACL. Passing `qos: 1` for a
+QoS 0 subscription sends an `ack` the daemon cannot honor; a reader without
+the `ack` operation sees that `request_failed` error from `ack()`. Aborting the `signal` while the
 iterator is idle or before a `receive` is sent ends the iteration normally.
 Aborting while a `receive` is in flight throws that request's `TransportError`
 with outcome `unknown` instead, because the daemon may already have removed a
@@ -193,7 +203,7 @@ reboots the platform or asserts firmware/boot health; platform tools own those.
 
 | Command | What it runs |
 |---|---|
-| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, one `timeoutMs` deadline spanning backoff (no dispatch after expiry, including a connect callback delayed past it by an event-loop stall and payload serialization that consumes the budget before the first connect; remaining-time response wait), abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, prompt `flush` abort during a nested client connect retry, `null` configuration, `timeoutMs`/`connectRetryDelayMs`/`connectAttempts` timer-range boundaries (2147483647 ms honored, larger/non-finite refused without a `TimeoutOverflowWarning`), invalid `maxAttempts`/`retryDelayMs` refused before any send, `messages()` `pollIntervalMs`/`maxReconnectDelayMs` refused before any `receive` and the 2147483647 ms maximum honored for both polling and reconnect backoff, reconnect within `maxReconnectDelayMs` when `pollIntervalMs` is longer (late listener after the first failure and after a successful receive), explicit `null` refused for every numeric timer/retry/bound option. |
+| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, one `timeoutMs` deadline spanning backoff (no dispatch after expiry, including a connect callback delayed past it by an event-loop stall and payload serialization that consumes the budget before the first connect; remaining-time response wait), abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack (QoS 1 acks subscription messages by id but never a legacy inbox message; QoS 0 deliveries of the daemon's id-bearing shape are not durable and send no `ack`; missing/invalid `qos` refused before any `receive`), iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, prompt `flush` abort during a nested client connect retry, `null` configuration, `timeoutMs`/`connectRetryDelayMs`/`connectAttempts` timer-range boundaries (2147483647 ms honored, larger/non-finite refused without a `TimeoutOverflowWarning`), invalid `maxAttempts`/`retryDelayMs` refused before any send, `messages()` `pollIntervalMs`/`maxReconnectDelayMs` refused before any `receive` and the 2147483647 ms maximum honored for both polling and reconnect backoff, reconnect within `maxReconnectDelayMs` when `pollIntervalMs` is longer (late listener after the first failure and after a successful receive), explicit `null` refused for every numeric timer/retry/bound option. |
 | `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; `null` configuration before the first install handled by the sensor example; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
 
 Fake-peer unit tests establish client framing and classification only; the
