@@ -2068,7 +2068,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
                     continue
                 child = self.children.get(row['id'])
-                alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
+                alive = child.poll() is None if child else runnable_identity(row['pid']) == row['started']
                 if alive:
                     if row['kind'] == 'fix':
                         # Locate by branch from fresh PR; never renew somebody else's claim.
@@ -2095,7 +2095,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.hold_authentication(row)
                         continue
                     # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
-                    retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
+                    retry = row['kind'] == 'review' and receipt_path.exists() and runnable_identity(row['pid']) != row['started']
                     status = 'retry' if retry else 'orphaned'
                     delay = min(3600,300*(2**min(row['attempts'],4)))
                     # SF-145: an explicit provider quota reset is never retried before that time.
@@ -2258,6 +2258,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             self.store.db.execute(f'UPDATE jobs SET {column}=? WHERE id=?',(posted['node_id'],row['id']))
 
     def tick(self, execute=False):
+        # Launching lanes own the subprocess handles. The completion lane
+        # independently consumes the durable exit and same-session evidence.
+        for job, child in list(self.children.items()):
+            if child.poll() is not None:
+                del self.children[job]
         for project in self.config['projects']:
             try:
                 self.tick_project(project,execute)
