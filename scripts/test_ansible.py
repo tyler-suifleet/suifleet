@@ -26,7 +26,9 @@ when the role classifies it unsafe, a header-only /proc/swaps bind-mounted over
 the kernel's (refused by the committed role as unverifiable), then /proc/swaps
 fixtures through a test-only role copy whose swap kernel-source check passes:
 zram/dm-crypt names with safe-looking attributes on a tmpfs over /sys/block,
-because the names do not identify the devices, and disk-backed swap), transfers
+because the names do not identify the devices, active swap while sed and other
+text tools fail (real swap through the committed classifier when present, and a
+fixture), and disk-backed swap), transfers
 to hosts that could store a crash dump are refused (the machine's real
 core_pattern/session core limit when classified unsafe, the real systemd-coredump
 pattern with a literal limit argument under a session limit of 0, a core file
@@ -884,6 +886,8 @@ class Harness:
                                     expected=["active swap that can write the claim", "/dev/zram0, /dev/dm-0"])
         print("PASS claim transfer refused with /dev/zram0 and /dev/dm-0 swap despite zram backing_dev none and a"
               " dm-crypt UUID under those names (names do not identify the devices; synthetic copy)")
+        self.swap_parser_failure(vault, real_unsafe=verdict == "unsafe", real=real)
+        self.examples = self.synthetic
         unsafe = [("/swapfile", "file"), ("/dev/sdb2", "partition"), ("/dev/zram1", "partition"), ("/dev/dm-1", "partition"),
                   ("/dev/zram2", "partition")]
         self.swap_fixture(unsafe, sysfs={"zram1/backing_dev": "/dev/sdb3", "dm-1/dm/uuid": "LVM-sf304fixture"})
@@ -892,6 +896,46 @@ class Harness:
                                               "/swapfile, /dev/sdb2, /dev/zram1, /dev/dm-1, /dev/zram2"])
         print("PASS claim transfer refused with a swap file, a disk partition, zram writeback, non-crypt dm and"
               " an unknown zram device (each listed; synthetic copy)")
+
+    FAULT_PATH = "/usr/local/lib/sf304-faultpath"
+    # Runs the swap classifier with only awk and cat working; every other text tool
+    # (sed among them, as a classifier once piped the list through it) exits 1.
+    SWAP_FAULT_PATH = [("\nv() { printf", f"\nPATH={FAULT_PATH}; export PATH\nv() {{ printf")]
+
+    def swap_parser_failure(self, vault, real_unsafe, real):
+        """A failed or missing text tool must never turn active swap into "VERDICT ok".
+
+        Secret-free: the claim transfer is refused before any claim is read.
+        """
+        for host in self.hosts.values():
+            self.exec(host["container"], "sh", "-c",
+                      f"d={self.FAULT_PATH}; rm -rf \"$d\" && mkdir -m 755 \"$d\""
+                      " && for t in awk cat; do ln -s \"$(command -v $t)\" \"$d/$t\"; done"
+                      " && for t in sed tr grep head tail cut wc; do ln -s /bin/false \"$d/$t\"; done")
+        try:
+            if real_unsafe:
+                # The committed classifier against the machine's real swap.
+                for host in self.hosts.values():
+                    self.clear_swap_fixture(host["container"])
+                self.examples = self.variant_examples("examples-swap-faultpath", {"swap_policy.sh": self.SWAP_FAULT_PATH})
+                assert {v["swap"] for v in self.classify().values()} == {"unsafe"}, "real swap accepted with failing tools"
+                self.refused_claim_transfer("claim transfer with real swap and failing text tools is refused", vault,
+                                            expected=["active swap that can write the claim", real[0]])
+                print(f"PASS claim transfer refused with this machine's real swap ({real[0]}) while sed, tr, grep,"
+                      " head, tail, cut and wc fail (committed classifier)")
+            # A swap fixture, so the case runs on machines without swap too.
+            self.examples = self.variant_examples("examples-swap-faultpath-synthetic", {
+                "crash_policy.sh": [("\nkernel_pattern() {\n", "\nkernel_pattern() { return 0; }\nreal_kernel_pattern() {\n")],
+                "swap_policy.sh": self.SWAP_SOURCE_STUBS + self.SWAP_FAULT_PATH})
+            self.swap_fixture([("/dev/sdb2", "partition")])
+            assert {v["swap"] for v in self.classify().values()} == {"unsafe"}, "fixture swap accepted with failing tools"
+            self.refused_claim_transfer("claim transfer with fixture swap and failing text tools is refused", vault,
+                                        expected=["active swap that can write the claim", "/dev/sdb2"])
+            print("PASS claim transfer refused with active swap while sed, tr, grep, head, tail, cut and wc fail"
+                  " (synthetic copy)")
+        finally:
+            for host in self.hosts.values():
+                self.exec(host["container"], "rm", "-rf", self.FAULT_PATH)
 
     SYSTEMD_COREDUMP = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
     # A literal limit where systemd-coredump reads the crashing process's (%c),
