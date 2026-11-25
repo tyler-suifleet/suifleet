@@ -9,6 +9,9 @@ Operators installing a first device should follow
 [Install the device client](INSTALL_DEVICE_CLIENT.md#yocto-image-and-recipe);
 this page records the packaging details and evidence.
 
+See the [edge platform compatibility matrix](EDGE_PLATFORM_COMPATIBILITY.md)
+for candidate kernels, libc variants and older Yocto series.
+
 ## Standalone distribution readiness (SF-230)
 
 The [software layer README](../suifleet-edge/meta-suifleet/README.md) and
