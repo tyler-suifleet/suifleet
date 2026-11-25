@@ -474,6 +474,45 @@ class DecisionTest(unittest.TestCase):
         # An explicit JSON null in the bundle still means omitted.
         self.assertIsNone(k8s.spec_drift({"runAsGroup": None}, {}, f"{container}.securityContext"))
 
+    def test_deployment_readiness_treats_explicit_null_like_an_omitted_field(self):
+        # The API server accepts an explicit null struct field as unset and
+        # defaults it (terminationGracePeriodSeconds null becomes 30); a
+        # healthy rollout must still be ready, as with the field omitted.
+        bundle = example()
+        deployment(bundle)["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] = None
+        k8s.validate_bundle(bundle)
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        live["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] = 30
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        # A genuine non-default live value is still drift.
+        live["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] = 5
+        ready, reason = k8s.object_ready(live, deploy, "web-app")
+        self.assertFalse(ready)
+        self.assertIn("spec.template.spec.terminationGracePeriodSeconds differs", reason)
+        pod = "spec.template.spec"
+        container = f"{pod}.containers[0]"
+        # Null follows the omitted-field rules: server defaults and delegated
+        # fields are accepted, pointer presence and other live values are drift.
+        for path, field, value in [(pod, "terminationGracePeriodSeconds", 30), (pod, "enableServiceLinks", True),
+                                   ("spec", "revisionHistoryLimit", 10), ("spec", "progressDeadlineSeconds", 600),
+                                   ("spec", "replicas", 3), ("spec.strategy", "type", "RollingUpdate"),
+                                   (f"{container}.readinessProbe", "periodSeconds", 10),
+                                   ("spec", "minReadySeconds", 0)]:
+            self.assertIsNone(k8s.spec_drift({field: None}, {field: value}, path), f"null {field}")
+            self.assertIsNone(k8s.spec_drift({field: None}, {}, path), f"null {field} absent live")
+        for path, field, value in [(f"{container}.securityContext", "runAsGroup", 0),
+                                   (f"{pod}.securityContext", "fsGroup", 0),
+                                   (pod, "activeDeadlineSeconds", 0), (pod, "terminationGracePeriodSeconds", 0),
+                                   ("spec", "revisionHistoryLimit", 3), ("spec", "minReadySeconds", 5),
+                                   (container, "args", ["x"])]:
+            self.assertEqual(k8s.spec_drift({field: None}, {field: value}, path), f"{path}.{field}", f"null {field}")
+        self.assertEqual(k8s.spec_drift({"nodeSelector": None}, {"nodeSelector": {"pool": ""}}, pod),
+                         f"{pod}.nodeSelector.pool")
+        # A null map entry keeps map key semantics: the key must still match.
+        self.assertEqual(k8s.spec_drift({"pool": None}, {}, f"{pod}.nodeSelector"), f"{pod}.nodeSelector.pool")
+        self.assertEqual(k8s.spec_drift({}, {"pool": ""}, f"{pod}.nodeSelector"), f"{pod}.nodeSelector.pool")
+
     def test_deployment_readiness_tolerates_canonical_quantities_and_delegated_replicas(self):
         bundle = example()
         resources = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["resources"]

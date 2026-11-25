@@ -561,12 +561,22 @@ def spec_drift(desired, live, path):
     if isinstance(desired, dict):
         if not isinstance(live, dict):
             return path
-        if _is_map(path, desired):
+        is_map = _is_map(path, desired)
+        if is_map:
             drift = _map_drift(desired, live, path)
             if drift:
                 return drift
         for key, value in desired.items():
-            drift = spec_drift(value, live.get(key), f"{path}.{key}")
+            if value is None and not is_map:
+                # An explicit JSON null struct field is accepted by the API
+                # server as unset, exactly like an omitted one: it is defaulted
+                # (terminationGracePeriodSeconds null becomes 30) or left to
+                # its delegated owner. Compare it by the omitted-field rules,
+                # including pointer presence. Map entries keep key semantics.
+                have = live.get(key)
+                drift = None if have is None else _unexpected(have, f"{path}.{key}")
+            else:
+                drift = spec_drift(value, live.get(key), f"{path}.{key}")
             if drift:
                 return drift
         for key in sorted(set(live) - set(desired)):
