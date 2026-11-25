@@ -314,6 +314,8 @@ def build(out, config=None):
                   "canonical": canonical, "nav": nav, "app_url": config["app_url"],
                   "repo_url": config["repo_url"], "docs_url": config["docs_url"], "content": content.strip()}
         rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|docs_url|content)\}\}", lambda m: values[m.group(1)], layout)
+        if page["path"] == "/":
+            rendered = rendered.replace("<body>", '<body class="landing-page">')
         if page.get("noindex"):
             rendered=rendered.replace("</head>", '<meta name="robots" content="noindex, nofollow">\n</head>')
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
