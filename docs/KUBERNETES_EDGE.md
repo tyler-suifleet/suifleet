@@ -88,7 +88,8 @@ How the helper keeps two controllers from fighting:
    write fails (a conflict, a rejection or a cluster error), earlier objects
    may already carry the new bundle. A failed apply deletes nothing; pruning
    runs only after every write has succeeded, and a prune that fails part way
-   leaves the namespace holding two bundles. Until one of those two converges,
+   (or one whose foreground deletions have not finished) leaves the namespace
+   holding two bundles. Until one of those two converges,
    `apply` refuses any other bundle before writing (see Quota headroom in
    item 7).
    `ready` keeps failing until every object carries the new bundle's digest
@@ -182,7 +183,12 @@ How the helper keeps two controllers from fighting:
      creates nothing and is also allowed. Once one of them succeeds, its
      prune removes the other's objects and any bundle can be applied again.
      If neither can succeed, `remove` the component or have an administrator
-     delete the leftovers. Objects already terminating do not count.
+     delete the leftovers. Objects still terminating count too: when an
+     update replaces a Deployment name, the old Deployment stays listed
+     (foreground deletion) after the previous bundle's ConfigMaps are gone,
+     and the rollback would have to recreate them, so another bundle is
+     refused until that deletion completes. Only then, with no object of
+     the previous bundle left, has the update's prune converged.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -556,6 +562,14 @@ It checks the following:
   before any write. After the policy is lifted, the rollback recreates the
   two ConfigMaps at exactly the shipped quota, prunes the update's
   ConfigMaps and converges, and the update then applies.
+  An update that renames the Deployment prunes the previous bundle's
+  ConfigMaps while a finalizer holds the old Deployment's Pod, so the old
+  Deployment stays terminating and the update is not ready. A third bundle
+  is refused before any write; the rollback recreates the previous bundle's
+  ConfigMaps at exactly the shipped quota and exits 2 while the old
+  Deployment is being deleted. After the Pod is released and that deletion
+  completes, a third bundle is still refused, and the rollback converges and
+  prunes the renamed Deployment.
 - A stable-name ConfigMap made immutable out of band, and a content-addressed
   ConfigMap recreated with other content, each stop the apply before any
   write; readiness rejects the forged one, and the apply recreates both after
