@@ -107,6 +107,14 @@ class ValidationTest(unittest.TestCase):
         self.rejects(lambda b: self.pod(b).update(volumes={"name": "x"}), "volumes must be a list")
         self.rejects(lambda b: b["resources"][0].update(immutable="yes"), "immutable must be a boolean")
 
+    def test_immutable_configmaps_are_rejected(self):
+        # An immutable ConfigMap could not be restored in place by a supervisor rollback.
+        self.rejects(lambda b: b["resources"][0].update(immutable=True), "cannot be rolled back in place")
+        for allowed in (False, None):
+            bundle = example()
+            bundle["resources"][0]["immutable"] = allowed
+            k8s.validate_bundle(bundle)
+
     def test_pod_host_access_and_privilege(self):
         for flag in ("hostNetwork", "hostPID", "hostIPC"):
             self.rejects(lambda b: self.pod(b).update({flag: True}), flag)
@@ -1030,6 +1038,27 @@ class WriterTest(unittest.TestCase):
         bound = fake.calls[5][-1]["metadata"]
         self.assertEqual((bound["uid"], bound["resourceVersion"]), ("u1", "2"), "apply is bound to the observed object")
         self.assertNotIn("--force-conflicts", fake.calls[5])
+
+    def test_owned_immutable_configmap_is_refused_before_any_write(self):
+        live = dict(obj(), immutable=True)
+        writer, fake = self.writer([live], [])
+        with self.assertRaisesRegex(k8s.Rejected, "immutable ConfigMap and cannot be updated or rolled back"):
+            writer.apply(self.item)
+        self.assertEqual(self.verbs(fake), ["get"], "no patch, apply, delete or recreation")
+
+    def test_preflight_refuses_whole_bundle_before_first_write(self):
+        # A later immutable ConfigMap must not leave an earlier object half-applied.
+        first = k8s.render({"resources": [dict(example()["resources"][0], metadata={"name": "first"})]},
+                           "suifleet-apps", "web-app", "1", "d" * 64)[0]
+        writer, fake = self.writer([obj(name="first"), dict(obj(), immutable=True)], [])
+        with self.assertRaisesRegex(k8s.Rejected, "web-content.*immutable"):
+            k8s.apply(fake, [first, self.item], "web-app", writer)
+        self.assertEqual(self.verbs(fake), ["get", "get"])
+
+    def test_preflight_ignores_absent_mutable_and_foreign_objects(self):
+        writer, fake = self.writer([None, obj(), dict(obj(labels={}), immutable=True)], [])
+        k8s.preflight(writer, [self.item] * 3)
+        self.assertEqual(self.verbs(fake), ["get"] * 3)
 
     def test_competing_creation_is_not_adopted(self):
         writer, fake = self.writer([None, obj(labels={})], [(1, 'Error from server (AlreadyExists): configmaps "web-content" already exists')])

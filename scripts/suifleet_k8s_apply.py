@@ -230,6 +230,11 @@ def _resource(index, resource):
         _require(isinstance(data, dict) and all(isinstance(v, str) for v in data.values()),
                  f"{where}.data must map keys to strings")
         _require(resource.get("immutable") in (None, True, False), f"{where}.immutable must be a boolean")
+        # Kubernetes never lets an immutable ConfigMap's data change or the flag
+        # return to false, so a supervisor rollback could not restore the
+        # previous bundle in place. Bundles therefore manage mutable ConfigMaps only.
+        _require(resource.get("immutable") is not True,
+                 f"{where}.immutable must be false or absent: an immutable ConfigMap cannot be rolled back in place")
     else:
         _keys(where, resource, ("apiVersion", "kind", "metadata", "spec"))
         spec = resource.get("spec")
@@ -944,6 +949,9 @@ class Writer:
                 raise Conflict(f"{label} {problem}")
             if (current.get("metadata") or {}).get("deletionTimestamp"):
                 raise Rejected(f"{label} is being deleted; retry after deletion completes")
+            irreversible = immutable_problem(current)
+            if irreversible:
+                raise Rejected(f"{label} {irreversible}")
             patch = transfer_patch(current)
             if patch is not None:
                 result = self.kubectl("patch", resource, name, "--type=merge", f"--field-manager={FIELD_MANAGER}",
@@ -1011,8 +1019,35 @@ class Writer:
         raise Conflict(f"{resource}/{name} kept changing during {WRITE_ATTEMPTS} delete attempts")
 
 
+def immutable_problem(current):
+    """Reason an owned live object cannot be updated or rolled back in place, or None.
+    The API server refuses any data change to an immutable ConfigMap and any
+    return to mutable; the helper never deletes and recreates it automatically."""
+    if current.get("kind") == "ConfigMap" and current.get("immutable") is True:
+        return ("is an immutable ConfigMap and cannot be updated or rolled back in place; "
+                "an administrator must delete it before SuiFleet manages it again")
+    return None
+
+
+def preflight(writer, objects):
+    """Refuse before any write when an owned live object could not be updated,
+    so a rejected bundle never leaves earlier objects half-applied. Writer.apply
+    re-checks each object immediately before writing it."""
+    for item in objects:
+        resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
+        if resource != "configmaps":
+            continue
+        current = writer.get(resource, item["metadata"]["name"])
+        if current is None or ownership(current, writer.component):
+            continue  # Absent objects are created mutable; foreign ones fail as a Conflict in apply.
+        irreversible = immutable_problem(current)
+        if irreversible:
+            raise Rejected(f"{item['kind']}/{item['metadata']['name']} in {writer.namespace} {irreversible}")
+
+
 def apply(kubectl, objects, component, writer=None):
     writer = writer or Writer(kubectl, component)
+    preflight(writer, objects)
     desired = {}
     for item in objects:
         writer.apply(item)
