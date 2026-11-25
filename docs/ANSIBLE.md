@@ -176,9 +176,10 @@ restarted once.
   which goes through the remote temporary directory, is never used for the
   claim. Enrollment refuses to send a claim unless modules are pipelined, so
   keep `pipelining = True` and leave `ANSIBLE_KEEP_REMOTE_FILES` unset. The
-  staging directory is erased after enrollment, when it fails, and at the
-  start of the next attempt; an interrupted run leaves the claim only on that
-  tmpfs, which a reboot also clears. Revoke a claim that was exposed before use.
+  staging directory is erased after enrollment, when it fails, at the start
+  of the next attempt and on every run of an enrolled host (a run interrupted
+  after the record was written but before its cleanup); an interrupted run
+  leaves the claim only on that tmpfs until the next run or a reboot. Revoke a claim that was exposed before use.
 - **One enrollment per device.** `/etc/suifleet/enrollment.json` records the
   public IDs, and a recorded host never enrolls again. A host that has
   `config.toml` but no record is refused rather than given a new claim.
@@ -244,7 +245,10 @@ The harness checks these phases:
 4. Install, on-device identity, enrollment, configuration and start, in three
    rollout batches.
 5. A rerun with the credential batch deleted reports `changed=0`, and so does
-   check mode.
+   check mode. Then staging is planted as if enrollment stopped after writing
+   its record but before its cleanup: check mode reports it without erasing,
+   the retry (still without the batch) erases it without re-enrolling or
+   restarting a service, and a rerun reports `changed=0`.
 6. An upgrade preview in check mode leaves bytes, package versions and service
    processes unchanged.
 7. Package and binary upgrade, then a rerun with `changed=0`.

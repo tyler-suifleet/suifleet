@@ -19,7 +19,9 @@ fresh hosts (no change), a claim transfer interrupted after staging (plain
 and Vault claims only in tmpfs, none on host persistent storage or controller
 files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
-(changed=0), package/binary upgrade preview in check mode (bytes, package
+(changed=0), claim staging left by an enrollment interrupted after its record
+was written (check mode reports it; retry without the batch erases it without
+re-enrolling or restarting; rerun changed=0), package/binary upgrade preview in check mode (bytes, package
 versions and service PIDs untouched), package/binary upgrade, rerun
 (changed=0), an interrupted binary/config rollout (files land, restarts never
 run) followed by a retry that must restart the stale services onto the new
@@ -665,6 +667,36 @@ class Harness:
         print("PASS interrupted claim transfer left the claim only in tmpfs staging: none on host persistent storage"
               " (including Ansible remote temp) or in controller files (including Vault decryption)")
 
+    def staging_after_record(self, vault, previous):
+        """Enrollment stopped after the record's rename, before its cleanup: the staged claim is left behind."""
+        marker = uuid.uuid4().hex + uuid.uuid4().hex  # a disposable stand-in for the consumed claim
+        staged = ["/run/suifleet-enroll/claim.key", "/run/suifleet-enroll/enroll.toml", "/run/suifleet-enroll/deployment.json"]
+        for name, host in self.hosts.items():
+            container = host["container"]
+            # The marker travels on stdin, like the real claim.
+            self.exec(container, "sh", "-c", "umask 077 && mkdir -p /run/suifleet-enroll && cat > /run/suifleet-enroll/claim.key"
+                      " && cp /etc/suifleet/deployment.json /run/suifleet-enroll/deployment.json"
+                      " && : > /run/suifleet-enroll/enroll.toml", input=marker + "\n")
+            assert sorted(self.disk_hits(container, [marker], "/run/suifleet-enroll", one_filesystem=False)) == staged[:1], name
+        _, recap = self.ansible("check mode with staging left after the record", "site.yml", "--check", "--diff", *vault)
+        for name, host in self.hosts.items():
+            assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, "abandoned staging not reported", recap[name])
+            assert self.exec(host["container"], "test", "-e", staged[0], check=False).returncode == 0, (name, "check mode erased")
+        print("PASS check mode reported claim staging abandoned after the enrollment record")
+        # The credential batch is still absent: the cleanup must not need it.
+        _, recap = self.ansible("retry with staging left after the record", "site.yml", *vault)
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert recap[name]["changed"] > 0, (name, recap[name])
+            assert self.exec(host["container"], "test", "-e", "/run/suifleet-enroll", check=False).returncode != 0, name
+            assert not self.disk_hits(host["container"], [marker], "/run", one_filesystem=False), (name, "marker remains")
+            for field in ("key_sha256", "address", "enrollment_sha256", "main_pid", "invocations"):
+                assert state[field] == previous[name][field], (name, field, "changed by the staging cleanup")
+        print("PASS retry erased the abandoned claim staging without the credential batch, re-enrollment or restarts")
+        _, recap = self.ansible("rerun after the staging cleanup", "site.yml", *vault)
+        self.unchanged(recap, "rerun after the staging cleanup")
+
     def rapid_config_rollout(self, vault, rollout, previous):
         """A configuration-only change lands within a second of the daemon's start and is never applied."""
         rollout = [*rollout, "-e", "suifleet_poll_seconds=12"]
@@ -778,6 +810,7 @@ class Harness:
         self.unchanged(recap, "rerun")
         _, recap = self.ansible("check mode after convergence", "site.yml", "--check", "--diff", *vault)
         self.unchanged(recap, "check")
+        self.staging_after_record(vault, before)
 
         upgrade = ["-e", f"suifleet_deb_src=/artifacts/2/{self.debs['2'].name}", "-e", f"suifleet_deb_sha256={sha256(self.debs['2'])}",
                    "-e", "suifleet_binary_src=/artifacts/suifleet-2", "-e", f"suifleet_binary_sha256={sha256(self.binaries['2'])}"]
