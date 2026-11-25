@@ -1,0 +1,131 @@
+---
+- name: Refuse hosts without systemd
+  ansible.builtin.assert:
+    that: ansible_facts.service_mgr == 'systemd'
+    quiet: true
+    fail_msg: >-
+      {{ inventory_hostname }} uses {{ ansible_facts.service_mgr }}, not systemd.
+      The SuiFleet isolated signing service needs systemd socket activation and
+      caller-unit pinning; these examples support only systemd hosts. Use the
+      Yocto recipe (docs/CUSTOMER_YOCTO.md) for images, or keep this host out of
+      the inventory. No non-systemd service files are provided.
+
+- name: Refuse kernels older than Linux 6.5
+  ansible.builtin.assert:
+    that: (ansible_facts.kernel | regex_search('^[0-9]+\.[0-9]+')) is version('6.5', '>=')
+    quiet: true
+    fail_msg: >-
+      {{ inventory_hostname }} runs Linux {{ ansible_facts.kernel }}. The signing
+      service pins its caller with SO_PEERPIDFD, available from Linux 6.5
+      (docs/KEY_ISOLATION.md). Upgrade the kernel (Debian 12: a newer or
+      backports kernel) before installing.
+
+- name: Map the host architecture
+  ansible.builtin.set_fact:
+    suifleet_deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default('') }}"
+
+- name: Refuse unsupported architectures
+  ansible.builtin.assert:
+    that: suifleet_deb_arch | length > 0
+    quiet: true
+    fail_msg: >-
+      {{ inventory_hostname }} is {{ ansible_facts.architecture }}; packaged
+      clients exist for x86_64 (amd64) and aarch64 (arm64) only.
+
+- name: Select the packaging profile
+  vars:
+    tested_releases: "{{ suifleet_deb_distributions[ansible_facts.distribution] | default([]) | map('string') | list }}"
+    tested_deb: >-
+      {{ ansible_facts.pkg_mgr == 'apt'
+         and ((ansible_facts.distribution_version | string) in tested_releases
+              or (ansible_facts.distribution_major_version | string) in tested_releases) }}
+  ansible.builtin.set_fact:
+    suifleet_selected_profile: >-
+      {{ suifleet_profile if suifleet_profile != 'auto'
+         else ('deb' if tested_deb | bool
+               else ('systemd-binary' if suifleet_binary_src | length > 0 else 'none')) }}
+    suifleet_tested_deb: "{{ tested_deb | bool }}"
+
+- name: Refuse an unknown or unavailable profile
+  ansible.builtin.assert:
+    that: suifleet_selected_profile in ['deb', 'systemd-binary']
+    quiet: true
+    fail_msg: >-
+      No supported profile for {{ inventory_hostname }}
+      ({{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }},
+      suifleet_profile={{ suifleet_profile }}). Use deb on Debian 12 / Ubuntu 24.04,
+      or set suifleet_binary_src, suifleet_binary_sha256 and suifleet_units_src for
+      systemd-binary.
+
+- name: Refuse the deb profile on untested distributions unless explicitly allowed
+  ansible.builtin.assert:
+    that: >-
+      suifleet_selected_profile != 'deb'
+      or (ansible_facts.pkg_mgr == 'apt'
+          and (suifleet_tested_deb or suifleet_allow_untested_distribution | bool))
+    quiet: true
+    fail_msg: >-
+      The deb profile is tested on Debian 12 and Ubuntu 24.04 only;
+      {{ inventory_hostname }} is {{ ansible_facts.distribution }}
+      {{ ansible_facts.distribution_version }}. Set
+      suifleet_allow_untested_distribution=true to accept that risk, or use
+      systemd-binary.
+
+- name: Require pinned artifacts and the manifest
+  ansible.builtin.assert:
+    that:
+      - suifleet_manifest_src | length > 0
+      - >-
+        (suifleet_selected_profile == 'deb'
+         and suifleet_deb_src | length > 0
+         and suifleet_deb_sha256 is match('^[0-9a-f]{64}$'))
+        or (suifleet_selected_profile == 'systemd-binary'
+            and suifleet_binary_src | length > 0
+            and suifleet_units_src | length > 0
+            and suifleet_binary_sha256 is match('^[0-9a-f]{64}$'))
+    quiet: true
+    fail_msg: >-
+      Set suifleet_manifest_src and, for the {{ suifleet_selected_profile }}
+      profile, the artifact path and its 64-hex SHA-256 from the verified
+      release.json (and suifleet_units_src for systemd-binary).
+
+- name: Authenticate the artifact on the controller
+  delegate_to: localhost
+  become: false
+  ansible.builtin.stat:
+    path: "{{ suifleet_deb_src if suifleet_selected_profile == 'deb' else suifleet_binary_src }}"
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_artifact
+  check_mode: false
+
+- name: Refuse an artifact that does not match its pinned SHA-256
+  ansible.builtin.assert:
+    that:
+      - suifleet_artifact.stat.exists
+      - >-
+        suifleet_artifact.stat.checksum ==
+        (suifleet_deb_sha256 if suifleet_selected_profile == 'deb' else suifleet_binary_sha256)
+    quiet: true
+    fail_msg: The controller's artifact is missing or its SHA-256 differs from the pinned value.
+
+- name: Read the controller manifest
+  delegate_to: localhost
+  become: false
+  ansible.builtin.stat:
+    path: "{{ suifleet_manifest_src }}"
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_manifest
+  check_mode: false
+
+- name: Refuse a missing manifest
+  ansible.builtin.assert:
+    that: suifleet_manifest.stat.exists
+    quiet: true
+    fail_msg: "{{ suifleet_manifest_src }} does not exist on the controller."
+
+- name: Read the enrollment record
+  ansible.builtin.stat:
+    path: /etc/suifleet/enrollment.json
+  register: suifleet_enrollment_record
