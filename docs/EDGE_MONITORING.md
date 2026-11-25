@@ -189,6 +189,11 @@ monitoring tokens, AWS access key IDs, JWT-like values and bare hex of 64+
 characters. Over-redaction is preferred to a leak; components must still not
 log secrets.
 
+Each record carries the component name as `suifleet.component`. A configured
+name that the same scrub would alter (for example a 64-character hex name) is
+exported as `[redacted]` instead, so the selector never leaves the device;
+rename such a component to restore per-component attribution.
+
 New lines are found by overlapping the new tail with the previous one. This is
 bounded **tail sampling**, not complete log shipping:
 

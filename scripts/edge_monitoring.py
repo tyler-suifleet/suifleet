@@ -683,6 +683,10 @@ class Exporter:
             fresh, gap = new_lines(self.tails.get(component), lines)
             self.tails[component] = lines
             now = self.clock()
+            # The raw selector stays local: a name the scrubber would alter
+            # (for example 64-character hex) is exported only as the marker,
+            # matching how the console and the inventory metrics treat it.
+            label = component if redact(component) == component else REDACTED
             with self.lock:
                 self.log_gaps += int(gap)
                 for line in fresh:
@@ -694,7 +698,7 @@ class Exporter:
                         if not self.log_buffer:
                             continue
                         self.log_buffer.popleft()
-                    self.log_buffer.append((now, component, redact(line)))
+                    self.log_buffer.append((now, label, redact(line)))
 
     # --- Prometheus exposition
     def render_prometheus(self):

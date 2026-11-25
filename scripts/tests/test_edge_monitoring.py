@@ -685,6 +685,21 @@ class AdapterTests(Base):
             self.assertNotIn("abc123", json.dumps(body))
             self.assertNotIn("otlp-secret", json.dumps(body))
 
+    def test_log_component_attribute_never_exports_a_redacted_selector(self):
+        secret_name = "ab" * 32                                   # 64 hex characters: scrubbed as a secret
+        self.console.logs[secret_name] = ["hidden ready"]
+        self.console.logs["sensor-reader"] = ["plain ready"]
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(endpoint="http://127.0.0.1:9/"),
+                                           logs=dict(components=[secret_name, "sensor-reader"], max_lines=10, max_buffer=10))
+        self.assertEqual(em.redact(secret_name), em.REDACTED)
+        exporter.poll(console)
+        records = exporter.otlp_logs(list(exporter.log_buffer))["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+        attributed = {r["body"]["stringValue"]: {a["key"]: a["value"]["stringValue"] for a in r["attributes"]}["suifleet.component"]
+                      for r in records}
+        self.assertEqual(attributed, {"hidden ready": em.REDACTED, "plain ready": "sensor-reader"})
+        self.assertNotIn(secret_name, json.dumps(records))
+        self.assertIn(secret_name, exporter.tails)                # the selector itself is still used locally
+
     def test_truncated_collector_response_retries_and_keeps_logs(self):
         collector = FakeCollector()
         self.addCleanup(collector.close)
