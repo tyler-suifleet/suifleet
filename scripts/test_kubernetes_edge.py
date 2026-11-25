@@ -47,8 +47,11 @@ ServiceAccount credential:
   ConfigMap at a content-addressed name stops the apply before any write.
   Changing every ConfigMap of a bundle at the limit peaks exactly at the
   shipped quota and converges. After a partial apply fills the quota and
-  moves the template, a further bundle fails at a ConfigMap creation and
-  deletes nothing, and the rollback fits and converges. A failed update that
+  moves the template, a further bundle is refused before any write, and the
+  rollback fits and converges. After a prune deletes two ConfigMaps and then
+  fails (a test admission policy denies the third delete), another bundle is
+  refused before any write and the rollback recreates them within the full
+  quota. A failed update that
   omits a stable ConfigMap keeps it with its data; a successful one prunes it.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   stable-name ConfigMap made immutable out of band (or a content-addressed one
@@ -527,6 +530,14 @@ def scenario(cluster, work, supervisor):
     check("helper refuses to adopt an object it did not create",
           adopt.returncode == 3 and "does not adopt" in adopt.stderr and legacy["data"] == {"k": "customer"}
           and "labels" not in legacy["metadata"], adopt.stderr)
+    # The refused bundle had already relabelled the shared web ConfigMap, so
+    # the component holds two bundles; only v1 or the refused bundle may be
+    # applied until one converges (review 4645). Roll back as the supervisor would.
+    result = helper("apply", profiles, variant(work, "adopt-next", "hello from SuiFleet adopt-next"))
+    check("a third bundle is refused after the partially applied adoption attempt",
+          result.returncode == 2 and "not converged" in result.stderr, result.stderr)
+    result = helper("apply", profiles, v1)
+    check("the rollback to v1 after the refused adoption converges", result.returncode == 0, result.stderr)
 
     # The consumed ConfigMap is published immutable under its content-addressed
     # name, which the Pod template references: the API server itself refuses
@@ -984,7 +995,7 @@ def scenario(cluster, work, supervisor):
     check("a competing creation after the ownership check is not adopted",
           race.fired() and result.returncode == 3 and "does not adopt" in result.stderr
           and "app.kubernetes.io/managed-by" not in found and data == {"k": "customer"}, result.stderr)
-    cluster.admin("delete", "configmap", "race-new", "-n", NAMESPACE)
+    restore("race-new")  # The race bundle had relabelled the web ConfigMap; roll back to v1.
 
     # Race: the owned object is replaced by a customer object after the check
     # (the helper has just created the race bundle's content-addressed
@@ -1229,7 +1240,7 @@ def scenario(cluster, work, supervisor):
     wait("only kube-root-ca.crt and the web ConfigMap remain", only_baseline, timeout=60)
     check("the shipped quota leaves exactly two bundles' ConfigMaps of headroom",
           int(quota_limit()) == 2 + 2 * publisher.MAX_CONFIGMAPS, quota_limit())
-    quota = [quota_bundle(work, f"quota-v{index}", f"q{index}") for index in range(1, 5)]
+    quota = [quota_bundle(work, f"quota-v{index}", f"q{index}") for index in range(1, 6)]
     check("a bundle at the ConfigMap limit applies",
           helper("apply", profiles, quota[0], component="quota-app").returncode == 0)
     wait_ready(profiles, quota[0], "1.0.0", component="quota-app")
@@ -1256,9 +1267,9 @@ def scenario(cluster, work, supervisor):
     # Review 4628: a partial apply (ConfigMaps and quota-app written, the
     # quota-worker write denied) leaves its ConfigMaps at the quota and moves
     # quota-app's template off the last fully applied bundle's ConfigMaps. A
-    # further bundle must not delete those (a rollback re-applies them): it
-    # fails at a ConfigMap creation before any Deployment write, and the
-    # rollback creates nothing and converges.
+    # further bundle must not delete those (a rollback re-applies them) or
+    # consume the quota the rollback needs: it is refused before any write
+    # (review 4645), and the rollback creates nothing and converges.
     cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
         {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
          "metadata": {"name": "test-freeze-quota-worker"},
@@ -1291,11 +1302,12 @@ def scenario(cluster, work, supervisor):
     check("the partial apply's ConfigMaps fill the namespace ConfigMap quota",
           len(configmaps()) == 2 + 2 * publisher.MAX_CONFIGMAPS and extra.returncode != 0
           and "exceeded quota" in extra.stderr, f"{configmaps()} {extra.stderr}")
-    template = quota_app_refs()
+    template, before = quota_app_refs(), configmaps()
     result = helper("apply", profiles, quota[3], component="quota-app", version="4.0.0")
-    check("a further update fails at a ConfigMap creation and deletes nothing",
-          result.returncode != 0 and "exceeded quota" in result.stderr
-          and set(converged) <= set(configmaps()) and quota_app_refs() == template, result.stderr[-800:])
+    check("a further update is refused before any write and deletes nothing",
+          result.returncode == 2 and "not converged" in result.stderr
+          and configmaps() == before and set(converged) <= set(configmaps()) and quota_app_refs() == template,
+          result.stderr[-800:])
     cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-quota-worker")
     wait("the quota-worker Deployment write freeze to lift", lambda: not quota_frozen(), timeout=60)
     result = helper("apply", profiles, quota[1], component="quota-app", version="2.0.0")
@@ -1308,6 +1320,57 @@ def scenario(cluster, work, supervisor):
     result = helper("apply", profiles, quota[3], component="quota-app", version="4.0.0")
     check("the further update then fits the quota", result.returncode == 0, result.stderr[-500:])
     wait_ready(profiles, quota[3], "4.0.0", component="quota-app")
+
+    # Review 4645: a prune can delete some of the previous bundle's
+    # ConfigMaps and then fail. A test admission policy denies deleting the
+    # third of quota-v4's ConfigMaps (prune deletes in name order), so the
+    # quota-v5 apply writes everything, prunes two and fails. Another bundle
+    # is then refused before any write, so the rollback to quota-v4 can still
+    # recreate the two deleted ConfigMaps within the full quota.
+    pruned = sorted(published(quota[3], f"quota-{index}") for index in range(publisher.MAX_CONFIGMAPS))
+    held = pruned[2]
+    cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
+         "metadata": {"name": "test-freeze-quota-prune"},
+         "spec": {"failurePolicy": "Fail",
+                  "matchConstraints": {"resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"],
+                                                          "operations": ["DELETE"], "resources": ["configmaps"]}]},
+                  "validations": [{"expression": f"oldObject.metadata.name != '{held}'",
+                                   "message": "test: this ConfigMap's deletion is frozen"}]}},
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding",
+         "metadata": {"name": "test-freeze-quota-prune"},
+         "spec": {"policyName": "test-freeze-quota-prune", "validationActions": ["Deny"],
+                  "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
+
+    def prune_frozen():
+        return cluster.admin("delete", "configmap", held, "-n", NAMESPACE, "--dry-run=server", ok=False).returncode != 0
+
+    wait("the quota-v4 ConfigMap deletion freeze to take effect", prune_frozen, timeout=60)
+    result = helper("apply", profiles, quota[4], component="quota-app", version="5.0.0")
+    names = set(configmaps())
+    check("an update whose prune deletes two ConfigMaps and then fails exits 2",
+          result.returncode == 2 and "frozen" in result.stderr and not set(pruned[:2]) & names
+          and set(pruned[2:]) <= names and len(names) == 2 + 2 * publisher.MAX_CONFIGMAPS - 2,
+          f"{result.stderr[-500:]} {sorted(names)}")
+    check("the partially pruned update is not ready",
+          helper("ready", profiles, quota[4], component="quota-app", version="5.0.0").returncode == 1)
+    before = configmaps()
+    result = helper("apply", profiles, quota[2], component="quota-app", version="3.0.0")
+    check("a bundle other than the two the namespace holds is refused before any write",
+          result.returncode == 2 and "not converged" in result.stderr and configmaps() == before,
+          result.stderr[-800:])
+    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-quota-prune")
+    wait("the quota-v4 ConfigMap deletion freeze to lift", lambda: not prune_frozen(), timeout=60)
+    result = helper("apply", profiles, quota[3], component="quota-app", version="4.0.0")
+    check("the rollback recreates the pruned ConfigMaps within the full quota and prunes quota-v5",
+          result.returncode == 0 and all(f"configmaps/{published(quota[4], f'quota-{index}')}" in result.stderr
+                                         for index in range(publisher.MAX_CONFIGMAPS)), result.stderr[-800:])
+    wait_ready(profiles, quota[3], "4.0.0", component="quota-app")
+    check("the rollback converged on quota-v4's ConfigMaps",
+          quota_app_refs() == pruned and len(configmaps()) == 2 + publisher.MAX_CONFIGMAPS, str(configmaps()))
+    result = helper("apply", profiles, quota[4], component="quota-app", version="5.0.0")
+    check("the update then applies and prunes completely", result.returncode == 0, result.stderr[-500:])
+    wait_ready(profiles, quota[4], "5.0.0", component="quota-app")
     check("quota test component retires",
           helper("apply", profiles, retire_config, component="quota-app").returncode == 0)
     wait_ready(profiles, retire_config, "1.0.0", component="quota-app")
