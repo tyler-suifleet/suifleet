@@ -34,6 +34,11 @@ It is deliberately narrow:
   Deployment remains visible (terminating) until its ReplicaSets and Pods are
   gone, so readiness does not report a retirement or rollback converged while
   old Pods still run.
+- Deployments may consume only ConfigMaps from the same bundle, and the
+  digest of the ConfigMaps each one consumes is a Pod-template annotation, so
+  a configuration-only change or rollback rolls its Pods out (Kubernetes never
+  refreshes env/envFrom/subPath values in running Pods). ConfigMaps are
+  written before Deployments.
 - A multi-object apply is not transactional: if a later write fails, earlier
   objects may already carry the new bundle. Readiness never reports success
   until every object carries this bundle's digest and pruning has converged
@@ -84,6 +89,8 @@ MANAGED_BY = "app.kubernetes.io/managed-by"
 COMPONENT_LABEL = "suifleet.io/component"
 VERSION_ANNOTATION = "suifleet.io/version"
 BUNDLE_ANNOTATION = "suifleet.io/bundle-sha256"
+# Pod-template annotation: digest of the bundle ConfigMaps the Pods consume.
+CONFIG_ANNOTATION = "suifleet.io/config-sha256"
 DEFAULT_PROFILE_ROOT = "/etc/suifleet/k8s"
 KUBECTL_TIMEOUT = 60  # process limit per kubectl call (seconds)
 REQUEST_TIMEOUT = 30  # kubectl --request-timeout per API request (seconds)
@@ -175,6 +182,39 @@ def _security_context(where, context, container):
         _require(not capabilities.get("add"), f"{where}.capabilities.add is not allowed")
 
 
+def _config_ref(where, reference):
+    """Name of a ConfigMap reference (envFrom configMapRef, env
+    configMapKeyRef or configMap volume), or None when absent."""
+    if reference is None:
+        return None
+    _require(isinstance(reference, dict) and isinstance(reference.get("name"), str)
+             and DNS_LABEL.match(reference["name"]), f"{where}.name must name a ConfigMap (DNS label)")
+    return reference["name"]
+
+
+def config_refs(pod):
+    """Sorted names of the ConfigMaps a validated pod spec consumes: envFrom
+    configMapRef, env valueFrom.configMapKeyRef (all containers and init
+    containers) and configMap volumes (including subPath mounts)."""
+    names = set()
+    for kind in ("containers", "initContainers"):
+        for container in pod.get(kind) or []:
+            for item in container.get("envFrom") or []:
+                names.add(_config_ref("envFrom.configMapRef", item.get("configMapRef")))
+            for item in container.get("env") or []:
+                names.add(_config_ref("env.valueFrom.configMapKeyRef", (item.get("valueFrom") or {}).get("configMapKeyRef")))
+    for volume in pod.get("volumes") or []:
+        names.add(_config_ref("volumes.configMap", volume.get("configMap")))
+    names.discard(None)
+    return sorted(names)
+
+
+def config_digest(configs, names):
+    """sha256 of the named bundle ConfigMaps' data (canonical JSON)."""
+    canonical = json.dumps([[name, configs[name]] for name in names], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _container(where, container):
     _require(isinstance(container, dict), f"{where} must be an object")
     _require(isinstance(container.get("name"), str) and DNS_LABEL.match(container["name"]),
@@ -187,12 +227,14 @@ def _container(where, container):
                  f"{where}.ports must not use hostPort/hostIP")
     for item in _list(f"{where}.envFrom", container.get("envFrom")):
         _require(isinstance(item, dict) and "secretRef" not in item, f"{where}.envFrom must not reference Secrets")
+        _config_ref(f"{where}.envFrom.configMapRef", item.get("configMapRef"))
     for item in _list(f"{where}.env", container.get("env")):
         _require(isinstance(item, dict), f"{where}.env entries must be objects")
         source = item.get("valueFrom")
         source = {} if source is None else source
         _require(isinstance(source, dict), f"{where}.env valueFrom must be an object")
         _require("secretKeyRef" not in source, f"{where}.env must not reference Secrets")
+        _config_ref(f"{where}.env.valueFrom.configMapKeyRef", source.get("configMapKeyRef"))
     _security_context(f"{where}.securityContext", container.get("securityContext"), True)
     _require("volumeDevices" not in container, f"{where}.volumeDevices is not allowed")
 
@@ -216,6 +258,7 @@ def _pod_spec(where, spec):
         sources = set(volume) - {"name"}
         _require(len(sources) == 1 and sources <= ALLOWED_VOLUME_SOURCES,
                  f"{where}.volumes[{index}] may only use one of {sorted(ALLOWED_VOLUME_SOURCES)}")
+        _config_ref(f"{where}.volumes[{index}].configMap", volume.get("configMap"))
     _security_context(f"{where}.securityContext", spec.get("securityContext"), False)
 
 
@@ -297,6 +340,18 @@ def _validate_bundle(bundle):
         identity = _resource(index, resource)
         _require(identity not in seen, f"resources[{index}] duplicates {identity[0]}/{identity[1]}")
         seen.add(identity)
+    # Every ConfigMap a Deployment consumes must come from this bundle: render
+    # binds its content into the Pod template so that a configuration-only
+    # change or rollback rolls the Pods out. A ConfigMap outside the bundle
+    # could change without any rollout, so readiness could not vouch for the
+    # configuration the Pods actually run.
+    configs = {name for kind, name in seen if kind == "ConfigMap"}
+    for index, resource in enumerate(resources):
+        if resource["kind"] != "Deployment":
+            continue
+        for name in config_refs(resource["spec"]["template"]["spec"]):
+            _require(name in configs, f"resources[{index}] consumes ConfigMap {name!r}, which is not in this bundle; "
+                     "Deployments may consume only ConfigMaps the same bundle defines")
 
 
 def validate_component(component):
@@ -306,8 +361,15 @@ def validate_component(component):
 
 def render(bundle, namespace, component, version, digest):
     """Objects to apply: namespace forced, ownership labels/annotations added,
-    ServiceAccount token automount disabled and each container's unset
-    imagePullPolicy set to the default its image implies."""
+    ServiceAccount token automount disabled, each container's unset
+    imagePullPolicy set to the default its image implies and, for a Deployment
+    that consumes bundle ConfigMaps, a Pod-template annotation with the digest
+    of their data. Kubernetes never restarts Pods when a ConfigMap they read
+    through env/envFrom or a subPath mount changes, so without that binding a
+    configuration-only update or rollback would keep the old Pods (and their
+    old configuration) while readiness saw a healthy, current Deployment."""
+    configs = {resource["metadata"]["name"]: resource.get("data") or {}
+               for resource in bundle["resources"] if resource["kind"] == "ConfigMap"}
     rendered = []
     for resource in bundle["resources"]:
         item = json.loads(json.dumps(resource))
@@ -319,8 +381,15 @@ def render(bundle, namespace, component, version, digest):
             annotations[VERSION_ANNOTATION] = version
         metadata["annotations"] = annotations
         if item["kind"] == "Deployment":
-            pod = item["spec"]["template"]["spec"]
+            template = item["spec"]["template"]
+            pod = template["spec"]
             pod["automountServiceAccountToken"] = False
+            consumed = config_refs(pod)
+            if consumed:
+                template_metadata = template.get("metadata") or {}
+                template_metadata["annotations"] = dict(template_metadata.get("annotations") or {},
+                                                        **{CONFIG_ANNOTATION: config_digest(configs, consumed)})
+                template["metadata"] = template_metadata
             for container in (pod.get("containers") or []) + (pod.get("initContainers") or []):
                 # The API server defaults an unset imagePullPolicy from the
                 # image only when the field is empty, and keeps a previously
@@ -1057,10 +1126,14 @@ def preflight(writer, objects):
 
 
 def apply(kubectl, objects, component, writer=None):
+    """Apply every object (ConfigMaps first), then prune. ConfigMaps go first
+    so that Pods a Deployment change starts read the new configuration: a Pod
+    that started from the new template against the old ConfigMap would keep
+    the old env values until it restarted."""
     writer = writer or Writer(kubectl, component)
     preflight(writer, objects)
     desired = {}
-    for item in objects:
+    for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         writer.apply(item)
         desired.setdefault(ALLOWED_KINDS[(item["apiVersion"], item["kind"])], set()).add(item["metadata"]["name"])
     return prune(kubectl, component, desired, writer)

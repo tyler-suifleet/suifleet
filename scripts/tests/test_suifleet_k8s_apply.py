@@ -171,6 +171,135 @@ class ValidationTest(unittest.TestCase):
                 k8s.load_bundle(path)
 
 
+class ConfigBindingTest(unittest.TestCase):
+    """Combined review 4602: a configuration-only bundle change (or rollback)
+    must roll the consuming Pods out, because Kubernetes never restarts Pods
+    when a ConfigMap they read through env/envFrom or a subPath mount changes."""
+
+    def bundle(self, message, consume="envFrom"):
+        bundle = example()
+        bundle["resources"][0]["data"]["index.html"] = message
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        container = pod["containers"][0]
+        if consume == "envFrom":
+            container["envFrom"] = [{"configMapRef": {"name": "web-content"}}]
+        elif consume == "env":
+            container["env"] = [{"name": "PAGE", "valueFrom": {"configMapKeyRef": {"name": "web-content", "key": "index.html"}}}]
+        elif consume == "subPath":
+            container["volumeMounts"] = [{"name": "content", "mountPath": "/www/index.html", "subPath": "index.html"}]
+        k8s.validate_bundle(bundle)
+        return bundle
+
+    def rendered(self, bundle, digest):
+        return deployment({"resources": k8s.render(bundle, "suifleet-apps", "web-app", "1", digest)})
+
+    def test_config_only_change_changes_the_pod_template(self):
+        for consume in ("envFrom", "env", "subPath", "volume"):
+            with self.subTest(consume=consume):
+                v1 = self.rendered(self.bundle("v1", consume), "1" * 64)
+                v2 = self.rendered(self.bundle("v2", consume), "2" * 64)
+                annotations = v1["spec"]["template"]["metadata"]["annotations"]
+                self.assertEqual(len(annotations[k8s.CONFIG_ANNOTATION]), 64)
+                self.assertNotEqual(v1["spec"]["template"], v2["spec"]["template"],
+                                    "a ConfigMap-only change must start a new rollout")
+                # Rollback restores exactly the v1 template, so Kubernetes rolls
+                # back to the v1 ReplicaSet (and its configuration).
+                again = self.rendered(self.bundle("v1", consume), "3" * 64)
+                self.assertEqual(v1["spec"]["template"], again["spec"]["template"])
+
+    def test_unrelated_configmap_change_does_not_restart(self):
+        bundle = self.bundle("v1")
+        bundle["resources"].insert(0, {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "other"}, "data": {"k": "a"}})
+        before = self.rendered(bundle, "1" * 64)
+        bundle["resources"][0]["data"]["k"] = "b"
+        self.assertEqual(before["spec"]["template"], self.rendered(bundle, "2" * 64)["spec"]["template"])
+
+    def test_no_annotation_without_configmap_consumers(self):
+        bundle = example()
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        pod.pop("volumes")
+        pod["containers"][0].pop("volumeMounts")
+        template = self.rendered(bundle, "1" * 64)["spec"]["template"]
+        self.assertNotIn(k8s.CONFIG_ANNOTATION, template["metadata"].get("annotations") or {})
+        self.assertEqual(k8s.config_refs(pod), [])
+
+    def test_template_without_metadata_gets_the_annotation(self):
+        bundle = self.bundle("v1")
+        template = deployment(bundle)["spec"]["template"]
+        template.pop("metadata")
+        k8s.validate_bundle(bundle)
+        rendered = self.rendered(bundle, "1" * 64)["spec"]["template"]
+        self.assertEqual(list(rendered["metadata"]["annotations"]), [k8s.CONFIG_ANNOTATION])
+        self.assertNotIn("metadata", template, "render must not mutate the bundle")
+
+    def test_old_healthy_rollout_is_not_ready_for_a_config_only_update(self):
+        # The reviewer's probe: the v1 Deployment, fully rolled out, now
+        # carries v2's outer annotations (as after SSA of a metadata-only
+        # change). Its Pod template still has v1's configuration digest.
+        v1 = self.rendered(self.bundle("v1"), "1" * 64)
+        v2 = self.rendered(self.bundle("v2"), "2" * 64)
+        live = copy.deepcopy(v1)
+        live["metadata"] = copy.deepcopy(v2["metadata"])
+        live["metadata"].update(uid="u1", resourceVersion="5", generation=1)
+        live["status"] = {"observedGeneration": 1, "replicas": 1, "updatedReplicas": 1,
+                          "readyReplicas": 1, "availableReplicas": 1}
+        ok, reason = k8s.object_ready(live, v2, "web-app")
+        self.assertFalse(ok)
+        self.assertIn(k8s.CONFIG_ANNOTATION, reason)
+
+    def test_configmap_consumers_must_be_in_the_bundle(self):
+        for consume in ("envFrom", "env", "volume"):
+            with self.subTest(consume=consume):
+                bundle = self.bundle("v1", consume)
+                bundle["resources"][0]["metadata"]["name"] = "renamed"
+                with self.assertRaisesRegex(k8s.Rejected, "consumes ConfigMap 'web-content', which is not in this bundle"):
+                    k8s.validate_bundle(bundle)
+        bundle = example()
+        deployment(bundle)["spec"]["template"]["spec"]["initContainers"] = [{
+            "name": "init", "image": deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["image"],
+            "envFrom": [{"configMapRef": {"name": "admin-config", "optional": True}}]}]
+        with self.assertRaisesRegex(k8s.Rejected, "'admin-config', which is not in this bundle"):
+            k8s.validate_bundle(bundle)
+
+    def test_malformed_configmap_references_are_rejected(self):
+        for reference in ({}, {"name": 1}, {"name": "Bad_Name"}, "web-content", []):
+            for consume in ("envFrom", "env", "volume"):
+                with self.subTest(reference=reference, consume=consume):
+                    bundle = example()
+                    pod = deployment(bundle)["spec"]["template"]["spec"]
+                    if consume == "envFrom":
+                        pod["containers"][0]["envFrom"] = [{"configMapRef": reference}]
+                    elif consume == "env":
+                        pod["containers"][0]["env"] = [{"name": "A", "valueFrom": {"configMapKeyRef": reference}}]
+                    else:
+                        pod["volumes"][0]["configMap"] = reference
+                    with self.assertRaisesRegex(k8s.Rejected, "must name a ConfigMap"):
+                        k8s.validate_bundle(bundle)
+
+    def test_apply_writes_configmaps_before_deployments(self):
+        bundle = self.bundle("v2")
+        bundle["resources"].reverse()  # Deployment listed first
+        k8s.validate_bundle(bundle)
+        objects = k8s.render(bundle, "suifleet-apps", "web-app", "1", "2" * 64)
+        self.assertEqual([o["kind"] for o in objects], ["Deployment", "ConfigMap"])
+        order = []
+
+        class Recorder:
+            component = "web-app"
+            namespace = "suifleet-apps"
+
+            def get(self, resource, name, managed_fields=False):
+                return None
+
+            def apply(self, item):
+                order.append(item["kind"])
+
+        fake = FakeKubectl([{"items": []}, {"items": []}], [])
+        k8s.apply(fake, objects, "web-app", Recorder())
+        self.assertEqual(order, ["ConfigMap", "Deployment"],
+                         "new Pods must never start against the previous ConfigMap content")
+
+
 class DecisionTest(unittest.TestCase):
     def test_render_forces_namespace_ownership_and_no_token(self):
         bundle = example()
