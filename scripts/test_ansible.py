@@ -16,7 +16,9 @@ only loopback (the chain container is started with --network none):
 Phases: release/profile preflight cases with injected facts (Ubuntu 24.10 and
 Debian 13 refused for deb unless explicitly allowed), refusal, check mode on
 fresh hosts (no change), a control showing sudo input logging (enabled on
-every host) records a become command's stdin, a claim transfer interrupted
+every host) records a become command's stdin, the inventory enables
+ansible_become as a connection variable throughout, a claim transfer with
+-e ansible_become=true is refused before staging, a claim transfer interrupted
 after staging (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
@@ -455,7 +457,11 @@ class Harness:
                       ansible_ssh_common_args="-o UserKnownHostsFile=/work/known_hosts -o StrictHostKeyChecking=yes",
                       suifleet_manifest_src="/chain/deployment.json", suifleet_enrollment_root="/chain/batch",
                       suifleet_deb_src="/artifacts/1/" + self.debs["1"].name, suifleet_deb_sha256=sha256(self.debs["1"]),
-                      suifleet_units_src="/units")
+                      suifleet_units_src="/units",
+                      # Customers often enable escalation as a connection variable,
+                      # which overrides the become task keyword; the claim transfer
+                      # must still run unescalated.
+                      ansible_become=True)
         hosts = {}
         for name, host in self.hosts.items():
             vars_ = dict(ansible_port=host["port"], suifleet_serial=host["serial"])
@@ -682,6 +688,20 @@ class Harness:
             assert int(sessions) > 0, (name, "no sudo I/O sessions were logged")
         print(f"PASS {phase}: no claim in the hosts' sudo I/O logs (input logging on)")
 
+    def escalated_claim_transfer_refused(self, vault):
+        """Extra vars outrank the role's task variables: escalation stays on, so the claim must not be sent."""
+        (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
+        output, _ = self.ansible("claim transfer with -e ansible_become=true is refused", "/work/claim-interrupt.yml",
+                                 *vault, "-e", "ansible_become=true", expect_rc="nonzero")
+        assert "would run through" in output and "privilege escalation" in output, "the escalation probe did not refuse"
+        assert "interrupted after the claim transfer" not in output, "the claim transfer ran"
+        for name, host in self.hosts.items():
+            container = host["container"]
+            assert self.exec(container, "test", "-e", "/run/suifleet-enroll", check=False).returncode != 0, (name, "staged")
+            left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
+            assert left == "0", (name, "a transfer directory was created")
+        print("PASS claim transfer refused before reading the claim when escalation is forced through extra vars")
+
     def interrupted_claim_transfer(self, vault):
         """Enrollment stops right after the claim transfer, before its cleanup."""
         (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
@@ -836,6 +856,7 @@ class Harness:
             assert self.exec(host["container"], "test", "-e", "/usr/bin/suifleet", check=False).returncode != 0, name
             assert self.exec(host["container"], "test", "-e", "/etc/suifleet/device.key", check=False).returncode != 0, name
         self.sudo_log_control()
+        self.escalated_claim_transfer_refused(vault)
         self.interrupted_claim_transfer(vault)
         self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 

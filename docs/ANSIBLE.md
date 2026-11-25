@@ -175,7 +175,13 @@ restarted once.
   `no_log` standard input of a command, inside the pipelined module stream.
   That command runs **without privilege escalation**, as the SSH account:
   sudo can record a command's standard input (sudoers `log_input`), and with
-  pipelining that input is the whole module, claim included. The SSH account
+  pipelining that input is the whole module, claim included. An inventory
+  that sets `ansible_become: true` (which overrides the `become: false` task
+  keyword) is handled: the transfer tasks set `ansible_become: false` as a
+  task variable. Extra vars outrank task variables, so before reading the
+  claim the role inspects the module's process ancestry and refuses if any
+  Ansible become wrapper is present; never pass `-e ansible_become=true`.
+  The SSH account
   writes the claim into a private directory on `suifleet_claim_transfer_dir`
   (default `/dev/shm`, which must be a tmpfs). A root task, whose module
   carries only paths, then has the current key holder (the daemon user, not
@@ -252,7 +258,10 @@ The harness checks these phases:
 3. Check mode on fresh hosts changes nothing. A control play sends a
    disposable marker as the `no_log` standard input of a become command (how
    the claim used to travel), and the marker must appear in every host's sudo
-   I/O logs. Then a claim transfer is
+   I/O logs. The inventory sets `ansible_become: true` as a connection
+   variable for every later phase. A claim transfer run with
+   `-e ansible_become=true` must be refused before any staging or transfer
+   directory exists. Then a claim transfer is
    interrupted right after staging, for plain and Vault claims: the claim must
    exist only in the tmpfs staging directory, not anywhere on the host's
    persistent filesystem (including Ansible's remote temporary directories)
