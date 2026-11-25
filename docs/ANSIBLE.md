@@ -178,10 +178,15 @@ restarted once.
   pipelining that input is the whole module, claim included. An inventory
   that sets `ansible_become: true` (which overrides the `become: false` task
   keyword) is handled: the transfer tasks set `ansible_become: false` as a
-  task variable. Extra vars outrank task variables, so before reading the
-  claim the role inspects the module's process ancestry and refuses if any
-  Ansible become wrapper is present; never pass `-e ansible_become=true`.
-  The SSH account
+  task variable. Extra vars outrank task variables, so the controller
+  first refuses if the effective `ansible_become` is still true; never pass
+  `-e ansible_become=true`. Before reading the claim, the role then requires
+  positive evidence on the host: the module's complete process chain, from
+  its interpreter up to the SSH session (`sshd`), must be readable, run
+  entirely as the module's own user and carry no Ansible become wrapper.
+  An unreadable chain (for example `/proc` mounted with `hidepid`), another
+  user ID in it (a `sudo`/`su`/`doas`-wrapped `ansible_python_interpreter`)
+  or a connection that is not SSH refuses the claim. The SSH account
   writes the claim into a private directory on `suifleet_claim_transfer_dir`
   (default `/dev/shm`, which must be a tmpfs). A root task, whose module
   carries only paths, then has the current key holder (the daemon user, not
@@ -259,9 +264,13 @@ The harness checks these phases:
    disposable marker as the `no_log` standard input of a become command (how
    the claim used to travel), and the marker must appear in every host's sudo
    I/O logs. The inventory sets `ansible_become: true` as a connection
-   variable for every later phase. A claim transfer run with
-   `-e ansible_become=true` must be refused before any staging or transfer
-   directory exists. Then a claim transfer is
+   variable for every later phase. Three claim transfers must be refused
+   before any staging or transfer directory exists: one run with
+   `-e ansible_become=true` (refused on the controller), one whose
+   `ansible_python_interpreter` is wrapped in `sudo -u nobody` (refused by the
+   host probe because the process chain changes user), and the same with
+   `/proc` remounted `hidepid=2` (refused because the chain is not fully
+   readable). Then a claim transfer is
    interrupted right after staging, for plain and Vault claims: the claim must
    exist only in the tmpfs staging directory, not anywhere on the host's
    persistent filesystem (including Ansible's remote temporary directories)
