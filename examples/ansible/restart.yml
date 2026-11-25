@@ -1,6 +1,8 @@
 ---
 # Rolling daemon restart with health and identity checks. Restarts only the
-# SuiFleet units; it never reboots hosts.
+# SuiFleet units; it never reboots hosts. In check mode nothing restarts, so
+# the post-restart health checks are skipped instead of failing on the
+# command module's skipped (empty) output.
 - name: Restart the SuiFleet daemon
   hosts: "{{ suifleet_hosts | default('suifleet_devices') }}"
   serial: "{{ suifleet_restart_batch | default(1) }}"
@@ -24,11 +26,13 @@
       retries: 30
       delay: 2
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Check configuration, identity and journal binding as the daemon user
       ansible.builtin.command:
         argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Read the public device address after the restart
       ansible.builtin.slurp:

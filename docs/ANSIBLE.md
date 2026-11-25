@@ -140,6 +140,8 @@ Keys, address, enrollment record, configuration and journal are preserved.
 
 **Restart.** `ansible-playbook -i INVENTORY restart.yml` restarts the daemon
 one host at a time. It checks health and that the address did not change.
+With `--check` it restarts nothing and skips the post-restart health checks,
+which could only validate a real restart; it still reads the address.
 
 **Idempotence.** Rerunning `site.yml` on converged hosts reports no changes.
 Check mode reports pending installs, upgrades and enrollments without
