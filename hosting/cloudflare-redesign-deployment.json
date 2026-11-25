@@ -53,6 +53,29 @@
     "https://suifleet.io/",
     "https://suifleet.io/assets/style.css"
    ]
+  },
+  {
+   "date": "2026-11-25",
+   "scope": "website-and-docs",
+   "change": "Mobile layout pass: compact section buttons, shorter plan cards, tighter phone spacing",
+   "source_revision": "5248b60db1b4ae11c72be33fb8a9a449f3de20b2",
+   "release_sha256": {
+    "website": "e136a12d196e83ae31463e4856668995964f05a5c29c4fcb4208c094be9e9a21",
+    "docs": "fa02d2e0da8798552b42ff9b5ddd2d28bec123ba61f34479260070de8435562a"
+   },
+   "deployments": {
+    "website": "https://f34f3c46.suifleet-marketing.pages.dev",
+    "docs": "https://7dd097f0.suifleet-docs.pages.dev"
+   },
+   "app_unchanged": true,
+   "served_verification": [
+    "https://suifleet.io/",
+    "https://suifleet.io/pricing/",
+    "https://suifleet.io/security/",
+    "https://suifleet.io/assets/style.css",
+    "https://docs.suifleet.io/",
+    "https://docs.suifleet.io/assets/style.css"
+   ]
   }
  ]
 }
