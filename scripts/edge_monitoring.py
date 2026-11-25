@@ -42,7 +42,8 @@ MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL = 10, 3600, 60
 MAX_CONSOLE_RESPONSE = 70 * 1024            # the console caps responses at 64 KiB
 MAX_COMPONENTS = 256
 MAX_INVENTORY_PAGES = 10                    # requests per inventory read, whatever the page size
-MAX_DEPLOYMENT_PAGES = 10                   # 100 journal entries per page
+MAX_DEPLOYMENT_PAGES = 10                   # requests per journal read, whatever the page size
+PAGE_LIMITS = (100, 50, 25, 12, 6, 3, 1)    # page sizes tried when the console says too-large
 MAX_LOG_COMPONENTS = 16
 MAX_LOG_LINES = 200                         # console limit per request
 MAX_LINE_BYTES = 512                        # console limit per line
@@ -487,6 +488,42 @@ def _continuation(cursor, previous, items):
     return cursor
 
 
+def _paged(console, operation, key, max_pages, consume):
+    """One bounded, paged console read; ``consume(items)`` returns True to stop.
+
+    The console refuses ("too-large") a page whose serialized reply exceeds
+    its 64 KiB ceiling. Entries carry bounded but JSON-escapable text (error
+    and exit strings, names), so a full 100-entry page can exceed it while a
+    smaller one fits. On "too-large" the page is requested again at the next
+    smaller size in PAGE_LIMITS, down to one entry, and that size is kept for
+    the rest of this read. A read makes at most ``max_pages`` page requests
+    plus ``len(PAGE_LIMITS) - 1`` shrinking retries. Returns True when it
+    ended at the page bound with more data remaining (counts are partial).
+    """
+    after, pages, size = None, 0, 0
+    while True:
+        fields = dict(limit=PAGE_LIMITS[size])
+        if after is not None:
+            fields["after"] = after
+        try:
+            page = console.call(operation, **fields)
+        except ConsoleError as error:
+            if str(error) != "too-large" or size + 1 >= len(PAGE_LIMITS):
+                raise
+            size += 1
+            continue
+        pages += 1
+        items = page.get(key)
+        if not isinstance(items, list):
+            raise ConsoleError("malformed")
+        stop = consume(items)
+        after = _continuation(page.get("next"), after, items)
+        if after is None or stop:
+            return False
+        if pages >= max_pages:
+            return True
+
+
 def collect(console):
     """One bounded console read: current health, inventory and journal outcomes."""
     health = console.call("health")
@@ -506,22 +543,14 @@ def collect(console):
                     components=[], components_truncated=False, components_unidentified=0,
                     outcomes=dict(applied=0, failed=0, indeterminate=0, pending=0),
                     outcomes_unreported=0, outcomes_truncated=False)
-    after, pages = None, 0
-    while True:
-        fields = dict(limit=100)
-        if after is not None:
-            fields["after"] = after
-        page = console.call("inventory", **fields)
-        pages += 1
-        items = page.get("components")
-        if not isinstance(items, list):
-            raise ConsoleError("malformed")
+
+    def components(items):
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("component"), str):
                 raise ConsoleError("malformed")
             if len(snapshot["components"]) >= MAX_COMPONENTS:
                 snapshot["components_truncated"] = True
-                break
+                return True
             phase = item.get("health")
             snapshot["components"].append(dict(
                 name=bounded(item["component"], 128),
@@ -530,12 +559,10 @@ def collect(console):
                 running=item.get("supervised") is True and phase == "running",
                 phase=phase if phase in PHASES else "other",
                 restarts=item.get("restarts") if _count(item.get("restarts")) else None))
-        after = _continuation(page.get("next"), after, items)
-        if after is None or snapshot["components_truncated"]:
-            break
-        if pages >= MAX_INVENTORY_PAGES:
-            snapshot["components_truncated"] = True
-            break
+        return False
+
+    if _paged(console, "inventory", "components", MAX_INVENTORY_PAGES, components):
+        snapshot["components_truncated"] = True
     # The console redacts secret-looking inventory names, so distinct raw names
     # (for example two 64-hex names) can share one display name. A redacted or
     # repeated display name is not a series identity: emitting it would write
@@ -545,16 +572,8 @@ def collect(console):
     kept = [c for c in snapshot["components"] if seen[c["name"]] == 1 and not _altered_name(c["name"])]
     snapshot["components_unidentified"] = len(snapshot["components"]) - len(kept)
     snapshot["components"] = kept
-    after, pages = None, 0
-    while True:
-        fields = dict(limit=100)
-        if after is not None:
-            fields["after"] = after
-        page = console.call("deployments", **fields)
-        pages += 1
-        items = page.get("deployments")
-        if not isinstance(items, list):
-            raise ConsoleError("malformed")
+
+    def deployments(items):
         for item in items:
             if not isinstance(item, dict):
                 raise ConsoleError("malformed")
@@ -570,12 +589,9 @@ def collect(console):
             snapshot["outcomes"][outcome] += 1
             if outcome != "pending" and item.get("reported") is not True:
                 snapshot["outcomes_unreported"] += 1
-        after = _continuation(page.get("next"), after, items)
-        if after is None:
-            break
-        if pages >= MAX_DEPLOYMENT_PAGES:
-            snapshot["outcomes_truncated"] = True
-            break
+        return False
+    if _paged(console, "deployments", "deployments", MAX_DEPLOYMENT_PAGES, deployments):
+        snapshot["outcomes_truncated"] = True
     return snapshot
 
 

@@ -55,6 +55,19 @@ def send_truncated(handler, truncation):
 TRUNCATIONS = (200, 503, (200, "length"), (503, "length"))
 
 
+CONSOLE_MAX_RESPONSE = 65536                # suifleet-edge/src/console.rs MAX_RESPONSE
+
+
+def compact(value):
+    """serde_json's encoding: no spaces, non-ASCII unescaped, control characters escaped."""
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+# 256 characters (the console's error/exit bound) that JSON escaping expands
+# roughly sixfold: control characters become \u00XX.
+ESCAPED_TEXT = "\x01\x02\"\\" * 64
+
+
 class FakeConsole:
     def __init__(self):
         self.health = dict(health="degraded", reasons=["svc exited"], daemon_version="0.2.9", started_ms=1000,
@@ -118,6 +131,10 @@ class FakeConsole:
                     data = dict(component=body["component"], lines=fake.logs[body["component"]][-body["limit"]:])
                 else:
                     return self.reply(403, dict(version=1, status="denied"))
+                # Like the daemon (console.rs): a compactly serialized reply
+                # over 64 KiB is refused with "too-large" instead.
+                if len(compact(dict(version=1, status="ok", data=data))) > CONSOLE_MAX_RESPONSE:
+                    return self.reply(400, dict(version=1, status="too-large"))
                 self.reply(200, dict(version=1, status="ok", data=data))
 
             def send_raw(self, data):
@@ -747,6 +764,64 @@ class AdapterTests(Base):
             self.assertNotIn("suifleet_device_healthy", exporter.render_prometheus().decode())
             console.call = real_call
         self.assertEqual(exporter.polls["malformed"], 2)
+        self.assertTrue(exporter.poll(console))
+
+    def test_oversized_journal_page_is_reread_smaller_and_keeps_health(self):
+        cfg, exporter, console = self.make()
+        self.console.deployments = [dict(deployment=f"0x{i:03x}", status=2, reported=False, indeterminate=False,
+                                         error=ESCAPED_TEXT) for i in range(150)]
+        page = compact(dict(version=1, status="ok", data=dict(deployments=self.console.deployments[:100])))
+        self.assertGreater(len(page), CONSOLE_MAX_RESPONSE)     # the default page really is refused
+        self.assertTrue(exporter.poll(console))
+        self.assertEqual(exporter.polls.get("too-large", 0), 0)
+        self.assertEqual(exporter.snapshot["outcomes"]["failed"], 150)
+        self.assertEqual(exporter.snapshot["outcomes_unreported"], 150)
+        self.assertFalse(exporter.snapshot["outcomes_truncated"])
+        limits = [body["limit"] for _, body in self.console.requests if body["operation"] == "deployments"]
+        self.assertEqual(limits[0], 100)
+        self.assertLess(limits[-1], 100)
+        self.assertEqual(len(set(limits[limits.index(limits[-1]):])), 1)   # the smaller size is kept
+        text = exporter.render_prometheus().decode()
+        self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 1', text)
+        self.assertIn('suifleet_device_healthy{evidence="simulated",device="sim-1"} 0', text)
+        self.assertIn('suifleet_deployment_outcomes_truncated{evidence="simulated",device="sim-1"} 0', text)
+        self.assertNotIn(ESCAPED_TEXT[:4], text)
+
+    def test_oversized_inventory_page_is_reread_smaller(self):
+        cfg, exporter, console = self.make()
+        self.console.components = [dict(component=f"c-{i:03d}", version="v" * 128, health="exited",
+                                        deployment="0x" + "a" * 126, installed=True, supervised=True,
+                                        restarts=1, since_ms=1, last_exit=ESCAPED_TEXT) for i in range(120)]
+        self.assertTrue(exporter.poll(console))
+        self.assertEqual(len(exporter.snapshot["components"]), 120)
+        self.assertFalse(exporter.snapshot["components_truncated"])
+        limits = [body["limit"] for _, body in self.console.requests if body["operation"] == "inventory"]
+        self.assertEqual(limits[0], 100)
+        self.assertLess(min(limits), 100)
+
+    def test_smaller_pages_still_respect_the_page_bound(self):
+        cfg, exporter, console = self.make()
+        self.console.deployments = [dict(deployment=f"0x{i:04x}", status=2, reported=True, indeterminate=False,
+                                         error=ESCAPED_TEXT) for i in range(1000)]
+        self.assertTrue(exporter.poll(console))
+        self.assertTrue(exporter.snapshot["outcomes_truncated"])
+        calls = [body for _, body in self.console.requests if body["operation"] == "deployments"]
+        self.assertLessEqual(len(calls), em.MAX_DEPLOYMENT_PAGES + len(em.PAGE_LIMITS) - 1)
+        self.assertIn('suifleet_deployment_outcomes_truncated{evidence="simulated",device="sim-1"} 1',
+                      exporter.render_prometheus().decode())
+
+    def test_page_refused_at_every_size_fails_the_poll_boundedly(self):
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+
+        def refuse(fields):
+            raise em.ConsoleError("too-large")
+        calls, real_call = self._scripted(console, dict(deployments=refuse))
+        self.assertFalse(exporter.poll(console))
+        self.assertEqual([f["limit"] for op, f in calls if op == "deployments"], list(em.PAGE_LIMITS))
+        self.assertEqual(exporter.polls["too-large"], 1)
+        self.assertNotIn("suifleet_device_healthy", exporter.render_prometheus().decode())
+        console.call = real_call
         self.assertTrue(exporter.poll(console))
 
     def test_wrong_console_token_counts_unauthenticated(self):
