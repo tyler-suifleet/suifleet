@@ -572,9 +572,9 @@ It checks the following:
   unchanged. Pruning leaves a prune candidate alone when it is relabelled or
   replaced between the listing and the delete, including by a replacement
   that carries this component's labels: the racing delete never follows the
-  listed UID to the replacement. A same-owner replacement is a stale object of
-  this component, so the same apply's final prune lists it afresh and deletes
-  it; a same-owner stale object that remains is reported not yet pruned.
+  listed UID to the replacement. A same-owner replacement that survives is a
+  stale object of this component, which readiness reports not yet pruned
+  until a later apply prunes it.
 - A finalizer-delayed prune keeps `ready` failing until the object is gone,
   and re-applying meanwhile does not re-delete it. An empty retirement bundle
   is not ready before its apply and is ready once pruning has converged.

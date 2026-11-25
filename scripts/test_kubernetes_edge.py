@@ -30,8 +30,8 @@ ServiceAccount credential:
 - Races injected between the helper's ownership check and its write (through
   a kubectl wrapper): a competing creation, a replacement and a relabel are
   not mutated, and a racing prune delete leaves relabelled or replaced objects
-  alone, even a replacement that carries this component's labels (which the
-  same apply's final prune then lists afresh and deletes).
+  alone, even a replacement that carries this component's labels (which
+  readiness then reports not yet pruned).
 - A configuration-only update and rollback of a ConfigMap consumed through
   envFrom, configMapKeyRef and a subPath mount is observed inside the Pods
   before readiness succeeds, and a Deployment consuming a ConfigMap outside
@@ -1016,25 +1016,14 @@ def scenario(cluster, work, supervisor):
         before = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]["uid"]
         race.arm(["delete", "--raw"], *commands)
         result = helper("apply", profiles, v1, profile="race")
-        if owner == "suifleet":
-            # The racing delete is the pre-write ConfigMap freeing pass; it
-            # leaves the replacement (another UID) alone. The same apply's
-            # final prune then lists the replacement afresh as a stale object
-            # of this component and deletes that listed UID.
-            check(f"pruning leaves a {name} object alone in the racing pass and prunes it once listed",
-                  race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
-                  and "'configmaps/v2-extra'" in result.stderr
-                  and cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, ok=False).returncode != 0,
-                  result.stderr)
-            cluster.admin("create", "configmap", "v2-extra", "-n", NAMESPACE, "--from-literal=k=customer")
-            cluster.admin("label", "configmap", "v2-extra", "-n", NAMESPACE, *same_owner[3:])
-        else:
-            after = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
-            found, data = labels_of("v2-extra")
-            check(f"pruning leaves a {name} object alone",
-                  race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
-                  and found.get("app.kubernetes.io/managed-by") == owner and data == expected
-                  and (after["uid"] != before) == (name != "relabelled"), result.stderr)
+        # The racing delete is the final prune (the pre-write freeing pass
+        # never touches a stable ConfigMap); it deletes only the listed UID.
+        after = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
+        found, data = labels_of("v2-extra")
+        check(f"pruning leaves a {name} object alone",
+              race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
+              and found.get("app.kubernetes.io/managed-by") == owner and data == expected
+              and (after["uid"] != before) == (name != "relabelled"), result.stderr)
         if owner == "suifleet":
             # The surviving same-owner object is stale for v1: readiness reports
             # the incomplete prune instead of success. Readiness reports
