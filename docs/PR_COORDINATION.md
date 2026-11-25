@@ -1007,23 +1007,38 @@ merged-runtime path; this change does not restart services from a worktree.
 
 ### Shared discovery snapshots
 
-The coordinator uses the installed atomic-ticketing engine's `ticket_snapshot.py`
-provider when available. Install atomic-ticketing 0.3.2 or later before deploying
-this coordinator change. The provider is resolved from the `ticket` command's
-versioned installation; cache data is shared with dispatcher-triggered CLI
-refreshes in `${XDG_STATE_HOME:-~/.local/state}/github-snapshots-v1`.
+Install the verified merged atomic-ticketing engine (0.3.3 or later) before
+activating the matching coordinator. The coordinator resolves
+`ticket_snapshot.py` through the installed `ticket` symlink. The provider change
+is tracked in [atomic-ticketing PR #5](https://github.com/therealtime/atomic-ticketing/pull/5).
+Both tools share
+`${XDG_STATE_HOME:-~/.local/state}/github-snapshots-v2` by credential and host.
+Older engines use a separate cache and retain their previous cooldown behavior.
 
-Only discovery lists are cached, with an absolute 60-second lifetime and
-credential/host isolation. Writes invalidate snapshots, and concurrent readers
-coalesce. PR details, review feedback, checks, ownership verification and branch
-tips remain live: the cache never supplies merge approval. Quota observations are
-shared for 60 seconds; discovery reserves 250 GraphQL points and 100 REST
-requests for fresh decisions and writes. Server rate limits establish a shared
-cooldown rather than a retry loop per worker. Expired/error snapshots are not
-served as fallback. Existing exact-head/base and review gates remain in force.
+Mutable discovery lists have a 60-second lifetime. Project identity and field
+metadata have a five-minute lifetime and survive routine issue, PR and Project
+item writes. Schema-changing and unclassified mutations invalidate both groups.
+Per-request file locks coalesce concurrent discovery misses across processes.
+Writes fence mutable snapshots before and after the request, including ambiguous
+failures. Direct ownership checks, PR details, feedback, CI and branch tips
+remain live. Expired or failed snapshots never stand in for fresh evidence.
 
-An older ticket engine keeps the previous live transport until upgraded. Updating
-source on main does not bypass the existing runtime activation/validation policy.
+One quota probe per credential per minute reserves 250 GraphQL points and
+100 REST requests for fresh decisions and writes. Primary exhaustion pauses the
+affected API resource until its known reset. In the absence of a reset hint,
+the next attempt is eligible after one minute. Secondary limits pause all API
+resources for the credential for at least one minute and honor a longer
+Retry-After. Fresh cache hits require no network request during these pauses.
+The coordinator delegates cooldowns to the provider so an exhausted resource
+cannot start a second account-wide pause.
+
+After verifying both merges, install the portable engine from its exact merged
+revision and activate the coordinator through the existing merged-only
+runtime path. Record the portable Git revision, resolved `ticket` path and
+module digest, the coordinator generation/revision and readiness, and confirm
+worker preservation. Verify shared discovery with ordinary read-only traffic.
+Offline tests simulate rate limits without spending quota or provoking throttling
+on the live account.
 
 ### Authenticated preparation errors (SF-205)
 
