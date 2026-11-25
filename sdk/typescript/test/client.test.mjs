@@ -169,11 +169,13 @@ test('abort during connection retry backoff is not_sent with the abort reason as
 
 test('one request deadline covers connect backoff: a late listener never receives the request', async (t) => {
   const path = join(directory, 'late-deadline.sock');
-  const client = new Client({ socketPath: path, timeoutMs: 30, connectAttempts: 2, connectRetryDelayMs: 150 });
+  // Spare attempts: an attempt that starts just before the deadline may still
+  // fail ENOENT; the next one must then fail on the deadline, not dispatch.
+  const client = new Client({ socketPath: path, timeoutMs: 30, connectAttempts: 10, connectRetryDelayMs: 150 });
   let requests = 0;
   const server = createServer((socket) => socket.once('data', () => { requests++; socket.end(`${JSON.stringify(ok({ sequence: 1 }))}\n`); }));
-  setTimeout(() => server.listen(path), 75);
-  t.after(() => new Promise((resolve) => server.close(() => resolve())));
+  const listen = setTimeout(() => server.listen(path), 75);
+  t.after(() => new Promise((resolve) => { clearTimeout(listen); if (server.listening) server.close(() => resolve()); else resolve(); }));
   const started = Date.now();
   await assert.rejects(client.request('stream_append', { topic: 's', payload: { payload: 1 } }),
     (e) => e instanceof TransportError && e.outcome === 'not_sent' && /timed out after 30 ms/.test(e.message));
