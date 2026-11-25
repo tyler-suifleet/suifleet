@@ -11,8 +11,12 @@
 # are accepted; every other entry in /proc/swaps (a swap file, a plain disk
 # partition, zram writing back to a disk, anything unrecognized) refuses the
 # claim. Hibernation writes memory to swap, so it is covered by the same
-# rule. files/swap_policy.sh prints "SWAP <ok|unsafe> <device>" per entry,
-# then exactly one VERDICT line.
+# rule. The swap list and device attributes are used only once they are
+# shown to come from the kernel's procfs and sysfs; a substituted view (a
+# file or FUSE view over /proc/swaps, a tmpfs or another entry over part of
+# /sys) is refused as unverifiable or the device as unsafe.
+# files/swap_policy.sh prints "SWAP <ok|unsafe> <device>" per entry, then
+# exactly one VERDICT line.
 - name: Read the host's active swap devices
   ansible.builtin.command:
     argv:
@@ -28,9 +32,17 @@
     that: suifleet_swap.stdout_lines | last | default('') == 'VERDICT ok'
     quiet: true
     fail_msg: >-
+      {% if suifleet_swap.stdout_lines | last | default('') == 'VERDICT unverifiable' %}
+      {{ inventory_hostname }}'s active swap cannot be verified, so the claim
+      (tmpfs pages or process memory) could be swapped to persistent storage:
+      {{ suifleet_swap.stdout_lines | select('match', '^UNVERIFIABLE ') | map('regex_replace', '^UNVERIFIABLE ', '') | join('; ') }}.
+      Enroll from a session that sees the kernel's /proc and /sys
+      (docs/ANSIBLE.md#claim-storage).
+      {% else %}
       {{ inventory_hostname }} has active swap that can write the claim
       (tmpfs pages or process memory) to persistent storage:
       {{ suifleet_swap.stdout_lines | select('match', '^SWAP unsafe ') | map('regex_replace', '^SWAP unsafe ', '') | join(', ')
       or 'its swap configuration (/proc/swaps) could not be read' }}.
       Enroll with swap off (swapoff -a), on zram without a writeback device
       or on dm-crypt encrypted swap, then restore swap (docs/ANSIBLE.md#claim-storage).
+      {% endif %}
