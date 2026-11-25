@@ -286,6 +286,41 @@ test('putData chunks, hashes and resumes with a stable upload ID', async () => {
   await server.close();
 });
 
+test('putData snapshots the caller buffer and options before sending, so reuse cannot mix samples', async () => {
+  let data;
+  const options = { upload: 'cd'.repeat(32), contentType: 'application/x-sample' };
+  const server = await serve((r) => {
+    // The caller reuses its sample buffer and options while custody requests are in flight.
+    data.fill(34);
+    options.contentType = 'text/changed';
+    return ok({ sequence: r.payload.descriptor.chunk, state: 'queued', storage_acknowledged: false });
+  });
+  const client = new Client({ socketPath: server.path, component: 'svc' });
+  try {
+    data = new Uint8Array(DATA_CHUNK_SIZE * 2 + 1).fill(17);
+    const original = Buffer.alloc(data.length, 17);
+    const result = await client.putData('sensor', 'k', data, options);
+    assert.equal(result.chunks.length, 3);
+    const sent = Buffer.concat(server.requests.map((r) => Buffer.from(r.payload.data_base64, 'base64')));
+    assert.ok(sent.equals(original), 'every chunk carries the bytes present when putData was called');
+    for (const [index, request] of server.requests.entries()) {
+      const part = original.subarray(index * DATA_CHUNK_SIZE, (index + 1) * DATA_CHUNK_SIZE);
+      assert.deepEqual(request.payload.descriptor.sha256, [...createHash('sha256').update(part).digest()]);
+      assert.equal(request.payload.descriptor.content_type, 'application/x-sample');
+      assert.equal(request.payload.descriptor.total_size, original.length);
+    }
+    // Resuming snapshots only the remaining range, still from call time.
+    data.fill(5);
+    const before = server.requests.length;
+    await client.putData('sensor', 'k', data, { upload: options.upload, startChunk: 1 });
+    const resumed = server.requests.slice(before);
+    assert.deepEqual(resumed.map((r) => r.payload.descriptor.chunk), [1, 2]);
+    for (const request of resumed) assert.ok(Buffer.from(request.payload.data_base64, 'base64').every((b) => b === 5));
+  } finally {
+    await server.close();
+  }
+});
+
 test('putData metadata matches the daemon string map contract and is refused locally otherwise', async () => {
   const server = await serve((r) => ok({ sequence: r.payload.descriptor.chunk, state: 'queued', storage_acknowledged: false }));
   const client = new Client({ socketPath: server.path, component: 'svc' });

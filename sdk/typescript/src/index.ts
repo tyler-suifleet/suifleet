@@ -426,25 +426,33 @@ export class Client {
    * DataPutError carries the upload ID and chunk to resume from.
    */
   async putData(stream: string, key: string, data: Uint8Array, options: DataPutOptions = {}): Promise<DataPutResult> {
-    if (data.length > MAX_DATA_SIZE) throw new RangeError('data exceeds 64 MiB');
+    const totalSize = data.length;
+    if (totalSize > MAX_DATA_SIZE) throw new RangeError('data exceeds 64 MiB');
     const upload = options.upload ?? randomBytes(32).toString('hex');
     if (!/^[0-9a-f]{64}$/.test(upload)) throw new RangeError('upload must be 64 lowercase hex characters');
-    const chunks = Math.max(1, Math.ceil(data.length / DATA_CHUNK_SIZE));
+    const chunks = Math.max(1, Math.ceil(totalSize / DATA_CHUNK_SIZE));
     const startChunk = options.startChunk ?? 0;
     if (!Number.isInteger(startChunk) || startChunk < 0 || startChunk >= chunks) throw new RangeError('invalid startChunk');
     const metadata = validateDataMetadata(options.metadata === undefined ? {} : options.metadata);
+    const contentType = options.contentType ?? 'application/octet-stream';
+    const signal = options.signal;
+    // Snapshot the caller-owned bytes before the first await: a caller that
+    // reuses its buffer while chunks are in flight must not mix two payloads
+    // under one upload ID (the daemon checks each chunk, not the whole).
+    const bytes = Buffer.from(data.subarray(startChunk * DATA_CHUNK_SIZE, totalSize));
+    const base = startChunk * DATA_CHUNK_SIZE;
     const receipts: DataPutReceipt[] = [];
     for (let chunk = startChunk; chunk < chunks; chunk++) {
-      const part = Buffer.from(data.buffer, data.byteOffset + chunk * DATA_CHUNK_SIZE,
-        Math.min(DATA_CHUNK_SIZE, data.length - chunk * DATA_CHUNK_SIZE));
+      const offset = chunk * DATA_CHUNK_SIZE - base;
+      const part = bytes.subarray(offset, Math.min(offset + DATA_CHUNK_SIZE, bytes.length));
       const descriptor: JsonObject = {
-        stream, key, content_type: options.contentType ?? 'application/octet-stream', metadata,
-        upload, chunk, chunks, total_size: data.length, size: part.length,
+        stream, key, content_type: contentType, metadata,
+        upload, chunk, chunks, total_size: totalSize, size: part.length,
         sha256: [...createHash('sha256').update(part).digest()],
       };
       try {
         receipts.push(await this.request<DataPutReceipt>('data_put', { topic: stream,
-          payload: { descriptor, data_base64: part.toString('base64') }, ...(options.signal ? { signal: options.signal } : {}) }));
+          payload: { descriptor, data_base64: part.toString('base64') }, ...(signal ? { signal } : {}) }));
       } catch (error) {
         throw new DataPutError(upload, chunk, receipts, error);
       }
