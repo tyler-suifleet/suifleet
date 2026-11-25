@@ -126,7 +126,7 @@ class SiteTest(unittest.TestCase):
             html = build.output_path(self.out, page["path"]).read_text()
             self.assertIn(f'href="{config["app_url"]}"', html, page["path"])
         home = (self.out / "index.html").read_text()
-        self.assertIn(">Launch app<", home)
+        self.assertIn(">Open console<", home)
         guide = (self.out / "guide" / "index.html").read_text()
         steps = json.loads((SITE / "guide" / "steps.json").read_text())["steps"]
         self.assertEqual([s["id"] for s in steps][:3], ["sign-in", "capacity-plan", "fund"])

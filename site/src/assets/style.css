@@ -2089,7 +2089,7 @@ td.num,th.num {
 
 /* The phone homepage is a single-screen introduction. Details remain on /product/. */
 .mobile-landing-links{display:none}
-@media(max-width:800px){
+@media(max-width:800px), (max-width:1000px) and (max-height:500px) and (orientation:landscape){
  .landing-page:not(.product-details-page){height:100dvh;min-height:0;display:grid;grid-template-rows:64px minmax(0,1fr)}
  .landing-page:not(.product-details-page) .site-header{height:64px;min-height:0}
  .landing-page:not(.product-details-page) .header-row{height:64px;min-height:0}
@@ -2128,7 +2128,7 @@ td.num,th.num {
  .landing-page:not(.product-details-page) .visual-body{padding:8px 12px}
  .landing-page:not(.product-details-page) .visual-topbar{padding:7px 12px;min-height:30px}
 }
-@media(max-width:800px) and (max-height:480px) and (orientation:landscape){
+@media(max-width:1000px) and (max-height:480px) and (orientation:landscape){
  .landing-page:not(.product-details-page){grid-template-rows:60px minmax(0,1fr)}
  .landing-page:not(.product-details-page) .site-header,.landing-page:not(.product-details-page) .header-row{height:60px}
  .landing-page:not(.product-details-page) .hero{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) 44px;column-gap:24px}
@@ -2137,3 +2137,48 @@ td.num,th.num {
  .landing-page:not(.product-details-page) .hero-description{font-size:16px;margin-bottom:10px}
  .landing-page:not(.product-details-page) .mobile-landing-links{grid-column:1/-1;max-width:none;justify-content:center;gap:40px}
 }
+
+/* Shared navigation and the approved, uncluttered overview/Getting Started flow. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.overview-page{height:100dvh;min-height:0;display:grid;grid-template-rows:80px minmax(0,1fr)}
+.overview-page main{min-height:0}.overview-page>.site-footer{display:none}
+.overview-player{height:100%;min-height:0;max-width:1200px;margin:auto;padding:24px 32px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:18px}
+.overview-header{display:flex;gap:24px;justify-content:space-between;align-items:center}.overview-header h1{font-size:34px;margin:0}.overview-header>a{min-height:44px;white-space:nowrap}
+.overview-player .overview-intro{position:relative;min-height:0;height:100%;padding:0;margin:0;display:grid;grid-template-rows:minmax(0,1fr) 36px;gap:8px}
+.overview-player .overview-video{width:100%;height:100%;min-height:0;max-height:100%;object-fit:contain;grid-row:1;grid-column:1;box-shadow:none;margin:0;border-radius:12px;background:#f0f5fa}
+.overview-player .overview-portrait{display:none}
+.overview-player .overview-intro>details{grid-row:2;margin:0;padding:0;background:none}
+.overview-player .overview-intro summary{min-height:36px;display:flex;align-items:center;font-size:14px;cursor:pointer}
+.overview-player .overview-intro>details[open]{position:absolute;inset:0;z-index:4;padding:16px;background:white;overflow:auto;border:1px solid var(--line);border-radius:12px}
+.overview-player .overview-intro>[role=status]:not([hidden]){position:absolute;left:12px;right:12px;top:12px;background:white;padding:10px;font-size:14px;z-index:3}
+.guide-media{grid-template-rows:minmax(0,1fr)}
+@media(max-width:800px), (max-width:1000px) and (max-height:580px){
+ .site-header .header-row{height:64px;min-height:64px;flex-wrap:nowrap;gap:8px;padding-top:0;padding-bottom:0}
+ .site-header .header-row>.brand{margin-right:auto}.site-header .header-row>nav{display:none}.site-header .header-cta{order:2;min-height:44px;flex:none}
+ .site-header .mobile-menu{display:block;order:3;position:relative;flex:none}
+ .site-header .mobile-menu summary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;font-size:12px;cursor:pointer;list-style:none}
+ .site-header .mobile-menu summary::-webkit-details-marker{display:none}
+ .site-header .mobile-menu nav,.guide-page .site-header .mobile-menu nav{display:block;position:absolute;right:0;top:calc(100% + 8px);width:min(280px,calc(100vw - 40px));max-height:calc(100dvh - 90px);overflow:auto;padding:12px;background:white;border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 32px #12304a1a}
+ .site-header .mobile-menu ul{display:block;margin:0;padding:0;list-style:none}.site-header .mobile-menu nav a{display:flex;align-items:center;min-height:44px;font-size:15px;padding:8px 12px}
+ .site-header .brand{font-size:22px;gap:6px}.site-header .brand img{width:42px;height:30px}.site-header .header-cta{font-size:12px;padding:8px 12px}
+ .overview-page{grid-template-rows:64px minmax(0,1fr)}.overview-player{padding:18px 20px;gap:12px}.overview-header{gap:16px}.overview-header h1{font-size:26px}
+ .guide-page{grid-template-rows:64px minmax(0,1fr)}
+ .landing-page:not(.product-details-page) .fleet-visual{max-height:260px}
+ .landing-page:not(.product-details-page) .rollout-stages,.landing-page:not(.product-details-page) .device-list .device-list-heading,.landing-page:not(.product-details-page) .device-list>div:last-child{display:none}
+ .landing-page:not(.product-details-page) .mobile-landing-links{justify-content:center;gap:40px}
+}
+@media(max-width:800px) and (max-height:480px){.overview-player{padding:10px 20px;gap:8px}.overview-header h1{font-size:22px}}
+@media(min-width:1001px), (min-width:801px) and (min-height:581px){.overview-page .site-header .header-row{height:80px;min-height:80px;padding-top:0;padding-bottom:0}}
+
+@media(max-height:500px){.overview-player .overview-landscape{display:block}.overview-player .overview-portrait{display:none}}
+@media(max-width:370px){
+ .site-header .header-row{gap:6px}.site-header .brand{font-size:20px;gap:5px}.site-header .brand img{width:34px;height:28px}
+ .site-header .header-cta{font-size:11px;padding:8px 10px}.site-header .mobile-menu summary{font-size:11px;padding:8px}
+}
+
+.overview-player .overview-landscape{display:block}
+
+/* Keep native controls attached to the picture instead of stretching the player. */
+.overview-player .overview-intro{display:flex;flex-direction:column;align-items:center;justify-content:center;border:0;background:transparent;gap:12px}
+.overview-player .overview-video{width:min(100%,calc((100dvh - 230px) * 16 / 9));height:auto;aspect-ratio:16/9;max-height:calc(100% - 48px);flex:none}
+.overview-player .overview-intro>details{width:100%;max-width:1100px;flex:none}

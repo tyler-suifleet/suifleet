@@ -151,7 +151,6 @@ def render_guide(config):
                        f'<source src="{media_url("file")}" type="video/webm">{fallback}{captions}'
                        'Your browser cannot play this recording.</video>')
             out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. <button type="button" data-video-retry>Retry video</button> or <a href="{media_url("fallback" if video.get("fallback") else "file")}">download it</a>.</p></div>')
-            out.append(f'<figcaption><span>Optional subtitles (CC) · Narrated product walkthrough · {html.escape(manifest["recorded"])}</span><a href="{media_url("fallback" if video.get("fallback") else "file")}" download>Download video</a></figcaption>')
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')
@@ -252,13 +251,13 @@ def motion_sample_player():
 
 
 def overview_player():
-    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-labelledby="overview-title"><p class="eyebrow">Start with the big picture</p><h2 id="overview-title">How SuiFleet works</h2><p id="overview-description">A short animated introduction to approvals, shared records, software files and device clients. Female narration with optional English captions; use the player’s captions menu to turn them on or off.</p>']
-    for video in manifest['variants']:
+    manifest=overview_manifest();parts=['<section class="overview-intro" id="overview" aria-label="How SuiFleet works"><p id="overview-description" class="sr-only">A narrated introduction to SuiFleet. English captions can be enabled in the video player.</p>']
+    for video in (v for v in manifest['variants'] if v['name'] == 'landscape'):
         parts.append(f'<video class="overview-video overview-{video["name"]}" data-mp4-sha256="{video["fallback_sha256"]}" controls playsinline preload="none" width="{video["width"]}" height="{video["height"]}" poster="/media/overview/{video["poster"]}?v={video["poster_sha256"][:16]}" aria-label="How SuiFleet works, {video["name"]} version" aria-describedby="overview-description"><source src="/media/overview/{video["file"]}?v={video["file_sha256"][:16]}" type="video/webm"><source src="/media/overview/{video["fallback"]}?v={video["fallback_sha256"][:16]}" type="video/mp4"><track kind="captions" src="/media/overview/{manifest["captions"]}?v={manifest["captions_sha256"][:16]}" srclang="en" label="English">Your browser cannot play the video. Read the transcript below.</video>')
-    parts.append('<p class="overview-caption">Illustrative animation. Installation results and current health are different; your platform controls its installer and any reboot.</p><details><summary>Read the complete narration</summary><ol class="overview-transcript">')
+    parts.append('<details><summary>Read the complete narration</summary><ol class="overview-transcript">')
     for scene in manifest['scenes']:
         parts.append('<li><strong>'+html.escape(scene['title'])+'</strong><p>'+html.escape(scene['text'])+'</p></li>')
-    parts.append('</ol></details><p><a class="button primary" href="/guide/">Continue to the product guide →</a></p></section>')
+    parts.append('</ol></details></section>')
     return ''.join(parts)
 
 
@@ -365,7 +364,7 @@ def build(out, config=None):
             integrity = guide_integrity()
             if page['path'] == '/guide/': rendered = rendered.replace("<body>", '<body class="guide-page">')
             else:
-                rendered = rendered.replace("<body>", '<body class="guide-page how-page">')
+                rendered = rendered.replace("<body>", '<body class="overview-page">')
                 rendered = rendered.replace("media-src 'self';", "media-src 'self' blob:; connect-src 'self';")
             rendered = rendered.replace("base-uri 'none'; form-action 'none'", f"base-uri 'none'; form-action 'none'; script-src '{integrity}'")
             rendered = rendered.replace("</body>", f'<script src="{guide_script_url()}" integrity="{integrity}" defer></script>\n</body>')

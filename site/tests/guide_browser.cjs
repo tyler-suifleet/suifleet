@@ -28,10 +28,10 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
   }
   assert.equal(gathered.size,expected.size,'every prerequisite, action and result remains reachable');for(const [key,text]of expected)assert.equal(gathered.get(key).join(' '),text,`lost/duplicated text${width}x${height} ${key}`);
   await page.locator('[data-guide-back]').click();assert.equal(await page.locator('[data-guide-complete]').isVisible(),false);await page.locator('[data-guide-next]').click();await page.locator('[data-guide-next]').click();assert.equal(await page.locator('[data-guide-back]').isDisabled(),true);
-  await page.getByLabel('Guide stage').selectOption('publish-version');assert.equal(await page.locator('#publish-version').isVisible(),true);await page.goBack();await page.locator('#sign-in').waitFor();
-  await page.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});await page.locator('#fund').waitFor();assert.equal(await page.getByLabel('Guide stage').inputValue(),'fund');
+  await page.evaluate(()=>location.hash='publish-version');assert.equal(await page.locator('#publish-version').isVisible(),true);await page.goBack();await page.locator('#sign-in').waitFor();
+  await page.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});await page.locator('#fund').waitFor();assert.equal(await page.locator('[data-guide-select]').inputValue(),'fund');
   await page.mouse.wheel(0,800);assert.equal(await page.evaluate(()=>scrollY),0);
-  assert.deepEqual(errors,[],`browser errors at${width}x${height}`);assert.deepEqual(external,[]);console.log(`PASS guide${width}x${height}: ${count} screens, all${expected.size} instructions, no page/text overflow, controls visible, back/next/jump/history/deep link`);await page.close();
+  assert.deepEqual(errors,[],`browser errors at${width}x${height}`);assert.deepEqual(external,[]);console.log(`PASS guide${width}x${height}: ${count} screens, all${expected.size} instructions, no page/text overflow, controls visible, back/next/history/deep link`);await page.close();
   // Real server 404s exercise non-bubbling <source> errors, including a deep link.
   missingMedia.add('/media/guide/fund.webm');missingMedia.add('/media/guide/fund.mp4');
   const failure=await browser.newPage({viewport:{width,height}});
@@ -93,7 +93,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  }
  const page=await browser.newPage();await page.goto(origin+'/guide/',{waitUntil:'networkidle'});const video=page.locator('#sign-in video');
  await video.evaluate(async v=>{v.load();await v.play()});await page.waitForFunction(()=>document.querySelector('#sign-in video').currentTime>0);assert.equal(await video.evaluate(v=>v.error),null);
- await page.getByLabel('Guide stage').selectOption('fund');assert.equal(await video.evaluate(v=>v.paused),true,'leaving a stage pauses its video');
+ await page.evaluate(()=>location.hash='fund');await page.locator('#fund').waitFor();assert.equal(await video.evaluate(v=>v.paused),true,'leaving a stage pauses its video');
 
  missingMedia.add('/media/guide/fund.webm');
  // A fresh context prevents a previously cached WebM range from hiding the 404.
@@ -114,7 +114,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  });
  await lazyPage.goto(origin+'/guide/',{waitUntil:'networkidle'});
  for(const step of steps){
-  await lazyPage.getByLabel('Guide stage').selectOption(step.id);
+  await lazyPage.evaluate(id=>location.hash=id,step.id);await lazyPage.locator('#'+step.id).waitFor();
   const player=lazyPage.locator(`#${step.id} video`);
   if(!await player.count())continue;
   await player.evaluate(async v=>{v.muted=true;await v.play()});
@@ -140,7 +140,7 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  for(const viewport of [{width:320,height:568},{width:844,height:390}]) {
  const touchPage=await browser.newPage({viewport});
  await touchPage.goto(origin+'/guide/',{waitUntil:'networkidle'});
- for(const selector of ['[data-guide-prev-part]','[data-guide-forward]','[data-guide-next]','[data-guide-select]']) {
+ for(const selector of ['[data-guide-prev-part]','[data-guide-forward]','[data-guide-next]','.mobile-menu summary']) {
   const bounds=await touchPage.locator(selector+':visible').first().boundingBox();
   assert.ok(bounds&&bounds.width>=44&&bounds.height>=44,`${selector}: mobile touch target is smaller than44px`);
  }
