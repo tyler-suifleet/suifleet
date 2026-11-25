@@ -4,7 +4,8 @@
 # enroll.yml checks that the staging directory is on tmpfs and erases it
 # afterwards, also when enrollment fails. tmpfs pages and process memory can
 # be swapped out, so swap_policy.yml refuses hosts with swap that could
-# write the claim to a disk before the claim is read.
+# write the claim to a disk before the claim is read, and crash_policy.yml
+# refuses hosts that could store a crash dump of a process holding it.
 #
 # The claim must not touch persistent storage. Ansible's copy module
 # would transfer the decrypted file through the remote temporary
@@ -133,6 +134,9 @@
 - name: Refuse claims on a host that can swap them to disk
   ansible.builtin.import_tasks: swap_policy.yml
 
+- name: Refuse claims on a host that can store a crash dump of them
+  ansible.builtin.import_tasks: crash_policy.yml
+
 - name: Erase a claim left by an interrupted run
   ansible.builtin.file:
     path: "{{ suifleet_enroll_staging }}"
@@ -153,7 +157,7 @@
         argv:
           - sh
           - -c
-          - umask 077 && d=$(mktemp -d "$1/suifleet-claim.XXXXXXXXXX") && printf '%s\n' "$d" && cat > "$d/claim.key"
+          - ulimit -c 0 && umask 077 && d=$(mktemp -d "$1/suifleet-claim.XXXXXXXXXX") && printf '%s\n' "$d" && cat > "$d/claim.key"
           - sh
           - "{{ suifleet_claim_transfer_dir }}"
         stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
@@ -181,7 +185,7 @@
           - >-
             set -eu; src="$1/claim.key";
             test -f "$src" && test ! -L "$src";
-            runuser -u "$2" -- sh -c 'umask 077 && cat > "$1"' sh "$3" < "$src"
+            runuser -u "$2" -- sh -c 'ulimit -c 0 && umask 077 && cat > "$1"' sh "$3" < "$src"
           - sh
           - "{{ suifleet_claim_transfer.stdout }}"
           - "{{ suifleet_claim_owner }}"

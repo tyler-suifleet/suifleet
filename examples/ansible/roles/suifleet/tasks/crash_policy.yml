@@ -1,0 +1,40 @@
+---
+# A crash dump of a process holding the claim (Ansible's module, cat,
+# runuser, suifleet --enroll) is a copy of its memory. Before any claim is
+# read, the host must not be able to store one:
+#
+#   - kernel.core_pattern pipes to systemd-coredump and the SSH session's
+#     core dump size limit is 0 (systemd-coredump honors the crashing
+#     process's RLIMIT_CORE) or coredump.conf sets Storage=none;
+#   - kernel.core_pattern pipes to false/true (nothing is kept); or
+#   - kernel.core_pattern names a file and the SSH session's limit is 0 (the
+#     kernel writes nothing).
+#
+# Any other piped handler (apport, abrt, a vendor or WSL handler) is refused:
+# the kernel runs it whatever the limit and it may keep the dump. The probe
+# runs unescalated, like the claim transfer, so it reads the limit that the
+# module receiving the claim inherits. The root-run staging and enrollment
+# commands additionally set their own limit to 0 before the claim reaches
+# them, since sudo's and runuser's PAM limits could raise it.
+- name: Read the host's crash dump policy
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "{{ lookup('ansible.builtin.file', 'crash_policy.sh') }}"
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_crash
+  changed_when: false
+  check_mode: false
+
+- name: Refuse claims on a host that can store a crash dump of them
+  ansible.builtin.assert:
+    that: suifleet_crash.stdout_lines | last | default('') == 'VERDICT ok'
+    quiet: true
+    fail_msg: >-
+      {{ inventory_hostname }} could store a crash dump containing the claim:
+      {{ (suifleet_crash.stdout_lines | last | default('') | regex_replace('^VERDICT unsafe ', ''))
+      or 'its crash dump policy could not be read' }}.
+      Enroll with core dumps disabled (docs/ANSIBLE.md#claim-storage).

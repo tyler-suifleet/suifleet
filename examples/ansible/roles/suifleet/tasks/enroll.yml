@@ -112,7 +112,9 @@
             set -eu
             umask 077
             partial=/etc/suifleet/.enrollment.json.partial
-            runuser -u "$HOLDER" -- /usr/bin/suifleet --enroll "$STAGING/enroll.toml" > "$partial"
+            # A core dump size limit of 0, set after the PAM limits of runuser
+            # apply, keeps a crash of the claim holder from being stored.
+            runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && exec /usr/bin/suifleet --enroll "$1"' sh "$STAGING/enroll.toml" > "$partial"
             grep -Eq '"device_cap_id":"0x[0-9a-f]{64}"' "$partial"
             chown root:suifleet "$partial"
             chmod 0640 "$partial"
