@@ -7,6 +7,11 @@ export const MAX_FRAME = 65536;
 export const DEFAULT_SOCKET = '/run/suifleet/ipc.sock';
 /** Serialized payload limit of `publish`. */
 export const MAX_PUBLISH_PAYLOAD = 4096;
+/**
+ * Largest delay Node timers honor (2^31 - 1 ms). Larger values, and non-finite
+ * ones, fire after 1 ms, so every SDK timeout/delay option is checked against it.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 /** Raw bytes per `data_put` chunk, as in the Python SDK. */
 export const DATA_CHUNK_SIZE = 24576;
 export const MAX_DATA_SIZE = 64 * 1024 * 1024;

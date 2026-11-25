@@ -28,7 +28,7 @@
  */
 import type { Client } from './index.js';
 import type { JsonValue } from './protocol.js';
-import { IpcError, MAX_PUBLISH_PAYLOAD, TransportError, encodeRequest } from './protocol.js';
+import { IpcError, MAX_PUBLISH_PAYLOAD, MAX_TIMER_DELAY_MS, TransportError, encodeRequest } from './protocol.js';
 
 /**
  * A queued item. The item and its payload are frozen, detached copies taken at
@@ -50,9 +50,9 @@ export interface OutboundBufferOptions {
 }
 
 export interface FlushOptions {
-  /** Attempts for the head item before flush returns with it still queued. Default 5. */
+  /** Attempts for the head item before flush returns with it still queued: a positive integer. Default 5. */
   maxAttempts?: number;
-  /** First delay between attempts, doubled up to 5 s. Default 200. */
+  /** First delay between attempts (finite, 0..2147483647), doubled up to 5 s. Default 200. */
   retryDelayMs?: number;
   signal?: AbortSignal;
 }
@@ -187,13 +187,19 @@ export class OutboundBuffer {
   async flush(options: FlushOptions = {}): Promise<FlushResult> {
     if (this.uncertain) throw new Error('outbound buffer is blocked by an uncertain delivery; call resolveUncertain');
     if (this.flushing) throw new Error('flush already in progress');
-    this.flushing = true;
+    // Validate before anything is sent: NaN or Infinity would bypass the retry cap.
     const maxAttempts = options.maxAttempts ?? 5;
+    const retryDelayMs = options.retryDelayMs ?? 200;
+    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new RangeError('maxAttempts must be a positive integer');
+    if (typeof retryDelayMs !== 'number' || !Number.isFinite(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > MAX_TIMER_DELAY_MS) {
+      throw new RangeError(`retryDelayMs must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);
+    }
+    this.flushing = true;
     let sent = 0;
     try {
       while (this.entries.length > 0) {
         const entry = this.entries[0] as Entry;
-        let delay = options.retryDelayMs ?? 200;
+        let delay = retryDelayMs;
         for (let attempt = 1; ; attempt++) {
           try {
             options.signal?.throwIfAborted();

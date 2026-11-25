@@ -10,7 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createConnection } from 'node:net';
 import { performance } from 'node:perf_hooks';
 import {
-  DATA_CHUNK_SIZE, DEFAULT_SOCKET, DataPutError, MAX_DATA_SIZE, MAX_FRAME, MAX_PUBLISH_PAYLOAD, ProtocolError, TransportError,
+  DATA_CHUNK_SIZE, DEFAULT_SOCKET, DataPutError, MAX_DATA_SIZE, MAX_FRAME, MAX_PUBLISH_PAYLOAD, MAX_TIMER_DELAY_MS, ProtocolError, TransportError,
   decodeResponse, encodeRequest, validateDataMetadata,
 } from './protocol.js';
 import type { DataMetadata, DataPutReceipt, JsonObject, JsonValue } from './protocol.js';
@@ -26,7 +26,8 @@ export interface ClientOptions {
    * Whole-request deadline, started when `request` is called. It covers every
    * connection attempt and the backoff between them, so a request is never
    * first sent after it expires. The daemon ends connections after 120 s.
-   * Default 120000.
+   * A finite number in (0, 2147483647] (Node's maximum timer delay); anything
+   * else throws RangeError before connecting. Default 120000.
    */
   timeoutMs?: number;
   /**
@@ -35,7 +36,7 @@ export interface ClientOptions {
    * duplicates a request, for example while the daemon restarts.
    */
   connectAttempts?: number;
-  /** First delay between connection attempts, doubled up to 5 s. Default 250. */
+  /** First delay between connection attempts (finite, 0..2147483647), doubled up to 5 s. Default 250. */
   connectRetryDelayMs?: number;
 }
 
@@ -125,7 +126,13 @@ export class Client {
     this.connectAttempts = options.connectAttempts ?? 1;
     this.connectRetryDelayMs = options.connectRetryDelayMs ?? 250;
     if (!Number.isInteger(this.connectAttempts) || this.connectAttempts < 1) throw new RangeError('connectAttempts must be a positive integer');
-    if (!(this.timeoutMs > 0)) throw new RangeError('timeoutMs must be positive');
+    if (typeof this.timeoutMs !== 'number' || !Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0 || this.timeoutMs > MAX_TIMER_DELAY_MS) {
+      throw new RangeError(`timeoutMs must be a finite number in (0, ${MAX_TIMER_DELAY_MS}]`);
+    }
+    if (typeof this.connectRetryDelayMs !== 'number' || !Number.isFinite(this.connectRetryDelayMs) || this.connectRetryDelayMs < 0
+      || this.connectRetryDelayMs > MAX_TIMER_DELAY_MS) {
+      throw new RangeError(`connectRetryDelayMs must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);
+    }
   }
 
   /**

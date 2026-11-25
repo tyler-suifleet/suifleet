@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  BufferFullError, Client, DATA_CHUNK_SIZE, DataPutError, IpcError, MAX_FRAME, OutboundBuffer, ProtocolError,
+  BufferFullError, Client, DATA_CHUNK_SIZE, DataPutError, IpcError, MAX_FRAME, MAX_TIMER_DELAY_MS, OutboundBuffer, ProtocolError,
   TransportError, UncertainDeliveryError, encodeRequest, validateDataMetadata,
 } from '../dist/index.js';
 
@@ -553,4 +553,57 @@ test('OutboundBuffer flush stops promptly when its signal aborts a nested client
   assert.equal(requests.length, 1);
   assert.equal(requests[0].operation, 'stream_append');
   await new Promise((resolve) => server.close(resolve));
+});
+
+test('timeoutMs and connectRetryDelayMs outside the Node timer range are refused before connecting', async () => {
+  const warnings = [];
+  const onWarning = (warning) => warnings.push(warning.name);
+  process.on('warning', onWarning);
+  try {
+    const server = await serve(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      return ok({ echoed: true });
+    });
+    // The largest honored delay keeps its deadline: a 35 ms reply succeeds.
+    for (const timeoutMs of [1000, MAX_TIMER_DELAY_MS]) {
+      assert.deepEqual(await new Client({ socketPath: server.path, timeoutMs }).request('status'), { echoed: true });
+    }
+    // Larger or non-finite delays would fire after 1 ms; they never reach the socket.
+    for (const timeoutMs of [MAX_TIMER_DELAY_MS + 1, Infinity, NaN, 0, -1, '1000']) {
+      assert.throws(() => new Client({ socketPath: server.path, timeoutMs }), RangeError, String(timeoutMs));
+    }
+    for (const connectRetryDelayMs of [MAX_TIMER_DELAY_MS + 1, Infinity, NaN, -1]) {
+      assert.throws(() => new Client({ socketPath: server.path, connectRetryDelayMs }), RangeError, String(connectRetryDelayMs));
+    }
+    for (const connectAttempts of [Infinity, NaN, 0, 1.5]) {
+      assert.throws(() => new Client({ socketPath: server.path, connectAttempts }), RangeError, String(connectAttempts));
+    }
+    assert.equal(server.requests.length, 2);
+    await server.close();
+  } finally {
+    process.off('warning', onWarning);
+  }
+  assert.ok(!warnings.includes('TimeoutOverflowWarning'), warnings.join(','));
+});
+
+test('OutboundBuffer.flush refuses invalid maxAttempts and retryDelayMs before any send', async () => {
+  const server = await serve(() => ({ version: 1, ok: false, error: 'full' }));
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.append('s', 1);
+  for (const maxAttempts of [NaN, Infinity, -Infinity, 0, -1, 1.5, '3']) {
+    await assert.rejects(buffer.flush({ maxAttempts, retryDelayMs: 1 }), RangeError, String(maxAttempts));
+  }
+  for (const retryDelayMs of [NaN, Infinity, -1, MAX_TIMER_DELAY_MS + 1, '1']) {
+    await assert.rejects(buffer.flush({ maxAttempts: 2, retryDelayMs }), RangeError, String(retryDelayMs));
+  }
+  assert.equal(server.requests.length, 0);
+  assert.equal(buffer.pending, 1);
+  assert.equal(buffer.blocked, false);
+  // A refused option leaves the buffer usable, and a valid cap still bounds repeated refusals.
+  const result = await buffer.flush({ maxAttempts: 3, retryDelayMs: 1 });
+  assert.equal(result.sent, 0);
+  assert.equal(result.pending, 1);
+  assert.ok(result.error instanceof IpcError && result.error.code === 'full');
+  assert.equal(server.requests.length, 3);
+  await server.close();
 });
