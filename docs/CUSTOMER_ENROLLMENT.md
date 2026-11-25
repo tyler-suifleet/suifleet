@@ -8,12 +8,12 @@ Connect the fleet operator account on the intended network. Install a client wit
 
 ## Steps
 
-1. Open **Enrollment**. Create or select a batch policy with sufficient quota and an appropriate expiry.
-2. Use **Import CSV** (`serial` required; `alias` or `name`, and `group` optional), **Pair one device**, or **Import roster file**. Resolve duplicate names, serials and ambiguous groups before continuing.
-3. Select **Download credentials**. If the batch uses an updater, reporting, logs or archives, paste its TOML configuration in **Batch configuration template**. Keep the archive offline. Each `enrollment/SERIAL/` folder contains `enroll.toml`, `claim.key`, `deployment.json` and, when supplied, `config.template.toml`.
-4. Select **Run pending transactions** to register and fund claims. Approve the intended network and batch in your wallet.
+1. Open **Enrollment**. The page selects an open enrollment batch; use **Create another batch** for a new quota or expiry.
+2. Use **Pair one device** (serial required; a blank name uses the serial), **Import CSV** (`serial` required; `alias` or `name`, and `group` optional), or **Import roster file**. Rows are checked as you type; resolve duplicate names, serials and ambiguous groups before continuing.
+3. Select **Download credentials**. If the batch uses an updater, reporting, logs or archives, paste its TOML configuration in **Advanced → Batch configuration template**. Keep the archive offline: it is the only saved copy of the browser-generated claim keys. Each `enrollment/SERIAL/` folder contains `enroll.toml`, `claim.key`, `deployment.json` and, when supplied, `config.template.toml`.
+4. Select **Run pending transactions** to register and fund claims. Approve only the intended network and batch in your wallet.
 5. Install the same [public trust settings](ENROLLMENT.md#automatic-linux-first-boot) in the root filesystem for the batch. Put exactly one `enrollment/SERIAL/` folder on each unit's private writable boot partition or configured provisioning media.
-6. Boot the device. First-boot enrollment verifies the inputs, consumes the claim, writes the client configuration and starts the client. Check `enrollment-status.json` in the unit's folder. The same status code goes to the service journal. If you supplied no updater template, the default updater refuses artifacts until you configure an updater.
+6. Boot the device. First-boot enrollment verifies the inputs, consumes the claim, writes the client configuration and starts the client. Check `enrollment-status.json` in the unit's folder. The same status code goes to the service journal. If you supplied no updater template, the default updater refuses artifacts until you configure an updater. On a device without first-boot enrollment, run `sudo suifleet --enroll /path/to/enroll.toml` and install the manifest, `signer.toml` and `config.toml` as described in [setup](INSTALL_DEVICE_CLIENT.md#configuration-file).
 7. Run pending transactions again to bind enrolled devices to their reserved aliases, serials and groups. Use **Fund enrolled devices** or your configured device operating budget for ongoing reports.
 
 ## Expected result
