@@ -3,8 +3,8 @@
 # to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner.
 # enroll.yml checks that the staging directory is on tmpfs and erases it
 # afterwards, also when enrollment fails. tmpfs pages and process memory can
-# be swapped out, so swap_policy.yml refuses hosts with swap that could
-# write the claim to a disk before the claim is read, and crash_policy.yml
+# be swapped out, so swap_policy.yml refuses hosts with any active swap
+# before the claim is read, and crash_policy.yml
 # refuses hosts that could store a crash dump of a process holding it.
 #
 # The claim must not touch persistent storage. Ansible's copy module
