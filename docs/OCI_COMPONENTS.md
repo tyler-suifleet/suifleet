@@ -1,14 +1,60 @@
 # OCI container components (SF-036 and SF-300)
 
-The Linux supervisor supports Docker Engine through `/usr/bin/docker` and the
-local `/var/run/docker.sock`. The daemon account needs explicit operator-provided
-engine access. Engine access is a privileged trust boundary; install it only for
-a trusted fleet operator. Podman, remote engines, Docker Desktop, Windows and
-macOS are not supported by this adapter. The initial tested engine is Docker
-29.8.0 with cgroup v2 on x86-64. Native Linux amd64, arm64 and ARMv7 image selection
-is implemented; physical ARM/Pi installation, crash/reboot and target limits remain
-unrun acceptance in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
-Image/Yocto builds do not install or provision an engine automatically.
+The Linux supervisor selects one local engine per daemon state root. Set
+`SUIFLEET_OCI_ENGINE` in the daemon service environment. The packaged service
+reads `/etc/suifleet/env`. Recipes cannot select an engine.
+
+| Selection | Unix socket | Network setting | Linux image platforms | Engine requirements |
+| --- | --- | --- | --- | --- |
+| `docker` (default) | `/var/run/docker.sock` | `none`, `bridge` | amd64, arm64, ARMv7 | Local Docker CLI and Docker Engine with resource limits |
+| `podman-rootful` | `/run/podman/podman.sock` | `none`, `bridge` | amd64, arm64 | `/usr/bin/podman-remote` and separately managed rootful API service, cgroup v2, CPU/memory/PID controllers and seccomp |
+| `podman-rootless` | `/run/suifleet-podman/podman.sock` | `none` | amd64, arm64 | `/usr/bin/podman-remote`, API service under the daemon UID, subordinate UID/GID mappings, delegated cgroup v2 CPU/memory/PID controllers and seccomp |
+
+Run the Podman API service outside the SuiFleet unit. For both Podman modes,
+provision `/run/suifleet-podman` and `/run/suifleet-podman/libpod` as mode 0700
+and owned by the daemon account at boot. The socket client expects the
+`libpod` directory to exist when it runs inside the read-only service sandbox.
+For example, use these two systemd tmpfiles entries for the packaged account.
+
+```text
+d /run/suifleet-podman        0700 suifleet suifleet -
+d /run/suifleet-podman/libpod 0700 suifleet suifleet -
+```
+
+With systemd, provision the system `podman.socket` for rootful mode or the
+daemon account's user `podman.socket` for rootless mode. For rootless boot
+operation, arrange that the account's user manager and runtime directory are
+present without an interactive login. The SuiFleet sandbox hides `/run/user`.
+Set the rootless socket's drop-in as follows. The engine still uses its normal
+rootless runtime directory outside the daemon sandbox.
+
+```ini
+[Socket]
+ListenStream=
+ListenStream=/run/suifleet-podman/podman.sock
+```
+
+Rootful socket access grants root-equivalent engine authority.
+Grant the daemon account socket access explicitly, including traversal of the
+rootful socket directory. Restrict engine administration to trusted operators. Keep the API
+local to Unix sockets. Configure a credential-empty engine service environment and
+storage, with no injected default mounts, secrets or environment and an enforcing
+default seccomp profile. For a rootless service, keep its store and UID/GID mappings
+stable across daemon restarts. See [Podman system service](https://docs.podman.io/en/stable/markdown/podman-system-service.1.html)
+and [Podman create](https://docs.podman.io/en/stable/markdown/podman-create.1.html).
+
+The durable marker binds recovery to the engine selection. Retire all OCI
+components and confirm cleanup with the old engine before switching. A legacy
+marker implies Docker. A mismatched engine selection fails before cleanup;
+restore the prior configuration and keep the marker. Before downgrading to
+a daemon that predates Podman support, retire its Podman components and confirm
+cleanup with the Podman-capable daemon. Remote hosts,
+Docker Desktop, Windows and macOS are outside this adapter's scope. Both Podman
+modes reject ARMv7 before contacting the engine because image inspection lacks
+the ARM variant needed to verify the platform. Physical ARM/Pi
+installation, crash/reboot and target limits remain acceptance in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
+Image/Yocto builds leave engine installation and provisioning to the platform.
 
 Use an ordinary authenticated native recipe with `lifecycle.run` exactly
 `suifleet:oci`, `lifecycle.restart` set to `on-failure`, `always` or `never`, and no
@@ -41,21 +87,23 @@ manifest/index digest and upload/hash the descriptor bytes as the artifact:
 
 Unknown fields fail. Images require an explicit repository and immutable SHA-256;
 tags alone fail. Platforms must match the daemon: `linux/amd64`, `linux/arm64` or
-`linux/arm/v7` (ARMv7 only; ARMv6 daemon targets are unsupported). There is no
+`linux/arm/v7` (Docker only; ARMv6 daemon targets are unsupported). There is no
 automatic emulation or architecture fallback. The
 engine's cached image platform and repository digest are checked before use.
 Images declaring implicit `VOLUME`s fail. Choose images compatible with a non-root
 numeric UID[:GID], read-only root filesystem, all capabilities dropped and
 `no-new-privileges`. The descriptor cannot specify host paths, port publishing,
 privileged mode or arbitrary engine flags. `network` is explicitly `none`
-or Docker's `bridge` (which permits outbound traffic); host networking is rejected.
-Version 1 can request a non-executable, nodev/nosuid `/tmp` tmpfs for writes.
+or an engine-supported `bridge` (which permits outbound traffic); host networking is rejected.
+The descriptor can request a non-executable, nodev/nosuid `/tmp` tmpfs for writes.
 The device's configuration files, signing keys and registry credentials stay
 outside the container.
 
 ## Device-local grants for descriptor version 2
 
 Version 2 adds three optional fields to the same authenticated descriptor.
+Persistence, device and IPC grants require Docker. Both Podman modes reject
+requests for these grants before contacting the engine.
 Set `version` to 2 and `user` to the locally granted UID:GID. This example
 requests all three grants for UID and GID 31001.
 
@@ -133,10 +181,11 @@ firmware installation, boot selection, reboot and firmware rollback.
 
 Memory is 6 MiB–64 GiB with swap limited to the same combined total, CPUs are
 1–64, PID count is 1–4096, and tmpfs cannot exceed the memory limit (zero disables
-it). Docker/kernel admission failure fails deployment; there is no fallback to
-an unconfined container. Docker's required `/proc`, `/dev` and generated resolver
-mounts remain engine-managed. Engine logs use the local driver with two 1 MiB
-files; attached stdout/stderr also enters the supervisor's private component log.
+it). Engine or kernel admission failure fails deployment. Engine-managed mounts
+include `/proc`, `/dev` and generated resolver files. Podman disables its automatic
+writable tmpfs mounts and systemd mode. Docker uses the local driver with two
+1 MiB log files. Podman uses the k8s-file log driver with a 1 MiB size limit.
+Attached stdout/stderr also enters the supervisor's private component log.
 
 Registry authentication is optional `registryAuth: "profile_name"`; it names
 `/etc/suifleet/oci/profile_name/config.json`, never credentials in the recipe.
@@ -148,6 +197,11 @@ workspaces or images, and engine error bodies are withheld from diagnostics.
 The anonymous config location `/etc/suifleet/oci/public` should be absent or an
 operator-controlled empty (`{}`) Docker configuration. No inherited `DOCKER_HOST`,
 Docker context, home-directory credentials or environment secrets are used.
+Podman pulls use the same inline auth profile and require TLS verification. The
+client uses an explicit empty auth file for anonymous pulls and clears its
+inherited home and configuration lookup paths. The
+Podman service is part of the trusted engine boundary and must run without
+ambient registry logins or registry credential helpers.
 Production registry/account validation is deferred to the final external phase
 in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
@@ -164,7 +218,7 @@ The supervisor owns restart budgets/backoff and readiness. Transient engine
 cleanup/start failures consume that same budget and retry after backoff; a new
 container cannot be created until component cleanup succeeds. After the last OCI
 component is retired, confirmed cleanup releases the durable engine requirement,
-so later daemon startup does not require Docker. Engine restart is
+so later daemon startup does not require an engine. Engine restart is
 always disabled. Descriptor readiness is an argv command executed as the container
 user; without one, the container must survive the configured startup interval.
 A failed replacement restores the previous descriptor/image and confirms it only
@@ -191,10 +245,15 @@ SF_OCI_TEST_IMAGE=docker.io/library/alpine@sha256:294b683cb724975bec92580e1e6856
   RUSTUP_TOOLCHAIN=1.94.0 python3 scripts/test_oci.py
 ```
 
-The engine test covers retained data across replacement, restart and retirement,
-real UID-based IPC authorization, a virtual character-device grant, sibling
-isolation, actual create/start, readiness, non-root/capability and filesystem
-restrictions, engine resource settings, crash/restart, a local HTTP
+Repeat the host command with `SUIFLEET_OCI_ENGINE=podman-rootful` and
+`SUIFLEET_OCI_ENGINE=podman-rootless` for the two local Podman profiles. Pre-cache
+the same digest in each selected store. The Podman registry negative tests an
+untrusted local endpoint. The plain HTTP auth forwarding fixture runs on Docker.
+The Docker grant test covers retained data across replacement, restart and
+retirement, real UID-based IPC authorization, a virtual character-device grant,
+and sibling isolation. The engine lifecycle test covers actual create/start,
+readiness, non-root/capability and filesystem restrictions, engine resource
+settings, crash/restart, a local HTTP
 401 registry, missing auth profile, failed-readiness replacement rollback, clean
 shutdown, orphaned engine-container cleanup after a killed client, and cache-only bootstrap. It uses no production credentials, public Sui
 network, physical device or firmware updater. The script cleans its own labeled
