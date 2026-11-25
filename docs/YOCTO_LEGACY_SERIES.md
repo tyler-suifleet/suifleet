@@ -111,15 +111,22 @@ was unchanged afterwards. The run checked:
 
 - Unenrolled automatic provisioning and an unprivileged daemon unit.
 - Config activation, then retry against an unavailable loopback node.
-- No systemd parse diagnostics for SuiFleet units.
-- The packaged Node reports v22.22.2, equal to the codec manifest, and runs.
+- No systemd parse diagnostics for SuiFleet units. The boot journal capture
+  must succeed and contain the daemon's own output, and only grep's clean
+  no-match status passes.
+- The packaged Node (required in this profile) reports v22.22.2, equal to the
+  codec manifest, and runs.
 - The test updater installs v1, refuses a malformed artifact with v1 still
   current, and upgrades to v2 with a receipt naming the previous version.
   It runs as the daemon user.
 - After switching to the service signer, the unchanged key is
   suifleet-signer 0600. The daemon user cannot read it. The socket is
-  suifleet-signer:suifleet 0660, and the socket-activated service reports
-  ready with the device address.
+  suifleet-signer:suifleet 0660. With the service stopped, a connection to
+  the socket from the daemon user activated it. It answered the device
+  address, refused a signature request from a process that is not the
+  recorded daemon main process, and refused an unknown operation. This ran on
+  the 5.15 kernel, so the refusal used the /proc caller fallback without
+  pidfd confirmation (SF-292).
 - Rebooting the same disk preserves the key, address and state.
 - A second fresh copy provisions a different identity.
 
@@ -146,9 +153,9 @@ recorded. Each retry passed unchanged, and no clock or QA check was
 disabled. This is a package build, not a Pi image, flash or boot (SF-029,
 SF-031).
 
-Not shown by any of these checks: a signing request over the socket (no
-chain was reached), real enrollment or OTA, or behaviour under the 6.5+
-pidfd path.
+Not shown by any of these checks: a successful signature (no transaction
+was signed and no chain was reached), real enrollment or OTA, or behaviour
+under the 6.5+ pidfd path.
 
 ### Kernel and signer boundary (SF-292)
 
@@ -199,22 +206,29 @@ kas build kas/packaging-kirkstone.yml
 Keep each series in its own work tree; do not mix release TMPDIRs. A local
 `conf/site.conf` may set the download/sstate directories, `rm_work` and the
 codec artifact directory without changing source pins. The QEMU boot check
-(with the native QEMU's library directory in `LD_LIBRARY_PATH`):
+uses the QEMU build directory, not the Pi one exported last above. Set
+`TMP` to that build's `TMPDIR` (`$KAS_BUILD_DIR/tmp` unless `site.conf`
+moves it) and put the native QEMU's library directory in `LD_LIBRARY_PATH`:
 
 ```sh
+export KAS_BUILD_DIR="$KAS_WORK_DIR/build-qemu"
+TMP="$KAS_BUILD_DIR/tmp"
 python3 scripts/test_yocto_boot.py --extended \
-  --qemu "$KAS_BUILD_DIR/tmp/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64" \
-  --kernel "$KAS_BUILD_DIR/tmp/deploy/images/qemuarm64/Image" \
-  --image "$KAS_BUILD_DIR/tmp/deploy/images/qemuarm64/core-image-minimal-qemuarm64.ext4"
+  --qemu "$TMP/sysroots-components/x86_64/qemu-system-native/usr/bin/qemu-system-aarch64" \
+  --kernel "$TMP/deploy/images/qemuarm64/Image" \
+  --image "$TMP/deploy/images/qemuarm64/core-image-minimal-qemuarm64.ext4"
 ```
 
 `--extended` also records the guest kernel and systemd versions. It rejects
 systemd parse diagnostics for SuiFleet units. It applies, refuses and upgrades
 the harmless SF-030 test component as the daemon user. It switches the device
 to the isolated signer and checks that the unchanged key moves to
-`suifleet-signer`, the daemon user cannot read it, and the socket-activated
-service is ready. It does not send a signing request over the socket and does
-not reach a chain.
+`suifleet-signer` and the daemon user cannot read it. With the service
+stopped, a local connection to the socket (from the packaged Node runtime, as
+the daemon user) must activate it. The service must answer the device address
+and refuse two requests: a signature from a process that is not the recorded
+daemon main process, and an unknown operation. It signs no transaction and
+does not reach a chain.
 
 ## Not covered
 
