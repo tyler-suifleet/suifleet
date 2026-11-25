@@ -1,0 +1,122 @@
+{
+  "schema": 1,
+  "kind": "overview-chapter-excerpts",
+  "source_manifest_sha256": "c641ad3dbc7a3cf748d8950bced52e12e997de61d1938641318ca91478f4a1fc",
+  "source_video_sha256": "1732f966aa9a96d6691eec124570121e0b40351d75b1a112eb883e7b949fe89d",
+  "renderer_sha256": "3861aa910d634bfafabc08068b17d4c1177587b9e49cad85fe2880923148c660",
+  "clips": [
+    {
+      "section": "first-update",
+      "title": "Approvals before an update",
+      "start": 12,
+      "end": 24,
+      "duration_seconds": 12,
+      "width": 1280,
+      "height": 720,
+      "cues": [
+        {
+          "text": "You choose what changes, and which devices receive it. Your wallet acts as a secure approval app. It confirms your permission, without sharing your private key.",
+          "speech_start": 0.35,
+          "speech_end": 9.758
+        }
+      ],
+      "file": "section-first-update.mp4",
+      "file_sha256": "a248a0c596ae01f6df9f1a1181fca68f629d7d8807f32455b7a8154dfe1db236",
+      "poster": "section-first-update.jpg",
+      "poster_sha256": "5c8166a8fd592893f1fb7299b76b2352229fa3ef4cf1e9855f29ffe7f959c0d7",
+      "captions": "section-first-update.en.vtt",
+      "captions_sha256": "97890bae15c5b921fada8df91b1b4f336bb028bc32f99ef5b7f5658b2cc94f34"
+    },
+    {
+      "section": "update-flow",
+      "title": "From publishing to a device result",
+      "start": 24,
+      "end": 84,
+      "duration_seconds": 60,
+      "width": 1280,
+      "height": 720,
+      "cues": [
+        {
+          "text": "Sui saves your approval on a shared network. Walrus stores your software files for the period you choose. Private releases are encrypted, with access limited to authorized devices.",
+          "speech_start": 0.35,
+          "speech_end": 11.464667
+        },
+        {
+          "text": "The SuiFleet client on each device checks for approved updates on its configured schedule. Connections start from the device, so you do not need to open an incoming connection.",
+          "speech_start": 12.35,
+          "speech_end": 22.974
+        },
+        {
+          "text": "When an update is available, the device downloads it from Walrus and verifies that it matches the approved release. A device that reconnects can catch up while the update remains available.",
+          "speech_start": 24.35,
+          "speech_end": 35.358
+        },
+        {
+          "text": "SuiFleet then runs your configured installer. Your platform handles installation, any reboot, and recovery. This lets you use the update process that suits your devices.",
+          "speech_start": 36.35,
+          "speech_end": 46.995333
+        },
+        {
+          "text": "See which installations succeeded and which failed. Device health is reported separately. If an update fails, review the available diagnostics before trying again.",
+          "speech_start": 48.35,
+          "speech_end": 58.312667
+        }
+      ],
+      "file": "section-update-flow.mp4",
+      "file_sha256": "f96d94c557cbef785f380ef37e026a6b168c115adcb549a3603d2ac8f5f569bb",
+      "poster": "section-update-flow.jpg",
+      "poster_sha256": "677d724ee2a79caa21b6c4dd5ec565a80efeb92db77562dc919f7fa370cddb7c",
+      "captions": "section-update-flow.en.vtt",
+      "captions_sha256": "bd3abc0358290413a397ced9ec1bc5bb2751693553729a0e4e9c5d1241ba9865"
+    },
+    {
+      "section": "your-platform",
+      "title": "Your installer stays in control",
+      "start": 60,
+      "end": 72,
+      "duration_seconds": 12,
+      "width": 1280,
+      "height": 720,
+      "cues": [
+        {
+          "text": "SuiFleet then runs your configured installer. Your platform handles installation, any reboot, and recovery. This lets you use the update process that suits your devices.",
+          "speech_start": 0.35,
+          "speech_end": 10.995333
+        }
+      ],
+      "file": "section-your-platform.mp4",
+      "file_sha256": "06b16561c7fa03e7f948a86bc2c6c96a42795ebf5c1a5a7f5a7f7337c3509f1a",
+      "poster": "section-your-platform.jpg",
+      "poster_sha256": "1ab156462df65ecfa6bc7ebeca924d10c6b18372ba57cd88a64100bc3e08670e",
+      "captions": "section-your-platform.en.vtt",
+      "captions_sha256": "33b252344897d64ba94ded987b45378cdbfa52648b10425ce0e0ce4314d6a3e3"
+    },
+    {
+      "section": "behind-console",
+      "title": "Shared records, storage and device clients",
+      "start": 24,
+      "end": 48,
+      "duration_seconds": 24,
+      "width": 1280,
+      "height": 720,
+      "cues": [
+        {
+          "text": "Sui saves your approval on a shared network. Walrus stores your software files for the period you choose. Private releases are encrypted, with access limited to authorized devices.",
+          "speech_start": 0.35,
+          "speech_end": 11.464667
+        },
+        {
+          "text": "The SuiFleet client on each device checks for approved updates on its configured schedule. Connections start from the device, so you do not need to open an incoming connection.",
+          "speech_start": 12.35,
+          "speech_end": 22.974
+        }
+      ],
+      "file": "section-behind-console.mp4",
+      "file_sha256": "c9368eda84cf58f6f4efd2a02cbba1b959821aa264b4ed96e03b24113fd7e448",
+      "poster": "section-behind-console.jpg",
+      "poster_sha256": "677d724ee2a79caa21b6c4dd5ec565a80efeb92db77562dc919f7fa370cddb7c",
+      "captions": "section-behind-console.en.vtt",
+      "captions_sha256": "d2cb3ddeb34c1a96238c4e48bcfb53053018468242b9f0abcc113c11f0d8fb22"
+    }
+  ]
+}
