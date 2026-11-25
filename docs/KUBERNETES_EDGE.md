@@ -305,8 +305,10 @@ annotations, `matchLabels`, `nodeSelector`, resource `limits`/`requests`,
 `overhead`) must hold exactly the bundle's keys: an extra key is drift even
 when its value is empty, because for example `nodeSelector:
 {"example.com/pool": ""}` still requires that node label. A field the server omits matches a
-zero/empty bundle value, and resource quantities compare by value (`0.1`,
-`"0.1"` and `100m` are equal; `1E` equals `1000P`; `1G` does not equal `1Gi`).
+zero/empty bundle value, and Kubernetes quantities (resource
+`limits`/`requests`, `overhead` and emptyDir `sizeLimit`) compare by value
+(`0.1`, `"0.1"` and `100m` are equal; `1.5Gi` equals the server's `1536Mi`;
+`1E` equals `1000P`; `1G` does not equal `1Gi`). Other fields compare as text.
 Omitting `replicas` leaves scaling to, for example, a HorizontalPodAutoscaler.
 A pre-existing foreign object with the right
 name, an object of another component and an object from a stale bundle are

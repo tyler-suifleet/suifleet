@@ -528,6 +528,22 @@ class DecisionTest(unittest.TestCase):
         live["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]["cpu"] = "200m"
         self.assertIn("limits.cpu", k8s.object_ready(live, deploy, "web-app")[1])
 
+    def test_deployment_readiness_compares_empty_dir_size_limit_by_value(self):
+        bundle = example()
+        deployment(bundle)["spec"]["template"]["spec"]["volumes"].append(
+            {"name": "scratch", "emptyDir": {"sizeLimit": "1.5Gi"}})
+        k8s.validate_bundle(bundle)  # the helper accepts an emptyDir sizeLimit
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        volume = live["spec"]["template"]["spec"]["volumes"][-1]
+        self.assertEqual(volume["name"], "scratch")
+        volume["emptyDir"]["sizeLimit"] = "1536Mi"  # as the API server returns it
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        volume["emptyDir"]["sizeLimit"] = "2Gi"  # a true size change is drift
+        self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1])
+        del volume["emptyDir"]["sizeLimit"]  # *Quantity: presence still matters
+        self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1])
+
     def test_spec_drift(self):
         self.assertEqual(k8s.spec_drift({"a": 1}, {"a": 1, "b": 2}, "spec"), "spec.b",
                          "a non-default live field the bundle omits is drift")
@@ -559,7 +575,16 @@ class DecisionTest(unittest.TestCase):
         self.assertIsNone(k8s.spec_drift({"labels": {"a": ""}}, {"labels": {"a": ""}}, "spec"))
         self.assertIsNone(k8s.spec_drift({}, {"nodeSelector": {}}, "spec"))
         self.assertEqual(k8s.spec_drift({"image": "1"}, {"image": "1000m"}, "spec"), "spec.image",
-                         "quantity equivalence applies only to resources")
+                         "quantity equivalence applies only to quantity fields")
+        quantity_paths = [("spec.c.resources.limits", "example.com/gpu"), ("spec.resources.requests", "cpu"),
+                          ("spec.overhead", "memory"), ("spec.volumes[0].emptyDir", "sizeLimit")]
+        for parent, key in quantity_paths:
+            self.assertIsNone(k8s.spec_drift({key: "1.5Gi"}, {key: "1536Mi"}, parent), f"{parent}.{key}")
+            self.assertEqual(k8s.spec_drift({key: "1.5Gi"}, {key: "2Gi"}, parent), f"{parent}.{key}")
+        for parent, key in [("spec.c.resources.claims[0]", "name"), ("spec.volumes[0].configMap", "name"),
+                            ("spec.volumes[0]", "sizeLimit")]:
+            self.assertEqual(k8s.spec_drift({key: "1"}, {key: "1000m"}, parent), f"{parent}.{key}",
+                             f"{parent}.{key} is not a quantity")
 
     def test_transfer_patch(self):
         current = {"metadata": {"uid": "u1", "resourceVersion": "7", "managedFields": [

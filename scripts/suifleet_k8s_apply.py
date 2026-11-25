@@ -382,6 +382,14 @@ def _quantity(value):
     return number * Fraction(10) ** int(suffix[1:])  # decimal exponent, e.g. "1e3"
 
 
+# Fields whose values are Kubernetes resource.Quantity, which the API server
+# canonicalises ("1.5Gi" is returned as "1536Mi"): ResourceRequirements limits
+# and requests (container and pod level), PodSpec overhead and
+# EmptyDirVolumeSource sizeLimit. Map keys may contain dots ("example.com/gpu").
+# Every other field, including resources.claims names, compares as plain text.
+QUANTITY_PATH = re.compile(r"(?:\.resources\.(?:limits|requests)\.|\.overhead\.).+$|\.emptyDir\.sizeLimit$")
+
+
 def _http_get_defaults(prefix):
     # SetDefaults_HTTPGetAction: an omitted or empty path becomes "/" and an
     # omitted or empty scheme becomes HTTP.
@@ -548,7 +556,8 @@ def spec_drift(desired, live, path):
     exactly when the bundle specifies them, even with a zero value. Map fields (labels, annotations, nodeSelector,
     resource lists, ...) must have exactly the bundle's keys, even when an
     extra key's value is empty. A field the server omits matches a zero/empty
-    desired value (Go omitempty), and resource quantities compare by value."""
+    desired value (Go omitempty), and resource quantities (resource limits and
+    requests, overhead, emptyDir sizeLimit) compare by value."""
     if live is None:
         if desired is None:
             return None
@@ -597,7 +606,7 @@ def spec_drift(desired, live, path):
     if isinstance(desired, (int, float)) and isinstance(live, (int, float)) and \
             not isinstance(desired, bool) and not isinstance(live, bool) and desired == live:
         return None
-    if ".resources." in path:
+    if QUANTITY_PATH.search(path):
         want, have = _quantity(desired), _quantity(live)
         if want is not None and want == have:
             return None
