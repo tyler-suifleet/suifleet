@@ -7,6 +7,9 @@ SO_PEERPIDFD); Debian 12 needs a suitable newer/backports kernel. Ubuntu 24.04
 has a suitable kernel. For an older Linux or non-systemd source installation,
 see the [portable signer setup](KEY_ISOLATION.md#portable-linux-signer).
 
+See the [edge platform compatibility matrix](EDGE_PLATFORM_COMPATIBILITY.md)
+for candidate kernels, libc variants and older Yocto series.
+
 ## Build and availability
 
 No public signed APT repository or published Debian download is available yet.

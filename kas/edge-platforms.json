@@ -1,0 +1,99 @@
+{
+  "profiles": {
+    "linux-amd64-systemd": {
+      "status": "current",
+      "arch": "x86_64",
+      "libc": "glibc >= 2.35 for the Debian release artifact",
+      "kernel": ">= 6.5 with SO_PEERPIDFD and cgroup v2",
+      "init": "systemd",
+      "rust": "1.94.0",
+      "checks": ["ota-simulator"],
+      "evidence": "docs/DEBIAN_PACKAGING.md"
+    },
+    "linux-arm64-systemd": {
+      "status": "current",
+      "arch": "aarch64",
+      "libc": "glibc >= 2.35 for the Debian release artifact",
+      "kernel": ">= 6.5 with SO_PEERPIDFD and cgroup v2",
+      "init": "systemd",
+      "rust": "1.94.0",
+      "checks": [],
+      "evidence": "docs/DEBIAN_PACKAGING.md"
+    },
+    "linux-i686-gnu": {
+      "status": "current",
+      "arch": "i686 (userspace)",
+      "libc": "glibc (GLIBC_2.34 symbols; built with 2.35, tested with 2.36)",
+      "kernel": "measured on x86_64 Linux 6.6 with IA-32 compatibility",
+      "init": "32-bit userspace test harness; shipped systemd units untested on i686",
+      "rust": "1.94.0",
+      "checks": [],
+      "evidence": "docs/LINUX_X86.md"
+    },
+    "linux-amd64-musl-5.15": {
+      "status": "smoke-only",
+      "arch": "x86_64",
+      "libc": "musl (static daemon)",
+      "kernel": "5.15",
+      "init": "BusyBox sh as PID 1 in initramfs",
+      "rust": "1.94.0",
+      "checks": ["legacy-vm-smoke"],
+      "blockers": ["Portable signer integration is unqualified in the static musl 5.15 guest", "SF-293/#829 service supervision", "SF-296/#830 embedded packaging and runtime"]
+    },
+    "linux-legacy-target": {
+      "status": "candidate",
+      "arch": "x86_64, aarch64; ARMv7 requires its own hard-float ABI evidence",
+      "libc": "glibc or musl; target-specific link and runtime qualification",
+      "kernel": "4.19, 5.4, 5.10, 5.15",
+      "init": "OpenRC, SysV or runit",
+      "rust": "1.94.0 pinned build; cross C compiler/sysroot required",
+      "checks": [],
+      "blockers": ["Portable signer deployment and restart behavior need qualification on each target", "SF-293/#829 OpenRC, SysV and runit integration", "SF-296/#830 embedded libc, codec and ABI qualification", "SF-296/#830 strict log ingestion on 4.19/5.4 requires an openat2 backport or a reviewed equivalent"]
+    },
+    "yocto-scarthgap": {
+      "status": "current",
+      "arch": "aarch64 (Pi 3 and QEMU)",
+      "libc": "glibc",
+      "kernel": "pinned BSP or QEMU kernel; >= 6.5 with SO_PEERPIDFD for service signing",
+      "init": "systemd",
+      "rust": "1.98.1 via pinned scarthgap/rust mixin",
+      "kas": ["kas/packaging.yml", "kas/packaging-qemu.yml"],
+      "checks": [],
+      "evidence": "docs/YOCTO_PACKAGING.md"
+    },
+    "yocto-wrynose": {
+      "status": "current",
+      "arch": "aarch64 (Pi 3 and QEMU)",
+      "libc": "glibc",
+      "kernel": "pinned BSP or QEMU kernel; >= 6.5 with SO_PEERPIDFD for service signing",
+      "init": "systemd",
+      "rust": "1.94.1 via pinned core",
+      "kas": ["kas/packaging-wrynose.yml", "kas/packaging-wrynose-qemu.yml"],
+      "checks": [],
+      "evidence": "docs/YOCTO_PACKAGING.md"
+    },
+    "yocto-kirkstone": {
+      "status": "current",
+      "arch": "aarch64 (QEMU image and Pi 3 package)",
+      "libc": "glibc 2.35",
+      "kernel": "Linux 5.15 measured in QEMU; Kirkstone 5.10/5.15 lack SO_PEERPIDFD",
+      "init": "systemd 250.14",
+      "rust": "1.92.0 via pinned kirkstone/rust mixin at 6baa9afeb88a4a9b4a0e82dd7e3e611438999dbb",
+      "kas": ["kas/packaging-kirkstone.yml", "kas/packaging-kirkstone-qemu.yml"],
+      "checks": ["image-build"],
+      "evidence": "docs/YOCTO_LEGACY_SERIES.md",
+      "blockers": ["Strong systemd signer binding requires SO_PEERPIDFD; portable signer integration is unqualified on the Kirkstone image", "SF-031/#32 physical Pi image boot and runtime acceptance", "SF-293/#829 SysV integration"]
+    },
+    "yocto-dunfell": {
+      "status": "blocked",
+      "arch": "aarch64 (evaluation target)",
+      "libc": "glibc (evaluation target)",
+      "kernel": "5.4 baseline without SO_PEERPIDFD",
+      "init": "systemd or SysV, pending feature qualification",
+      "rust": "no compatible Rust >= 1.90 toolchain; Dunfell meta-rust ends at 1.72.0",
+      "checks": [],
+      "evidence": "docs/YOCTO_LEGACY_SERIES.md",
+      "blockers": ["Dunfell lacks a compatible Rust >= 1.90 toolchain and has no supported layer or kas profile", "Separately built client deployment requires target validation, including portable signer integration", "SF-293/#829 SysV support", "SF-295/#820 strict log ingestion on 5.4 requires an openat2 backport or a reviewed equivalent"]
+    }
+  }
+}
