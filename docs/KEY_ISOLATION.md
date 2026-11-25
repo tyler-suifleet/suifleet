@@ -69,14 +69,15 @@ features you configure.
    `--socket`, `--daemon-config`, and `--signer-config` paths. It drops all
    supplementary groups from both child processes, so grant required
    accesses to their primary group or UID. If an init system forcibly
-   terminates the launcher, configure it to stop both children too.
+   terminates the launcher, Linux kills both children. Each child checks its parent
+   after arming that cleanup so a concurrent launcher exit aborts startup.
 4. The launcher waits for signer readiness and then starts normal daemon
    operation. Requests open new connections throughout that daemon's
    lifetime. If either child exits, the launcher shuts down the other and
    exits so the init system can restart the pair. Restart the pair for
    configuration and binary changes. Keep daemon self-update disabled with
    the service signer. Platform scripts still own reboot and firmware
-   recovery.
+   recovery. See the [OpenRC, SysV, runit and foreground profiles](PORTABLE_LINUX_SERVICE.md).
 
 The root launcher executes the trusted binary as root and holds it at a
 startup gate. It opens the child's procfs task directory before creating a

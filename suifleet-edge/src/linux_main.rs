@@ -73,15 +73,20 @@ fn main() -> anyhow::Result<()> {
     {
         let mut args = args;
         match args.get(1).map(String::as_str) {
-            Some("--portable-signer-child") if args.len() == 6 => {
+            Some("--portable-signer-child") if args.len() == 7 => {
+                signer_service::bind_portable_lifetime(args[6].parse()?)?;
                 init_tracing();
                 return signer_service::serve_portable(Path::new(&args[2]), args[3].parse()?, args[4].parse()?, args[5].parse()?);
             }
-            Some("--portable-daemon-child") if args.len() == 5 => {
+            Some("--portable-daemon-child") if args.len() == 6 => {
                 signer_service::enter_portable_daemon(args[2].parse()?, args[3].parse()?)?;
+                signer_service::bind_portable_lifetime(args[5].parse()?)?;
                 let socket = PathBuf::from(&args[4]);
                 args.truncate(1);
                 return run(args, Some(socket));
+            }
+            Some("--portable-daemon-child" | "--portable-signer-child") => {
+                anyhow::bail!("portable child arguments do not match the installed launcher");
             }
             _ => {}
         }

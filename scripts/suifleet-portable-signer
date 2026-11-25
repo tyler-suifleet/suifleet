@@ -62,7 +62,7 @@ def run(args, daemon_user, signer_user):
     children = []
     try:
         daemon = subprocess.Popen(
-            [args.binary, "--portable-daemon-child", str(daemon_user.pw_uid), str(daemon_user.pw_gid), args.socket],
+            [args.binary, "--portable-daemon-child", str(daemon_user.pw_uid), str(daemon_user.pw_gid), args.socket, str(os.getpid())],
             stdin=subprocess.PIPE,
             env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "EDGE_CONFIG": str(args.daemon_config)},
         )
@@ -95,7 +95,7 @@ def run(args, daemon_user, signer_user):
                 listener.listen(32)
                 signer = subprocess.Popen(
                     [args.binary, "--portable-signer-child", args.signer_config,
-                     str(listener.fileno()), str(task), str(daemon_user.pw_uid)],
+                     str(listener.fileno()), str(task), str(daemon_user.pw_uid), str(os.getpid())],
                     pass_fds=(listener.fileno(), task),
                     user=signer_user.pw_uid,
                     group=signer_user.pw_gid,
@@ -127,6 +127,9 @@ def main():
     if os.geteuid():
         raise RuntimeError("portable signer launcher requires root")
     os.umask(0o077)
+    # Debian SysV matches this name together with the root-owned pidfile,
+    # interpreter and UID so stale state does not match ordinary Python jobs.
+    Path("/proc/self/comm").write_text("suifleet-pair")
     if not os.path.samefile("/proc/1/ns/pid", "/proc/self/ns/pid"):
         raise RuntimeError("portable signer launcher requires procfs mounted for its own PID namespace")
     daemon = pwd.getpwnam("suifleet")
@@ -157,6 +160,8 @@ def main():
 
 
 def request_stop(_signum, _frame):
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, signal.SIG_IGN)
     raise SystemExit(0)
 
 

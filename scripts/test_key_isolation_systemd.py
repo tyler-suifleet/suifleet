@@ -189,6 +189,11 @@ def portable(args, etc, key, state, write_config, journal, wait, sim, check):
 
     daemon_user = pwd.getpwnam("suifleet")
     signer_user = pwd.getpwnam("suifleet-signer")
+    if args.portable_manager:
+        from test_portable_services import exercise
+        exercise(args.portable_manager, sock, key, state, journal, wait, sim, check)
+        return
+
     component = dict(user=daemon_user.pw_uid, group=daemon_user.pw_gid, extra_groups=[])
     signer_account = dict(user=signer_user.pw_uid, group=signer_user.pw_gid, extra_groups=[])
     probe_code = r"""
@@ -283,7 +288,7 @@ with socket.socket(socket.AF_UNIX) as conn:
                 listener.listen()
                 with subprocess.Popen(
                     ["/usr/bin/suifleet", "--portable-signer-child", signer_config, str(listener.fileno()),
-                     str(task), str(daemon_user.pw_uid)], pass_fds=(listener.fileno(), task), **signer_account
+                     str(task), str(daemon_user.pw_uid), str(os.getpid())], pass_fds=(listener.fileno(), task), **signer_account
                 ) as signer:
                     try:
                         assert probe({"op": "address"})["address"] == ADDRESS
@@ -396,11 +401,11 @@ def inside(args):
         sh("useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet")
         sh("useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet-signer")
         sh("install", "-m", "0755", "/workspace/suifleet-edge/target/debug/suifleet", "/usr/bin/suifleet")
-        sh("install", "-D", "-m", "0755", str(files / "suifleet-provision"), "/usr/libexec/suifleet-provision")
-        units = {}
-        for unit in ("suifleet.service", "suifleet-provision.service", "suifleet-signer.service", "suifleet-signer.socket"):
-            units[unit] = hashlib.sha256((files / unit).read_bytes()).hexdigest()
-            sh("install", "-m", "0644", str(files / unit), f"/etc/systemd/system/{unit}")
+        if not args.portable:
+            sh("install", "-D", "-m", "0755", str(files / "suifleet-provision"), "/usr/libexec/suifleet-provision")
+            for unit in ("suifleet.service", "suifleet-provision.service", "suifleet-signer.service", "suifleet-signer.socket"):
+                units[unit] = hashlib.sha256((files / unit).read_bytes()).hexdigest()
+                sh("install", "-m", "0644", str(files / unit), f"/etc/systemd/system/{unit}")
     etc = Path("/etc/suifleet")
     etc.mkdir(mode=0o750, exist_ok=True)
     sh("chown", "root:suifleet", str(etc))
@@ -677,6 +682,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--portable", action="store_true", help="test the non-systemd profile inside a disposable guest")
+    parser.add_argument("--portable-manager", choices=("openrc", "sysv", "runit", "manual"))
     parser.add_argument("--force-pid-reuse", action="store_true", help="force PID reuse inside a disposable booted VM")
     parser.add_argument("--head", help=argparse.SUPPRESS)
     parser.add_argument("--evidence", help="write evidence JSON here")
@@ -684,6 +690,8 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if arguments.portable and not arguments.inside:
         parser.error("--portable requires --inside in a disposable guest")
+    if arguments.portable_manager and not arguments.portable:
+        parser.error("--portable-manager requires --portable")
     if arguments.force_pid_reuse and not arguments.portable:
         parser.error("--force-pid-reuse requires --portable in a disposable booted VM")
     if arguments.inside:
