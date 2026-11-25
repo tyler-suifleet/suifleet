@@ -150,6 +150,7 @@ the two apart.
 | `suifleet_component_running{component}` | gauge | Current: supervised component running (supervised components only). |
 | `suifleet_component_phase{component,phase}` | gauge | Current lifecycle phase: `starting`, `running`, `backoff`, `stopping`, `stopped`, `exited`, `broken`, `installed`, `unconfirmed` or `other`. |
 | `suifleet_component_restarts{component}` | gauge | Restarts in the current daemon run; resets when the daemon restarts. |
+| `suifleet_components_unidentified` | gauge | Current: components omitted from the `component` metrics because the console's display name is redacted or repeated. The console redacts secret-looking names (for example 64-character hex names), so distinct components can share one display name; they are counted here rather than written as contradictory points under identical labels. Rename such components to restore per-component metrics. |
 | `suifleet_components_truncated` | gauge | 1 when more than 256 components exist. |
 | `suifleet_deployment_outcomes{outcome}` | gauge | Historical: journal entries by `applied`, `failed`, `indeterminate` or `pending`. Past failures stay visible while the device is currently healthy. |
 | `suifleet_deployment_outcomes_unreported` | gauge | Historical: terminal outcomes whose receipt is not on chain yet. |

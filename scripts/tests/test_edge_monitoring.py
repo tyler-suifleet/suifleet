@@ -382,6 +382,39 @@ class AdapterTests(Base):
         self.assertEqual(ops.count("deployments"), 3)
         self.assertTrue(all(h.get("Authorization") == "Bearer " + CONSOLE_TOKEN for h, _ in self.console.requests))
 
+    def test_redacted_or_repeated_component_names_are_omitted_and_counted(self):
+        # The console redacts secret-looking inventory names, so distinct raw
+        # names (here two 64-hex names) arrive as one display name. Neither pull
+        # nor push may emit contradictory points under identical labels.
+        entry = lambda name, installed, phase: dict(
+            component=name, version="1.0", health=phase, deployment="0x9", installed=installed,
+            supervised=True, restarts=1, since_ms=1, last_exit=None)
+        self.console.components += [entry("[redacted]", True, "running"), entry("[redacted]", False, "exited"),
+                                    entry("app-[redacted]", True, "running"),
+                                    entry("dup", True, "running"), entry("dup", False, "broken")]
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(otlp=dict(endpoint=collector.url))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        self.assertTrue(exporter.poll(console))
+        text = exporter.render_prometheus().decode()
+        self.assertIn('suifleet_components_unidentified{evidence="simulated",device="sim-1"} 5', text)
+        self.assertNotIn("[redacted]", text)
+        self.assertNotIn('component="dup"', text)
+        samples = [line.rsplit(" ", 1)[0] for line in text.splitlines() if line and not line.startswith("#")]
+        self.assertEqual(len(samples), len(set(samples)), "duplicate Prometheus series")
+        self.assertIn('suifleet_component_installed{evidence="simulated",device="sim-1",component="svc"} 1', text)
+        em.export_once(exporter, transport)
+        body = [b for path, _, b, _ in collector.received if path == "/v1/metrics"][-1]
+        metrics = names_of(body)
+        self.assertEqual(metrics["suifleet_components_unidentified"]["gauge"]["dataPoints"][0]["asInt"], "5")
+        for metric in metrics.values():
+            points = (metric.get("gauge") or metric.get("sum"))["dataPoints"]
+            identities = [json.dumps(sorted((a["key"], a["value"]["stringValue"]) for a in p["attributes"]))
+                          for p in points]
+            self.assertEqual(len(identities), len(set(identities)), metric["name"])
+        self.assertNotIn("[redacted]", json.dumps(body))
+
     def test_unavailable_console_drops_stale_device_metrics(self):
         cfg, exporter, console = self.make()
         exporter.poll(console)

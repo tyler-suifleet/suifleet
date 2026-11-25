@@ -406,6 +406,11 @@ def _count(value):
     return type(value) is int and 0 <= value <= 2 ** 63
 
 
+def _altered_name(name):
+    """True when the console's redaction or truncation markers altered the name."""
+    return REDACTED in name or "[truncated]" in name
+
+
 def collect(console):
     """One bounded console read: current health, inventory and journal outcomes."""
     health = console.call("health")
@@ -422,7 +427,7 @@ def collect(console):
                     sync_failures=health["sync"]["consecutive_failures"],
                     sync_success=None if last_success is None else last_success / 1000,
                     version=bounded(version, 64) if isinstance(version, str) else "unknown",
-                    components=[], components_truncated=False,
+                    components=[], components_truncated=False, components_unidentified=0,
                     outcomes=dict(applied=0, failed=0, indeterminate=0, pending=0),
                     outcomes_unreported=0, outcomes_truncated=False)
     after = None
@@ -453,6 +458,15 @@ def collect(console):
             break
         if not isinstance(after, str):
             raise ConsoleError("malformed")
+    # The console redacts secret-looking inventory names, so distinct raw names
+    # (for example two 64-hex names) can share one display name. A redacted or
+    # repeated display name is not a series identity: emitting it would write
+    # contradictory points under identical labels. Omit those entries and
+    # account for them explicitly instead.
+    seen = collections.Counter(c["name"] for c in snapshot["components"])
+    kept = [c for c in snapshot["components"] if seen[c["name"]] == 1 and not _altered_name(c["name"])]
+    snapshot["components_unidentified"] = len(snapshot["components"]) - len(kept)
+    snapshot["components"] = kept
     after, pages = None, 0
     while True:
         fields = dict(limit=100)
@@ -593,6 +607,7 @@ class Exporter:
                 running.add(int(c["running"]), component=c["name"])
                 if c["restarts"] is not None:
                     restarts.add(c["restarts"], component=c["name"])
+        m("suifleet_components_unidentified", "gauge", "Current: components omitted because their console display name is redacted or not unique, so it cannot identify a series.").add(s["components_unidentified"])
         m("suifleet_components_truncated", "gauge", f"1 when more than {MAX_COMPONENTS} components exist and the rest are omitted.").add(int(s["components_truncated"]))
         outcomes = m("suifleet_deployment_outcomes", "gauge", "Historical: deployment outcomes in the device journal, including past failures.")
         for outcome in ("applied", "failed", "indeterminate", "pending"):
