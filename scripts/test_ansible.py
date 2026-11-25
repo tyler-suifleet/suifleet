@@ -26,7 +26,8 @@ when the role classifies it unsafe, then /proc/swaps fixtures), transfers
 to hosts that could store a crash dump are refused (the machine's real
 core_pattern/session core limit when classified unsafe, then core_pattern fixtures
 for Apport, core files, systemd-coredump with a nonzero limit and
-systemd-coredump with Storage=none but a default/nonzero ProcessSizeMax; nothing is
+systemd-coredump with Storage=none but a default/nonzero ProcessSizeMax (or with the
+disabling settings outside an effective [Coredump] section); nothing is
 crashed), a claim transfer interrupted after staging with zram/dm-crypt swap
 and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
@@ -815,7 +816,7 @@ class Harness:
             if coredump_conf is not None:
                 self.exec(container, "sh", "-c", "mkdir -p /etc/systemd/coredump.conf.d"
                           " && umask 022 && cat > /etc/systemd/coredump.conf.d/sf304.conf",
-                          input="[Coredump]\n" + "".join(f"{line}\n" for line in coredump_conf))
+                          input="".join(f"{line}\n" for line in coredump_conf))
             if limit_zero:
                 # pam_limits sets each new SSH session's limits (each controller run
                 # connects afresh), starting from PID 1's, so sshd's own limit is not enough.
@@ -855,11 +856,23 @@ class Harness:
              "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=default;"),
             # Storage=none alone still lets systemd-coredump write the dump to disk while processing it.
             ("systemd-coredump with Storage=none and the default ProcessSizeMax", self.SYSTEMD_COREDUMP,
-             {"coredump_conf": ["Storage=none"]},
+             {"coredump_conf": ["[Coredump]", "Storage=none"]},
              "systemd-coredump may write core dumps to disk (Storage=none, ProcessSizeMax=default;"),
             ("systemd-coredump with Storage=none and ProcessSizeMax=1G", self.SYSTEMD_COREDUMP,
-             {"coredump_conf": ["Storage=none", "ProcessSizeMax=1G"]},
+             {"coredump_conf": ["[Coredump]", "Storage=none", "ProcessSizeMax=1G"]},
              "systemd-coredump may write core dumps to disk (Storage=none, ProcessSizeMax=1G;"),
+            # systemd reads these keys only in [Coredump]; a disabling pair in another section changes nothing.
+            ("systemd-coredump with the disabling settings outside [Coredump]", self.SYSTEMD_COREDUMP,
+             {"coredump_conf": ["[Coredump]", "Storage=external", "ProcessSizeMax=1G",
+                                "[Other]", "Storage=none", "ProcessSizeMax=0"]},
+             "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=1G;"),
+            # Each file starts outside any section, so a drop-in without a header is ignored.
+            ("systemd-coredump with the disabling settings in a drop-in without a section header", self.SYSTEMD_COREDUMP,
+             {"coredump_conf": ["Storage=none", "ProcessSizeMax=0"]},
+             "systemd-coredump may write core dumps to disk (Storage=external, ProcessSizeMax=default;"),
+            ("systemd-coredump configuration with a line continuation", self.SYSTEMD_COREDUMP,
+             {"coredump_conf": ["[Coredump]", "Storage=external \\", "Storage=none", "ProcessSizeMax=0"]},
+             "systemd-coredump's configuration uses line continuations"),
         ]
         try:
             for label, pattern, options, reason in cases:
@@ -872,7 +885,7 @@ class Harness:
 
     def safe_crash_policy(self):
         """systemd-coredump with Storage=none and ProcessSizeMax=0: no dump is processed or stored whatever the session's core limit."""
-        self.crash_fixture(self.SYSTEMD_COREDUMP, coredump_conf=["Storage=none", "ProcessSizeMax=0"])
+        self.crash_fixture(self.SYSTEMD_COREDUMP, coredump_conf=["[Coredump]", "Storage=none", "ProcessSizeMax=0"])
 
     def accepted_swap(self):
         """zram without writeback and dm-crypt swap keep plaintext off disks and are accepted.
