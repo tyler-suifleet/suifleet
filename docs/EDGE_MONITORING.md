@@ -218,8 +218,10 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   `suifleet_up` becomes 0, device metrics are withdrawn and the poll result is
   counted. Prometheus still scrapes the adapter, so an alert on
   `suifleet_up == 0` (and on `up == 0` for the adapter itself) covers both.
-- **Collector unavailable, 5xx, 429 or 401/403:** the post is retried after
-  `initial_backoff_seconds`, doubling per consecutive failure up to
+- **Collector unreachable or a retryable status** (connection failure, or
+  HTTP 429, 502, 503 or 504, the only retryable responses under the
+  [OTLP/HTTP retry rules](https://opentelemetry.io/docs/specs/otlp/#retryable-response-codes)):
+  the post is retried after `initial_backoff_seconds`, doubling per consecutive failure up to
   `max_backoff_seconds`, with ±20 % jitter. A `Retry-After` header, as
   delay-seconds or an HTTP-date (measured against the device clock), raises
   the delay up to the maximum; a past date or unparsable value adds nothing. Metrics and logs back off independently. Metrics
@@ -227,8 +229,10 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   are cumulative). Log lines stay buffered up to `max_buffer`, including a
   batch in flight; when it is full the oldest queued lines are dropped and
   counted (if the whole bound is in flight, the new lines are dropped).
-- **Collector rejects a payload** (400, 413, 422): it is not resent and is
-  counted as `rejected`. An OTLP partial-success reply with a positive count is
+- **Collector refuses a payload** (any other non-2xx status, for example 400,
+  404, 413, 415, 422 or 500): the refusal is permanent for that payload, so it
+  is not resent, the post is counted as `rejected` and its log lines count as
+  `rejected`. No backoff is applied and later fresh batches are still sent. An OTLP partial-success reply with a positive count is
   recorded as `partial`, not `ok`, and is not resent: refused log records count
   as `rejected` and refused metric data points add to
   `suifleet_exporter_otlp_metric_points_rejected_total`. A count larger than
@@ -237,9 +241,12 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   Content-Length body, or a read timeout): the collector already accepted the
   payload, so it is not resent; it is recorded as `invalid_response` and its
   log lines count as `unconfirmed`. A connection that fails before any status
-  arrives, or a truncated non-2xx reply, is `unreachable`/`retry` as above.
-- **Wrong collector credential:** reported as `unauthorized` and retried with
-  backoff; fix the header file and restart.
+  arrives is `unreachable` and retried as above; a truncated non-2xx reply is
+  classified by its status.
+- **Wrong collector credential** (401/403): reported as `unauthorized`. The
+  refused batch is not resent (its log lines count as `rejected`), and later
+  posts back off as above so fresh batches do not hammer the collector; fix the
+  header file and restart.
 - Requests use no proxy environment and follow no redirects. Request and
   response bodies, headers and tokens are never logged.
 
