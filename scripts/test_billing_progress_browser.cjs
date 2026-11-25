@@ -21,14 +21,15 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.goto('http://fleet.test'); await page.addScriptTag({ content: result.outputFiles[0].text });
     for (const width of [1440, 375]) {
       await page.setViewportSize({ width, height: 667 });
-      assert.match(await page.getByRole('note').innerText(), /Your device operating budget is separate/);
-      assert.doesNotMatch(await page.getByRole('note').innerText(), /device device/);
+      assert.doesNotMatch(await page.locator('body').innerText(), /testnet/i, 'no test-network wording');
       const capacity = page.getByRole('heading', { name: 'Capacity plans' }).locator('..');
       assert.match(await capacity.innerText(), /checkout and settings tariffs do not establish the all-in commercial offer/);
+      assert.match(await capacity.innerText(), /your device operating budget is separate/);
       assert.equal(await capacity.getByRole('link', { name: 'Contact', exact: true }).getAttribute('href'), 'https://suifleet.io/contact/');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
-    await page.getByLabel('Plan and payment coin').selectOption('0x' + '1'.repeat(64));
+    await page.getByRole('radio', { name: /3 devices/ }).click();
+    assert.equal(await page.getByRole('radio', { name: /3 devices/ }).getAttribute('aria-checked'), 'true');
     async function visible(button, text) {
       const status = page.getByRole('status').filter({ hasText: text });
       await status.waitFor();
@@ -38,7 +39,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
       const box = await status.boundingBox(); assert(box.y >= 0 && box.y + box.height <= 667, `status outside phone: ${JSON.stringify(box)}`);
       assert.equal(await button.isDisabled(), true);
     }
-    const prepay = page.getByRole('button', { name: 'Prepay from connected wallet in one transaction' });
+    const prepay = page.getByRole('button', { name: 'Pay 1 SUI from your wallet' });
     await prepay.click(); await visible(prepay, 'Checking payment details');
     await page.evaluate(() => window.billing.release()); // delayed preparePrepay
     await visible(prepay, 'Checking payment details');
