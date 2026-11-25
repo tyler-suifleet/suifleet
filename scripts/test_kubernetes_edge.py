@@ -18,8 +18,8 @@ ServiceAccount credential:
 - Apply, ownership-checked readiness (including ConfigMap-only bundles and
   foreign or stale objects), content served through an administrator-owned
   Service, update, prune and rollback. Readiness includes prune convergence:
-  an empty retirement bundle, a same-owner replacement left by a pruning race
-  and a finalizer-delayed prune are all reported not ready until gone.
+  an empty retirement bundle, a remaining same-owner stale object and a
+  finalizer-delayed prune are all reported not ready until gone.
   Pruning a Deployment is foreground: while a finalizer holds one of its Pods
   the Deployment stays terminating and a retirement bundle is not ready; it
   becomes ready only once the Pod, ReplicaSet and Deployment are gone.
@@ -29,8 +29,9 @@ ServiceAccount credential:
   ready, and becomes ready once the bundle's template is restored.
 - Races injected between the helper's ownership check and its write (through
   a kubectl wrapper): a competing creation, a replacement and a relabel are
-  not mutated, and pruning leaves relabelled or replaced objects alone, even a
-  replacement that carries this component's labels.
+  not mutated, and a racing prune delete leaves relabelled or replaced objects
+  alone, even a replacement that carries this component's labels (which the
+  same apply's final prune then lists afresh and deletes).
 - A configuration-only update and rollback of a ConfigMap consumed through
   envFrom, configMapKeyRef and a subPath mount is observed inside the Pods
   before readiness succeeds, and a Deployment consuming a ConfigMap outside
@@ -41,6 +42,12 @@ ServiceAccount credential:
   Deployment write denied by a test admission policy) a v1-template Pod
   restarted in between still reads v1, and the rollback converges with every
   Pod on v1.
+- A stable ConfigMap name with the reserved content-addressed suffix and a
+  bundle over the ConfigMap limit are rejected offline, and an owned mutable
+  ConfigMap at a content-addressed name stops the apply before any write.
+  Changing every ConfigMap of a bundle at the limit peaks exactly at the
+  shipped quota and converges; after a partial apply fills the quota, the
+  next bundle frees the leftovers first and converges.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   stable-name ConfigMap made immutable out of band (or a content-addressed one
   recreated with other content) stops the apply before any write; the apply
@@ -280,6 +287,26 @@ def config_bundle(work, name, mode):
         {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "config-settings"}, "data": {"MODE": mode}},
         deployment]}
     path = work / f"{name}.json"
+    path.write_text(json.dumps(bundle))
+    return path
+
+
+def quota_bundle(work, name, message, count=publisher.MAX_CONFIGMAPS):
+    """A Deployment consuming `count` ConfigMaps (the per-bundle limit by
+    default), each through envFrom."""
+    path = config_bundle(work, name, message)
+    bundle = json.loads(path.read_text())
+    config, deployment = bundle["resources"]
+    deployment["metadata"]["name"] = "quota-app"
+    deployment["metadata"]["labels"] = deployment["spec"]["selector"]["matchLabels"] = \
+        deployment["spec"]["template"]["metadata"]["labels"] = {"app": "quota-app"}
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    for key in ("env", "volumeMounts"):
+        container.pop(key)
+    deployment["spec"]["template"]["spec"].pop("volumes")
+    container["envFrom"] = [{"configMapRef": {"name": f"quota-{index}"}} for index in range(count)]
+    bundle["resources"] = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": f"quota-{index}"},
+                            "data": {f"Q{index}": message}} for index in range(count)] + [deployment]
     path.write_text(json.dumps(bundle))
     return path
 
@@ -988,12 +1015,25 @@ def scenario(cluster, work, supervisor):
         before = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]["uid"]
         race.arm(["delete", "--raw"], *commands)
         result = helper("apply", profiles, v1, profile="race")
-        after = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
-        found, data = labels_of("v2-extra")
-        check(f"pruning leaves a {name} object alone",
-              race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
-              and found.get("app.kubernetes.io/managed-by") == owner and data == expected
-              and (after["uid"] != before) == (name != "relabelled"), result.stderr)
+        if owner == "suifleet":
+            # The racing delete is the pre-write ConfigMap freeing pass; it
+            # leaves the replacement (another UID) alone. The same apply's
+            # final prune then lists the replacement afresh as a stale object
+            # of this component and deletes that listed UID.
+            check(f"pruning leaves a {name} object alone in the racing pass and prunes it once listed",
+                  race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
+                  and "'configmaps/v2-extra'" in result.stderr
+                  and cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, ok=False).returncode != 0,
+                  result.stderr)
+            cluster.admin("create", "configmap", "v2-extra", "-n", NAMESPACE, "--from-literal=k=customer")
+            cluster.admin("label", "configmap", "v2-extra", "-n", NAMESPACE, *same_owner[3:])
+        else:
+            after = json.loads(cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, "-o", "json").stdout)["metadata"]
+            found, data = labels_of("v2-extra")
+            check(f"pruning leaves a {name} object alone",
+                  race.fired() and result.returncode == 0 and "left configmaps/v2-extra" in result.stderr
+                  and found.get("app.kubernetes.io/managed-by") == owner and data == expected
+                  and (after["uid"] != before) == (name != "relabelled"), result.stderr)
         if owner == "suifleet":
             # The surviving same-owner object is stale for v1: readiness reports
             # the incomplete prune instead of success. Readiness reports
@@ -1003,7 +1043,7 @@ def scenario(cluster, work, supervisor):
             wait("v1 rollout settled while the same-owner object survives", lambda: outcome.append(
                 helper("ready", profiles, v1)) or "not ready: Deployment/" not in outcome[-1].stderr, timeout=180, interval=2)
             result = outcome[-1]
-            check("readiness reports an incomplete prune after a same-owner replacement",
+            check("readiness reports an incomplete prune for a same-owner stale object",
                   result.returncode == 1 and "configmaps/v2-extra not yet pruned" in result.stderr, result.stderr)
         cluster.admin("delete", "configmap", "v2-extra", "-n", NAMESPACE)
     wait_ready(profiles, v1, "1.0.0")
@@ -1149,6 +1189,108 @@ def scenario(cluster, work, supervisor):
     check("config-only test component retires",
           helper("apply", profiles, retire_config, component="config-app").returncode == 0)
     wait_ready(profiles, retire_config, "1.0.0", component="config-app")
+
+    # Review 4613: names are disjoint across bundles and updates fit the
+    # shipped ConfigMap quota. A stable ConfigMap may not take the reserved
+    # content-addressed shape, and an owned mutable object already at a
+    # derived name is refused before any write.
+    reserved = json.loads(v1.read_text())
+    reserved["resources"].append({"apiVersion": "v1", "kind": "ConfigMap",
+                                  "metadata": {"name": "stable-0123456789abcdef"}, "data": {}})
+    (work / "reserved.json").write_text(json.dumps(reserved))
+    result = run(sys.executable, str(HELPER), "validate", "--bundle", str(work / "reserved.json"), ok=False)
+    check("helper validate rejects a stable ConfigMap name with the reserved content-addressed suffix",
+          result.returncode == 2 and "reserved for content-addressed" in result.stderr, result.stderr)
+    result = run(sys.executable, str(HELPER), "validate", "--bundle",
+                 str(quota_bundle(work, "quota-over", "x", publisher.MAX_CONFIGMAPS + 1)), ok=False)
+    check(f"helper validate rejects a bundle with more than {publisher.MAX_CONFIGMAPS} ConfigMaps",
+          result.returncode == 2 and f"more than {publisher.MAX_CONFIGMAPS} ConfigMaps" in result.stderr, result.stderr)
+
+    def configmaps():
+        listed = json.loads(cluster.admin("get", "configmaps", "-n", NAMESPACE, "-o", "json").stdout)["items"]
+        return sorted(item["metadata"]["name"] for item in listed if not item["metadata"].get("deletionTimestamp"))
+
+    def quota_limit():
+        return cluster.admin("get", "resourcequota", ACCOUNT, "-n", NAMESPACE,
+                             "-o", "jsonpath={.spec.hard.configmaps}").stdout
+
+    # With kube-root-ca.crt and the web component's one ConfigMap, a change of
+    # all MAX_CONFIGMAPS consumed ConfigMaps peaks exactly at the quota.
+    # The customer object from the no-adoption check is set aside for the
+    # boundary and restored afterwards (the remove check needs it).
+    cluster.admin("delete", "configmap", "legacy", "-n", NAMESPACE, "--wait=true")
+
+    def only_baseline():
+        present = configmaps()
+        if present != sorted(["kube-root-ca.crt", web_config]):
+            raise AssertionError(f"ConfigMaps present: {present}")
+        return True
+
+    wait("only kube-root-ca.crt and the web ConfigMap remain", only_baseline, timeout=60)
+    check("the shipped quota leaves exactly two bundles' ConfigMaps of headroom",
+          int(quota_limit()) == 2 + 2 * publisher.MAX_CONFIGMAPS, quota_limit())
+    quota = [quota_bundle(work, f"quota-v{index}", f"q{index}") for index in range(1, 5)]
+    check("a bundle at the ConfigMap limit applies",
+          helper("apply", profiles, quota[0], component="quota-app").returncode == 0)
+    wait_ready(profiles, quota[0], "1.0.0", component="quota-app")
+    alias = published(quota[1], "quota-0")
+    cluster.admin("create", "-f", "-", stdin=json.dumps({
+        "apiVersion": "v1", "kind": "ConfigMap", "data": {"Q0": "stale"},
+        "metadata": {"name": alias, "namespace": NAMESPACE,
+                     "labels": {publisher.MANAGED_BY: publisher.FIELD_MANAGER, publisher.COMPONENT_LABEL: "quota-app"}}}))
+    before = configmaps()
+    rv = cluster.admin("get", "deployment", "quota-app", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
+    result = helper("apply", profiles, quota[1], component="quota-app", version="2.0.0")
+    check("apply refuses an owned mutable ConfigMap at a content-addressed name before writing anything",
+          result.returncode == 2 and "mutable ConfigMap at a content-addressed name" in result.stderr
+          and configmaps() == before and rv == cluster.admin(
+              "get", "deployment", "quota-app", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout,
+          result.stderr)
+    cluster.admin("delete", "configmap", alias, "-n", NAMESPACE, "--wait=true")
+    result = helper("apply", profiles, quota[1], component="quota-app", version="2.0.0")
+    check("changing every ConfigMap of a bundle at the limit fits the shipped quota",
+          result.returncode == 0, result.stderr[-500:])
+    wait_ready(profiles, quota[1], "2.0.0", component="quota-app")
+    check("the update converged and pruned the previous ConfigMaps",
+          len(configmaps()) == 2 + publisher.MAX_CONFIGMAPS, str(configmaps()))
+    # A partial apply leaves its ConfigMaps behind at the quota; the next
+    # bundle frees those unreferenced leftovers before creating its own.
+    cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
+         "metadata": {"name": "test-freeze-quota-app"},
+         "spec": {"failurePolicy": "Fail",
+                  "matchConstraints": {"resourceRules": [{"apiGroups": ["apps"], "apiVersions": ["v1"],
+                                                          "operations": ["UPDATE"], "resources": ["deployments"]}]},
+                  "validations": [{"expression": "object.metadata.name != 'quota-app'",
+                                   "message": "test: quota-app Deployment writes are frozen"}]}},
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding",
+         "metadata": {"name": "test-freeze-quota-app"},
+         "spec": {"policyName": "test-freeze-quota-app", "validationActions": ["Deny"],
+                  "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
+
+    def quota_frozen():
+        return cluster.admin("annotate", "deployment", "quota-app", "-n", NAMESPACE, "test-probe=1", "--overwrite",
+                             "--dry-run=server", ok=False).returncode != 0
+
+    wait("the quota-app Deployment write freeze to take effect", quota_frozen, timeout=60)
+    result = helper("apply", profiles, quota[2], component="quota-app", version="3.0.0")
+    check("a partially applied update at the limit fails at the Deployment write",
+          result.returncode == 2 and "frozen" in result.stderr, result.stderr[-500:])
+    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-quota-app")
+    wait("the quota-app Deployment write freeze to lift", lambda: not quota_frozen(), timeout=60)
+    extra = cluster.publisher("create", "configmap", "quota-extra", "-n", NAMESPACE, ok=False)
+    check("the partial apply's leftovers fill the namespace ConfigMap quota",
+          len(configmaps()) == 2 + 2 * publisher.MAX_CONFIGMAPS and extra.returncode != 0
+          and "exceeded quota" in extra.stderr, f"{configmaps()} {extra.stderr}")
+    result = helper("apply", profiles, quota[3], component="quota-app", version="4.0.0")
+    leftovers = [published(quota[2], f"quota-{index}") for index in range(publisher.MAX_CONFIGMAPS)]
+    check("the next update frees the unreferenced leftovers first and fits the quota",
+          result.returncode == 0 and all(f"configmaps/{name}" in result.stderr for name in leftovers), result.stderr[-800:])
+    wait_ready(profiles, quota[3], "4.0.0", component="quota-app")
+    check("quota test component retires",
+          helper("apply", profiles, retire_config, component="quota-app").returncode == 0)
+    wait_ready(profiles, retire_config, "1.0.0", component="quota-app")
+    cluster.admin("create", "configmap", "legacy", "-n", NAMESPACE, "--from-literal=k=customer")
 
     # A stable-name (unconsumed) ConfigMap cannot be restored in place once
     # immutable (the API server refuses data changes and a return to
