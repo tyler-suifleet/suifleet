@@ -128,6 +128,8 @@ jobs:
 
       - name: CloudWatch metrics adapter with local emulator
         run: make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+      - name: Edge monitoring adapter with real Prometheus and OpenTelemetry Collector
+        run: make test-edge-monitoring SUIFLEET_DEV_IMAGE=suifleet-dev:ci
       - name: SiteWise publisher with local signed API emulator and durable daemon streams
         run: make test-sitewise SUIFLEET_DEV_IMAGE=suifleet-dev:ci
       - name: Firehose exporter with local SDK emulator and durable daemon streams
