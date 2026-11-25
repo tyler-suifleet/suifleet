@@ -311,7 +311,13 @@ zero/empty bundle value, and Kubernetes quantities (resource
 `1E` equals `1000P`; `1G` does not equal `1Gi`). Resource `limits`/`requests`
 and `overhead` are compared after the API server's round-up to milli
 precision (a bundle request of `10.1m` is stored, and accepted, as `11m`; any
-other live value is drift); emptyDir `sizeLimit` is not rounded. Other fields compare as text.
+other live value, including the unrounded text, is drift); emptyDir `sizeLimit` is not rounded.
+An omitted, `null` or empty container `imagePullPolicy` is applied as the
+default the API server derives from that container's image: `Always` for a
+`latest` tag (`repo:latest@sha256:…`), otherwise `IfNotPresent` (a digest-pinned
+image without a tag). The helper sends it explicitly because the server keeps a
+previously defaulted policy when only the image changes. Any other live policy
+is drift; an explicit policy is applied and compared as given. Other fields compare as text.
 Map keys are always literal: an annotation key such as
 `example.com/setting.emptyDir.sizeLimit` compares as text, and drift messages
 quote map keys (`spec.template.metadata.annotations["example.com/x"]`, with

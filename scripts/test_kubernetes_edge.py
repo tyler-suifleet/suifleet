@@ -698,6 +698,55 @@ def scenario(cluster, work, supervisor):
     check("apply returns to v1 after the rounded-request bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
 
+    # The API server derives an omitted imagePullPolicy from the image: a
+    # digest-pinned image without a tag gets IfNotPresent, "repo:latest@sha256"
+    # gets Always. It keeps an existing value across an image change, so the
+    # helper sends that default explicitly. Readiness must expect exactly that
+    # default for each form, follow image changes in both directions and reject
+    # another manager's policy change.
+    def pull_policy():
+        pod = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]["spec"]
+        return pod["containers"][0].get("imagePullPolicy")
+
+    pinned = json.loads(v1.read_text())["resources"][1]["spec"]["template"]["spec"]["containers"][0]["image"]
+    repository, _, digest = pinned.partition("@")
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["containers"][0]["image"] = f"{repository}:latest@{digest}"
+    latest = work / "latest-tag.json"
+    latest.write_text(json.dumps(bundle))
+    for form, path, expected, changed in (("digest-only", v1, "IfNotPresent", "Always"),
+                                          (":latest@digest", latest, "Always", "IfNotPresent")):
+        result = helper("apply", profiles, path)
+        check(f"helper applies the {form} image bundle", result.returncode == 0, result.stderr)
+        wait_ready(profiles, path, "1.0.0")
+        check(f"the server defaults the {form} image's imagePullPolicy to {expected} and readiness accepts it",
+              pull_policy() == expected, repr(pull_policy()))
+        cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                      stdin=json.dumps({
+                          "apiVersion": "apps/v1", "kind": "Deployment",
+                          "metadata": {"name": "web", "namespace": NAMESPACE},
+                          "spec": {"template": {"spec": {"containers": [
+                              {"name": container["name"], "imagePullPolicy": changed}]}}}}))
+        cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+        result = helper("ready", profiles, path)
+        check(f"readiness rejects another manager's imagePullPolicy {changed} for the {form} image",
+              pull_policy() == changed and result.returncode == 1
+              and "containers[0].imagePullPolicy differs" in result.stderr, result.stderr)
+        cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+            {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+        result = helper("apply", profiles, path)
+        check(f"apply restores the {form} image bundle after the other manager relinquishes imagePullPolicy",
+              result.returncode == 0, result.stderr)
+        wait_ready(profiles, path, "1.0.0")
+        check(f"readiness succeeds once the {form} imagePullPolicy default is restored",
+              pull_policy() == expected, repr(pull_policy()))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the imagePullPolicy bundles", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+    check("returning to the digest-only image resets imagePullPolicy to IfNotPresent", pull_policy() == "IfNotPresent",
+          repr(pull_policy()))
+
     # A map key that ends in a quantity field path is still a literal key: a
     # pod-template annotation "example.com/setting.emptyDir.sizeLimit" changed
     # from "1" to "1000m" (equal as quantities) is drift, not canonicalisation.
