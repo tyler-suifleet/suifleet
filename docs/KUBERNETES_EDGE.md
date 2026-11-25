@@ -87,7 +87,10 @@ How the helper keeps two controllers from fighting:
    content-addressed ConfigMap (item 7) that does not exist yet. If a later
    write fails (a conflict, a rejection or a cluster error), earlier objects
    may already carry the new bundle. A failed apply deletes nothing; pruning
-   runs only after every write has succeeded (see Quota headroom in item 7).
+   runs only after every write has succeeded, and a prune that fails part way
+   leaves the namespace holding two bundles. Until one of those two converges,
+   `apply` refuses any other bundle before writing (see Quota headroom in
+   item 7).
    `ready` keeps failing until every object carries the new bundle's digest
    and pruning has converged, so the supervisor does not see a partial apply
    as ready. A later successful apply converges, and a supervisor rollback
@@ -168,11 +171,18 @@ How the helper keeps two controllers from fighting:
      bundle therefore survives any number of failed applies, so re-applying
      it (the supervisor rollback) creates no object and always fits, and
      retrying the partially applied bundle itself fits within the two-bundle
-     headroom. A further, different bundle after a partial apply can exceed
-     the quota instead: it fails with a quota error at a ConfigMap creation,
-     before any Deployment is written, and leaves the previous objects in
-     place. Roll back or retry the partially applied bundle first; the
-     successful apply prunes the leftovers.
+     headroom. The prune after the writes is not atomic either: it can
+     delete some of the previous bundle's objects and then fail, and a
+     rollback must then recreate them. So while the component's live
+     objects carry two bundle digests (a partial apply or a partial prune),
+     `apply` refuses, with exit code 2 before any write, every bundle except
+     those two. The supervisor rollback (the previous bundle) and a retry
+     (the new one) are allowed; both stay within the two bundles'
+     ConfigMaps, so the rollback always fits. An empty retirement bundle
+     creates nothing and is also allowed. Once one of them succeeds, its
+     prune removes the other's objects and any bundle can be applied again.
+     If neither can succeed, `remove` the component or have an administrator
+     delete the leftovers. Objects already terminating do not count.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -536,10 +546,16 @@ It checks the following:
   changing every ConfigMap of a 9-ConfigMap bundle peaks exactly at the
   shipped quota of 20 and converges. A partial apply at that bundle size
   that updates one Deployment and fails at the next fills the quota (a
-  further create fails with `exceeded quota`). A further bundle then fails
-  at a ConfigMap creation, deletes nothing and leaves the template as it
-  was; the rollback to the last fully applied bundle creates nothing, prunes
-  the leftovers and converges, and the further bundle then applies.
+  further create fails with `exceeded quota`). A further bundle is then
+  refused before any write and leaves every ConfigMap and the template as
+  they were; the rollback to the last fully applied bundle creates nothing,
+  prunes the leftovers and converges, and the further bundle then applies.
+  An update whose prune deletes two of the previous bundle's ConfigMaps and
+  then fails (a test admission policy denies the third delete) exits 2 and
+  is not ready. A bundle other than the two the namespace holds is refused
+  before any write. After the policy is lifted, the rollback recreates the
+  two ConfigMaps at exactly the shipped quota, prunes the update's
+  ConfigMaps and converges, and the update then applies.
 - A stable-name ConfigMap made immutable out of band, and a content-addressed
   ConfigMap recreated with other content, each stop the apply before any
   write; readiness rejects the forged one, and the apply recreates both after
