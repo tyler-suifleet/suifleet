@@ -38,7 +38,15 @@ It is deliberately narrow:
   digest of the ConfigMaps each one consumes is a Pod-template annotation, so
   a configuration-only change or rollback rolls its Pods out (Kubernetes never
   refreshes env/envFrom/subPath values in running Pods). ConfigMaps are
-  written before Deployments.
+  written before Deployments. Every write that changes a ConfigMap's data
+  stamps it with a new data epoch (suifleet.io/config-epoch: the
+  resourceVersion the write replaced), and the Pod template also records the
+  UID and epoch of each consumed live ConfigMap (suifleet.io/config-revision).
+  A rollback that restores earlier data after a partially applied update
+  therefore still rolls the Pods out, and readiness requires the live
+  ConfigMaps to carry the recorded epochs: a Pod that restarted and read
+  another bundle's data in between is always replaced before readiness
+  succeeds.
 - A multi-object apply is not transactional: if a later write fails, earlier
   objects may already carry the new bundle. Readiness never reports success
   until every object carries this bundle's digest and pruning has converged
@@ -91,6 +99,12 @@ VERSION_ANNOTATION = "suifleet.io/version"
 BUNDLE_ANNOTATION = "suifleet.io/bundle-sha256"
 # Pod-template annotation: digest of the bundle ConfigMaps the Pods consume.
 CONFIG_ANNOTATION = "suifleet.io/config-sha256"
+# ConfigMap annotation: resourceVersion replaced by the last write that
+# changed its data ("0" at creation); see config_epoch.
+EPOCH_ANNOTATION = "suifleet.io/config-epoch"
+# Pod-template annotation: UID and data epoch of each consumed live ConfigMap
+# when the Deployment was written (see bind_config_revisions).
+REVISION_ANNOTATION = "suifleet.io/config-revision"
 DEFAULT_PROFILE_ROOT = "/etc/suifleet/k8s"
 KUBECTL_TIMEOUT = 60  # process limit per kubectl call (seconds)
 REQUEST_TIMEOUT = 30  # kubectl --request-timeout per API request (seconds)
@@ -402,6 +416,58 @@ def render(bundle, namespace, component, version, digest):
                         container["imagePullPolicy"] = default
         rendered.append(item)
     return rendered
+
+
+def config_epoch(item, current):
+    """Copy of a rendered ConfigMap carrying its data epoch for a write over
+    `current` (the observed live object, or None to create). A write that
+    changes the data takes the replaced object's resourceVersion as the new
+    epoch: the API server never reuses a resourceVersion and the write is
+    bound to it, so every data change -- including one that restores earlier
+    data -- gets a distinct epoch. A write that keeps the data keeps the live
+    epoch, so metadata-only bundle changes and re-applies restart nothing.
+    Other kinds are returned unchanged."""
+    if item["kind"] != "ConfigMap":
+        return item
+    if current is None:
+        epoch = "0"
+    else:
+        epoch = ((current.get("metadata") or {}).get("annotations") or {}).get(EPOCH_ANNOTATION)
+        if epoch is None or (current.get("data") or {}) != (item.get("data") or {}):
+            epoch = current["metadata"]["resourceVersion"]
+    stamped = json.loads(json.dumps(item))
+    stamped["metadata"]["annotations"][EPOCH_ANNOTATION] = epoch
+    return stamped
+
+
+def config_revision(live, names):
+    """Canonical `name=uid/epoch,...` of the named live ConfigMaps."""
+    return ",".join(f"{name}={live[name]['metadata']['uid']}/"
+                    f"{((live[name]['metadata'].get('annotations') or {}).get(EPOCH_ANNOTATION))}"
+                    for name in names)
+
+
+def bind_config_revisions(item, live):
+    """Copy of a rendered Deployment whose Pod template also records the UID
+    and data epoch (config_epoch) of each live bundle ConfigMap it consumes;
+    other objects are returned unchanged.
+
+    The data digest alone does not bind a Pod to the configuration it read:
+    if an update writes a ConfigMap and then fails before the Deployment, an
+    old-template Pod that restarts in between reads the new data, and a
+    rollback that restores the old data would leave the identical old template
+    (and that Pod) in place. Every data change gets a new epoch, so any data
+    change since the Deployment's last write (including the restoring one)
+    produces a new template and replaces every Pod."""
+    if item["kind"] != "Deployment":
+        return item
+    names = config_refs(item["spec"]["template"]["spec"])
+    if not names:
+        return item
+    bound = json.loads(json.dumps(item))
+    template = bound["spec"]["template"]
+    template["metadata"]["annotations"][REVISION_ANNOTATION] = config_revision(live, names)
+    return bound
 
 
 def ownership(existing, component):
@@ -1020,7 +1086,8 @@ class Writer:
             if current is None:
                 # Create-only: fails instead of adopting an object that appeared
                 # after the read. The next iteration verifies and applies.
-                result = self.kubectl("create", f"--field-manager={FIELD_MANAGER}", "-f", "-", stdin=json.dumps(item))
+                result = self.kubectl("create", f"--field-manager={FIELD_MANAGER}", "-f", "-",
+                                      stdin=json.dumps(config_epoch(item, None)))
                 if result.returncode != 0 and not _stale(result.stderr, "already exists", "alreadyexists"):
                     raise Rejected(f"kubectl create {label} failed: {result.stderr.strip()[:500]}")
                 continue
@@ -1039,7 +1106,7 @@ class Writer:
                 if result.returncode != 0 and not _stale(result.stderr, "not found", "notfound"):
                     raise Rejected(f"kubectl patch {label} failed: {result.stderr.strip()[:500]}")
                 continue
-            bound = json.loads(json.dumps(item))
+            bound = json.loads(json.dumps(config_epoch(item, current)))
             bound["metadata"]["uid"] = current["metadata"]["uid"]
             bound["metadata"]["resourceVersion"] = current["metadata"]["resourceVersion"]
             # No --force-conflicts: a field owned by another manager fails the apply.
@@ -1129,13 +1196,24 @@ def apply(kubectl, objects, component, writer=None):
     """Apply every object (ConfigMaps first), then prune. ConfigMaps go first
     so that Pods a Deployment change starts read the new configuration: a Pod
     that started from the new template against the old ConfigMap would keep
-    the old env values until it restarted."""
+    the old env values until it restarted. After each ConfigMap write the
+    helper re-reads it, requires exactly this bundle's content, and binds its
+    revision into the consuming Deployments' Pod templates
+    (bind_config_revisions)."""
     writer = writer or Writer(kubectl, component)
     preflight(writer, objects)
-    desired = {}
+    desired, live = {}, {}
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
-        writer.apply(item)
-        desired.setdefault(ALLOWED_KINDS[(item["apiVersion"], item["kind"])], set()).add(item["metadata"]["name"])
+        resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
+        name = item["metadata"]["name"]
+        writer.apply(bind_config_revisions(item, live))
+        if resource == "configmaps":
+            current = writer.get(resource, name)
+            ok, reason = object_ready(current, item, component)
+            if not ok:
+                raise Conflict(f"{reason} right after it was written; not binding its revision")
+            live[name] = current
+        desired.setdefault(resource, set()).add(name)
     return prune(kubectl, component, desired, writer)
 
 
@@ -1162,15 +1240,21 @@ def ready(kubectl, objects, component):
     an update, rollback or empty retirement bundle is not ready while stale
     workloads still exist or are still terminating. Because pruning uses
     foreground deletion, a pruned Deployment stays listed until its
-    ReplicaSets and Pods are gone; no Pod/ReplicaSet permission is needed."""
-    desired = {}
-    for item in objects:
+    ReplicaSets and Pods are gone; no Pod/ReplicaSet permission is needed.
+    ConfigMaps are checked first; a consuming Deployment must record their
+    current live revisions in its Pod template (bind_config_revisions), so a
+    rollout started before a later ConfigMap write is not ready."""
+    desired, live = {}, {}
+    for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
-        desired.setdefault(resource, set()).add(item["metadata"]["name"])
-        current = kubectl.json("get", resource, item["metadata"]["name"], "--ignore-not-found")
-        ok, reason = object_ready(current, item, component)
+        name = item["metadata"]["name"]
+        desired.setdefault(resource, set()).add(name)
+        current = kubectl.json("get", resource, name, "--ignore-not-found")
+        ok, reason = object_ready(current, bind_config_revisions(item, live), component)
         if not ok:
             return False, reason
+        if resource == "configmaps":
+            live[name] = current
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     for resource in ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}
