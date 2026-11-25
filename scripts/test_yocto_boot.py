@@ -4,6 +4,14 @@
 Requires an aarch64 QEMU system emulator, kernel and ext4 image built using
 kas/packaging-qemu.yml. Copies the disk into a temporary directory; never
 writes the input image or a physical device. Guest networking is disabled.
+
+--extended (SF-309) additionally records the guest kernel/systemd versions,
+rejects any systemd parse diagnostic for the SuiFleet units (an unknown
+directive is silently ignored, weakening the sandbox), runs the packaged Node
+runtime when installed, switches the device to
+the isolated signing service and checks key ownership/activation, and applies
+the harmless SF-030 test component with the packaged test updater. It needs
+suifleet-test-component in the image. It is emulation evidence only.
 """
 import argparse
 import base64
@@ -136,7 +144,116 @@ poll_seconds = 1
                   "systemctl stop suifleet.service; systemctl reset-failed; sync")
 
 
-def boot(qemu, kernel, disk, reboot=False, console_timeout=300):
+TEST_APP = Path(__file__).resolve().parents[1] / "tests/components/suifleet-test-app/app.sh.in"
+
+
+def test_component(version, run_id="sf309-qemu"):
+    text = TEST_APP.read_text()
+    for name, value in (("COMPONENT", "sf309-probe"), ("VERSION", version),
+                        ("RUN_ID", run_id), ("FAIL", "none")):
+        text = text.replace(f"@{name}@", value)
+    return text.encode()
+
+
+def guest_value(guest, label, shell):
+    # The echoed input never contains "LABEL:", only the printed output does.
+    guest.send(f"printf '%s:%s:END\\n' {label} \"$({shell})\"")
+    return guest.expect(label.encode() + rb":([^\r\n]*):END")[1].decode()
+
+
+def extended_checks(guest):
+    """Signer, unit-parse and harmless-update checks for an advertised runtime profile."""
+    kernel = guest_value(guest, "KERNEL", "uname -r")
+    systemd = guest_value(guest, "SYSTEMD", "systemctl --version | sed -n 1p")
+    print(f"INFO: guest kernel {kernel}; {systemd}", flush=True)
+    # systemd logs "unit:LINE: ..." for unknown keys/values it then ignores.
+    guest.command("if journalctl -b --no-pager | grep -E 'suifleet[a-z-]*\\.(service|socket|path):[0-9]+: '; "
+                  "then exit 1; fi")
+    print("PASS: no systemd parse diagnostics for SuiFleet units", flush=True)
+    # The prebuilt archive runtime must load against this image's glibc/libstdc++.
+    guest.command("node=/usr/lib/suifleet/node/bin/node; test -e $node || exit 0; "
+                  "test \"$($node --version)\" = v$(sed -n 's/.*\"node\": *\"\\([0-9.]*\\)\".*/\\1/p' "
+                  "/usr/lib/suifleet/walrus-codec/manifest.json); "
+                  "$node -e 'process.exit(require(\"fs\").existsSync(process.argv[1]) ? 0 : 1)' "
+                  "/usr/lib/suifleet/walrus-codec/walrus_wasm_bg.wasm", timeout=180)
+    print("PASS: packaged Node runtime matches the codec manifest release and executes", flush=True)
+
+    # Harmless update: install v1, reject a malformed artifact, upgrade to v2.
+    root = "/var/lib/suifleet/test-components"
+    guest.put("/tmp/sf309-v1", test_component("1.0.0"))
+    guest.put("/tmp/sf309-v2", test_component("2.0.0"))
+    guest.put("/tmp/sf309-bad", b"#!/bin/sh\n# not a component\n")
+    guest.command("chown suifleet:suifleet /tmp/sf309-v1 /tmp/sf309-v2 /tmp/sf309-bad; "
+                  f"install -d -o suifleet -g suifleet {root}; "
+                  f"su -s /bin/sh suifleet -c 'suifleet-test-updater --root {root} /tmp/sf309-v1'; "
+                  f"test $(cat {root}/sf309-probe/current) = 1.0.0; "
+                  f"grep -q '\"install\":\"succeeded\",\"health\":\"passed\"' {root}/sf309-probe/receipt.json; "
+                  f"if su -s /bin/sh suifleet -c 'suifleet-test-updater --root {root} /tmp/sf309-bad'; then exit 1; fi; "
+                  f"test $(cat {root}/sf309-probe/current) = 1.0.0; "
+                  f"su -s /bin/sh suifleet -c 'suifleet-test-updater --root {root} /tmp/sf309-v2'; "
+                  f"test $(cat {root}/sf309-probe/current) = 2.0.0; "
+                  f"grep -q '\"previousVersion\":\"1.0.0\"' {root}/sf309-probe/receipt.json; "
+                  f"test $(wc -l < {root}/sf309-probe/history.jsonl) = 2; "
+                  f"test $(stat -c %U {root}/sf309-probe/current) = suifleet; "
+                  f"rm -rf {root} /tmp/sf309-v1 /tmp/sf309-v2 /tmp/sf309-bad")
+    print("PASS: test updater installs, refuses a malformed artifact and upgrades as the daemon user", flush=True)
+
+    # Isolated signer: the key moves to suifleet-signer and the daemon user
+    # loses read access; the socket-activated service starts and is ready.
+    manifest = json.loads((Path(__file__).resolve().parents[1] /
+                           "manifests/fixture.localnet.json").read_text())
+    manifest["rpc_url"] = "http://127.0.0.1:9000"
+    guest.put("/etc/suifleet/deployment.json", json.dumps(manifest).encode())
+    guest.put("/etc/suifleet/signer.toml", b'''manifest_path = "deployment.json"
+device_cap_id = "0x2"
+keypair_path = "/etc/suifleet/device.key"
+caller_unit = "suifleet.service"
+''')
+    guest.put("/etc/suifleet/config.toml.new", b'''[sui]
+manifest_path = "deployment.json"
+[device]
+device_object_id = "0x1"
+device_cap_id = "0x2"
+[device.signer]
+kind = "service"
+socket = "/run/suifleet-signer/sign.sock"
+[apply]
+command = "/usr/bin/false"
+[runtime]
+state_dir = "/var/lib/suifleet"
+poll_seconds = 1
+''')
+    guest.command("key_hash=$(sha256sum /etc/suifleet/device.key | cut -d' ' -f1); "
+                  "chown root:suifleet-signer /etc/suifleet/signer.toml; chmod 640 /etc/suifleet/signer.toml; "
+                  "chown root:suifleet /etc/suifleet/deployment.json /etc/suifleet/config.toml.new; "
+                  "chmod 640 /etc/suifleet/deployment.json /etc/suifleet/config.toml.new; "
+                  "systemctl stop suifleet-enrollment.path; "
+                  "mv /etc/suifleet/config.toml.new /etc/suifleet/config.toml; "
+                  "systemctl restart suifleet-provision.service; "
+                  "test $(stat -c %U /etc/suifleet/device.key) = suifleet-signer; "
+                  "test $(stat -c %a /etc/suifleet/device.key) = 600; "
+                  "test $(sha256sum /etc/suifleet/device.key | cut -d' ' -f1) = $key_hash; "
+                  "if su -s /bin/sh suifleet -c 'cat /etc/suifleet/device.key' >/dev/null 2>&1; then exit 1; fi; "
+                  "systemctl is-active --quiet suifleet-signer.socket; "
+                  "test $(stat -c %U:%G:%a /run/suifleet-signer/sign.sock) = suifleet-signer:suifleet:660; "
+                  "systemctl start suifleet-signer.service; "
+                  "attempt=0; until journalctl -u suifleet-signer.service --no-pager | grep -q 'Device signing service ready'; do "
+                  "attempt=$((attempt + 1)); test $attempt -lt 60 || { "
+                  "systemctl status suifleet-signer.service --no-pager || :; "
+                  "journalctl -u suifleet-signer.service --no-pager; exit 1; }; sleep 1; done; "
+                  "systemctl is-active --quiet suifleet-signer.service; "
+                  "test $(systemctl show -p User --value suifleet-signer.service) = suifleet-signer; "
+                  "journalctl -u suifleet-signer.service --no-pager | grep -q \"$(cat /etc/suifleet/device.address)\"", timeout=240)
+    print("PASS: service signer owns the unchanged key, daemon user cannot read it, socket-activated signer is ready", flush=True)
+    # Return to the legacy unenrolled state for the next boot.
+    guest.command("systemctl stop suifleet-signer.service suifleet.service; "
+                  "rm /etc/suifleet/config.toml /etc/suifleet/deployment.json /etc/suifleet/signer.toml; "
+                  "systemctl restart suifleet-provision.service; "
+                  "test $(stat -c %U /etc/suifleet/device.key) = suifleet; "
+                  "systemctl reset-failed; systemctl start suifleet-enrollment.path; sync")
+
+
+def boot(qemu, kernel, disk, reboot=False, console_timeout=300, extended=False):
     guest = Guest(qemu, kernel, disk, console_timeout)
     try:
         guest.login()
@@ -172,6 +289,8 @@ def boot(qemu, kernel, disk, reboot=False, console_timeout=300):
                           "echo preserved > /var/lib/suifleet/packaging-journal")
             offline_enrollment(guest)
             print("PASS: config installation activates daemon; unavailable loopback node causes retry", flush=True)
+            if extended:
+                extended_checks(guest)
         # Stop normally and sync the disk before testing another boot.
         guest.command("systemctl restart suifleet-provision.service; sync")
         guest.send("poweroff")
@@ -188,6 +307,8 @@ def main():
     parser.add_argument("--image", required=True, type=Path)
     parser.add_argument("--console-timeout", type=float, default=300,
                         help="Console/login/command deadline in seconds (default: 300)")
+    parser.add_argument("--extended", action="store_true",
+                        help="Also check unit parsing, the service signer and the harmless test updater")
     args = parser.parse_args()
     if args.console_timeout <= 0:
         parser.error("--console-timeout must be positive")
@@ -195,7 +316,8 @@ def main():
         first, second = [Path(temporary) / name for name in ("first.ext4", "second.ext4")]
         shutil.copyfile(args.image, first)
         shutil.copyfile(args.image, second)
-        address = boot(args.qemu, args.kernel, first, console_timeout=args.console_timeout)
+        address = boot(args.qemu, args.kernel, first, console_timeout=args.console_timeout,
+                       extended=args.extended)
         assert boot(args.qemu, args.kernel, first, reboot=True, console_timeout=args.console_timeout) == address
         assert boot(args.qemu, args.kernel, second, console_timeout=args.console_timeout) != address, "image cloned the private identity"
     print("PASS: actual QEMU image boots unenrolled, retries offline startup, provisions independent keys, preserves identity/state across reboot")
