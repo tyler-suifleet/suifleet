@@ -1,5 +1,5 @@
 /* Docs layout on top of the shared site stylesheet (style.css is a copy of site/src/assets/style.css). */
-.docs-tag { margin-left: 2px; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: .8125rem; font-weight: 600; letter-spacing: 0; }
+.docs-tag { flex: none; margin-left: -20px; text-decoration: none; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: .8125rem; font-weight: 600; letter-spacing: 0; }
 .docs { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: clamp(32px, 5vw, 72px); padding-top: clamp(32px, 4vw, 56px); padding-bottom: 80px; }
 .docs aside { position: sticky; top: 96px; align-self: start; max-height: calc(100vh - 120px); overflow-y: auto; min-width: 0; }
 .docs main { min-width: 0; }
