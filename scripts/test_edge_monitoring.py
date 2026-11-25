@@ -293,14 +293,14 @@ def run(bin_dir, evidence_path):
             assert statuses == [1, 2], statuses
             print('PASS: real daemon recorded one applied and one failed deployment')
 
-            secrets_dir = root / 'monitoring'
-            secrets_dir.mkdir(mode=0o700)
-            console_auth_path = secrets_dir / 'console.token'
+            private_dir = root / 'monitoring'
+            private_dir.mkdir(mode=0o700)
+            console_auth_path = private_dir / 'console.token'
             console_auth_path.write_text(monitor['token'] + '\n')
             console_auth_path.chmod(0o600)
             scrape_token = json.loads(subprocess.run([sys.executable, str(ADAPTER), '--token'], capture_output=True,
                                                      text=True, check=True).stdout)
-            scrape_file = secrets_dir / 'scrape.token'
+            scrape_file = private_dir / 'scrape.token'
             scrape_file.write_text(scrape_token['token'])
             scrape_file.chmod(0o600)
             # As an operator would: the scraper reads the private credential file,
@@ -308,12 +308,12 @@ def run(bin_dir, evidence_path):
             # which must match the digest the adapter reported for the token.
             scrape_digest = hashlib.sha256(scrape_file.read_bytes()).hexdigest()
             assert scrape_digest == scrape_token['token_sha256'], 'adapter --token digest mismatch'
-            headers_file = secrets_dir / 'otlp.headers'
+            headers_file = private_dir / 'otlp.headers'
             headers_file.write_text(f'Authorization: Bearer {GATEWAY_TOKEN}\n')
             headers_file.chmod(0o600)
 
             def adapter_config(name, **fields):
-                path = secrets_dir / name
+                path = private_dir / name
                 path.write_text(json.dumps(fields))
                 path.chmod(0o600)
                 return path
@@ -426,7 +426,7 @@ def run(bin_dir, evidence_path):
             print(f'PASS: real OpenTelemetry Collector received {len(metrics)} metric names and {len(logs)} redacted log records through the authenticating gateway')
 
             # A wrong gateway credential is refused and reported, never retried as success.
-            wrong_headers = secrets_dir / 'wrong.headers'
+            wrong_headers = private_dir / 'wrong.headers'
             wrong_headers.write_text('Authorization: Bearer not-the-gateway-token\n')
             wrong_headers.chmod(0o600)
             wrong_port = free_port()
