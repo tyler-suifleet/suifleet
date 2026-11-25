@@ -267,13 +267,18 @@ someone deletes is recreated. It exits non-zero on a conflict, rejection or
 cluster error, and the supervisor's restart budget then applies. `ready`
 succeeds only when every object in the bundle exists, is not being deleted, is
 owned by this component and carries *this* bundle's digest, version and
-labels. ConfigMaps must also hold the bundle's data. Deployments must hold
+labels. ConfigMaps must also hold the bundle's data and no `binaryData` (the
+bundle format has none, and a ConfigMap volume would project it as extra
+files). Deployments must hold
 every spec field the bundle specifies and be observed, updated and available,
 so a healthy rollout of another manager's edit (for example a changed image or
 pod template that keeps SuiFleet's labels and annotations) is not ready. A
 live spec field the bundle omits must hold the API server's documented default
 for it (for example `restartPolicy: Always`, probe thresholds, port `protocol`,
-the RollingUpdate strategy) or a zero value. Anything else the bundle omits,
+the RollingUpdate strategy, an HTTP probe or lifecycle `path` of `/` and
+`scheme` of `HTTP`) or a zero value. An explicitly empty string for a
+plain-string field the server defaults (such as an httpGet `path`) matches
+that default too. Anything else the bundle omits,
 such as an injected init container or sidecar, extra `env`, a `nodeSelector`
 or an extra pod-template annotation (including `kubectl rollout restart`'s
 `restartedAt`), is drift and not ready. A field the server omits matches a

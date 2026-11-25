@@ -455,6 +455,42 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, v1, "1.0.0")
     check("readiness succeeds once the bundle's template has rolled out again", True)
 
+    # The API server defaults an omitted or empty probe httpGet path to "/";
+    # readiness must accept that default rather than time out and roll back.
+    for label, path in (("omitted", None), ("empty", "")):
+        bundle = json.loads(v1.read_text())
+        http_get = bundle["resources"][1]["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"]
+        if path is None:
+            del http_get["path"]
+        else:
+            http_get["path"] = path
+        defaulted = work / f"path-{label}.json"
+        defaulted.write_text(json.dumps(bundle))
+        result = helper("apply", profiles, defaulted)
+        check(f"helper applies a bundle with an {label} readiness probe path", result.returncode == 0, result.stderr)
+        live_path = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"].get("path")
+        result = helper("ready", profiles, defaulted)
+        check(f"readiness accepts the server-defaulted path for an {label} bundle path",
+              live_path == "/" and result.returncode == 0, f"live path {live_path!r}: {result.stderr}")
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the defaulted-path bundles", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
+    # binaryData is outside the bundle schema; another manager adding it to an
+    # owned ConfigMap (projected as an extra file) keeps SuiFleet's markers but
+    # is not this bundle's content.
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps({
+        "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE},
+        "binaryData": {"extra.sh": "IyEvYmluL3NoCg=="}}))
+    result = helper("ready", profiles, v1)
+    check("readiness rejects foreign binaryData in an owned ConfigMap",
+          result.returncode == 1 and "ConfigMap/web-content content differs" in result.stderr, result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "web-content", "namespace": NAMESPACE}}))
+    wait_ready(profiles, v1, "1.0.0")
+    check("readiness succeeds once the other manager relinquishes its binaryData", True)
+
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}
