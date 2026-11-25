@@ -5484,6 +5484,26 @@
         "Meaningful offline concurrency and regression tests; install verified committed-main runtime and verify lane activity."
       ],
       "validation": "Focused scheduling/concurrency and coordinator regression tests; no unrelated application builds."
+    },
+    {
+      "key": "SF-316",
+      "title": "Collect exited PR workers across coordinator lanes",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Use runnable PID/start identities when a completion lane observes workers launched by another lane, and reap exited launch children.",
+      "evidence": "Six worker wrappers with durable exits were zombies yet remained running in the review ledger, delaying source reviews, candidate review and repair.",
+      "acceptance": [
+        "Collect durable review and repair exits across lanes without treating zombies as live.",
+        "Retain same-session helper and ownership fences, and test the cross-lane regression."
+      ],
+      "validation": "Focused offline coordinator regressions and diff check. Install only through reviewed merged-main activation."
     }
   ]
 }
