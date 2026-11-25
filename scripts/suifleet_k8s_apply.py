@@ -343,7 +343,9 @@ def object_ready(current, desired, component):
             if live.get(key) != value:
                 return False, f"{kind}/{name} not yet applied from this bundle ({field} {key})"
     if kind == "ConfigMap":
-        if (current.get("data") or {}) != (desired.get("data") or {}) or \
+        # The bundle schema has no binaryData, so any live binaryData entry
+        # (projected as an extra file by a ConfigMap volume) is foreign content.
+        if (current.get("data") or {}) != (desired.get("data") or {}) or current.get("binaryData") or \
                 bool(current.get("immutable")) != bool(desired.get("immutable")):
             return False, f"{kind}/{name} content differs from this bundle"
     if kind == "Deployment":
@@ -380,10 +382,16 @@ def _quantity(value):
     return number * Fraction(10) ** int(suffix[1:])  # decimal exponent, e.g. "1e3"
 
 
+def _http_get_defaults(prefix):
+    # SetDefaults_HTTPGetAction: an omitted or empty path becomes "/" and an
+    # omitted or empty scheme becomes HTTP.
+    return {f"{prefix}.httpGet.path": ("/",), f"{prefix}.httpGet.scheme": ("HTTP",)}
+
+
 def _probe_defaults(prefix):
     return {f"{prefix}.timeoutSeconds": (1,), f"{prefix}.periodSeconds": (10,),
             f"{prefix}.successThreshold": (1,), f"{prefix}.failureThreshold": (3,),
-            f"{prefix}.httpGet.scheme": ("HTTP",)}
+            **_http_get_defaults(prefix)}
 
 
 def _server_defaults():
@@ -411,8 +419,8 @@ def _server_defaults():
             f"{container}.imagePullPolicy": ("IfNotPresent", "Always"),
             f"{container}.ports[].protocol": ("TCP",),
             f"{container}.env[].valueFrom.fieldRef.apiVersion": ("v1",),
-            f"{container}.lifecycle.postStart.httpGet.scheme": ("HTTP",),
-            f"{container}.lifecycle.preStop.httpGet.scheme": ("HTTP",),
+            **_http_get_defaults(f"{container}.lifecycle.postStart"),
+            **_http_get_defaults(f"{container}.lifecycle.preStop"),
         })
         for probe in ("livenessProbe", "readinessProbe", "startupProbe"):
             table.update(_probe_defaults(f"{container}.{probe}"))
@@ -424,6 +432,12 @@ def _server_defaults():
 # zero value; anything else (an injected init container, an extra template
 # annotation, a changed default) is drift.
 SERVER_DEFAULTS = _server_defaults()
+# Defaulted fields that are plain (non-pointer) strings in the Go API types:
+# the server cannot tell an explicit "" from an omitted value, so it fills in
+# the default for both. Pointer fields (for example terminationGracePeriodSeconds
+# or the rollingUpdate IntOrStrings) keep an explicit value and are excluded.
+EMPTY_STRING_DEFAULTS = {path: allowed for path, allowed in SERVER_DEFAULTS.items()
+                         if ".rollingUpdate." not in path and all(isinstance(v, str) for v in allowed)}
 # Omitted fields intentionally left to another controller (an HPA owns replicas).
 DELEGATED_FIELDS = {"spec.replicas"}
 
@@ -485,6 +499,10 @@ def spec_drift(desired, live, path):
     if ".resources." in path:
         want, have = _quantity(desired), _quantity(live)
         if want is not None and want == have:
+            return None
+    if desired == "" and isinstance(live, str):
+        allowed = EMPTY_STRING_DEFAULTS.get(re.sub(r"\[[0-9]+\]", "[]", path), ())
+        if live in allowed:
             return None
     return path
 

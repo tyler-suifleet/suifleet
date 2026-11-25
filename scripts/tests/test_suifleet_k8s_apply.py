@@ -195,6 +195,12 @@ class DecisionTest(unittest.TestCase):
         self.assertFalse(k8s.object_ready(old_version, config, "web-app")[0])
         edited = self.live(config, data={"index.html": "customer"})
         self.assertIn("content differs", k8s.object_ready(edited, config, "web-app")[1])
+        # binaryData is outside the bundle schema; a ConfigMap volume would
+        # project it as an extra file while the bundle markers stay intact.
+        binary = self.live(config, binaryData={"extra.sh": "IyEvYmluL3NoCg=="})
+        self.assertEqual(binary["metadata"]["annotations"], config["metadata"]["annotations"])
+        self.assertIn("content differs", k8s.object_ready(binary, config, "web-app")[1])
+        self.assertEqual(k8s.object_ready(self.live(config, binaryData={}), config, "web-app"), (True, "ready"))
         deleting = self.live(config)
         deleting["metadata"]["deletionTimestamp"] = "2026-11-24T00:00:00Z"
         self.assertIn("being deleted", k8s.object_ready(deleting, config, "web-app")[1])
@@ -293,6 +299,37 @@ class DecisionTest(unittest.TestCase):
         scaled["spec"]["replicas"] = 3
         self.assertIn("spec.replicas", k8s.object_ready(scaled, deploy, "web-app")[1],
                       "replicas the bundle specifies are compared")
+
+    def test_deployment_readiness_tolerates_defaulted_http_get_path(self):
+        for path in (None, ""):  # omitted or explicitly empty
+            bundle = example()
+            http_get = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"]
+            if path is None:
+                del http_get["path"]
+            else:
+                http_get["path"] = path
+            k8s.validate_bundle(bundle)
+            deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+            live = self.healthy(deploy)
+            live["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"]["path"] = "/"
+            self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"),
+                             f"server-defaulted path for a {path!r} bundle path")
+            live["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"]["path"] = "/admin"
+            self.assertIn("readinessProbe.httpGet.path", k8s.object_ready(live, deploy, "web-app")[1],
+                          "a genuinely different path is still drift")
+        # Explicit empty strings match only plain-string defaults.
+        pod = "spec.template.spec"
+        self.assertIsNone(k8s.spec_drift({"imagePullPolicy": ""}, {"imagePullPolicy": "IfNotPresent"},
+                                         f"{pod}.containers[0]"))
+        self.assertEqual(k8s.spec_drift({"imagePullPolicy": ""}, {"imagePullPolicy": "Never"},
+                                        f"{pod}.containers[0]"), f"{pod}.containers[0].imagePullPolicy")
+        self.assertEqual(k8s.spec_drift({"maxSurge": ""}, {"maxSurge": "25%"}, "spec.strategy.rollingUpdate"),
+                         "spec.strategy.rollingUpdate.maxSurge", "pointer IntOrString keeps an explicit value")
+        self.assertEqual(k8s.spec_drift({"image": ""}, {"image": "x"}, f"{pod}.containers[0]"),
+                         f"{pod}.containers[0].image", "fields without a default are compared")
+        self.assertIsNone(k8s.spec_drift({"httpGet": {"port": 8080}},
+                                         {"httpGet": {"port": 8080, "path": "/", "scheme": "HTTP"}},
+                                         f"{pod}.containers[0].lifecycle.preStop"))
 
     def test_deployment_readiness_tolerates_canonical_quantities_and_delegated_replicas(self):
         bundle = example()
