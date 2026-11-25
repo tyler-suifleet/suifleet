@@ -157,7 +157,8 @@ the two apart.
 | `suifleet_exporter_info{adapter_version}` | gauge | Adapter version. |
 | `suifleet_exporter_polls_total{result}` | counter | Console reads by result (`ok`, `unreachable`, `unauthenticated`, `denied`, `unavailable`, `malformed`, and `logs-…` for log reads). |
 | `suifleet_exporter_last_success_timestamp_seconds` | gauge | Last successful console read. |
-| `suifleet_exporter_otlp_exports_total{signal,result}` | counter | OTLP posts by `metrics`/`logs` and `ok`, `invalid_response` (accepted with 2xx, but the reply could not be inspected: larger than 64 KiB, not a JSON object, or a partial-success count that is not a nonnegative int64; the batch is not resent and its log lines count as `unconfirmed`, not `exported`), `rejected`, `retry`, `unauthorized` or `unreachable`. |
+| `suifleet_exporter_otlp_exports_total{signal,result}` | counter | OTLP posts by `metrics`/`logs` and `ok`, `partial` (accepted with 2xx, but the collector's partial-success reply refused a positive number of data points or log records; not resent), `invalid_response` (accepted with 2xx, but the reply could not be inspected: larger than 64 KiB, not a JSON object, or a partial-success count that is not a nonnegative int64; the batch is not resent and its log lines count as `unconfirmed`, not `exported`), `rejected`, `retry`, `unauthorized` or `unreachable`. |
+| `suifleet_exporter_otlp_metric_points_rejected_total` | counter | Metric data points refused in OTLP partial-success replies (`rejectedDataPoints`). |
 | `suifleet_exporter_otlp_backoff_seconds{signal}` | gauge | Current retry delay; 0 when healthy. |
 | `suifleet_exporter_log_records_total{result}` | counter | Log lines `exported`, `dropped` from the full buffer, `rejected` by the collector, or `unconfirmed` (sent and accepted with 2xx, but the reply could not be inspected for partial rejection). |
 | `suifleet_exporter_log_gaps_total` | counter | Polls whose tail did not overlap the previous one, so lines may have been missed. |
@@ -212,7 +213,10 @@ For complete, durable log delivery use [SF-020 logs](LOGS.md) or
   are cumulative). Log lines stay buffered up to `max_buffer`; when it is full
   the oldest lines are dropped and counted.
 - **Collector rejects a payload** (400, 413, 422): it is not resent and is
-  counted as `rejected`. OTLP partial success counts rejected log records.
+  counted as `rejected`. An OTLP partial-success reply with a positive count is
+  recorded as `partial`, not `ok`, and is not resent: refused log records count
+  as `rejected` and refused metric data points add to
+  `suifleet_exporter_otlp_metric_points_rejected_total`.
 - **Wrong collector credential:** reported as `unauthorized` and retried with
   backoff; fix the header file and restart.
 - Requests use no proxy environment and follow no redirects. Request and

@@ -528,6 +528,7 @@ class Exporter:
         self.polls = collections.Counter()
         self.otlp_results = collections.Counter()
         self.log_records = collections.Counter()
+        self.metric_points_rejected = 0
         self.log_gaps = 0
         self.log_dropped = 0
         self.backoff = dict(metrics=0.0, logs=0.0)
@@ -560,6 +561,7 @@ class Exporter:
             otlp = m("suifleet_exporter_otlp_exports_total", "counter", "OTLP export attempts by signal and result.")
             for (sig, result), count in sorted(self.otlp_results.items()):
                 otlp.add(count, signal=sig, result=result)
+            m("suifleet_exporter_otlp_metric_points_rejected_total", "counter", "Metric data points the collector refused in an OTLP partial-success reply (not resent).").add(self.metric_points_rejected)
             backoff = m("suifleet_exporter_otlp_backoff_seconds", "gauge", "Current OTLP retry delay after failures (0 when healthy).", "seconds")
             for sig in sorted(self.backoff):
                 backoff.add(self.backoff[sig], signal=sig)
@@ -757,7 +759,9 @@ class Transport:
                 # resend, and do not report the records as confirmed exported.
                 self._record(signal_name, "invalid_response")
                 return ("unconfirmed", None)
-            self._record(signal_name, "ok")
+            # A positive partial-success count is recorded as "partial", not
+            # "ok", so a refused point or record is never shown as delivered.
+            self._record(signal_name, "partial" if rejected else "ok")
             return ("ok", rejected)
         if status in (400, 413, 422):
             # Permanent: the collector refused this payload; never resend it.
@@ -831,7 +835,10 @@ def _partial_rejected(data, signal_name):
 def export_once(exporter, transport, signals=("metrics", "logs")):
     """Send current metrics and pending logs to the OTLP endpoint if not backing off."""
     if "metrics" in signals and transport.ready("metrics"):
-        transport.post("metrics", exporter.otlp_metrics())
+        result, rejected = transport.post("metrics", exporter.otlp_metrics())
+        if result == "ok" and rejected:
+            with exporter.lock:
+                exporter.metric_points_rejected += rejected
     if "logs" not in signals or not exporter.config.logs:
         return
     while transport.ready("logs"):

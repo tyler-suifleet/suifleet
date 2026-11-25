@@ -656,9 +656,44 @@ class AdapterTests(Base):
         self.assertEqual(exporter.log_records["rejected"], 1)
         self.assertEqual(exporter.log_records["exported"], batch - 1)
         self.assertEqual(exporter.log_records["unconfirmed"], batch * len(malformed))
-        self.assertEqual(exporter.otlp_results[("logs", "ok")], 1)
+        self.assertEqual(exporter.otlp_results[("logs", "partial")], 1)
         series = {m.name: m for m in exporter.metrics()}["suifleet_exporter_log_records_total"].points
         self.assertIn(({"result": "unconfirmed"}, batch * len(malformed)), series)
+
+    def test_metrics_partial_success_is_reported_not_counted_ok(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, initial_backoff_seconds=1, max_backoff_seconds=8))
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        exporter.poll(console)
+        rejected_total = lambda: {m.name: m for m in exporter.metrics()}[
+            "suifleet_exporter_otlp_metric_points_rejected_total"].points[0][1]
+        self.assertEqual(rejected_total(), 0)
+        # The collector refuses one data point: reported, never resent, no backoff.
+        collector.responses = [(200, {}, b'{"partialSuccess":{"rejectedDataPoints":1,"errorMessage":"x"}}')]
+        em.export_once(exporter, transport, signals=("metrics",))
+        self.assertEqual(len(collector.received), 1)
+        self.assertTrue(transport.ready("metrics"))
+        self.assertEqual(exporter.backoff["metrics"], 0.0)
+        self.assertEqual(exporter.otlp_results[("metrics", "partial")], 1)
+        self.assertEqual(exporter.otlp_results[("metrics", "ok")], 0)
+        self.assertEqual(rejected_total(), 1)
+        # A later fully successful reply (empty or zero count) is ok and adds nothing.
+        collector.responses = [(200, {}, b"{}"), (200, {}, b'{"partialSuccess":{"rejectedDataPoints":"0"}}')]
+        em.export_once(exporter, transport, signals=("metrics",))
+        em.export_once(exporter, transport, signals=("metrics",))
+        self.assertEqual(len(collector.received), 3)
+        self.assertEqual(exporter.otlp_results[("metrics", "ok")], 2)
+        self.assertEqual(exporter.otlp_results[("metrics", "partial")], 1)
+        self.assertEqual(rejected_total(), 1)
+        # A string-encoded int64 count accumulates.
+        collector.responses = [(200, {}, b'{"partialSuccess":{"rejectedDataPoints":"3"}}')]
+        em.export_once(exporter, transport, signals=("metrics",))
+        self.assertEqual(rejected_total(), 4)
+        self.assertEqual(exporter.otlp_results[("metrics", "partial")], 2)
+        series = {m.name: m for m in exporter.metrics()}["suifleet_exporter_otlp_exports_total"].points
+        self.assertIn(({"signal": "metrics", "result": "partial"}, 2), series)
 
     def test_oversized_retry_after_is_capped_and_keeps_logs(self):
         collector = FakeCollector()
