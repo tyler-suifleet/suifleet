@@ -442,6 +442,25 @@ EMPTY_STRING_DEFAULTS = {path: allowed for path, allowed in SERVER_DEFAULTS.item
 DELEGATED_FIELDS = {"spec.replicas"}
 
 
+# Go map fields (map[string]string, ResourceList) reachable from a Deployment
+# spec, by field name. Unlike struct fields, a map key is meaningful even when
+# its value is empty or zero (nodeSelector {"pool": ""} requires that node
+# label; a label selector term matches on it), so map key sets must match the
+# bundle exactly rather than tolerating extra zero-valued keys.
+MAP_FIELDS = frozenset({"labels", "annotations", "matchLabels", "nodeSelector", "limits", "requests",
+                        "overhead", "volumeAttributes", "options"})
+
+
+def _is_map(path, value):
+    return isinstance(value, dict) and path.rsplit(".", 1)[-1] in MAP_FIELDS
+
+
+def _map_drift(desired, live, path):
+    """Path of the first key present in only one of two map fields, or None."""
+    extra = sorted(set(live) ^ set(desired))
+    return f"{path}.{extra[0]}" if extra else None
+
+
 def _is_zero(value):
     return value is None or value is False or value == 0 and not isinstance(value, bool) or value in ("", [], {})
 
@@ -454,6 +473,8 @@ def _unexpected(live, path):
     if pattern in SERVER_DEFAULTS:
         allowed = SERVER_DEFAULTS[pattern]
         return None if any(type(live) is type(value) and live == value for value in allowed) else path
+    if _is_map(path, live):
+        return _map_drift({}, live, path)
     if isinstance(live, dict):
         return spec_drift({}, live, path)
     return None if _is_zero(live) else path
@@ -464,7 +485,9 @@ def spec_drift(desired, live, path):
     bundle specifies, or None. Every field the bundle specifies must match. A
     live field the bundle omits must hold the API server's default for it (or a
     zero value) unless it is delegated (replicas left to a
-    HorizontalPodAutoscaler). A field the server omits matches a zero/empty
+    HorizontalPodAutoscaler). Map fields (labels, annotations, nodeSelector,
+    resource lists, ...) must have exactly the bundle's keys, even when an
+    extra key's value is empty. A field the server omits matches a zero/empty
     desired value (Go omitempty), and resource quantities compare by value."""
     if live is None:
         if not desired:
@@ -474,6 +497,10 @@ def spec_drift(desired, live, path):
     if isinstance(desired, dict):
         if not isinstance(live, dict):
             return path
+        if _is_map(path, desired):
+            drift = _map_drift(desired, live, path)
+            if drift:
+                return drift
         for key, value in desired.items():
             drift = spec_drift(value, live.get(key), f"{path}.{key}")
             if drift:

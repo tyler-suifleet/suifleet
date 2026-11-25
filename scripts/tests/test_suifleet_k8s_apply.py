@@ -300,6 +300,46 @@ class DecisionTest(unittest.TestCase):
         self.assertIn("spec.replicas", k8s.object_ready(scaled, deploy, "web-app")[1],
                       "replicas the bundle specifies are compared")
 
+    def test_deployment_readiness_preserves_map_key_presence(self):
+        objects = k8s.render(example(), "suifleet-apps", "web-app", "1.0.0", "d" * 64)
+        deploy = objects[1]
+        template = deploy["spec"]["template"]
+        self.assertNotIn("nodeSelector", template["spec"])
+        self.assertTrue(template["metadata"]["labels"] and template["metadata"]["annotations"])
+        # An empty-valued key is still a constraint or a selectable label, both
+        # in a map the bundle omits and in one it already populates.
+        for mutate, where in [
+                (lambda t: t["spec"].update(nodeSelector={"example.com/pool": ""}),
+                 "spec.nodeSelector.example.com/pool"),
+                (lambda t: t["metadata"]["labels"].update({"example.com/extra": ""}),
+                 "metadata.labels.example.com/extra"),
+                (lambda t: t["metadata"]["annotations"].update({"example.com/extra": ""}),
+                 "metadata.annotations.example.com/extra"),
+                (lambda t: t["spec"]["containers"][0]["resources"]["limits"].update({"example.com/gpu": "0"}),
+                 "limits.example.com/gpu"),
+                (lambda t: t["spec"].update(overhead={"cpu": ""}), "spec.overhead.cpu")]:
+            drifted = self.healthy(deploy)
+            mutate(drifted["spec"]["template"])
+            ok, why = k8s.object_ready(drifted, deploy, "web-app")
+            self.assertFalse(ok, f"an extra empty-valued {where} key is drift")
+            self.assertIn(where, why)
+        selector = self.healthy(deploy)
+        selector["spec"]["selector"]["matchLabels"]["example.com/extra"] = ""
+        self.assertIn("matchLabels.example.com/extra", k8s.object_ready(selector, deploy, "web-app")[1])
+        # A bundle map key with an empty value must be present live, not omitted.
+        bundle = example()
+        deployment(bundle)["spec"]["template"]["spec"]["nodeSelector"] = {"example.com/pool": ""}
+        k8s.validate_bundle(bundle)
+        pinned = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(pinned)
+        self.assertEqual(k8s.object_ready(live, pinned, "web-app"), (True, "ready"))
+        del live["spec"]["template"]["spec"]["nodeSelector"]
+        self.assertIn("spec.nodeSelector.example.com/pool", k8s.object_ready(live, pinned, "web-app")[1])
+        # Struct defaults and zero values for omitted struct fields still pass.
+        zero = self.healthy(deploy)
+        zero["spec"]["template"]["spec"].update(nodeSelector={}, hostNetwork=False)
+        self.assertEqual(k8s.object_ready(zero, deploy, "web-app"), (True, "ready"))
+
     def test_deployment_readiness_tolerates_defaulted_http_get_path(self):
         for path in (None, ""):  # omitted or explicitly empty
             bundle = example()
@@ -369,6 +409,13 @@ class DecisionTest(unittest.TestCase):
             drift = k8s.spec_drift({"resources": {"limits": {"cpu": want}}},
                                    {"resources": {"limits": {"cpu": have}}}, "spec.c")
             self.assertEqual(drift is None, same, f"{want!r} vs {have!r}")
+        self.assertEqual(k8s.spec_drift({}, {"nodeSelector": {"k": ""}}, "spec"), "spec.nodeSelector.k",
+                         "map keys are meaningful even with empty values")
+        self.assertEqual(k8s.spec_drift({"labels": {"a": "1"}}, {"labels": {"a": "1", "b": ""}}, "spec"),
+                         "spec.labels.b")
+        self.assertEqual(k8s.spec_drift({"labels": {"a": ""}}, {"labels": {}}, "spec"), "spec.labels.a")
+        self.assertIsNone(k8s.spec_drift({"labels": {"a": ""}}, {"labels": {"a": ""}}, "spec"))
+        self.assertIsNone(k8s.spec_drift({}, {"nodeSelector": {}}, "spec"))
         self.assertEqual(k8s.spec_drift({"image": "1"}, {"image": "1000m"}, "spec"), "spec.image",
                          "quantity equivalence applies only to resources")
 
