@@ -10,7 +10,7 @@ repos:
   meta-suifleet:
     url: https://github.com/tyler-suifleet/meta-suifleet.git
     branch: main
-    commit: ae29529a88f11f7d52129eef51702759ce316404
+    commit: 7831cebe241050fc2bdb319786144c3f4d62edcb
   poky:
     url: https://git.yoctoproject.org/poky
     commit: 445a6223929b9a7a62b575093659e3d9e1aba982
