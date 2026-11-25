@@ -34,7 +34,10 @@ ServiceAccount credential:
 - A configuration-only update and rollback of a ConfigMap consumed through
   envFrom, configMapKeyRef and a subPath mount is observed inside the Pods
   before readiness succeeds, and a Deployment consuming a ConfigMap outside
-  its bundle is rejected offline.
+  its bundle is rejected offline. A no-op re-apply starts no rollout. After a
+  partially applied update (ConfigMap written, Deployment write denied by a
+  test admission policy) a v1-template Pod restarted in between reads the
+  new data; the rollback replaces it before readiness succeeds.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   ConfigMap made immutable out of band stops the apply before any write; the
   apply recreates a mutable object after the administrator deletes it.
@@ -1034,6 +1037,64 @@ def scenario(cluster, work, supervisor):
     seen = observed_config(cluster)
     check("a config-only rollback restores the v1 configuration in the pods before readiness succeeds",
           seen == [("alpha",) * 3], str(seen))
+    steady = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
+    check("config-only re-apply of the same bundle succeeds",
+          helper("apply", profiles, config_v1, component="config-app").returncode == 0)
+    again = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
+    check("a no-op re-apply keeps the ConfigMap data epoch and starts no rollout",
+          again["metadata"]["generation"] == steady["metadata"]["generation"]
+          and again["spec"]["template"] == steady["spec"]["template"])
+
+    # Combined review 4605: a partially applied update writes the ConfigMap,
+    # then its Deployment write fails. A v1-template Pod that starts in that
+    # window reads the v2 configuration. The rollback restores the v1 data;
+    # it must replace that Pod before readiness succeeds, even though the
+    # Deployment still has the exact, healthy v1 template.
+    cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
+         "metadata": {"name": "test-freeze-config-app"},
+         "spec": {"failurePolicy": "Fail",
+                  "matchConstraints": {"resourceRules": [{"apiGroups": ["apps"], "apiVersions": ["v1"],
+                                                          "operations": ["UPDATE"], "resources": ["deployments"]}]},
+                  "validations": [{"expression": "object.metadata.name != 'config-app'",
+                                   "message": "test: config-app Deployment writes are frozen"}]}},
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding",
+         "metadata": {"name": "test-freeze-config-app"},
+         "spec": {"policyName": "test-freeze-config-app", "validationActions": ["Deny"],
+                  "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
+
+    def frozen():
+        return cluster.admin("annotate", "deployment", "config-app", "-n", NAMESPACE, "test-probe=1", "--overwrite",
+                             "--dry-run=server", ok=False).returncode != 0
+
+    wait("the test Deployment write freeze to take effect", frozen, timeout=60)
+    result = helper("apply", profiles, config_v2, component="config-app", version="2.0.0")
+    check("a partially applied v2 fails at the Deployment write",
+          result.returncode == 2 and "frozen" in result.stderr, result.stderr[-500:])
+    live_data = json.loads(cluster.admin("get", "configmap", "config-settings", "-n", NAMESPACE, "-o", "json").stdout)["data"]
+    frozen_deployment = json.loads(cluster.admin("get", "deployment", "config-app", "-n", NAMESPACE, "-o", "json").stdout)
+    check("the partial apply wrote the v2 ConfigMap but left the v1 template",
+          live_data == {"MODE": "beta"} and frozen_deployment["spec"]["template"] == again["spec"]["template"],
+          str(live_data))
+    old_pods = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]
+    old_names = {pod["metadata"]["name"] for pod in old_pods}
+    cluster.admin("delete", "pods", "-n", NAMESPACE, "-l", "app=config-app", "--wait=true")
+    wait("a replacement v1-template Pod", lambda: len(observed_config(cluster)) == 1, timeout=120, interval=2)
+    seen = observed_config(cluster)
+    check("a v1-template Pod started during the partial apply reads v2 (the hazard)", seen == [("beta",) * 3], str(seen))
+    hazard = {pod["metadata"]["name"] for pod in json.loads(cluster.admin(
+        "get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]} - old_names
+    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-config-app")
+    wait("the test Deployment write freeze to lift", lambda: not frozen(), timeout=60)
+    check("rollback after the partial apply applies",
+          helper("apply", profiles, config_v1, component="config-app").returncode == 0)
+    wait_ready(profiles, config_v1, "1.0.0", component="config-app")
+    pods = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=config-app", "-o", "json").stdout)["items"]
+    seen = observed_config(cluster)
+    check("once the rollback is ready, every live Pod runs the v1 configuration",
+          seen == [("alpha",) * 3], str(seen))
+    check("the Pod that read v2 was replaced",
+          bool(hazard) and not hazard & {pod["metadata"]["name"] for pod in pods}, str(hazard))
     retire_config = work / "config-retire.json"
     retire_config.write_text(json.dumps({"version": 1, "resources": []}))
     check("config-only test component retires",
