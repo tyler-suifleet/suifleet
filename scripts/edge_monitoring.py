@@ -564,8 +564,8 @@ class Exporter:
             for sig in sorted(self.backoff):
                 backoff.add(self.backoff[sig], signal=sig)
         if self.config.logs:
-            records = m("suifleet_exporter_log_records_total", "counter", "Redacted component log lines by result (exported, dropped from the bounded buffer, rejected by the collector).")
-            for result in ("exported", "dropped", "rejected"):
+            records = m("suifleet_exporter_log_records_total", "counter", "Redacted component log lines by result (exported, dropped from the bounded buffer, rejected by the collector, unconfirmed after an uninspectable 2xx reply).")
+            for result in ("exported", "dropped", "rejected", "unconfirmed"):
                 records.add(self.log_records[result], result=result)
             m("suifleet_exporter_log_gaps_total", "counter", "Log polls with no overlap with the previous tail: lines may have been missed.").add(self.log_gaps)
             m("suifleet_exporter_log_buffered", "gauge", "Redacted log lines waiting for export.").add(len(self.log_buffer))
@@ -733,7 +733,7 @@ class Transport:
         return self.clock() >= self.not_before[signal_name]
 
     def post(self, signal_name, payload):
-        """Returns 'ok', 'rejected' (do not resend) or 'retry'."""
+        """Returns 'ok', 'unconfirmed' or 'rejected' (do not resend) or 'retry'."""
         url = self.cfg["metrics_url"] if signal_name == "metrics" else self.cfg["logs_url"]
         body = json.dumps(payload, separators=(",", ":")).encode()
         headers = {**self.cfg["headers"], "Content-Type": "application/json"}
@@ -753,10 +753,10 @@ class Transport:
             rejected = _partial_rejected(data, signal_name)
             self._success(signal_name)
             if rejected is _INVALID:
-                # Accepted (2xx) but the partial-success count is unusable:
-                # count the reply, never resend, report no rejected records.
+                # Accepted (2xx) but the body could not be inspected: never
+                # resend, and do not report the records as confirmed exported.
                 self._record(signal_name, "invalid_response")
-                return ("ok", None)
+                return ("unconfirmed", None)
             self._record(signal_name, "ok")
             return ("ok", rejected)
         if status in (400, 413, 422):
@@ -798,16 +798,21 @@ _INVALID = object()
 def _partial_rejected(data, signal_name):
     """Rejected count from an OTLP partial-success reply.
 
-    None when the reply carries no count; _INVALID when it is not a
-    nonnegative int64 (OTLP JSON encodes int64 as a number or decimal string).
+    None when the reply carries no count; _INVALID when the body exceeds the
+    read cap, is not a JSON object, or the count is not a nonnegative int64
+    (OTLP JSON encodes int64 as a number or decimal string).
     """
-    if not data or len(data) > MAX_OTLP_RESPONSE:
+    if not data:
         return None
+    if len(data) > MAX_OTLP_RESPONSE:
+        return _INVALID                        # over the read cap: cannot be inspected
     try:
         parsed = json.loads(data)
     except (ValueError, RecursionError):
         return _INVALID
-    partial = parsed.get("partialSuccess") if isinstance(parsed, dict) else None
+    if not isinstance(parsed, dict):
+        return _INVALID                        # an OTLP response is a JSON object
+    partial = parsed.get("partialSuccess")
     if partial is None:
         return None
     if not isinstance(partial, dict):
@@ -844,6 +849,8 @@ def export_once(exporter, transport, signals=("metrics", "logs")):
                 refused = min(rejected or 0, len(batch))
                 exporter.log_records["exported"] += len(batch) - refused
                 exporter.log_records["rejected"] += refused
+            elif result == "unconfirmed":
+                exporter.log_records["unconfirmed"] += len(batch)
             else:
                 exporter.log_records["rejected"] += len(batch)
 

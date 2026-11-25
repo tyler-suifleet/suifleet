@@ -615,7 +615,10 @@ class AdapterTests(Base):
                      b'{"partialSuccess":{"rejectedLogRecords":"1e3"}}',
                      b'{"partialSuccess":{"rejectedLogRecords":true}}',
                      b'{"partialSuccess":{"rejectedLogRecords":[1]}}',
-                     b'{"partialSuccess":[]}', b'not json', b'[' * 60000)
+                     b'{"partialSuccess":[]}', b'not json', b'[' * 60000,
+                     b'[]', b'"text"', b'null',                              # not a JSON object
+                     b'{"partialSuccess":{"rejectedLogRecords":1},"x":"' + b"a" * em.MAX_OTLP_RESPONSE + b'"}')
+        structural = 7    # invalid for both signals: all but the count-specific bodies
         for body in malformed:
             with self.subTest(body=body[:60]):
                 self.assertIs(em._partial_rejected(body, "logs"), em._INVALID)
@@ -637,19 +640,25 @@ class AdapterTests(Base):
                 self.assertEqual(len(exporter.log_buffer), 0)   # accepted: not resent
                 self.assertTrue(transport.ready("logs"))        # no backoff
                 self.assertEqual(exporter.log_records["rejected"], 0)
-                self.assertLessEqual(exporter.log_records["exported"], batch * len(malformed))
+                self.assertEqual(exporter.log_records["exported"], 0)   # never confirmed
                 exporter.log_buffer.extend(lines)
         self.assertEqual(exporter.otlp_results[("logs", "invalid_response")], len(malformed))
-        # Metrics replies are judged by rejectedDataPoints, so only the three
-        # structurally malformed bodies are invalid for that signal.
-        self.assertEqual(exporter.otlp_results[("metrics", "invalid_response")], 3)
-        self.assertEqual(exporter.log_records["exported"], batch * len(malformed))
+        self.assertEqual(exporter.otlp_results[("logs", "ok")], 0)
+        # Metrics replies are judged by rejectedDataPoints, so only the
+        # structurally invalid bodies are invalid for that signal.
+        self.assertEqual(exporter.otlp_results[("metrics", "invalid_response")], structural)
+        self.assertEqual(exporter.otlp_results[("metrics", "ok")], len(malformed) - structural)
+        self.assertEqual(exporter.log_records["unconfirmed"], batch * len(malformed))
+        self.assertEqual(exporter.log_records["exported"], 0)
         # A later well-formed reply is counted normally.
         collector.responses = [(200, {}, b"{}"), (200, {}, b'{"partialSuccess":{"rejectedLogRecords":"1"}}')]
         em.export_once(exporter, transport)
         self.assertEqual(exporter.log_records["rejected"], 1)
-        self.assertEqual(exporter.log_records["exported"], batch * len(malformed) + batch - 1)
+        self.assertEqual(exporter.log_records["exported"], batch - 1)
+        self.assertEqual(exporter.log_records["unconfirmed"], batch * len(malformed))
         self.assertEqual(exporter.otlp_results[("logs", "ok")], 1)
+        series = {m.name: m for m in exporter.metrics()}["suifleet_exporter_log_records_total"].points
+        self.assertIn(({"result": "unconfirmed"}, batch * len(malformed)), series)
 
     def test_oversized_retry_after_is_capped_and_keeps_logs(self):
         collector = FakeCollector()
