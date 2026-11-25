@@ -5731,6 +5731,27 @@
         "Tests start from a recorded 0.2.1 filesystem state (container or QEMU) and verify identity preservation, journal retention, refusal of mismatched manifests and successful re-enrollment on localnet."
       ],
       "validation": "Package upgrade tests from recorded 0.2.1 state, localnet re-enrollment harness; physical acceptance in SF-031."
+    },
+    {
+      "key": "SF-326",
+      "title": "Recognize verified fast-lane workflow applicability in merge gates",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests/test_optional_skips.py"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-326 -->\n## Problem\nThe locally tested SF-321 content fast lane added intentional content-job skips and changed the static-site workflow blob. The coordinator still recognizes only earlier deployment workflow hashes and treats the new content skips as mandatory failures. Candidate #965 has successful CI and protected Testnet but cannot receive final evidence review.\n## Implementation\nRecognize only the exact reviewed workflow and scope-script blobs, with fresh GitHub run/job/check provenance and successful scope/build prerequisites. Preserve every mandatory/security/testnet gate and reject unknown or tampered skips. No blanket acceptance of SKIPPED.\n## Acceptance\n- Reproduce blocking skips from #965.\n- Positive and negative regressions for reviewed content and deployment applicability.\n- Local-test infrastructure integration, installed-runtime provenance, and actual candidate review launch verification.\nPriority: P0. Area: infra. User authorized queue recovery and locally tested infrastructure merges.\n",
+      "acceptance": [
+        "Recognize only exact reviewed content/deployment workflow and scope script blobs with fresh provenance.",
+        "Unknown, tampered, stale, required and live skips stay blocking.",
+        "Scoped positive/negative tests and actual live candidate proof."
+      ],
+      "validation": "Focused coordinator applicability and gate regressions; meaningful local combined-main checks; verified activation."
     }
   ]
 }
