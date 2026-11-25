@@ -53,6 +53,7 @@ MAX_OTLP_RESPONSE = 64 * 1024
 MAX_HEADERS = 16
 MAX_SECRET_FILE = 8192
 DEFAULT_PROMETHEUS = "127.0.0.1:9469"
+SCRAPE_DEADLINE = 5                         # seconds per whole /metrics request
 TOKEN_PREFIX = "sfm_"
 CONSOLE_TOKEN = re.compile(r"sfc_[A-Za-z0-9_-]{20,128}")
 MONITOR_TOKEN = re.compile(TOKEN_PREFIX + r"[A-Za-z0-9_-]{43}")
@@ -425,27 +426,121 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class _Deadline:
+    """Wall-clock bound on one whole HTTP exchange.
+
+    A socket timeout bounds only each blocking operation, so a peer that keeps
+    making slow progress (a byte every few seconds) could hold an exchange
+    indefinitely. At the deadline every attached socket is shut down, which
+    ends any blocked or later read/write promptly; ``expired`` then tells the
+    caller that whatever arrived is incomplete even if it looks well framed.
+    """
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+        self.expired = False
+        self._lock = threading.Lock()
+        self._sockets = []
+        self._timer = threading.Timer(seconds, self._expire)
+        self._timer.daemon = True
+
+    def __enter__(self):
+        self._timer.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._timer.cancel()
+        with self._lock:
+            self._sockets.clear()
+        return False
+
+    def attach(self, sock):
+        with self._lock:
+            if not self.expired:
+                self._sockets.append(sock)
+                return sock
+        _shutdown(sock)
+        return sock
+
+    def _expire(self):
+        with self._lock:
+            self.expired = True
+            sockets, self._sockets = self._sockets, []
+        for sock in sockets:
+            _shutdown(sock)
+
+
+def _shutdown(sock):
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass                    # already closed, detached by a TLS wrap or never connected
+
+
+def _bounded_connection(http_class, deadline):
+    """Connection factory whose raw and (TLS-wrapped) sockets join `deadline`,
+    so name resolution aside, connect, handshake, request and response are all
+    within the one wall-clock bound."""
+    def factory(*args, **kwargs):
+        connection = http_class(*args, **kwargs)
+        create, connect = connection._create_connection, connection.connect
+        connection._create_connection = lambda *a, **k: deadline.attach(create(*a, **k))
+
+        def bounded_connect():
+            connect()
+            deadline.attach(connection.sock)
+        connection.connect = bounded_connect
+        return connection
+    return factory
+
+
+class _DeadlineMixin:
+    def do_open(self, http_class, req, **kwargs):
+        deadline = getattr(req, "deadline", None)
+        if deadline is not None:
+            http_class = _bounded_connection(http_class, deadline)
+        return super().do_open(http_class, req, **kwargs)
+
+
+class _DeadlineHTTPHandler(_DeadlineMixin, urllib.request.HTTPHandler):
+    pass
+
+
+class _DeadlineHTTPSHandler(_DeadlineMixin, urllib.request.HTTPSHandler):
+    pass
+
+
+def _opener(context=None):
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect(), _DeadlineHTTPHandler(),
+                                       _DeadlineHTTPSHandler(context=context))
+
+
 class Console:
     def __init__(self, url, token, timeout=5):
         self.url, self.token, self.timeout = url, token, timeout
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+        self.opener = _opener()
 
     def call(self, operation, **fields):
         body = json.dumps(dict(version=1, operation=operation, **fields)).encode()
         request = urllib.request.Request(self.url + "/api/v1/request", data=body, method="POST", headers={
             "Content-Type": "application/json", "Authorization": "Bearer " + self.token})
-        try:
-            with self.opener.open(request, timeout=self.timeout) as response:
-                data = _read_body(response, MAX_CONSOLE_RESPONSE)
-        except urllib.error.HTTPError as error:
+        # self.timeout bounds the whole exchange, not only each socket read.
+        with _Deadline(self.timeout) as deadline:
+            request.deadline = deadline
             try:
-                data = _read_body(error, MAX_CONSOLE_RESPONSE)
+                with self.opener.open(request, timeout=self.timeout) as response:
+                    data = _read_body(response, MAX_CONSOLE_RESPONSE)
+            except urllib.error.HTTPError as error:
+                try:
+                    data = _read_body(error, MAX_CONSOLE_RESPONSE)
+                except _IO_ERRORS:
+                    raise ConsoleError("unreachable") from None
+                finally:
+                    error.close()
             except _IO_ERRORS:
                 raise ConsoleError("unreachable") from None
-            finally:
-                error.close()
-        except _IO_ERRORS:
-            raise ConsoleError("unreachable") from None
+        if deadline.expired:
+            raise ConsoleError("unreachable")       # whatever arrived may be cut short
         if len(data) > MAX_CONSOLE_RESPONSE:
             raise ConsoleError("too-large")
         try:
@@ -842,10 +937,7 @@ class Transport:
 
     def __init__(self, config, exporter, clock=time.monotonic, rng=random.random):
         self.cfg, self.exporter, self.clock, self.rng = config.otlp, exporter, clock, rng
-        handlers = [urllib.request.ProxyHandler({}), _NoRedirect()]
-        if self.cfg["context"] is not None:
-            handlers.append(urllib.request.HTTPSHandler(context=self.cfg["context"]))
-        self.opener = urllib.request.build_opener(*handlers)
+        self.opener = _opener(self.cfg["context"])
         self.failures = dict(metrics=0, logs=0)
         self.not_before = dict(metrics=0.0, logs=0.0)
 
@@ -859,27 +951,32 @@ class Transport:
         headers = {**self.cfg["headers"], "Content-Type": "application/json"}
         request = urllib.request.Request(url, data=body, method="POST", headers=headers)
         retry_after, status, data, unreadable = None, None, None, False
-        try:
-            with self.opener.open(request, timeout=self.cfg["timeout"]) as response:
-                status = response.status
-                try:
-                    data = _read_body(response, MAX_OTLP_RESPONSE)
-                except _IO_ERRORS:
-                    # The status line already arrived: a 2xx means the collector
-                    # accepted the payload, so a body cut short (truncation or
-                    # timeout) leaves the acknowledgement uninspectable, not the
-                    # delivery failed. Other statuses keep their own handling.
+        # The configured timeout bounds the whole exchange, not only each read.
+        with _Deadline(self.cfg["timeout"]) as deadline:
+            request.deadline = deadline
+            try:
+                with self.opener.open(request, timeout=self.cfg["timeout"]) as response:
+                    status = response.status
+                    try:
+                        data = _read_body(response, MAX_OTLP_RESPONSE)
+                    except _IO_ERRORS:
+                        # The status line already arrived: a 2xx means the collector
+                        # accepted the payload, so a body cut short (truncation or
+                        # timeout) leaves the acknowledgement uninspectable, not the
+                        # delivery failed. Other statuses keep their own handling.
+                        data, unreadable = b"", True
+            except urllib.error.HTTPError as error:
+                status, data = error.code, b""
+                value = error.headers.get("Retry-After") if error.headers else None
+                retry_after = _retry_after(value, self.cfg["max_backoff"])
+                error.close()
+            except _IO_ERRORS:
+                if status is None or not 200 <= status < 300:
+                    status = None              # failed before a success status was known
+                if data is None:
                     data, unreadable = b"", True
-        except urllib.error.HTTPError as error:
-            status, data = error.code, b""
-            value = error.headers.get("Retry-After") if error.headers else None
-            retry_after = _retry_after(value, self.cfg["max_backoff"])
-            error.close()
-        except _IO_ERRORS:
-            if status is None or not 200 <= status < 300:
-                status = None                  # failed before a success status was known
-            if data is None:
-                data, unreadable = b"", True
+        if deadline.expired and status is not None and 200 <= status < 300:
+            data, unreadable = b"", True       # the acknowledgement body may be cut short
         if status is not None and 200 <= status < 300:
             rejected = _INVALID if unreadable else _partial_rejected(data, signal_name)
             if rejected not in (None, _INVALID) and rejected > _payload_items(payload, signal_name):
@@ -1061,7 +1158,21 @@ def make_server(exporter):
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "suifleet-edge-monitoring"
         sys_version = ""
-        timeout = 5
+        timeout = SCRAPE_DEADLINE
+
+        def setup(self):
+            # The socket timeout bounds each read/write; this wall-clock deadline
+            # bounds the whole request, so a client that trickles bytes cannot
+            # hold the single handler and block other scrapes.
+            self.deadline = _Deadline(self.timeout).__enter__()
+            self.deadline.attach(self.request)
+            super().setup()
+
+        def finish(self):
+            try:
+                super().finish()
+            finally:
+                self.deadline.__exit__(None, None, None)
 
         def log_message(self, *args):
             pass
@@ -1100,6 +1211,9 @@ def make_server(exporter):
     class Server(http.server.HTTPServer):
         address_family = socket.AF_INET6 if ":" in cfg["host"] else socket.AF_INET
         request_queue_size = 16
+
+        def handle_error(self, request, client_address):
+            pass                # e.g. a request cut off at its deadline; never print request data
 
     return Server((cfg["host"], cfg["port"]), Handler)
 

@@ -11,7 +11,10 @@ import http.server
 import json
 import os
 from pathlib import Path
+import socket
+import ssl
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -153,7 +156,7 @@ class FakeConsole:
 
 
 class FakeCollector:
-    def __init__(self, require=None):
+    def __init__(self, require=None, tls=None):
         self.require = require
         self.received = []
         self.responses = []         # queued (status, headers, body); default 200
@@ -162,9 +165,13 @@ class FakeCollector:
         self.arrived = []           # request paths, recorded before any reply delay
         self.gate = None            # threading.Event that holds every reply until set
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
+        if tls:                     # (certificate, key) paths
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(*tls)
+            server.socket = context.wrap_socket(server.socket, server_side=True)
         self.server = server
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.url = f"http://127.0.0.1:{server.server_port}"
+        self.url = f"{'https' if tls else 'http'}://127.0.0.1:{server.server_port}"
 
     def close(self):
         if self.gate:
@@ -1470,6 +1477,198 @@ class AdapterTests(Base):
         self.assertEqual(posts[3], ("logs", 20.0))
         self.assertEqual(transport.failures["metrics"], 0)
 
+
+
+def trickle(write, data, stop, interval=0.2):
+    """Send data one byte at a time: a peer that keeps making slow progress,
+    so no single socket read or write ever reaches its timeout."""
+    for index in range(len(data)):
+        if stop.is_set():
+            return
+        try:
+            write(data[index:index + 1])
+        except OSError:
+            return                  # the other side gave up, as it should
+        stop.wait(interval)
+
+
+class TricklingServer:
+    """A one-connection-at-a-time HTTP peer that answers every request by
+    trickling `reply` (raw response bytes) until stopped or disconnected."""
+
+    def __init__(self, reply):
+        self.reply, self.stop = reply, threading.Event()
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.listener.settimeout(0.2)
+        self.url = f"http://127.0.0.1:{self.listener.getsockname()[1]}"
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while not self.stop.is_set():
+            try:
+                connection, _ = self.listener.accept()
+            except OSError:
+                continue
+            with connection:
+                connection.settimeout(5)
+                try:
+                    connection.recv(65536)
+                except OSError:
+                    continue
+                trickle(connection.sendall, self.reply, self.stop)
+
+    def close(self):
+        self.stop.set()
+        self.listener.close()
+
+
+# A complete-looking console reply with no framing, followed by endless
+# whitespace: only the deadline, not EOF or framing, can end this read.
+UNFRAMED_REPLY = (b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n"
+                  + json.dumps(dict(version=1, status="ok", data={})).encode() + b" " * 400)
+
+
+class DeadlineTests(Base):
+    """Wall-clock deadlines on whole requests (combined review of PR #920)."""
+
+    def setUp(self):
+        super().setUp()
+        self.console = FakeConsole()
+        self.addCleanup(self.console.close)
+
+    make = AdapterTests.make
+
+    def trickler(self, reply):
+        server = TricklingServer(reply)
+        self.addCleanup(server.close)
+        return server
+
+    def test_trickling_console_reply_is_bounded_and_polling_recovers(self):
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+        replies = {
+            "status line": b"HTTP/1.1 200 OK\r\n" + b"X-Slow: " + b"a" * 400,
+            "length body": b"HTTP/1.1 200 OK\r\nContent-Length: 400\r\n\r\n" + b" " * 400,
+            "unframed body": UNFRAMED_REPLY,
+        }
+        for shape, reply in replies.items():
+            with self.subTest(shape=shape):
+                slow = em.Console(self.trickler(reply).url, CONSOLE_TOKEN, timeout=1)
+                started = time.monotonic()
+                with self.assertRaises(em.ConsoleError) as raised:
+                    slow.call("health")
+                self.assertEqual(raised.exception.status, "unreachable")
+                self.assertLess(time.monotonic() - started, 2.5)
+                started = time.monotonic()
+                self.assertFalse(exporter.poll(slow))             # stale health withdrawn
+                self.assertLess(time.monotonic() - started, 2.5)  # one bounded request
+                self.assertNotIn(b"suifleet_device_healthy", exporter.render_prometheus())
+                self.assertTrue(exporter.poll(console))           # normal polling recovers
+                self.assertIn(b"suifleet_device_healthy", exporter.render_prometheus())
+
+    def otlp_with(self, collector_url):
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector_url, timeout_seconds=1, initial_backoff_seconds=2, max_backoff_seconds=8),
+            logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        exporter.poll(console)
+        return em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5), exporter
+
+    def test_trickling_collector_success_body_is_bounded_and_unconfirmed(self):
+        collector = FakeCollector()
+        self.addCleanup(collector.close)
+        stop = threading.Event()
+        self.addCleanup(stop.set)
+
+        def trickled_success(handler):
+            handler.protocol_version = "HTTP/1.1"
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Connection", "close")    # unframed: ends only at EOF
+            handler.end_headers()
+            handler.wfile.flush()
+            trickle(lambda b: (handler.wfile.write(b), handler.wfile.flush()), b"{}" + b" " * 400, stop)
+            handler.close_connection = True
+        collector.stall = [trickled_success]
+        transport, exporter = self.otlp_with(collector.url)
+        started = time.monotonic()
+        self.assertEqual(transport.post("logs", exporter.otlp_logs(list(exporter.log_buffer))),
+                         ("unconfirmed", None))
+        self.assertLess(time.monotonic() - started, 2.5)
+        self.assertEqual(exporter.otlp_results[("logs", "invalid_response")], 1)
+        # The next exchange, with a prompt collector, is unaffected.
+        self.assertEqual(transport.post("metrics", exporter.otlp_metrics())[0], "ok")
+
+    def test_trickling_collector_status_line_is_bounded_and_retried(self):
+        slow = self.trickler(b"HTTP/1.1 200 OK\r\n" + b"X-Slow: " + b"a" * 400)
+        transport, exporter = self.otlp_with(slow.url)
+        started = time.monotonic()
+        self.assertEqual(transport.post("metrics", exporter.otlp_metrics())[0], "retry")
+        self.assertLess(time.monotonic() - started, 2.5)
+        self.assertEqual(exporter.otlp_results[("metrics", "unreachable")], 1)
+
+    def test_trickling_tls_collector_is_bounded_and_tls_export_still_works(self):
+        cert, key = str(self.dir / "collector.pem"), str(self.dir / "collector.key")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+                        "-keyout", key, "-out", cert], check=True, capture_output=True)
+        os.chmod(cert, 0o600)
+        collector = FakeCollector(tls=(cert, key))
+        self.addCleanup(collector.close)
+        stop = threading.Event()
+        self.addCleanup(stop.set)
+
+        def trickled_success(handler):
+            handler.protocol_version = "HTTP/1.1"
+            handler.send_response(200)
+            handler.send_header("Connection", "close")
+            handler.end_headers()
+            handler.wfile.flush()
+            trickle(lambda b: (handler.wfile.write(b), handler.wfile.flush()), b"{}" + b" " * 400, stop)
+            handler.close_connection = True
+        collector.stall = [trickled_success]
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=collector.url, ca_file=cert, timeout_seconds=1, initial_backoff_seconds=2,
+            max_backoff_seconds=8), logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        exporter.poll(console)
+        transport = em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5)
+        started = time.monotonic()
+        self.assertEqual(transport.post("logs", exporter.otlp_logs(list(exporter.log_buffer))),
+                         ("unconfirmed", None))
+        self.assertLess(time.monotonic() - started, 2.5)
+        # The deadline-aware HTTPS handler still verifies the private CA and delivers.
+        self.assertEqual(transport.post("metrics", exporter.otlp_metrics())[0], "ok")
+        self.assertEqual(collector.received[-1][0], "/v1/metrics")
+
+    def test_trickling_scrape_cannot_hold_the_metrics_listener(self):
+        token = em.generate_token()
+        cfg, exporter, console = self.make(prometheus=dict(listen="127.0.0.1:0", token_sha256=token["token_sha256"]))
+        exporter.poll(console)
+        with unittest.mock.patch.object(em, "SCRAPE_DEADLINE", 1):
+            server = em.make_server(exporter)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+        stop = threading.Event()
+        self.addCleanup(stop.set)
+        slow = socket.create_connection(("127.0.0.1", port), timeout=10)
+        self.addCleanup(slow.close)
+        # Unauthenticated and endless: headers that never finish, a byte at a time.
+        threading.Thread(target=trickle, args=(slow.sendall, b"GET /metrics HTTP/1.1\r\nX: " + b"a" * 400, stop),
+                         daemon=True).start()
+        time.sleep(0.3)                                    # the slow client holds the handler
+        started = time.monotonic()
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/metrics",
+                                         headers={"Authorization": "Bearer " + token["token"]})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"suifleet_device_healthy", response.read())
+        self.assertLess(time.monotonic() - started, 2.5)  # waited at most one deadline
+        slow.settimeout(3)
+        try:
+            self.assertEqual(slow.recv(1), b"")            # the slow client was disconnected
+        except ConnectionResetError:
+            pass
 
 
 if __name__ == "__main__":
