@@ -35,12 +35,23 @@ case $pat in
         # (and must match), so its comments can never start another file.
         # Anything else in the listing, a file that cannot be read and line
         # continuations (which could hide or forge an assignment) are refused.
-        eff=$(printf '%s\n' "$conf" | awk '
+        # So is any syntax whose meaning to systemd this check does not
+        # reproduce exactly, rather than guessing it: a byte outside printable
+        # ASCII (systemd strips a UTF-8 byte order mark, which would otherwise
+        # hide a section header), a section header other than [Name] (systemd
+        # stops reading a file at an invalid one) and any other line that is
+        # not a comment or a Key=value assignment.
+        eff=$(printf '%s\n' "$conf" | LC_ALL=C awk '
           function classify(l) {
+            if (l ~ /[^\t\r -~]/) fail("unsupported")
             sub(/^[ \t]+/, "", l); sub(/[ \t\r]+$/, "", l)
             if (l == "" || l ~ /^[#;]/) return
             if (l ~ /\\$/) cont = 1
-            if (l ~ /^\[.*\]$/) { sec = substr(l, 2, length(l) - 2); return }
+            if (l ~ /^\[/) {
+              if (l !~ /^\[[A-Za-z0-9_-]+\]$/) fail("unsupported")
+              sec = substr(l, 2, length(l) - 2); return
+            }
+            if (l !~ /^[A-Za-z0-9_]+[ \t]*=/) fail("unsupported")
             if (sec != "Coredump") return
             if (l ~ /^Storage[ \t]*=/) { s = l; sub(/^Storage[ \t]*=[ \t]*/, "", s) }
             if (l ~ /^ProcessSizeMax[ \t]*=/) { m = l; sub(/^ProcessSizeMax[ \t]*=[ \t]*/, "", m) }
@@ -67,6 +78,7 @@ case $pat in
           || v unsafe "systemd-coredump's configuration could not be parsed and the core dump size limit is $lim"
         case $(printf '%s\n' "$eff" | sed -n 1p) in
           -) ;;
+          unsupported) v unsafe "systemd-coredump's configuration uses syntax this check does not support (a non-ASCII byte, an unusual section header or a line that is not Key=value) and the core dump size limit is $lim" ;;
           continued) v unsafe "systemd-coredump's configuration uses line continuations and the core dump size limit is $lim" ;;
           unreadable) v unsafe "a systemd-coredump configuration file could not be read and the core dump size limit is $lim" ;;
           *) v unsafe "systemd-coredump's configuration listing could not be matched to its files and the core dump size limit is $lim" ;;
