@@ -6,6 +6,7 @@ transport, backoff and redaction) runs against them. The integration harness
 scripts/test_edge_monitoring.py exercises the real daemon, real Prometheus and
 a real OpenTelemetry Collector.
 """
+import contextlib
 import hashlib
 import http.server
 import json
@@ -1669,6 +1670,129 @@ class DeadlineTests(Base):
             self.assertEqual(slow.recv(1), b"")            # the slow client was disconnected
         except ConnectionResetError:
             pass
+
+
+
+# A TLS record header and ServerHello announcing ~16 KiB, then one byte at a time:
+# the client's handshake never completes and no single read times out.
+TRICKLED_HANDSHAKE = b"\x16\x03\x03\x40\x00" + b"\x02\x00\x3f\xf0" + b"\x03\x03" + b"\x00" * 400
+
+
+class SetupDeadlineTests(Base):
+    """The whole-request deadline also covers name resolution, every TCP
+    connect attempt and the TLS handshake (review 4487 of PR #845)."""
+
+    def setUp(self):
+        super().setUp()
+        self.console = FakeConsole()
+        self.addCleanup(self.console.close)
+
+    make = AdapterTests.make
+    trickler = DeadlineTests.trickler
+
+    def certificate(self):
+        cert, key = str(self.dir / "collector.pem"), str(self.dir / "collector.key")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+                        "-keyout", key, "-out", cert], check=True, capture_output=True)
+        os.chmod(cert, 0o600)
+        return cert, key
+
+    def tls_transport(self, url, cert):
+        cfg, exporter, console = self.make(prometheus=None, otlp=dict(
+            endpoint=url, ca_file=cert, timeout_seconds=1, initial_backoff_seconds=2,
+            max_backoff_seconds=8), logs=dict(components=["svc"], max_lines=10, max_buffer=10))
+        exporter.poll(console)
+        return em.Transport(cfg, exporter, clock=lambda: 0.0, rng=lambda: 0.5), exporter
+
+    def assert_tls_setup_bounded(self, slow_connect):
+        cert, key = self.certificate()
+        stalled = self.trickler(TRICKLED_HANDSHAKE)
+        transport, exporter = self.tls_transport(stalled.url.replace("http://", "https://"), cert)
+        connect = socket.socket.connect
+
+        def delayed(sock, address):
+            time.sleep(0.75)                    # most of the budget goes to TCP setup
+            return connect(sock, address)
+        started = time.monotonic()
+        with unittest.mock.patch.object(socket.socket, "connect", delayed) if slow_connect else contextlib.nullcontext():
+            self.assertEqual(transport.post("metrics", exporter.otlp_metrics())[0], "retry")
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual(exporter.otlp_results[("metrics", "unreachable")], 1)
+        # A prompt private-CA collector still verifies and receives exports.
+        collector = FakeCollector(tls=(cert, key))
+        self.addCleanup(collector.close)
+        working, exporter = self.tls_transport(collector.url, cert)
+        self.assertEqual(working.post("metrics", exporter.otlp_metrics())[0], "ok")
+        self.assertEqual(collector.received[-1][0], "/v1/metrics")
+
+    def test_trickled_tls_handshake_is_bounded(self):
+        self.assert_tls_setup_bounded(slow_connect=False)
+
+    def test_slow_tcp_connect_and_stalled_handshake_share_one_budget(self):
+        self.assert_tls_setup_bounded(slow_connect=True)
+
+    def test_every_tcp_address_attempt_shares_one_budget(self):
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+        stalled = self.trickler(UNFRAMED_REPLY)
+        port = int(stalled.url.rsplit(":", 1)[1])
+        peers = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))] * 3
+        attempts = []
+
+        def hanging(sock, address):
+            attempts.append(sock.gettimeout())
+            time.sleep(sock.gettimeout())       # a SYN that is never answered
+            raise TimeoutError("timed out")
+        slow = em.Console(stalled.url, CONSOLE_TOKEN, timeout=1)
+        started = time.monotonic()
+        with unittest.mock.patch.object(em, "_resolve", lambda *a: peers), \
+                unittest.mock.patch.object(socket.socket, "connect", hanging):
+            with self.assertRaises(em.ConsoleError) as raised:
+                slow.call("health")
+        self.assertEqual(raised.exception.status, "unreachable")
+        self.assertLess(time.monotonic() - started, 1.5)       # not 3 x 1 s
+        self.assertTrue(attempts and all(t <= 1 for t in attempts))
+        self.assertTrue(exporter.poll(console))                  # polling recovers
+
+    def test_slow_name_resolution_is_bounded_and_capped(self):
+        port = int(self.console.url.rsplit(":", 1)[1])
+        release = threading.Event()
+        self.addCleanup(release.set)
+        real = socket.getaddrinfo
+
+        def resolver(host, *args):
+            if host == "console.test":
+                if len(args) >= 5 and args[4] & socket.AI_NUMERICHOST:
+                    raise socket.gaierror(socket.EAI_NONAME, "not numeric")   # never blocks
+                release.wait(30)               # a resolver that does not answer
+                return real("127.0.0.1", *args)
+            return real(host, *args)
+        with unittest.mock.patch.object(socket, "getaddrinfo", resolver):
+            url = f"http://console.test:{port}"
+            for _ in range(em.MAX_PENDING_RESOLUTIONS):
+                started = time.monotonic()
+                with self.assertRaises(em.ConsoleError) as raised:
+                    em.Console(url, CONSOLE_TOKEN, timeout=0.5).call("health")
+                self.assertEqual(raised.exception.status, "unreachable")
+                self.assertLess(time.monotonic() - started, 1.0)
+            # Abandoned lookups are capped: a further request fails at once.
+            started = time.monotonic()
+            with self.assertRaises(em.ConsoleError):
+                em.Console(url, CONSOLE_TOKEN, timeout=5).call("health")
+            self.assertLess(time.monotonic() - started, 0.5)
+            # Once the resolver answers, the slots return and requests succeed.
+            release.set()
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    data = em.Console(url, CONSOLE_TOKEN, timeout=2).call("health")
+                    break
+                except em.ConsoleError:
+                    if time.monotonic() > deadline:
+                        raise
+                    time.sleep(0.05)
+        self.assertIsInstance(data, dict)
 
 
 if __name__ == "__main__":

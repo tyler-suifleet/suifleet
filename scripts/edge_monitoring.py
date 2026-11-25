@@ -434,6 +434,8 @@ class _Deadline:
     indefinitely. At the deadline every attached socket is shut down, which
     ends any blocked or later read/write promptly; ``expired`` then tells the
     caller that whatever arrived is incomplete even if it looks well framed.
+    Connection setup (see ``_bounded_connection``) additionally caps every
+    socket timeout at the remaining budget.
     """
 
     def __init__(self, seconds):
@@ -441,10 +443,12 @@ class _Deadline:
         self.expired = False
         self._lock = threading.Lock()
         self._sockets = []
+        self._end = None
         self._timer = threading.Timer(seconds, self._expire)
         self._timer.daemon = True
 
     def __enter__(self):
+        self._end = time.monotonic() + self.seconds
         self._timer.start()
         return self
 
@@ -453,6 +457,13 @@ class _Deadline:
         with self._lock:
             self._sockets.clear()
         return False
+
+    def remaining(self):
+        """Seconds left; raises TimeoutError once the budget is spent."""
+        left = self._end - time.monotonic() if self._end is not None else self.seconds
+        if self.expired or left <= 0:
+            raise TimeoutError("request deadline exceeded")
+        return left
 
     def attach(self, sock):
         with self._lock:
@@ -472,24 +483,100 @@ class _Deadline:
 
 def _shutdown(sock):
     try:
-        sock.shutdown(socket.SHUT_RDWR)
+        # The plain socket method, also for an SSLSocket: it shuts down the
+        # shared descriptor without touching TLS state another thread is using
+        # (for example inside a handshake), which then fails promptly.
+        socket.socket.shutdown(sock, socket.SHUT_RDWR)
     except OSError:
-        pass                    # already closed, detached by a TLS wrap or never connected
+        pass                    # already closed or never connected
+
+
+# Name resolution has no timeout of its own, so it runs on a helper thread and
+# the request stops waiting when its deadline expires. An abandoned lookup
+# finishes in the background within the system resolver's own timeouts; at
+# most this many may be outstanding, after which new requests fail at once as
+# unreachable instead of accumulating threads.
+MAX_PENDING_RESOLUTIONS = 4
+_resolutions = threading.BoundedSemaphore(MAX_PENDING_RESOLUTIONS)
+
+
+def _resolve(host, port, deadline):
+    try:      # Literal addresses (the loopback console) need no lookup.
+        return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM, 0, socket.AI_NUMERICHOST)
+    except socket.gaierror:
+        pass
+    if not _resolutions.acquire(blocking=False):
+        raise TimeoutError("too many outstanding name resolutions")
+    result, done = {}, threading.Event()
+
+    def lookup():
+        try:
+            result["value"] = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+        except OSError as error:
+            result["error"] = error
+        finally:
+            _resolutions.release()
+            done.set()
+    threading.Thread(target=lookup, daemon=True).start()
+    if not done.wait(deadline.remaining()):
+        raise TimeoutError("name resolution exceeded the request deadline")
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+
+def _step_timeout(timeout, deadline):
+    left = deadline.remaining()
+    return left if not isinstance(timeout, (int, float)) else min(timeout, left)
+
+
+def _connect(address, timeout, source_address, deadline):
+    """socket.create_connection with every address attempt inside the deadline."""
+    host, port = address
+    last = None
+    for family, kind, proto, _, peer in _resolve(host, port, deadline):
+        sock = socket.socket(family, kind, proto)
+        try:
+            sock.settimeout(_step_timeout(timeout, deadline))
+            deadline.attach(sock)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(peer)
+            deadline.remaining()         # a connect that completed after expiry
+            return sock
+        except OSError as error:
+            sock.close()
+            last = error
+            if isinstance(error, TimeoutError) and deadline.expired:
+                break
+    deadline.remaining()
+    raise last if last is not None else OSError("no address to connect to")
 
 
 def _bounded_connection(http_class, deadline):
-    """Connection factory whose raw and (TLS-wrapped) sockets join `deadline`,
-    so name resolution aside, connect, handshake, request and response are all
-    within the one wall-clock bound."""
+    """Connection factory that keeps resolution, every TCP connect attempt,
+    the TLS handshake, the request and the response within one wall-clock
+    bound: each socket joins `deadline` before it blocks, and each setup step's
+    socket timeout is capped at the remaining budget."""
     def factory(*args, **kwargs):
         connection = http_class(*args, **kwargs)
-        create, connect = connection._create_connection, connection.connect
-        connection._create_connection = lambda *a, **k: deadline.attach(create(*a, **k))
-
-        def bounded_connect():
-            connect()
-            deadline.attach(connection.sock)
-        connection.connect = bounded_connect
+        connection._create_connection = lambda address, timeout, source=None: _connect(
+            address, timeout, source, deadline)
+        if isinstance(connection, http.client.HTTPSConnection):
+            def bounded_tls_connect():
+                http.client.HTTPConnection.connect(connection)
+                hostname = connection._tunnel_host or connection.host
+                # Wrapping detaches the raw socket, so attach the TLS socket
+                # before its handshake can block.
+                sock = connection._context.wrap_socket(connection.sock, server_hostname=hostname,
+                                                       do_handshake_on_connect=False)
+                connection.sock = sock
+                deadline.attach(sock)
+                sock.settimeout(_step_timeout(connection.timeout, deadline))
+                sock.do_handshake()
+                deadline.remaining()
+                sock.settimeout(_step_timeout(connection.timeout, deadline))
+            connection.connect = bounded_tls_connect
         return connection
     return factory
 
