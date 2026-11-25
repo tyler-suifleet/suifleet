@@ -234,6 +234,11 @@ sudo install -m 0640 -o root -g suifleet-signer signer.toml /etc/suifleet/signer
 macOS has no signing service: the daemon reads the key itself (see
 [macOS guide](CUSTOMER_MACOS.md)), so skip this step there.
 
+For a batch of new Linux devices, use [first-boot enrollment](CUSTOMER_ENROLLMENT.md)
+to install the deployment, signer and daemon settings from provisioning media.
+The manual configuration procedure below applies to individual or already
+enrolled clients.
+
 ## Configuration file
 
 `/etc/suifleet/config.toml` names the manifest, the device's on-chain IDs and

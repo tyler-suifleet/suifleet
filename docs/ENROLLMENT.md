@@ -64,6 +64,63 @@ suifleet --enroll /etc/suifleet/enroll.toml
 
 Revoke leaked claims, and keep claim batches small, with expiries.
 
+## Automatic Linux first boot
+
+Prepare the root-owned `/etc/suifleet/first-boot.toml` on the OS filesystem for
+the entire batch. Keep this file separate from the writable provisioning
+media. The SHA-256 values pin the exact archive members, including line
+endings. Obtain them with `sha256sum deployment.json config.template.toml` from a
+trusted copy of the extracted archive. If the operator omitted the template,
+omit `template_sha256`. Record a finalized checkpoint just **before creating
+the batch policy** to bound the recovery search. Use an indexed fullnode that
+retains events from that checkpoint.
+
+```toml
+policy_id = "0x<POLICY_ID>"
+operator = "0x<OPERATOR_ADDRESS_OR_MANAGED_FLEET_ID>"
+history_start_checkpoint = 123456
+manifest_sha256 = "<LOWERCASE_SHA256_OF_DEPLOYMENT_JSON>"
+# template_sha256 = "<LOWERCASE_SHA256_OF_CONFIG_TEMPLATE_TOML>"
+# locations = ["/boot/enrollment", "/boot/firmware/enrollment", "/media/provision/enrollment"]
+
+# For a managed batch only, match the archive's [managed] section.
+# [managed]
+# customer_id = "0x<CUSTOMER_ID>"
+# fleet_id = "0x<FLEET_ID>"
+# budget_id = "0x<BUDGET_ID>"
+```
+
+Mount writable media before the service starts. Each configured location is
+the parent of the serial folder. Use a systemd drop-in for custom mount
+dependencies or write access outside `/boot`, `/media`, `/run/media` and `/mnt`.
+Yocto enables the service. Debian and RPM installations follow their existing
+opt-in policy. Enable `suifleet-first-boot-enrollment.service` after preparing
+the batch settings, and enable `suifleet.service` for later enrolled boots.
+
+The optional template uses ordinary daemon TOML fields, such as `[apply]`,
+`[runtime]`, `[telemetry]`, `[logs]` and `[fleet_data]`. The service supplies
+`[sui]` and `[device]`, and derives matching signer settings from the template.
+Keep secret values out of the template and provision any credential files
+independently. With no template, the client uses a refusing updater.
+
+The service starts after key provisioning and exits early if `config.toml`
+exists. It validates the pinned files and deployment, validates the policy's
+registry and operator, and looks up the local device address in checkpointed
+enrollment events before signing. It retries chain errors with delays up to 32
+seconds for a bounded number of attempts. After confirming the applicable cap
+and identity, it installs the manifest, isolated signer settings and daemon
+settings. The device key stays on the device. The claim file is overwritten,
+synchronized and unlinked before the daemon configuration becomes visible.
+On flash and copy-on-write media these steps remove the live file. Residual
+blocks, snapshots and archive copies require separate media sanitization.
+
+Read `enrollment-status.json` in the serial folder or use
+`journalctl -u suifleet-first-boot-enrollment.service`. A chain error can
+indicate an offline endpoint, unavailable history or a claim the policy no
+longer accepts. After correcting the cause, restart the unit with the same
+media. Keep the existing device key and the original claim with the unit
+until the service reports completion.
+
 ## Address-free bulk enrollment in the dApp (SF-100)
 
 The dApp's **Enrollment** page puts the claim flow above behind names and serial numbers. Operators never copy a blockchain address and approve one transaction per batch chunk, not per device.
@@ -81,9 +138,10 @@ The dApp's **Enrollment** page puts the claim flow above behind names and serial
 4. **Download credentials.** A warning before the button explains that the archive is the only copy of its claim keys. The download stays disabled until you tick *I understand this download is the only copy of these credentials*, once per download. The browser generates one fresh claim key per accepted reservation and downloads a tar archive. Each device gets one folder, `enrollment/SERIAL/`, containing:
    - `claim.key`, mode 0600;
    - `enroll.toml`, with the policy, the alias as `name` and `keypair_path = "/etc/suifleet/device.key"`;
-   - `deployment.json`.
+   - `deployment.json`;
+   - optionally, the batch's `config.template.toml`.
 5. **Run pending transactions.** These register the claims and fund each claim's enrollment gas, at most 250 claims per transaction.
-6. **Devices enroll themselves.** At first boot, `suifleet --provision` (or a hardware signer) makes the device's own key, then `suifleet --enroll /path/to/enroll.toml` enrolls it.
+6. **Devices enroll themselves.** On packaged Linux, the [first-boot service](#automatic-linux-first-boot) provisions the local identity and consumes the claim. The manual command remains available for individual installations.
 7. **Run pending transactions** again to bind each enrolled device. This writes metadata `suifleet.alias` and `suifleet.serial` and adds the device to its group, at most 100 devices per transaction.
    - Binding does not need the policy to accept enrollments. Under a closed, expired or exhausted policy, the run skips claim registration and still binds devices that already enrolled.
    - Devices, groups, access and deployment pages then show the alias and serial.
