@@ -22,7 +22,10 @@ const {appRequire}=require('../../scripts/frontend_test_utils.cjs'),{chromium}=a
   assert.equal(await page.locator('video track[default]').count(),0);
   for(const v of await page.locator('.guide-stage video').all())assert.equal(await v.evaluate(v=>v.textTracks[0].mode),'disabled');
   for(const clip of manifest.videos){
-   await page.getByLabel('Guide stage').selectOption(clip.step);const v=page.locator(`#${clip.step} video`);
+   await page.evaluate(id=>location.hash=id,clip.step);
+   const stage=page.locator(`#${clip.step}`);
+   await stage.waitFor({state:'visible'});
+   const v=stage.locator('video');
    await v.evaluate(async v=>{v.muted=true;v.textTracks[0].mode='hidden';await v.play()});
    await page.waitForFunction(id=>{const v=document.querySelector(`#${id} video`);return v.currentTime>.1&&v.textTracks[0].cues?.length>0},clip.step);
    assert.deepEqual(await v.evaluate(v=>[v.videoWidth,v.videoHeight]),[clip.width,clip.height]);
