@@ -69,7 +69,7 @@ All three profiles preserve core's `UNPACKDIR` when present and fall back to
 `WORKDIR` for older BitBake. The daemon archive unpacks to `source` on all three series;
 local install inputs use `UNPACKDIR`. Before configure, the recipe executes the
 staged compiler's `--version` and rejects Rust below 1.90.0. The mixin dependency
-belongs to the Scarthgap kas profile, rather than the reusable layer.
+is provided by the Kirkstone and Scarthgap kas profiles.
 
 ## Build
 
@@ -105,8 +105,8 @@ Preserve the package feed, source/layer revisions, build configuration,
 `license.manifest`, image/package manifests, binary/image SHA-256 values and
 BitBake logs. `ca-certificates` is an explicit runtime dependency; the daemon uses Rustls and has no direct OpenSSL build dependency. Systemd and
 other image/native dependencies still use OpenSSL, so the observed recursive
-install serialization workaround remains in the integration layer. Shared-library QA stays
-enabled.
+install serialization workaround is in the opt-in `suifleet-core-fixes` class,
+which the integration layer inherits. Shared-library QA stays enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.
 
