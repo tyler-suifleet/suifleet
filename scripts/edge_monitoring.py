@@ -535,8 +535,9 @@ def _connect(address, timeout, source_address, deadline):
     host, port = address
     last = None
     for family, kind, proto, _, peer in _resolve(host, port, deadline):
-        sock = socket.socket(family, kind, proto)
-        try:
+        sock = None
+        try:     # creation may fail (e.g. EAFNOSUPPORT); try the next address
+            sock = socket.socket(family, kind, proto)
             sock.settimeout(_step_timeout(timeout, deadline))
             deadline.attach(sock)
             if source_address:
@@ -545,7 +546,8 @@ def _connect(address, timeout, source_address, deadline):
             deadline.remaining()         # a connect that completed after expiry
             return sock
         except OSError as error:
-            sock.close()
+            if sock is not None:
+                sock.close()
             last = error
             if isinstance(error, TimeoutError) and deadline.expired:
                 break

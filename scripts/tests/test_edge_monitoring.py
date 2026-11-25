@@ -7,6 +7,7 @@ scripts/test_edge_monitoring.py exercises the real daemon, real Prometheus and
 a real OpenTelemetry Collector.
 """
 import contextlib
+import errno
 import hashlib
 import http.server
 import json
@@ -1755,6 +1756,31 @@ class SetupDeadlineTests(Base):
         self.assertLess(time.monotonic() - started, 1.5)       # not 3 x 1 s
         self.assertTrue(attempts and all(t <= 1 for t in attempts))
         self.assertTrue(exporter.poll(console))                  # polling recovers
+
+    def test_unsupported_address_family_falls_through_to_next_address(self):
+        # A dual-stack name whose IPv6 address comes first, on a device that
+        # cannot create IPv6 sockets (review 4534): the IPv4 address is used.
+        port = int(self.console.url.rsplit(":", 1)[1])
+        peers = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", port, 0, 0)),
+                 (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        real, families = socket.socket, []
+
+        class NoInet6(real):
+            def __init__(self, family=socket.AF_INET, *args, **kwargs):
+                families.append(family)
+                if family == socket.AF_INET6:
+                    raise OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+                super().__init__(family, *args, **kwargs)
+        with unittest.mock.patch.object(em, "_resolve", lambda *a: peers), \
+                unittest.mock.patch.object(socket, "socket", NoInet6):
+            data = em.Console(self.console.url, CONSOLE_TOKEN, timeout=1).call("health")
+            self.assertIsInstance(data, dict)
+            self.assertEqual(families[:2], [socket.AF_INET6, socket.AF_INET])
+            # When no address yields a socket, the request fails as unreachable.
+            with unittest.mock.patch.object(em, "_resolve", lambda *a: peers[:1]):
+                with self.assertRaises(em.ConsoleError) as raised:
+                    em.Console(self.console.url, CONSOLE_TOKEN, timeout=1).call("health")
+            self.assertEqual(raised.exception.status, "unreachable")
 
     def test_slow_name_resolution_is_bounded_and_capped(self):
         port = int(self.console.url.rsplit(":", 1)[1])
