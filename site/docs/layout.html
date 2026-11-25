@@ -14,22 +14,74 @@
 <link rel="stylesheet" href="/assets/docs.css">
 <script src="/assets/search.js" defer></script>
 </head>
-<body>
+<body class="docs-page">
 <a class="skip" href="#main">Skip to content</a>
-<header class="site-header"><div class="wrap header-row">
-<a class="brand" href="/"><img src="/assets/logo.svg" width="62" height="38" alt=""> SuiFleet docs</a>
-<nav aria-label="Main"><ul><li><a href="/">Guides</a></li><li><a href="https://suifleet.io/">SuiFleet</a></li></ul></nav>
-<a class="button primary header-cta" href="https://app.suifleet.io/">Launch app</a>
-</div></header>
-<div class="wrap docs"><aside>
+<header class="site-header">
+<div class="wrap header-row">
+<a class="brand" href="/" aria-label="SuiFleet docs home">
+<img src="/assets/logo.svg" alt="" width="62" height="38">
+<span>SuiFleet</span><span class="docs-tag">Docs</span>
+</a>
+<nav aria-label="Main"><ul>
+<li><a href="/">Guides</a></li>
+<li><a href="https://suifleet.io/how-it-works/">How it works</a></li>
+<li><a href="https://suifleet.io/pricing/">Pricing</a></li>
+<li><a href="https://suifleet.io/security/">Security</a></li>
+</ul></nav>
+<details class="mobile-menu">
+<summary><span class="burger" aria-hidden="true"></span><span class="visually-hidden">Menu</span></summary>
+<nav aria-label="Mobile navigation"><ul>
+<li><a href="/">Guides</a></li>
+<li><a href="https://suifleet.io/how-it-works/">How it works</a></li>
+<li><a href="https://suifleet.io/pricing/">Pricing</a></li>
+<li><a href="https://suifleet.io/security/">Security</a></li>
+<li><a href="https://suifleet.io/">SuiFleet home</a></li>
+</ul></nav>
+</details>
+<a class="button primary small header-cta" href="https://app.suifleet.io/">Launch app</a>
+</div>
+</header>
+<div class="wrap docs">
+<aside>
+<div class="docs-search">
 <label for="search">Search documentation</label>
-<input id="search" type="search" placeholder="Search pages…" autocomplete="off" aria-controls="search-results">
+<input id="search" type="search" placeholder="Search guides…" autocomplete="off" aria-controls="search-results">
 <p id="search-status" role="status"></p><ul id="search-results"></ul>
 <noscript>Search needs JavaScript. Browse all pages below.</noscript>
-<nav aria-label="Documentation">{{nav}}</nav>
-</aside><main id="main"><article>{{content}}</article></main></div>
-<footer class="site-footer"><div class="wrap footer-row">
-<p>Device software delivery and fleet management. No analytics or tracking cookies.</p>
-<a href="https://suifleet.io/privacy/">Privacy</a><a href="https://github.com/tyler-suifleet/suifleet">Source (MIT)</a>
-</div></footer>
+</div>
+<nav class="docs-nav" aria-label="Documentation">{{nav}}</nav>
+</aside>
+<main id="main"><article>{{content}}</article></main>
+</div>
+<footer class="site-footer">
+<div class="wrap">
+<div class="footer-top">
+<div>
+<a class="footer-brand" href="/"><img src="/assets/logo.svg" alt="" width="62" height="38"><span>SuiFleet</span></a>
+<p class="footer-tagline">Over-the-air updates for Linux device fleets. No analytics or tracking cookies.</p>
+</div>
+<div class="footer-links">
+<div>
+<span class="footer-label">Product</span>
+<a href="https://suifleet.io/how-it-works/">How it works</a>
+<a href="https://suifleet.io/pricing/">Pricing</a>
+<a href="https://app.suifleet.io/">Open console</a>
+</div>
+<div>
+<span class="footer-label">Learn</span>
+<a href="/">Guides</a>
+<a href="https://suifleet.io/guide/">Product guide</a>
+<a href="https://github.com/tyler-suifleet/suifleet">Source (MIT)</a>
+</div>
+<div>
+<span class="footer-label">Company</span>
+<a href="https://suifleet.io/security/">Security</a>
+<a href="https://suifleet.io/contact/">Contact</a>
+<a href="https://suifleet.io/privacy/">Privacy</a>
+</div>
+</div>
+</div>
+<div class="footer-bottom"><span>© 2026 SuiFleet</span></div>
+</div>
+</footer>
 </body></html>

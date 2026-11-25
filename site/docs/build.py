@@ -173,11 +173,23 @@ def build(out, origins=None):
         target = out / (path.lstrip("/") + "index.html" if path.endswith("/") else path.lstrip("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(result, encoding="utf-8")
-    emit("/", "Documentation", '<h1>SuiFleet documentation</h1><p>Install a client, enroll a device, publish components and administer your fleet. Start with <a href="/install/">the installation guide</a>.</p><p>Choose the platform and configuration that match your fleet. Your platform scripts control OS installation, reboot and firmware recovery.</p>')
+    blurbs = {"Operators": "Install the client, enroll devices and send updates.",
+              "Device integrators": "Build SuiFleet into your device image.",
+              "Administrators": "Control access, encryption and fleet budgets."}
+    groups = ""
+    for group in dict.fromkeys(p["group"] for p in pages):
+        links = "".join('<li><a href="/' + p["slug"] + '/">' + html.escape(p["title"]) + "</a></li>" for p in pages if p["group"] == group)
+        blurb = '<p>' + html.escape(blurbs[group]) + '</p>' if group in blurbs else ''
+        groups += '<section class="doc-group"><h2>' + html.escape(group) + '</h2>' + blurb + '<ul>' + links + '</ul></section>'
+    emit("/", "Documentation", '<div class="docs-home"><h1>SuiFleet documentation</h1>'
+         '<p class="lead">Install a client, enroll a device, publish components and administer your fleet.</p>'
+         '<p><a class="start-link" href="/install/">Install and connect your first device</a></p>'
+         '<div class="doc-groups">' + groups + '</div>'
+         '<p>Your platform scripts control OS installation, reboot and firmware recovery. Start with <a href="/install/">the installation guide</a>.</p></div>')
     for page in pages:
         text = (ROOT / page["source"]).read_text(encoding="utf-8")
         content = render(text, page["source"], pages)
-        content += '<p>Source: <a href="' + REPO + '/blob/main/' + page["source"] + '">Edit this page</a></p>'
+        content += '<p class="edit-source">Source: <a href="' + REPO + '/blob/main/' + page["source"] + '">Edit this page</a></p>'
         path = "/" + page["slug"] + "/"
         emit(path, page["title"], content)
         search.append(dict(path=path, title=page["title"], text=text))
