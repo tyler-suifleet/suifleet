@@ -254,9 +254,11 @@ inherits. It refuses the host unless a crash could store nothing:
   systemd-coredump may still write the dump to disk temporarily while
   processing it. As in systemd, only assignments inside a `[Coredump]`
   section count (each file, including each drop-in, starts outside any
-  section) and the last one wins. A configuration that
-  `systemd-analyze cat-config` cannot read, or that uses line continuations,
-  is refused;
+  section) and the last one wins. File boundaries come from reading each file
+  that `systemd-analyze cat-config` lists, so a comment that looks like its
+  `# /path` header does not end a section. A configuration that cannot be
+  read, whose listing does not match its files, or that uses line
+  continuations, is refused;
 - **it pipes to `false` or `true`**: nothing is kept.
 
 Any other piped handler is refused, because the kernel runs it whatever the
@@ -359,7 +361,8 @@ The harness checks these phases:
    with a nonzero limit, for systemd-coredump storing dumps with a nonzero
    limit, for systemd-coredump with `Storage=none` but the default or a
    nonzero `ProcessSizeMax`, for the disabling settings outside `[Coredump]`
-   or in a drop-in without a section header, and for a line continuation
+   or in a drop-in without a section header, for a path-like comment before
+   settings that re-enable dumps, and for a line continuation
    (the containers' init and sshd inherit Docker's
    unlimited limit). No test
    process is crashed: `kernel.core_pattern` is global to the shared kernel,
