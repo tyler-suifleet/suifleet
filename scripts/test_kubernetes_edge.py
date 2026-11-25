@@ -47,7 +47,8 @@ ServiceAccount credential:
   ConfigMap at a content-addressed name stops the apply before any write.
   Changing every ConfigMap of a bundle at the limit peaks exactly at the
   shipped quota and converges; after a partial apply fills the quota, the
-  next bundle frees the leftovers first and converges.
+  next bundle frees the leftovers first and converges. A failed update that
+  omits a stable ConfigMap keeps it with its data; a successful one prunes it.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   stable-name ConfigMap made immutable out of band (or a content-addressed one
   recreated with other content) stops the apply before any write; the apply
@@ -1290,6 +1291,61 @@ def scenario(cluster, work, supervisor):
     check("quota test component retires",
           helper("apply", profiles, retire_config, component="quota-app").returncode == 0)
     wait_ready(profiles, retire_config, "1.0.0", component="quota-app")
+
+    # Review 4621: a stable ConfigMap of the last converged bundle may serve a
+    # consumer outside the bundle. An update that omits it and then fails at
+    # its Deployment write must leave it with its data; only the prune after a
+    # successful apply removes it.
+    stable = [config_bundle(work, f"stable-v{index}", f"s{index}") for index in (1, 2)]
+    with_stable = json.loads(stable[0].read_text())
+    with_stable["resources"].insert(1, {"apiVersion": "v1", "kind": "ConfigMap",
+                                        "metadata": {"name": "customer-settings"}, "data": {"mode": "previous"}})
+    stable[0].write_text(json.dumps(with_stable))
+    check("a bundle with a stable ConfigMap applies",
+          helper("apply", profiles, stable[0], component="stable-app").returncode == 0)
+    wait_ready(profiles, stable[0], "1.0.0", component="stable-app")
+    cluster.admin("apply", "-f", "-", stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": [
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
+         "metadata": {"name": "test-freeze-stable-app"},
+         "spec": {"failurePolicy": "Fail",
+                  "matchConstraints": {"resourceRules": [{"apiGroups": ["apps"], "apiVersions": ["v1"],
+                                                          "operations": ["UPDATE"], "resources": ["deployments"]}]},
+                  "validations": [{"expression": "object.metadata.name != 'config-app'",
+                                   "message": "test: config-app Deployment writes are frozen"}]}},
+        {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding",
+         "metadata": {"name": "test-freeze-stable-app"},
+         "spec": {"policyName": "test-freeze-stable-app", "validationActions": ["Deny"],
+                  "matchResources": {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}}}}]}))
+
+    def stable_frozen():
+        return cluster.admin("annotate", "deployment", "config-app", "-n", NAMESPACE, "test-probe=1", "--overwrite",
+                             "--dry-run=server", ok=False).returncode != 0
+
+    def customer_settings():
+        found = cluster.admin("get", "configmap", "customer-settings", "-n", NAMESPACE,
+                              "--ignore-not-found", "-o", "json").stdout.strip()
+        return json.loads(found).get("data") if found else None
+
+    wait("the config-app Deployment write freeze to take effect", stable_frozen, timeout=60)
+    result = helper("apply", profiles, stable[1], component="stable-app", version="2.0.0")
+    check("an update omitting a stable ConfigMap fails at the Deployment write",
+          result.returncode == 2 and "frozen" in result.stderr, result.stderr[-500:])
+    result = helper("apply", profiles, stable[1], component="stable-app", version="2.0.0")
+    check("its retry (through the pre-write freeing pass) fails again without deleting the stable ConfigMap",
+          result.returncode == 2 and "frozen" in result.stderr
+          and "configmaps/customer-settings" not in result.stderr, result.stderr[-500:])
+    check("the failed applies keep the stable ConfigMap with its prior data",
+          customer_settings() == {"mode": "previous"}, str(customer_settings()))
+    cluster.admin("delete", "validatingadmissionpolicybinding,validatingadmissionpolicy", "test-freeze-stable-app")
+    wait("the config-app Deployment write freeze to lift", lambda: not stable_frozen(), timeout=60)
+    result = helper("apply", profiles, stable[1], component="stable-app", version="2.0.0")
+    check("a successful update prunes the omitted stable ConfigMap after its writes",
+          result.returncode == 0 and "configmaps/customer-settings" in result.stderr, result.stderr[-500:])
+    wait_ready(profiles, stable[1], "2.0.0", component="stable-app")
+    check("the stable ConfigMap is gone after the successful update", customer_settings() is None)
+    check("stable test component retires",
+          helper("apply", profiles, retire_config, component="stable-app").returncode == 0)
+    wait_ready(profiles, retire_config, "1.0.0", component="stable-app")
     cluster.admin("create", "configmap", "legacy", "-n", NAMESPACE, "--from-literal=k=customer")
 
     # A stable-name (unconsumed) ConfigMap cannot be restored in place once
