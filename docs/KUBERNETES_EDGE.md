@@ -270,11 +270,17 @@ owned by this component and carries *this* bundle's digest, version and
 labels. ConfigMaps must also hold the bundle's data. Deployments must hold
 every spec field the bundle specifies and be observed, updated and available,
 so a healthy rollout of another manager's edit (for example a changed image or
-pod template that keeps SuiFleet's labels and annotations) is not ready. Fields
-the bundle omits are not compared: API-server defaults are tolerated, a field
-the server omits matches a zero/empty bundle value, resource quantities compare
-by value (`0.5` equals `500m`), and omitting `replicas` leaves scaling to, for
-example, a HorizontalPodAutoscaler. A pre-existing foreign object with the right
+pod template that keeps SuiFleet's labels and annotations) is not ready. A
+live spec field the bundle omits must hold the API server's documented default
+for it (for example `restartPolicy: Always`, probe thresholds, port `protocol`,
+the RollingUpdate strategy) or a zero value. Anything else the bundle omits,
+such as an injected init container or sidecar, extra `env`, a `nodeSelector`
+or an extra pod-template annotation (including `kubectl rollout restart`'s
+`restartedAt`), is drift and not ready. A field the server omits matches a
+zero/empty bundle value, and resource quantities compare by value (`0.1`,
+`"0.1"` and `100m` are equal; `1E` equals `1000P`; `1G` does not equal `1Gi`).
+Omitting `replicas` leaves scaling to, for example, a HorizontalPodAutoscaler.
+A pre-existing foreign object with the right
 name, an object of another component and an object from a stale bundle are
 all not ready, also for ConfigMap-only bundles. `ready` also requires prune
 convergence: while any other object labelled for this component remains in

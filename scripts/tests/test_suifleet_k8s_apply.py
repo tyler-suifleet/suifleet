@@ -262,6 +262,33 @@ class DecisionTest(unittest.TestCase):
         token = self.healthy(deploy)
         token["spec"]["template"]["spec"]["automountServiceAccountToken"] = True
         self.assertFalse(k8s.object_ready(token, deploy, "web-app")[0])
+        # Workload-bearing fields the bundle omits must not appear either.
+        init = self.healthy(deploy)
+        self.assertNotIn("initContainers", deploy["spec"]["template"]["spec"])
+        init["spec"]["template"]["spec"]["initContainers"] = [{"name": "inject", "image": "x@sha256:" + "3" * 64}]
+        self.assertIn("spec.template.spec.initContainers differs", k8s.object_ready(init, deploy, "web-app")[1])
+        for mutate, where in [
+                (lambda p: p.update(hostAliases=[{"ip": "10.0.0.1", "hostnames": ["x"]}]), "spec.hostAliases"),
+                (lambda p: p.update(nodeSelector={"pool": "other"}), "spec.nodeSelector"),
+                (lambda p: p["containers"][0].update(args=["-x"]), "containers[0].args"),
+                (lambda p: p["containers"][0].update(env=[{"name": "A", "value": "1"}]), "containers[0].env"),
+                (lambda p: p["containers"][0].update(imagePullPolicy="Never"), "imagePullPolicy"),
+                (lambda p: p.update(terminationGracePeriodSeconds=0), "terminationGracePeriodSeconds"),
+                (lambda p: p["containers"][0]["readinessProbe"].update(failureThreshold=99), "failureThreshold")]:
+            drifted = self.healthy(deploy)
+            mutate(drifted["spec"]["template"]["spec"])
+            ok, why = k8s.object_ready(drifted, deploy, "web-app")
+            self.assertFalse(ok, f"an unexpected live {where} is drift")
+            self.assertIn(where, why)
+        restarted = self.healthy(deploy)
+        restarted["spec"]["template"]["metadata"]["annotations"]["kubectl.kubernetes.io/restartedAt"] = "now"
+        self.assertIn("restartedAt", k8s.object_ready(restarted, deploy, "web-app")[1],
+                      "an extra template annotation is drift")
+        zeroes = self.healthy(deploy)
+        zeroes["spec"]["template"]["metadata"]["creationTimestamp"] = None
+        zeroes["spec"]["template"]["spec"].update(hostNetwork=False, enableServiceLinks=True)
+        self.assertEqual(k8s.object_ready(zeroes, deploy, "web-app"), (True, "ready"),
+                         "zero values and server defaults for omitted fields are tolerated")
         scaled = self.healthy(deploy, replicas=3)
         scaled["spec"]["replicas"] = 3
         self.assertIn("spec.replicas", k8s.object_ready(scaled, deploy, "web-app")[1],
@@ -283,7 +310,10 @@ class DecisionTest(unittest.TestCase):
         self.assertIn("limits.cpu", k8s.object_ready(live, deploy, "web-app")[1])
 
     def test_spec_drift(self):
-        self.assertIsNone(k8s.spec_drift({"a": 1}, {"a": 1, "b": 2}, "spec"), "server-added fields are ignored")
+        self.assertEqual(k8s.spec_drift({"a": 1}, {"a": 1, "b": 2}, "spec"), "spec.b",
+                         "a non-default live field the bundle omits is drift")
+        for zero in (False, 0, "", {}, [], None, {"x": {}}):
+            self.assertIsNone(k8s.spec_drift({}, {"b": zero}, "spec"), f"omitted field holding {zero!r}")
         self.assertEqual(k8s.spec_drift({"a": 1}, {"a": 2}, "spec"), "spec.a")
         self.assertEqual(k8s.spec_drift({"a": 1}, {}, "spec"), "spec.a")
         for empty in (False, 0, "", {}, [], None, {"x": {}}):
@@ -295,7 +325,9 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(k8s.spec_drift({"a": [1]}, {"a": [1, 2]}, "spec"), "spec.a")
         self.assertEqual(k8s.spec_drift({"a": {"b": 1}}, {"a": "x"}, "spec"), "spec.a")
         cases = [("1", "1000m", True), ("0.5", "500m", True), ("1Gi", "1073741824", True), ("1e3", "1k", True),
-                 (1, "1", True), ("1G", "1Gi", False), ("100m", "0.2", False)]
+                 (1, "1", True), ("1G", "1Gi", False), ("100m", "0.2", False),
+                 (0.1, "100m", True), (0.5, "500m", True), (1.5, "1500m", True), (0.1, "200m", False),
+                 (1e-05, "10u", True), ("1E", "1000P", True), ("2E", "1000P", False), ("1Ei", "1024Pi", True)]
         for want, have, same in cases:
             drift = k8s.spec_drift({"resources": {"limits": {"cpu": want}}},
                                    {"resources": {"limits": {"cpu": have}}}, "spec.c")

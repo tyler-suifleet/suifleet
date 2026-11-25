@@ -363,24 +363,95 @@ QUANTITY_BINARY = {"Ki": 10, "Mi": 20, "Gi": 30, "Ti": 40, "Pi": 50, "Ei": 60}
 
 def _quantity(value):
     """Exact value of a Kubernetes resource quantity, or None if not one. The
-    API server canonicalises quantities (for example "0.5" becomes "500m")."""
-    match = QUANTITY.match(str(value)) if isinstance(value, (str, int)) and not isinstance(value, bool) else None
+    API server accepts JSON numbers and canonicalises quantities (for example
+    0.1 or "0.1" becomes "100m")."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    if isinstance(value, float):
+        value = repr(value)  # shortest round-trip text of the JSON number
+    match = QUANTITY.match(str(value))
     if not match:
         return None
     number, suffix = Fraction(match.group(1)), match.group(2)
     if suffix in QUANTITY_BINARY:
         return number * 2 ** QUANTITY_BINARY[suffix]
-    if suffix and suffix[0] in "eE":
-        return number * Fraction(10) ** int(suffix[1:])
-    return number * Fraction(10) ** QUANTITY_SCALE[suffix]
+    if suffix in QUANTITY_SCALE:  # includes the decimal SI suffix "E" (exa)
+        return number * Fraction(10) ** QUANTITY_SCALE[suffix]
+    return number * Fraction(10) ** int(suffix[1:])  # decimal exponent, e.g. "1e3"
+
+
+def _probe_defaults(prefix):
+    return {f"{prefix}.timeoutSeconds": (1,), f"{prefix}.periodSeconds": (10,),
+            f"{prefix}.successThreshold": (1,), f"{prefix}.failureThreshold": (3,),
+            f"{prefix}.httpGet.scheme": ("HTTP",)}
+
+
+def _server_defaults():
+    pod = "spec.template.spec"
+    table = {
+        "spec.strategy.type": ("RollingUpdate",),
+        "spec.strategy.rollingUpdate.maxUnavailable": ("25%",),
+        "spec.strategy.rollingUpdate.maxSurge": ("25%",),
+        "spec.revisionHistoryLimit": (10,),
+        "spec.progressDeadlineSeconds": (600,),
+        f"{pod}.restartPolicy": ("Always",),
+        f"{pod}.terminationGracePeriodSeconds": (30,),
+        f"{pod}.dnsPolicy": ("ClusterFirst",),
+        f"{pod}.schedulerName": ("default-scheduler",),
+        f"{pod}.enableServiceLinks": (True,),
+        f"{pod}.volumes[].configMap.defaultMode": (420,),
+    }
+    for kind in ("containers", "initContainers"):
+        container = f"{pod}.{kind}[]"
+        table.update({
+            f"{container}.terminationMessagePath": ("/dev/termination-log",),
+            f"{container}.terminationMessagePolicy": ("File",),
+            # Digest-pinned images default to IfNotPresent; a ":latest" tag
+            # alongside the digest defaults to Always. Both pull the pinned digest.
+            f"{container}.imagePullPolicy": ("IfNotPresent", "Always"),
+            f"{container}.ports[].protocol": ("TCP",),
+            f"{container}.env[].valueFrom.fieldRef.apiVersion": ("v1",),
+            f"{container}.lifecycle.postStart.httpGet.scheme": ("HTTP",),
+            f"{container}.lifecycle.preStop.httpGet.scheme": ("HTTP",),
+        })
+        for probe in ("livenessProbe", "readinessProbe", "startupProbe"):
+            table.update(_probe_defaults(f"{container}.{probe}"))
+    return table
+
+
+# Fields the bundle may omit that the API server fills in, with the values it
+# fills in. A live field the bundle omits must be one of these defaults or a
+# zero value; anything else (an injected init container, an extra template
+# annotation, a changed default) is drift.
+SERVER_DEFAULTS = _server_defaults()
+# Omitted fields intentionally left to another controller (an HPA owns replicas).
+DELEGATED_FIELDS = {"spec.replicas"}
+
+
+def _is_zero(value):
+    return value is None or value is False or value == 0 and not isinstance(value, bool) or value in ("", [], {})
+
+
+def _unexpected(live, path):
+    """Path of a non-default value in a live field the bundle omits, or None."""
+    pattern = re.sub(r"\[[0-9]+\]", "[]", path)
+    if pattern in DELEGATED_FIELDS:
+        return None
+    if pattern in SERVER_DEFAULTS:
+        allowed = SERVER_DEFAULTS[pattern]
+        return None if any(type(live) is type(value) and live == value for value in allowed) else path
+    if isinstance(live, dict):
+        return spec_drift({}, live, path)
+    return None if _is_zero(live) else path
 
 
 def spec_drift(desired, live, path):
-    """Path of the first field the bundle specifies that the live object does
-    not hold, or None. Fields the bundle omits are not compared, so API-server
-    defaults (and, for example, replicas left to a HorizontalPodAutoscaler) are
-    tolerated. A field the server omits matches a zero/empty desired value
-    (Go omitempty), and resource quantities compare by value."""
+    """Path of the first field where the live object differs from what the
+    bundle specifies, or None. Every field the bundle specifies must match. A
+    live field the bundle omits must hold the API server's default for it (or a
+    zero value) unless it is delegated (replicas left to a
+    HorizontalPodAutoscaler). A field the server omits matches a zero/empty
+    desired value (Go omitempty), and resource quantities compare by value."""
     if live is None:
         if not desired:
             return None
@@ -391,6 +462,10 @@ def spec_drift(desired, live, path):
             return path
         for key, value in desired.items():
             drift = spec_drift(value, live.get(key), f"{path}.{key}")
+            if drift:
+                return drift
+        for key in sorted(set(live) - set(desired)):
+            drift = _unexpected(live[key], f"{path}.{key}")
             if drift:
                 return drift
         return None
