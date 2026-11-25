@@ -363,10 +363,13 @@ export class Client {
       }
       const received = message;
       const durable = qos === 1 && isSubscriptionMessage(received);
+      // Capture the id now: `message` is caller-mutable, and the daemon acks any
+      // queued id in the subscription, so rereading it could remove another message.
+      const id = durable ? (received as SubscriptionMessage).id : undefined;
       yield {
         message: received,
         durable,
-        ack: async () => durable ? (await this.ack(filter, (received as SubscriptionMessage).id)).acknowledged : true,
+        ack: async () => id !== undefined ? (await this.ack(filter, id)).acknowledged : true,
       };
     }
   }

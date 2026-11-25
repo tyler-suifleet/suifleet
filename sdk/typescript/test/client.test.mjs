@@ -352,6 +352,29 @@ test('messages() yields durable messages and acks them by id', async () => {
   await server.close();
 });
 
+test('messages() acks the delivered id even if the caller mutates the yielded message', async () => {
+  // The daemon removes any matching queued id in the subscription, not only the head.
+  const queue = [{ id: 41, topic: 'a/b', sender: 'p', payload: 1, published_ms: 1 }, { id: 42, topic: 'a/c', sender: 'p', payload: 2, published_ms: 2 }];
+  const server = await serve((r) => {
+    if (r.operation === 'receive') return ok(queue[0] ?? null);
+    if (r.operation !== 'ack') return fail('request_failed');
+    const index = queue.findIndex((m) => m.id === r.payload);
+    if (index >= 0) queue.splice(index, 1);
+    return ok({ acknowledged: index >= 0 });
+  });
+  const client = new Client({ socketPath: server.path, component: 'sub' });
+  const controller = new AbortController();
+  for await (const delivery of client.messages('a/#', { qos: 1, pollIntervalMs: 10, signal: controller.signal })) {
+    assert.equal(delivery.message.id, 41);
+    delivery.message.id = 42;
+    assert.equal(await delivery.ack(), true);
+    controller.abort();
+  }
+  assert.deepEqual(server.requests.filter((r) => r.operation === 'ack').map((r) => r.payload), [41]);
+  assert.deepEqual(queue.map((m) => m.id), [42]);
+  await server.close();
+});
+
 test('messages() QoS 0: the id-bearing daemon shape is not durable and ack sends nothing', async () => {
   // The daemon returns the same {id, topic, sender, payload, published_ms} for QoS 0 and QoS 1.
   // A QoS 0 reader without the ack operation would get request_failed if the SDK sent one.
