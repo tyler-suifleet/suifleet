@@ -22,7 +22,11 @@ ansible_become as a connection variable throughout, a claim transfer with
 sudo-wrapped interpreter are refused by the host probe both with readable
 and with hidepid=2-hidden process ancestry (no staging), transfers with swap
 that can write to a disk are refused (the machine's real swap
-when the role classifies it unsafe, then /proc/swaps fixtures), transfers
+when the role classifies it unsafe, a header-only /proc/swaps bind-mounted over
+the kernel's (refused by the committed role as unverifiable), zram/dm-crypt
+attributes on a tmpfs over /sys/block (refused by a copy trusting only the
+/proc/swaps fixture), then /proc/swaps fixtures through a test-only role copy
+whose swap kernel-source checks pass), transfers
 to hosts that could store a crash dump are refused (the machine's real
 core_pattern/session core limit when classified unsafe, the real systemd-coredump
 pattern with a literal limit argument under a session limit of 0, a core file
@@ -367,29 +371,52 @@ class Harness:
         self.containers = []
         self.outputs = []
         self.evidence = dict(ticket="SF-304", phases=[], hosts={})
-        # The role as committed; phases with a bind-mounted kernel.core_pattern
-        # fixture switch to the synthetic copy (see synthetic_examples).
+        # The role as committed; phases with a bind-mounted kernel.core_pattern,
+        # /proc/swaps or /sys/block fixture switch to the synthetic copy (see
+        # synthetic_examples).
         self.examples = EXAMPLES
         self.synthetic = self.synthetic_examples()
+        # The committed crash classifier with the swap classifier's kernel-source checks
+        # passing, so crash cases run with a /proc/swaps fixture (see crash_fixture).
+        self.crash_committed = self.variant_examples("examples-crash-committed", {"swap_policy.sh": self.SWAP_SOURCE_STUBS})
+        # Trusts only /proc/swaps; device attributes are still checked (see swap_refused).
+        self.swaps_only = self.variant_examples("examples-swaps-only", {
+            "swap_policy.sh": [("\nkernel_view() {\n",
+                                "\nkernel_view() { [ \"$1\" = /proc/swaps ] && return 0; real_kernel_view \"$@\"; }"
+                                "\nreal_kernel_view() {\n")]})
+
+    def variant_examples(self, name, edits):
+        """A test-only copy of the examples with each named function in edits replaced (each must occur once)."""
+        copy = self.work / name
+        shutil.copytree(EXAMPLES, copy)
+        for script, changes in edits.items():
+            path = copy / "roles/suifleet/files" / script
+            text = path.read_text()
+            for old, new in changes:
+                assert text.count(old) == 1, f"{script} no longer defines {old.strip()!r} as expected"
+                text = text.replace(old, new)
+            path.write_text(text)
+        return copy
 
     def synthetic_examples(self):
-        """A test-only copy of the examples whose crash classifier skips its kernel_pattern check.
+        """A test-only copy of the examples whose classifiers skip their kernel-source checks.
 
-        The hosts share this machine's kernel, whose core_pattern is global and
-        is not changed by the test, so crash dump fixtures are bind-mounted over
-        /proc/sys/kernel/core_pattern inside each host. The committed role
-        (rightly) refuses such a masked sysctl; this copy lets the rest of the
-        classifier, and the enrollment phases, run against the fixtures. Its only
-        difference is that one check. Results from it are synthetic classifier
-        evidence, never evidence about a real host's crash policy.
+        The hosts share this machine's kernel, whose core_pattern and swap are
+        global and are not changed by the test, so crash dump and swap fixtures
+        are bind-mounted over /proc/sys/kernel/core_pattern, /proc/swaps and
+        /sys/block inside each host. The committed role (rightly) refuses such
+        masked views; this copy lets the rest of the classifiers, and the
+        enrollment phases, run against the fixtures. Its only differences are the
+        crash classifier's kernel_pattern and the swap classifier's kernel_view
+        and sysattr checks, which always pass. Results from it are synthetic
+        classifier evidence, never evidence about a real host's crash or swap policy.
         """
-        copy = self.work / "examples-synthetic"
-        shutil.copytree(EXAMPLES, copy)
-        crash = copy / "roles/suifleet/files/crash_policy.sh"
-        text = crash.read_text()
-        assert text.count("\nkernel_pattern() {\n") == 1, "crash_policy.sh no longer defines kernel_pattern as expected"
-        crash.write_text(text.replace("\nkernel_pattern() {\n", "\nkernel_pattern() { return 0; }\nreal_kernel_pattern() {\n"))
-        return copy
+        return self.variant_examples("examples-synthetic", {
+            "crash_policy.sh": [("\nkernel_pattern() {\n", "\nkernel_pattern() { return 0; }\nreal_kernel_pattern() {\n")],
+            "swap_policy.sh": self.SWAP_SOURCE_STUBS})
+
+    SWAP_SOURCE_STUBS = [("\nkernel_view() {\n", "\nkernel_view() { return 0; }\nreal_kernel_view() {\n"),
+                         ("\nsysattr() {\n", "\nsysattr() { return 0; }\nreal_sysattr() {\n")]
 
     # Images and containers
     def image(self, name, dockerfile, base, context=None):
@@ -821,9 +848,19 @@ class Harness:
         # The test machine's own swap (for example WSL's disk swap) with no fixture. Only a
         # configuration the role itself classifies as unsafe must be refused: zram without
         # writeback or dm-crypt swap is accepted, and is covered by the fixtures below.
+        previous = self.examples
+        self.examples = EXAMPLES
+        try:
+            self.swap_refused_cases(vault)
+        finally:
+            self.examples = previous
+            self.no_swap()
+
+    def swap_refused_cases(self, vault):
         for host in self.hosts.values():
             self.clear_swap_fixture(host["container"])
         real = subprocess.run(["sh", "-c", "sed 1d /proc/swaps"], text=True, capture_output=True, check=True).stdout.split()
+        # The committed role reads the machine's real swap through the containers' procfs.
         verdicts = {name: v["swap"] for name, v in self.classify().items()}
         assert len(set(verdicts.values())) == 1, ("hosts sharing one kernel disagree about its swap", verdicts)
         verdict = next(iter(verdicts.values()))
@@ -835,18 +872,33 @@ class Harness:
             assert verdict == "ok", ("unexpected swap verdict", verdict)
             print(f"NOTE the role accepts this machine's real swap ({' '.join(real) or 'none'}); the real-swap"
                   " refusal case did not run (fixtures below did)")
+        # A header-only file bind-mounted over /proc/swaps hides the machine's real swap:
+        # the committed role refuses it as unverifiable before reading it.
+        self.swap_fixture([])
+        assert {v["swap"] for v in self.classify().values()} == {"unverifiable"}, "masked /proc/swaps not refused"
+        self.refused_claim_transfer("claim transfer with a masked /proc/swaps is refused", vault,
+                                    expected=["active swap cannot be verified", "/proc/swaps is not the kernel's swap list"])
+        print("PASS claim transfer refused with a header-only file bind-mounted over /proc/swaps (committed role)")
+        # Safe-looking zram and dm-crypt attributes on a tmpfs over /sys/block are not the
+        # kernel's: a copy trusting only the /proc/swaps fixture must still refuse both devices.
+        self.swap_fixture([("/dev/zram0", "partition"), ("/dev/dm-0", "partition")],
+                          sysfs={"zram0/backing_dev": "none", "dm-0/dm/uuid": "CRYPT-LUKS2-sf304fixture-swap"})
+        self.examples = self.swaps_only
+        self.refused_claim_transfer("claim transfer with masked /sys/block swap attributes is refused", vault,
+                                    expected=["active swap that can write the claim", "/dev/zram0, /dev/dm-0"])
+        print("PASS claim transfer refused with zram/dm-crypt attributes on a tmpfs over /sys/block (role copy trusting"
+              " only the /proc/swaps fixture; device attribute checks unchanged)")
+        # The remaining fixtures are synthetic classifier evidence (see synthetic_examples).
+        self.examples = self.synthetic
         unsafe = [("/swapfile", "file"), ("/dev/sdb2", "partition"), ("/dev/zram1", "partition"), ("/dev/dm-1", "partition"),
                   ("/dev/zram2", "partition")]
         # zram1 writes back to a disk, dm-1 is not dm-crypt (LVM), zram2 has no device.
         self.swap_fixture(unsafe, sysfs={"zram1/backing_dev": "/dev/sdb3", "dm-1/dm/uuid": "LVM-sf304fixture"})
-        try:
-            self.refused_claim_transfer("claim transfer with disk-backed swap is refused", vault,
-                                        expected=["active swap that can write the claim",
-                                                  "/swapfile, /dev/sdb2, /dev/zram1, /dev/dm-1, /dev/zram2"])
-            print("PASS claim transfer refused with a swap file, a disk partition, zram writeback, non-crypt dm and"
-                  " an unknown zram device (each listed)")
-        finally:
-            self.no_swap()
+        self.refused_claim_transfer("claim transfer with disk-backed swap is refused", vault,
+                                    expected=["active swap that can write the claim",
+                                              "/swapfile, /dev/sdb2, /dev/zram1, /dev/dm-1, /dev/zram2"])
+        print("PASS claim transfer refused with a swap file, a disk partition, zram writeback, non-crypt dm and"
+              " an unknown zram device (each listed; synthetic copy)")
 
     SYSTEMD_COREDUMP = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
     # A literal limit where systemd-coredump reads the crashing process's (%c),
@@ -862,10 +914,12 @@ class Harness:
         the machine's own handler. Only the role's policy decision is tested.
         With pattern None the machine's real pattern stays visible. With
         synthetic (the default) later runs use the synthetic copy of the role,
-        which does not refuse the bind-mounted pattern; otherwise the role as
-        committed.
+        which does not refuse the bind-mounted pattern; otherwise the crash
+        classifier as committed (from a copy whose swap classifier trusts the
+        hosts' /proc/swaps fixture, because the machine's real swap or a masked
+        /proc/swaps would refuse every transfer before the crash check).
         """
-        self.examples = self.synthetic if synthetic else EXAMPLES
+        self.examples = self.synthetic if synthetic else self.crash_committed
         for host in self.hosts.values():
             container = host["container"]
             self.clear_crash_fixture(container)
@@ -909,7 +963,7 @@ class Harness:
         """A host that could store a crash dump of a claim-handling process refuses the claim before it is read."""
         for host in self.hosts.values():
             self.clear_crash_fixture(host["container"])
-        self.examples = EXAMPLES
+        self.examples = self.crash_committed
         real = Path("/proc/sys/kernel/core_pattern").read_text().strip()
         limits = {name: self.exec(h["container"], "sh", "-c", "grep '^Max core' /proc/$(systemctl show -p MainPID --value"
                                   " ssh.service)/limits").stdout.split()[4] for name, h in self.hosts.items()}
