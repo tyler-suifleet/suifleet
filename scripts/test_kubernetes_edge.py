@@ -23,6 +23,8 @@ ServiceAccount credential:
   Pruning a Deployment is foreground: while a finalizer holds one of its Pods
   the Deployment stays terminating and a retirement bundle is not ready; it
   becomes ready only once the Pod, ReplicaSet and Deployment are gone.
+  A Deployment-only retirement held that way refuses a different-name
+  successor before any write until the deletion completes.
 - No adoption of pre-existing objects and no overriding of fields owned by
   another field manager (two controllers do not fight). A healthy rollout of
   another manager's pod-template edit that keeps SuiFleet's metadata is not
@@ -296,6 +298,29 @@ def config_bundle(work, name, mode):
         deployment]}
     path = work / f"{name}.json"
     path.write_text(json.dumps(bundle))
+    return path
+
+
+def solo_bundle(work, name, deployment_name):
+    """A bundle holding only Deployment `deployment_name` (no ConfigMap), so
+    after its foreground prune every listed object still matches the
+    bundle's digest and object count (review 4664)."""
+    example = json.loads(BUNDLE.read_text())["resources"][1]
+    container = example["spec"]["template"]["spec"]["containers"][0]
+    labels = {"app": "solo-app"}
+    deployment = {
+        "apiVersion": "apps/v1", "kind": "Deployment",
+        "metadata": {"name": deployment_name, "labels": labels},
+        "spec": {"replicas": 1, "selector": {"matchLabels": labels}, "progressDeadlineSeconds": 120,
+                 "template": {"metadata": {"labels": labels}, "spec": {
+                     "terminationGracePeriodSeconds": 5,
+                     "securityContext": example["spec"]["template"]["spec"]["securityContext"],
+                     "containers": [{
+                         "name": "app", "image": container["image"],
+                         "command": ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done"],
+                         "resources": container["resources"], "securityContext": container["securityContext"]}]}}}}
+    path = work / f"{name}.json"
+    path.write_text(json.dumps({"version": 1, "resources": [deployment]}))
     return path
 
 
@@ -1700,6 +1725,49 @@ def scenario(cluster, work, supervisor):
           and cluster.admin("get", "deployment", "web", "-n", NAMESPACE, ok=False).returncode != 0)
     check("re-apply v1 after the dependent-held retirement", helper("apply", profiles, v1).returncode == 0)
     wait_ready(profiles, v1, "1.0.0")
+
+    # A Deployment-only bundle's retirement leaves its one Deployment listed
+    # (terminating) with the bundle's digest and full object count. That is
+    # still not converged: a different-name successor is refused before any
+    # write until the deletion and its Pods are gone (review 4664).
+    solo_v1, solo_v2 = solo_bundle(work, "solo-v1", "solo"), solo_bundle(work, "solo-v2", "solo-next")
+
+    def solo_pods():
+        listed = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=solo-app", "-o", "json").stdout)
+        return [item["metadata"]["name"] for item in listed["items"]]
+
+    check("Deployment-only test component applies",
+          helper("apply", profiles, solo_v1, component="solo-app").returncode == 0)
+    wait_ready(profiles, solo_v1, "1.0.0", component="solo-app")
+    held_solo = [pod for pod in solo_pods() if cluster.admin(
+        "patch", "pod", pod, "-n", NAMESPACE, "--type=merge",
+        "-p", '{"metadata":{"finalizers":["example.com/hold"]}}', ok=False).returncode == 0]
+    check("a live Deployment-only Pod is held before its retirement", bool(held_solo), str(held_solo))
+    result = helper("apply", profiles, retire, component="solo-app")
+    check("Deployment-only retirement issues the foreground prune",
+          result.returncode == 0 and "deployments.apps/solo" in result.stderr, result.stderr)
+    solo = json.loads(cluster.admin("get", "deployment", "solo", "-n", NAMESPACE, "-o", "json", ok=False).stdout or "null")
+    check("the retired Deployment stays terminating with the full bundle count while its Pod is held",
+          solo is not None and solo["metadata"].get("deletionTimestamp")
+          and solo["metadata"]["annotations"].get(publisher.COUNT_ANNOTATION) == "1",
+          json.dumps((solo or {}).get("metadata", {}))[:500])
+    result = helper("apply", profiles, solo_v2, component="solo-app")
+    check("a different-name successor is refused before any write during the Deployment-only retirement",
+          result.returncode != 0 and "not converged" in result.stderr
+          and cluster.admin("get", "deployment", "solo-next", "-n", NAMESPACE, ok=False).returncode != 0
+          and set(held_solo) <= set(solo_pods()), result.stderr)
+    for pod in held_solo:
+        cluster.admin("patch", "pod", pod, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}')
+    wait("Deployment-only retirement ready after the held Pod is released",
+         lambda: helper("ready", profiles, retire, component="solo-app").returncode == 0, timeout=180, interval=2)
+    check("the Deployment-only retirement converges once its Pods and Deployment are gone",
+          solo_pods() == [] and cluster.admin("get", "deployment", "solo", "-n", NAMESPACE, ok=False).returncode != 0)
+    check("the different-name successor applies after the retirement converged",
+          helper("apply", profiles, solo_v2, component="solo-app").returncode == 0)
+    wait_ready(profiles, solo_v2, "1.0.0", component="solo-app")
+    check("Deployment-only test component retires",
+          helper("apply", profiles, retire, component="solo-app").returncode == 0)
+    wait_ready(profiles, retire, "1.0.0", component="solo-app")
 
     # Removal deletes only this component's objects in its namespace, and its
     # exit status reports convergence: while a finalizer holds a web Pod the
