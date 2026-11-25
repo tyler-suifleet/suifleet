@@ -9,8 +9,9 @@ see the [portable signer setup](KEY_ISOLATION.md#portable-linux-signer).
 
 ## Build and availability
 
-No public signed APT repository or published Debian download is available yet.
-Build from source or obtain a verified release bundle from your fleet operator.
+Obtain a [verified release bundle](CUSTOMER_RELEASES.md) from an approved GitHub
+release or your fleet operator. An operator can also host its signed APT snapshot.
+Production publication remains pending under [SF-042](https://github.com/tyler-suifleet/suifleet/issues/62).
 The release builder produces a `.deb`, checksum, SPDX SBOM and provenance for
 each amd64/arm64 target. These files are included in the signed `release.json`;
 protected release signing and public publication remain subject to
@@ -75,6 +76,75 @@ suifleet-signer:suifleet 0660; components run as `suifleet`, never root. Firmwar
 helpers are not installed by this package. Consult [key isolation](KEY_ISOLATION.md)
 for policy and kernel requirements.
 
+## Signed APT snapshots
+
+Each immutable release includes `suifleet-VERSION-apt.tar.gz`, a static flat
+repository with `InRelease`, detached `Release.gpg`, `Packages` and the
+same Debian packages included in the signed client bundles. APT verifies the
+OpenPGP repository signature and the package SHA-256 from its signed index.
+The Debian packages use repository authentication through APT. For standalone
+files, verify the signed client bundle instead.
+
+Operators stage the archive in a new directory, verify its signatures against
+the separately authenticated publisher keyring and check package digests
+against the signed per-target client bundles. For example, from the snapshot
+directory run:
+
+```sh
+gpgv --keyring /path/to/authenticated-publisher.gpg InRelease
+gpgv --keyring /path/to/authenticated-publisher.gpg Release.gpg Release
+```
+
+Serve the complete directory over
+HTTPS at a version-specific path and expose it only after staging all files.
+Keep prior snapshots for pinned fleets, publish new versions at new paths, and
+restrict writes to the publication role. Rotate the OpenPGP key by delivering
+the new scoped public keyring to clients before issuing new snapshots. Keep
+old trust available only as long as old snapshots are still approved.
+Clients explicitly select a snapshot and package version. There is no moving
+channel or automatic freshness claim. Move the URL and pin together via fleet
+configuration management.
+
+Have your operator supply both the snapshot URL and the exact Debian package
+version. Install the authenticated binary OpenPGP keyring as
+`/etc/apt/keyrings/suifleet.gpg` (root-owned, mode 0644). Example source in
+`/etc/apt/sources.list.d/suifleet.sources`:
+
+```text
+Types: deb
+URIs: https://packages.example.org/suifleet/v0.2.3/
+Suites: ./
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/suifleet.gpg
+```
+
+Substitute your operator's URI and `amd64` or `arm64`. In
+`/etc/apt/preferences.d/suifleet`, set the exact approved version, including
+the Git suffix:
+
+```text
+Package: suifleet
+Pin: version 0.2.3-1+gitCOMMIT
+Pin-Priority: 990
+
+Package: suifleet
+Pin: version *
+Pin-Priority: -1
+```
+
+Run `sudo apt-get -o APT::Update::Error-Mode=any update`, check
+`apt-cache policy suifleet` for the expected source and candidate, and run
+`sudo apt-get install suifleet=APPROVED_VERSION`. For an upgrade, move the
+source and pin to the approved new snapshot, re-run the update/check, then run
+`sudo apt-get install --only-upgrade suifleet=APPROVED_VERSION`.
+Equal crate versions with distinct Git suffixes do not encode chronological
+ordering. Use an incremented crate version for a supported upgrade and check
+with `dpkg --compare-versions NEW gt OLD` before rollout.
+
+After removal or purge, remove the APT source, pin and scoped keyring if the
+device will no longer use the repository. The package's runtime state is
+preserved as described below.
+
 ## Upgrade, removal and purge
 
 `sudo apt install ./NEW.deb` stops running units before replacing binaries.
@@ -90,7 +160,8 @@ manual decommissioning; package scripts never recursively delete runtime data.
 ## Verification
 
 Run `python3 scripts/test_deb.py --packages DIR` on a Docker host. The harness
-installs, upgrades, removes, reinstalls and purges real packages in disposable
+rejects unknown APT signing keys and modified packages, then installs, pins,
+upgrades, removes, reinstalls and purges real packages from signed snapshots in disposable
 Debian 12 and Ubuntu 24.04 containers for both architectures (ARM via QEMU when
 needed), checking identity/config/journal preservation and unprivileged CLI
 operation. For native amd64 systemd/cgroup isolation, signed simulator reports
