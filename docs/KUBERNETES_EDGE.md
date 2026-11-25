@@ -103,13 +103,30 @@ How the helper keeps two controllers from fighting:
    `valueFrom.configMapKeyRef` or a `configMap` volume, in any container or
    init container), it adds the Pod-template annotation
    `suifleet.io/config-sha256`, a digest of those ConfigMaps' data. A
-   configuration change then changes the Pod template and starts a rollout,
-   and a rollback restores the earlier template and its ReplicaSet. `ready`
-   compares the live Pod template with the rendered one and waits for that
-   rollout, so it never reports a configuration change ready while Pods still
-   run the previous configuration. A change to a ConfigMap that no Deployment
-   consumes restarts nothing. Whole-volume consumers are restarted too, for
-   the same guarantee.
+   configuration change then changes the Pod template and starts a rollout.
+   The data digest alone does not bind a Pod to what it read: if an update
+   writes a ConfigMap and its Deployment write then fails, an old-template
+   Pod that starts or restarts in between reads the new data, and a rollback
+   that restores the old data would leave the identical old template (and
+   that Pod) in place. The helper therefore stamps each ConfigMap with a data
+   epoch (`suifleet.io/config-epoch`). A write that changes the data sets the
+   epoch to the `resourceVersion` it replaced. The API server never reuses a
+   `resourceVersion` and the write is bound to it, so every data change gets
+   a distinct epoch, even one that restores earlier data. A write that keeps
+   the data keeps the epoch. After writing the ConfigMaps, the helper records
+   the UID and epoch of each consumed live ConfigMap in the Pod-template
+   annotation `suifleet.io/config-revision`. Any data change since the
+   Deployment was last written, including a rollback's restoring write,
+   therefore produces a new template and replaces every Pod. `ready` compares
+   the live Pod template with the rendered one, including the live
+   ConfigMaps' current UIDs and epochs, and waits for that rollout. It never
+   reports a configuration change or rollback ready while a Pod may still run
+   another configuration. Re-applying a bundle, or a new bundle that keeps the
+   ConfigMap data, restarts nothing; neither does a change to a ConfigMap that
+   no Deployment consumes. Whole-volume consumers
+   are restarted too, for the same guarantee. If a ConfigMap no longer holds
+   exactly the bundle's content right after its write, the apply stops with a
+   conflict before any Deployment is bound to it.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -444,8 +461,14 @@ It checks the following:
 - A configuration-only update of a ConfigMap consumed through `envFrom`,
   `configMapKeyRef` and a `subPath` mount starts a new rollout, and every
   running Pod reports the new value through all three when `ready` succeeds.
-  Rolling back restores the old value in the Pods the same way. A Deployment
-  consuming a ConfigMap outside its bundle is rejected offline.
+  Rolling back restores the old value in the Pods the same way. Re-applying
+  the same bundle starts no rollout. A Deployment consuming a ConfigMap
+  outside its bundle is rejected offline.
+- A partially applied update: a test admission policy denies the Deployment
+  write after the new ConfigMap is written, and a replacement Pod started
+  from the old template reads the new value. The rollback replaces that Pod,
+  and every live Pod reports the old value through all three paths once
+  `ready` succeeds.
 - Readiness of a ConfigMap-only bundle fails while the object is missing, is a
   pre-existing foreign object with matching data, belongs to another
   component or comes from a stale bundle digest, and succeeds once applied.
