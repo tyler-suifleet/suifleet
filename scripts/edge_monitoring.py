@@ -41,6 +41,7 @@ EVIDENCE = ("simulated", "physical", "unclassified")
 MIN_INTERVAL, MAX_INTERVAL, DEFAULT_INTERVAL = 10, 3600, 60
 MAX_CONSOLE_RESPONSE = 70 * 1024            # the console caps responses at 64 KiB
 MAX_COMPONENTS = 256
+MAX_INVENTORY_PAGES = 10                    # requests per inventory read, whatever the page size
 MAX_DEPLOYMENT_PAGES = 10                   # 100 journal entries per page
 MAX_LOG_COMPONENTS = 16
 MAX_LOG_LINES = 200                         # console limit per request
@@ -470,6 +471,22 @@ def _altered_name(name):
     return REDACTED in name or "[truncated]" in name
 
 
+def _continuation(cursor, previous, items):
+    """Validate a page's ``next`` cursor against the request that produced it.
+
+    The console returns a continuation only after a nonempty page, set to the
+    last raw key on that page, and keys strictly increase. A continuation after
+    an empty page, or one that does not advance past the previous cursor, would
+    repeat the same request indefinitely (or count entries twice), so it is a
+    malformed reply rather than more data.
+    """
+    if cursor is None:
+        return None
+    if not isinstance(cursor, str) or not items or (previous is not None and cursor <= previous):
+        raise ConsoleError("malformed")
+    return cursor
+
+
 def collect(console):
     """One bounded console read: current health, inventory and journal outcomes."""
     health = console.call("health")
@@ -489,12 +506,13 @@ def collect(console):
                     components=[], components_truncated=False, components_unidentified=0,
                     outcomes=dict(applied=0, failed=0, indeterminate=0, pending=0),
                     outcomes_unreported=0, outcomes_truncated=False)
-    after = None
+    after, pages = None, 0
     while True:
         fields = dict(limit=100)
         if after is not None:
             fields["after"] = after
         page = console.call("inventory", **fields)
+        pages += 1
         items = page.get("components")
         if not isinstance(items, list):
             raise ConsoleError("malformed")
@@ -512,11 +530,12 @@ def collect(console):
                 running=item.get("supervised") is True and phase == "running",
                 phase=phase if phase in PHASES else "other",
                 restarts=item.get("restarts") if _count(item.get("restarts")) else None))
-        after = page.get("next")
+        after = _continuation(page.get("next"), after, items)
         if after is None or snapshot["components_truncated"]:
             break
-        if not isinstance(after, str):
-            raise ConsoleError("malformed")
+        if pages >= MAX_INVENTORY_PAGES:
+            snapshot["components_truncated"] = True
+            break
     # The console redacts secret-looking inventory names, so distinct raw names
     # (for example two 64-hex names) can share one display name. A redacted or
     # repeated display name is not a series identity: emitting it would write
@@ -551,14 +570,12 @@ def collect(console):
             snapshot["outcomes"][outcome] += 1
             if outcome != "pending" and item.get("reported") is not True:
                 snapshot["outcomes_unreported"] += 1
-        after = page.get("next")
+        after = _continuation(page.get("next"), after, items)
         if after is None:
             break
         if pages >= MAX_DEPLOYMENT_PAGES:
             snapshot["outcomes_truncated"] = True
             break
-        if not isinstance(after, str):
-            raise ConsoleError("malformed")
     return snapshot
 
 
@@ -668,7 +685,7 @@ class Exporter:
                 if c["restarts"] is not None:
                     restarts.add(c["restarts"], component=c["name"])
         m("suifleet_components_unidentified", "gauge", "Current: components omitted because their console display name is redacted or not unique, so it cannot identify a series.").add(s["components_unidentified"])
-        m("suifleet_components_truncated", "gauge", f"1 when more than {MAX_COMPONENTS} components exist and the rest are omitted.").add(int(s["components_truncated"]))
+        m("suifleet_components_truncated", "gauge", f"1 when more than {MAX_COMPONENTS} components exist or the bounded inventory read ends early; the rest are omitted.").add(int(s["components_truncated"]))
         outcomes = m("suifleet_deployment_outcomes", "gauge", "Historical: deployment outcomes in the device journal, including past failures.")
         for outcome in ("applied", "failed", "indeterminate", "pending"):
             outcomes.add(s["outcomes"][outcome], outcome=outcome)

@@ -678,6 +678,73 @@ class AdapterTests(Base):
         self.assertIn('suifleet_device_healthy{evidence="simulated",device="sim-1"} 0',
                       exporter.render_prometheus().decode())
 
+    def _scripted(self, console, replies, limit=50):
+        """Answer the named operations from ``replies``; count calls and stop runaway loops."""
+        real_call, calls = console.call, []
+
+        def call(operation, **fields):
+            calls.append((operation, fields))
+            if len(calls) > limit:
+                raise AssertionError("unbounded console pagination")
+            if operation in replies:
+                return replies[operation](fields)
+            return real_call(operation, **fields)
+        console.call = call
+        return calls, real_call
+
+    def test_nonprogressing_inventory_continuation_is_malformed_and_recovers(self):
+        cases = dict(
+            empty_page=lambda fields: dict(components=[], next="unchanged"),
+            repeated_cursor=lambda fields: dict(components=[dict(component="svc", health="running")], next="svc"),
+            backwards_cursor=lambda fields: dict(components=[dict(component="svc", health="running")],
+                                                 next="a" if fields.get("after") else "svc"),
+            empty_after_progress=lambda fields: (dict(components=[dict(component="svc")], next="svc")
+                                                 if "after" not in fields else dict(components=[], next="zz")))
+        for name, reply in cases.items():
+            with self.subTest(case=name):
+                cfg, exporter, console = self.make()
+                self.assertTrue(exporter.poll(console))
+                calls, real_call = self._scripted(console, dict(inventory=reply))
+                self.assertFalse(exporter.poll(console))
+                self.assertLessEqual(sum(op == "inventory" for op, _ in calls), 2)
+                self.assertEqual(exporter.polls["malformed"], 1)
+                text = exporter.render_prometheus().decode()
+                self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 0', text)
+                self.assertNotIn("suifleet_device_healthy", text)
+                self.assertNotIn("suifleet_component_running", text)
+                console.call = real_call
+                self.assertTrue(exporter.poll(console))         # recovers on the next valid reply
+                text = exporter.render_prometheus().decode()
+                self.assertIn('suifleet_device_healthy{evidence="simulated",device="sim-1"} 0', text)
+                self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 1', text)
+
+    def test_inventory_requests_are_bounded_even_when_pages_advance(self):
+        cfg, exporter, console = self.make()
+
+        def one_per_page(fields):
+            index = int(fields.get("after", "c-000")[2:]) + 1
+            return dict(components=[dict(component=f"c-{index:03d}", health="running", supervised=True)],
+                        next=f"c-{index:03d}")
+        calls, _ = self._scripted(console, dict(inventory=one_per_page))
+        self.assertTrue(exporter.poll(console))
+        self.assertEqual(sum(op == "inventory" for op, _ in calls), em.MAX_INVENTORY_PAGES)
+        self.assertEqual(len(exporter.snapshot["components"]), em.MAX_INVENTORY_PAGES)
+        self.assertIn('suifleet_components_truncated{evidence="simulated",device="sim-1"} 1',
+                      exporter.render_prometheus().decode())
+
+    def test_nonprogressing_deployment_continuation_is_malformed(self):
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+        page = [dict(deployment="0x1", status=1, reported=True)]
+        for reply in (lambda f: dict(deployments=page, next="0x1"), lambda f: dict(deployments=[], next="0x9")):
+            calls, real_call = self._scripted(console, dict(deployments=reply))
+            self.assertFalse(exporter.poll(console))
+            self.assertLessEqual(sum(op == "deployments" for op, _ in calls), 2)
+            self.assertNotIn("suifleet_device_healthy", exporter.render_prometheus().decode())
+            console.call = real_call
+        self.assertEqual(exporter.polls["malformed"], 2)
+        self.assertTrue(exporter.poll(console))
+
     def test_wrong_console_token_counts_unauthenticated(self):
         cfg, exporter, _ = self.make()
         self.assertFalse(exporter.poll(em.Console(cfg.console_url, "sfc_" + "B" * 43)))
