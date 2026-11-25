@@ -373,6 +373,17 @@ def object_ready(current, desired, component):
 QUANTITY = re.compile(r"^([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))(Ki|Mi|Gi|Ti|Pi|Ei|[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E)?$")
 QUANTITY_SCALE = {None: 0, "n": -9, "u": -6, "m": -3, "k": 3, "M": 6, "G": 9, "T": 12, "P": 15, "E": 18}
 QUANTITY_BINARY = {"Ki": 10, "Mi": 20, "Gi": 30, "Ti": 40, "Pi": 50, "Ei": 60}
+# Characters Go's strings.TrimSpace removes (unicode.IsSpace): Quantity's
+# UnmarshalJSON trims them before ParseQuantity, so " 64Mi " is stored as
+# "64Mi". Python's str.strip() differs (it also strips U+001C..U+001F).
+GO_SPACE = "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006" \
+    "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+
+
+def _quantity_match(value):
+    """QUANTITY match of a quantity's text as the API server parses it:
+    surrounding Go whitespace trimmed, the whole remainder matched."""
+    return QUANTITY.fullmatch(value.strip(GO_SPACE))
 
 
 def _quantity(value):
@@ -383,7 +394,7 @@ def _quantity(value):
         return None
     if isinstance(value, float):
         value = repr(value)  # shortest round-trip text of the JSON number
-    match = QUANTITY.match(str(value))
+    match = _quantity_match(str(value))
     if not match:
         return None
     number, suffix = Fraction(match.group(1)), match.group(2)
@@ -420,7 +431,7 @@ QUANTITY_BINARY_MAX = 2 ** 63 - 1
 def _is_binary_si(value):
     """Whether ParseQuantity reads this quantity in BinarySI format (a Ki..Ei
     suffix); JSON numbers and decimal/exponent suffixes are never BinarySI."""
-    match = QUANTITY.match(value) if isinstance(value, str) else None
+    match = _quantity_match(value) if isinstance(value, str) else None
     return bool(match) and match.group(2) in QUANTITY_BINARY
 
 

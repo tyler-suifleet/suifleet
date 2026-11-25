@@ -640,6 +640,40 @@ class DecisionTest(unittest.TestCase):
         # The cap also applies to ResourceList entries, before the milli round-up.
         self.assertIsNone(k8s.spec_drift({"memory": "16Ei"}, {"memory": cap}, "spec.overhead"))
 
+    def test_deployment_readiness_trims_quantity_whitespace_like_the_server(self):
+        # Quantity.UnmarshalJSON applies Go's strings.TrimSpace before
+        # ParseQuantity, so an accepted " 64Mi " sizeLimit is stored as "64Mi"
+        # and a padded "8Ei" is still BinarySI and capped at 2**63-1.
+        bundle = example()
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        pod["volumes"] = pod.get("volumes", []) + [{"name": "padded", "emptyDir": {"sizeLimit": " 64Mi "}}]
+        k8s.validate_bundle(bundle)
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        volume = live["spec"]["template"]["spec"]["volumes"][-1]
+        self.assertEqual(volume["name"], "padded")
+        volume["emptyDir"]["sizeLimit"] = "64Mi"  # as the API server stores it
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        volume["emptyDir"]["sizeLimit"] = "65Mi"
+        self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1])
+        parent = "spec.volumes[0].emptyDir"
+        cap = str(2 ** 63 - 1)
+        for want, have, same in [(" 64Mi ", "64Mi", True), ("\t64Mi\n", "64Mi", True),
+                                 ("\u00a064Mi\u3000", "64Mi", True), (" 8Ei ", cap, True),
+                                 ("\n8Ei\t", str(2 ** 63), False), (" -8Ei", "-" + cap, True),
+                                 (" 10E ", "10E", True), (" 10E ", cap, False),
+                                 (" 0.1n ", "1n", True)]:
+            drift = k8s.spec_drift({"sizeLimit": want}, {"sizeLimit": have}, parent)
+            self.assertEqual(drift is None, same, f"{want!r} vs {have!r}")
+        self.assertIsNone(k8s.spec_drift({"memory": " 16Ei "}, {"memory": cap}, "spec.overhead"))
+        self.assertIsNone(k8s.spec_drift({"cpu": " 0.1n "}, {"cpu": "1m"}, "spec.overhead"))
+        # Only Go whitespace is trimmed: Python-only separators and inner
+        # spaces are not a quantity, so they compare as plain text (drift).
+        for want in ("\x1c64Mi", "64 Mi", "64Mi\u200b"):
+            self.assertIsNone(k8s._quantity(want), repr(want))
+            self.assertEqual(k8s.spec_drift({"sizeLimit": want}, {"sizeLimit": "64Mi"}, parent),
+                             parent + ".sizeLimit", repr(want))
+
     def test_deployment_readiness_derives_image_pull_policy_default_from_image(self):
         # SetDefaults_Container fills an omitted, null or empty imagePullPolicy
         # from the container's image: Always for a "latest" tag (or no tag and
