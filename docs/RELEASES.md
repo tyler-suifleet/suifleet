@@ -9,7 +9,8 @@ SF-039 gives every SuiFleet daemon release three properties:
 
 | File | Contents |
 |---|---|
-| `suifleet-<version>-<commit12>-aarch64-unknown-linux-gnu.tar.gz` | `suifleet/bin/suifleet`, `LICENSE`, `config.example.toml`. Sorted entries, fixed mtime (the commit time), `root:root`, gzip without name or timestamp. |
+| `suifleet-<version>-<commit12>-aarch64-unknown-linux-gnu.tar.gz` | `suifleet/bin/suifleet`, provisioning helper, systemd units, configuration templates and license. Sorted entries, fixed mtime (the commit time), `root:root`, gzip without name or timestamp. |
+| Archive and package `.sha256` files | SHA-256 for the corresponding archive or package, covered by the signed manifest. |
 | `sbom.spdx.json` | SPDX 2.3: the daemon (with its binary's SHA-256) and every package in its normal dependency graph for the selected target, exactly as `cargo tree -e normal --target TARGET` resolves it. Each package has its Cargo.lock SHA-256, declared license and purl. Build-script-only dependencies are not linked into the binary and are not listed. |
 | `provenance.json` | Commit, `SOURCE_DATE_EPOCH`, target, `rustc -vV`, cargo and linker versions, `Cargo.lock` SHA-256, builder image ID, Debian archive backend version and binary SHA-256 |
 | `release.json` | Name, version, commit, target, and the size and SHA-256 of the artifacts above (including Debian packages/checksums when present). This is what gets signed. |
@@ -28,9 +29,11 @@ make release-artifacts            # builds HEAD twice; fails unless byte-identic
 
 **Builder pins:** Ubuntu 22.04 digest; Rust 1.94.0 via a checksum-verified rustup-init 1.29.1; `gcc-aarch64-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-aarch64-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-arm64-cross` 2.35-0ubuntu1cross3. For 32-bit x86: `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-i686-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-i386-cross` 2.35-0ubuntu1cross3.
 
-**Debian packages (SF-231):** amd64 and arm64 bundles also contain versioned `.deb` files and SHA-256 files covered by the same signed manifest. The SBOM describes their included daemon/signer binary; distribution dependencies are declared in Debian control metadata. See [Debian build/install and data retention](DEBIAN_PACKAGING.md). The release workflow builds both targets and publishes one archive containing each complete signed bundle, avoiding ambiguous shared SBOM/manifest filenames. No signed APT repository is provided. Protected production signing remains SF-042/#62.
+**Debian packages (SF-231):** amd64 and arm64 bundles also contain versioned `.deb` files and SHA-256 files covered by the same signed manifest. The SBOM describes their included daemon/signer binary; distribution dependencies are declared in Debian control metadata. See [Debian build/install and data retention](DEBIAN_PACKAGING.md). The release workflow builds amd64, arm64 and ARMv7 hard-float and publishes one archive containing each complete signed bundle, avoiding ambiguous shared SBOM/manifest filenames. The release includes an independently OpenPGP-signed [APT snapshot](DEBIAN_PACKAGING.md#signed-apt-snapshots) built from those verified packages. Protected signing and HTTPS publication remain SF-042/#62.
 
-**Targets:** `aarch64-unknown-linux-gnu` (the default), `x86_64-unknown-linux-gnu` (amd64) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
+**Targets:** `armv7-unknown-linux-gnueabihf` (glibc hard-float archive), `aarch64-unknown-linux-gnu` (the default), `x86_64-unknown-linux-gnu` (amd64) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
+
+For ARMv7 hard-float: `gcc-arm-linux-gnueabihf` 4:11.2.0-1ubuntu1, `gcc-11-arm-linux-gnueabihf` 11.4.0-1ubuntu1~22.04.3cross1, `binutils-arm-linux-gnueabihf` 2.38-4ubuntu2.12 and `libc6-dev-armhf-cross` 2.35-0ubuntu1cross3.
 
 The daemon uses rustls for both gRPC and Walrus HTTP, so the release links no OpenSSL. Bump these pins deliberately, and record the new versions here.
 
@@ -65,18 +68,28 @@ Installers (for example a daemon self-update recipe, or the image build) must ru
 
 `.github/workflows/release.yml` runs only on `v*` tags or manual dispatch, never for pull requests.
 
-1. **Build job:** no secrets, read-only token. It builds the bundle twice from the commit, requires identical output, and uploads it unsigned.
+1. **Build job:** no secrets, read-only token. It builds the bundle twice from the commit, requires identical output, runs the archive CLI on the target ABI and exercises Debian installation and upgrades through signed disposable APT snapshots. It uploads the bundle unsigned.
 2. **Preflight:** fails closed unless the `release` environment has a required reviewer.
 3. **Sign job:** runs in the protected `release` environment.
    - It writes the `RELEASE_SIGNING_KEY` secret (hex seed) to a private temporary file, signs as `RELEASE_SIGNING_KEY_ID`, and verifies the result with the daemon's verifier against `release/trust.toml`.
    - It adds GitHub (Sigstore) build-provenance attestations for every file.
-   - For tags, it publishes a GitHub release.
+   - For tags, it packages and verifies a separately signed APT snapshot and creates the release only after checking the repository immutability setting. It confirms the published release is immutable.
    - With no trusted keys committed, verification fails, and so does the release.
 
 **One-time setup** (by a repository admin):
 1. Create the `release` environment with a required reviewer.
 2. Add the `RELEASE_SIGNING_KEY` secret and the `RELEASE_SIGNING_KEY_ID` variable.
 3. Commit the matching public key to `release/trust.toml`.
+4. Enable [GitHub release immutability](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository).
+   Add `RELEASE_IMMUTABILITY_READ_TOKEN` to the protected environment with
+   repository Administration **read** permission. The workflow uses it only
+   to query the setting. Release writes use the existing GitHub workflow token.
+5. Provision a dedicated OpenPGP signing key for APT. Store its export as
+   `APT_SIGNING_KEY` and set `APT_SIGNING_FINGERPRINT` to the exact full signing
+   key fingerprint in the same protected environment. Deliver the matching
+   public keyring through the authenticated operator channel. A release without
+   these inputs fails before publication. Protect the version-tag namespace and
+   review the tagged commit before approving the environment job.
 
 ## Verified locally (2026-10-14)
 

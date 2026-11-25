@@ -1,31 +1,68 @@
-# Verify a client release bundle
-
-Authenticate the publisher, target and contents of a client bundle before installation. A checksum alone does not identify its publisher.
+# Download and verify a client release
 
 ## Prerequisites
 
-Obtain a complete signed bundle from your fleet operator and public trust roots through an authenticated channel. Use an already trusted verifier; do not trust an unverified binary merely because it can verify itself. No public signed download or APT repository is promised here.
+Get the version and reviewed commit for your fleet from your operator. Use the
+matching asset from the [GitHub Releases page](https://github.com/tyler-suifleet/suifleet/releases)
+when a protected release has been published, or obtain the same signed bundle
+from your operator.
 
-## Steps
+| Runtime target | Archive target | Debian package |
+|---|---|---|
+| Linux amd64 | `x86_64-unknown-linux-gnu` | `amd64` |
+| Linux arm64 | `aarch64-unknown-linux-gnu` | `arm64` |
+| Linux ARMv7 hard-float (ARM EABIhf, ARMv7-A with VFPv3 and NEON) | `armv7-unknown-linux-gnueabihf` | Archive only |
 
-1. Check that the bundle contains `release.json`, `release.sig.json`, its target archive, `sbom.spdx.json` and `provenance.json`. Debian bundles also include their signed package/checksum entries.
-2. With the trusted verifier, verify the bundle and exact target (example for Linux arm64):
+The Linux binaries require glibc 2.35 or later. Check the **userspace** ABI as
+well as the CPU. For example, an arm64 kernel can have 32-bit armhf userspace.
+ARMv6, soft-float and musl are outside these release profiles.
 
-```sh
-suifleet --verify-release /path/to/bundle /etc/suifleet/release-trust.toml aarch64-unknown-linux-gnu
-```
+1. Download `suifleet-VERSION-TARGET-release.tar.gz`. If available, compare its
+   SHA-256 against `SHA256SUMS` to catch transfer errors.
+2. For a GitHub download, use a trusted GitHub CLI to verify the outer asset
+   against the release workflow, tag and reviewed source commit. Replace
+   `VERSION`, `TARGET` and `REVIEWED_COMMIT` with the operator-approved values.
 
-3. Confirm the expected reviewed commit and target in the signed manifest. Install only after verification exits successfully.
-4. Follow the platform's installation/configuration steps. Keep public trust roots root-owned. Private release signing keys never belong on devices or in images.
+   ```sh
+   gh attestation verify suifleet-VERSION-TARGET-release.tar.gz \
+     --repo tyler-suifleet/suifleet \
+     --signer-workflow tyler-suifleet/suifleet/.github/workflows/release.yml \
+     --source-ref refs/tags/VERSION --source-digest REVIEWED_COMMIT
+   ```
+
+3. Extract the outer bundle as an unprivileged user into an empty staging
+   directory. It contains the target archive, checksums, SPDX SBOM,
+   provenance, manifest and detached manifest signature. Debian bundles also
+   carry a `.deb` and its checksum.
+4. Use a trusted SuiFleet verifier and public trust roots acquired through
+   an authenticated channel. You can use the binary from the attested archive
+   if your operator approves the GitHub workflow identity for initial download
+   trust. Run the Ed25519 bundle check before installing.
+
+   ```sh
+   suifleet --verify-release /path/to/staging /etc/suifleet/release-trust.toml aarch64-unknown-linux-gnu
+   ```
+
+   Substitute the correct target and confirm the manifest version and reviewed
+   commit. Use only files listed in the verified manifest. Stop on a verification
+   error and obtain a corrected bundle.
 
 ## Expected result
 
-Verification accepts at least one trusted non-revoked signature, every listed file's size/hash, and the specified target. The verifier exits nonzero on failure.
+After verification succeeds and the manifest matches the approved version,
+commit and target, follow the
+[generic archive install](INSTALL_DEVICE_CLIENT.md#generic-linux) or
+[Debian instructions](DEBIAN_PACKAGING.md). The signed APT snapshot uses a
+separately authenticated OpenPGP keyring.
 
 ## Recovery and limits
 
-Stop on a wrong target, signature or digest; obtain a corrected authenticated bundle. Do not disable verification. Trust rotation requires authenticated public-root delivery before retiring an old key. Protected production signing and distribution acceptance remain separate from reproducible local build evidence.
+Keep public trust roots root-owned. Obtain initial trust roots and their
+replacements through the same authenticated operator channel. A checksum alone
+cannot authenticate a publisher.
 
 ## Technical reference
 
-For integrators and auditors: [implementation details, API and validation provenance](RELEASES.md). This reference includes engineering history; it is not an installation shortcut or a claim of production acceptance.
+See [release engineering](RELEASES.md) for provenance and rotation.
+Follow [protected signing and publication acceptance](https://github.com/tyler-suifleet/suifleet/issues/62)
+for current release availability.
