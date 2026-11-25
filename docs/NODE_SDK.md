@@ -120,6 +120,10 @@ in order and never drops or reorders:
 - a `not_sent` failure is retried up to `maxAttempts`;
 - when retries run out, `flush` returns with the item still queued and the
   last error;
+- aborting the `flush({signal})` signal rejects with the abort reason at once,
+  including when the abort lands inside the client's own `connectAttempts`
+  backoff; the unsent head stays queued and the next `flush` can start
+  immediately;
 - an `unknown` outcome, or a `stream_append` `request_failed` (which may follow
   a stored record), stops the buffer with `UncertainDeliveryError`; the caller
   checks the destination and chooses `resolveUncertain('retry')` (may
@@ -167,7 +171,7 @@ reboots the platform or asserts firmware/boot health; platform tools own those.
 
 | Command | What it runs |
 |---|---|
-| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, `null` configuration. |
+| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, prompt `flush` abort during a nested client connect retry, `null` configuration. |
 | `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; `null` configuration before the first install handled by the sensor example; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
 
 Fake-peer unit tests establish client framing and classification only; the
