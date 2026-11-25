@@ -22,12 +22,15 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     for (const width of [1440, 375]) {
       await page.setViewportSize({ width, height: 667 });
       assert.doesNotMatch(await page.locator('body').innerText(), /testnet/i, 'no test-network wording');
-      const capacity = page.getByRole('heading', { name: 'Capacity plans' }).locator('..');
+      const capacity = page.locator('section', { has: page.getByRole('heading', { name: 'Renew or change plan' }) });
       assert.match(await capacity.innerText(), /checkout and settings tariffs do not establish the all-in commercial offer/);
       assert.match(await capacity.innerText(), /your device operating budget is separate/);
       assert.equal(await capacity.getByRole('link', { name: 'Contact', exact: true }).getAttribute('href'), 'https://suifleet.io/contact/');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
+    // During a paid term the plan list is collapsed until the customer asks to see it.
+    assert.equal(await page.getByRole('radio', { name: /3 devices/ }).isVisible(), false);
+    await page.getByText('See available plans', { exact: true }).click();
     await page.getByRole('radio', { name: /3 devices/ }).click();
     assert.equal(await page.getByRole('radio', { name: /3 devices/ }).getAttribute('aria-checked'), 'true');
     async function visible(button, text) {
@@ -39,7 +42,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
       const box = await status.boundingBox(); assert(box.y >= 0 && box.y + box.height <= 667, `status outside phone: ${JSON.stringify(box)}`);
       assert.equal(await button.isDisabled(), true);
     }
-    const prepay = page.getByRole('button', { name: 'Pay 1 SUI from your wallet' });
+    const prepay = page.getByRole('button', { name: 'Pay 1 SUI', exact: true });
     await prepay.click(); await visible(prepay, 'Checking payment details');
     await page.evaluate(() => window.billing.release()); // delayed preparePrepay
     await visible(prepay, 'Checking payment details');
@@ -47,19 +50,24 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.evaluate(() => window.billing.release()); await visible(prepay, 'Approve this billing action');
     await prepay.dispatchEvent('click'); assert.equal(await page.evaluate(() => window.billing.calls), 1);
     await page.evaluate(() => window.billing.release()); await visible(prepay, 'Do not pay again');
-    await page.evaluate(() => window.billing.release()); await page.getByRole('status').filter({ hasText: 'Confirmed.' }).waitFor();
     assert.match(await page.getByRole('status').innerText(), /Submitted digest: fixture-digest/);
-    const collect = page.getByRole('button', { name: 'Apply due prepaid payment' });
+    // A first purchase leaves the period due, so the page immediately asks to start it, still next to the Pay button.
+    await page.evaluate(() => window.billing.release()); await page.waitForFunction(() => window.billing.calls === 2);
+    await visible(prepay, 'Checking payment details');
+    assert.doesNotMatch(await page.getByRole('status').innerText(), /Submitted digest|fixture-digest/);
+    await page.evaluate(() => window.billing.release()); await visible(prepay, 'Approve this billing action');
+    await page.evaluate(() => window.billing.release()); await visible(prepay, 'Do not pay again');
+    await page.evaluate(() => window.billing.release()); await page.getByRole('status').filter({ hasText: 'Done. Your device slots are active.' }).waitFor();
+    const collect = page.getByRole('button', { name: 'Activate device slots' });
     await collect.click(); await visible(collect, 'Checking payment details');
     assert.doesNotMatch(await page.getByRole('status').innerText(), /Submitted digest|fixture-digest/);
     await page.evaluate(() => window.billing.release()); await visible(collect, 'Approve this billing action');
-    assert.doesNotMatch(await page.getByRole('status').innerText(), /Submitted digest|fixture-digest/);
     await page.evaluate(() => window.billing.release()); await visible(collect, 'Do not pay again');
     assert.match(await page.getByRole('status').innerText(), /Submitted digest: fixture-digest/);
     await page.evaluate(() => { window.billing.fail = true; window.billing.release(); });
     await page.getByRole('status').filter({ hasText: 'Confirmation unavailable' }).waitFor();
     assert.match(await page.getByRole('status').innerText(), /Check a submitted digest before retrying/);
     assert.deepEqual(errors, []);
-    console.log('PASS: actual billing page at 375x667; delayed preparation/validation/wallet/confirmation, adjacent visible status for prepay and collection, duplicate-submit guard, success and uncertain-confirmation retry warning; fixture transactions only');
+    console.log('PASS: actual billing page at 375x667; delayed preparation/validation/wallet/confirmation, adjacent visible status for prepay, automatic first-period activation and manual activation, duplicate-submit guard, success and uncertain-confirmation retry warning; fixture transactions only');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
