@@ -469,7 +469,7 @@ export function storageConfig(network = MANIFEST?.network, packageId = process.e
 /** Why the deposit cannot swap SUI for WAL on this network, if it cannot. */
 export function swapRoute(network = MANIFEST?.network): { route?: "testnet-exchange"; explanation: string } {
   if (network === "testnet") {
-    return { route: "testnet-exchange", explanation: "Storage budget can be funded in SUI only: its deposit swaps SUI for WAL through Walrus's pinned Testnet exchange at its posted fixed rate, deposits the WAL and can buy the storage, all in one transaction that aborts if fewer WAL than the minimum arrive." };
+    return { route: "testnet-exchange", explanation: "Storage budget can be funded in SUI only: its deposit swaps SUI for WAL through Walrus's pinned exchange at its posted fixed rate, deposits the WAL and can buy the storage, all in one transaction that aborts if fewer WAL than the minimum arrive." };
   }
   return { explanation: "No DEX route is pinned and verified for this network, so the deposit cannot swap SUI for WAL safely in one transaction. Buy WAL directly (an exchange, or a card on-ramp that sells WAL) and deposit it." };
 }
