@@ -1939,3 +1939,17 @@ supply approval, ownership, CI, head/base or feedback evidence: selected work
 still obtains a fresh snapshot and the final fences remain unchanged. Old cache
 and coordinator pauses are preserved through activation until their recorded
 expiry, and server Retry-After deadlines are never shortened.
+
+
+## Direct cosmetic and documentation requests — 2026-11-25
+
+The user-authorized [small-change fast lane](SMALL_CHANGES.md) takes precedence
+for direct, low-impact marketing/docs edits. Do not enqueue these into feature
+batch integration or testnet, require a new ticket/claim/PR, or wait for another
+model/hosted CI before an already-authorized publication. Keep isolated work,
+focused validation, user authorship and actual publication verification. Record
+an existing issue when useful; its API availability is not a prerequisite.
+
+This does not let an assigned worker skip its job, dismiss a finding, reclassify
+wallet/runtime/security/configuration work, or bypass actual release authority.
+Ordinary engineering and the local-test infrastructure rule remain unchanged.

@@ -1,5 +1,19 @@
 # SuiFleet agent instructions
 
+## Small direct requests — user direction, 2026-11-25
+
+For small, reversible marketing copy, styling, layout and ordinary documentation
+edits, follow [the proportional workflow](docs/SMALL_CHANGES.md). A new ticket,
+atomic implementation claim, PR, second model review, integration batch or hosted-CI
+approval is not mandatory. Use isolated work, focused checks once, user-authored
+commits and the existing publication authorization; verify the resulting URL.
+Tracking/API outages must not block these edits. Do not run unrelated full-stack,
+platform, coordinator or testnet suites. This is an explicit exception to the
+ordinary ticket/review workflow below, not an exception for wallet/auth/security,
+contracts, edge runtime, APIs, dependencies, billing or CI/release configuration.
+Assigned automation workers must still finish only their existing job. Preserve
+other owners, normal engineering gates and all actual deployment/credential limits.
+
 ## Ticket authority — user requirement
 
 **Codex is the only agent allowed to create new tickets or issues unless the user explicitly authorizes another model to do so.** This includes GitHub issues, sub-issues, draft issues and tickets in another tracker. Assignment to implement or review an existing issue is not permission to create more issues. Claude and other models must report newly discovered work to Codex in the existing issue or their handoff. Do not bypass this rule through a script, API, delegated agent or renamed task.
