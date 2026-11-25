@@ -93,7 +93,7 @@ def transient_delay(error, attempt):
         return None
     rate_limited = rate_limit_error(error)
     if rate_limited:
-        return None  # Shared account backoff belongs to Coordinator.gh, not each PR.
+        return None  # The shared transport handles cooldowns across processes.
     if not any(value in message for value in (
             'tls handshake timeout', 'connection reset', 'connection refused',
             'temporary failure in name resolution', 'i/o timeout', 'unexpected eof',
@@ -721,7 +721,6 @@ class Store:
           CREATE TABLE IF NOT EXISTS quarantine_backoff (
             family TEXT, kind TEXT, attempts INTEGER, retry_after REAL,
             PRIMARY KEY(family,kind));
-          CREATE TABLE IF NOT EXISTS github_backoff (account TEXT PRIMARY KEY, retry_after REAL);
           CREATE TABLE IF NOT EXISTS publications (project TEXT, pr INTEGER, node_id TEXT PRIMARY KEY, hash TEXT);
           CREATE TABLE IF NOT EXISTS ownership_publication (
             project TEXT, ticket TEXT, claim TEXT, revision INTEGER, attempts INTEGER,
@@ -1422,20 +1421,21 @@ class Coordinator:
 
     def gh(self, project, args):
         account = project['github_account']
-        pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?', (account,)).fetchone()
-        if pause and pause[0] > time.time():
-            raise RuntimeError('GitHub account read/write deferred by shared rate-limit backoff')
-        token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account]).strip()
-        env = {**os.environ, 'GH_TOKEN': token}
-        try:
-            return shared_github_snapshot(args, env, lambda: run(['gh', *args], cwd=project['root'], env=env))
-        except subprocess.CalledProcessError as error:
-            if rate_limit_error(error):
-                match = re.search(r'retry-after:\s*(\d+)', (error.stderr or '').lower())
-                delay = max(60, min(3600, int(match[1]) if match else 300))
-                self.store.db.execute('INSERT OR REPLACE INTO github_backoff VALUES(?,?)', (account,time.time()+delay))
-                raise RuntimeError('GitHub account rate limited; shared bounded backoff recorded') from None
-            raise
+        # Preserve any live old-runtime pause during activation. New rate-limit
+        # decisions belong solely to the resource-aware shared transport.
+        legacy = self.store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_backoff'").fetchone()
+        if legacy:
+            pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?',(account,)).fetchone()
+            if pause and pause[0] > time.time():
+                raise RuntimeError('Legacy GitHub cooldown preserved until '+str(int(pause[0])))
+        auth_env = {key: value for key, value in os.environ.items()
+                    if key not in ('GH_TOKEN', 'GITHUB_TOKEN')}
+        token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account],
+                    env=auth_env).strip()
+        if not token:
+            raise RuntimeError('Configured GitHub account has no token')
+        env = {**auth_env, 'GH_HOST': 'github.com', 'GH_TOKEN': token}
+        return shared_github_snapshot(args, env, lambda: run(['gh', *args], cwd=project['root'], env=env))
 
     def immutable_read(self, project, path):
         # Only content-addressed trees and SHA-to-SHA comparisons belong here.
@@ -1447,6 +1447,51 @@ class Coordinator:
                 self.immutable_reads.clear()
             self.immutable_reads[key] = value
         return self.immutable_reads[key]
+
+    def discovery_needed(self, project, row, owners):
+        """Scheduling hints only; every selected PR still gets a fresh snapshot.
+
+        Completion/CI lanes collect exits and failures independently. Batch
+        publication re-reads all reserved members, so polling them here adds no
+        authority and needlessly multiplies API traffic.
+        """
+        branch = (row.get('head') or {}).get('ref')
+        if not branch:
+            return True  # Incomplete discovery cannot establish a safe shortcut.
+        if row.get('draft'):
+            return False
+        owner = next((o for o in owners if o.get('branch') == branch), None)
+        number = row['number']
+        if self.lane == 'source':
+            if (not owner or owner.get('status') != 'review'
+                    or owner.get('publish_pending') or owner.get('expired')):
+                return False
+            active = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? "
+                "AND status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                (project['id'], number)).fetchone()
+            family = 'Claude' if owner.get('agent') == 'Codex' else 'Codex'
+            count = self.store.db.execute("SELECT COUNT(*) FROM jobs WHERE family=? AND kind='review' "
+                "AND status IN ('reserved','running','orphaned','quota_launch')", (family,)).fetchone()[0]
+            return not active and count < self.store.worker_limits.get(family, {}).get('review', 1)
+        if self.lane == 'integration':
+            candidate = self.store.db.execute("SELECT 1 FROM integration_batches WHERE project=? AND pr=? "
+                "AND status NOT IN ('done','invalidated','failed')", (project['id'], number)).fetchone()
+            if candidate:
+                return True
+            if number in self.batches.reserved_members(project):
+                return False
+            if not owner:
+                return True  # Preserve discovery of untracked infrastructure PRs.
+            if (owner.get('status') != 'review' or owner.get('publish_pending') or owner.get('expired')):
+                return False
+            if owner.get('spec', {}).get('area') == 'infra':
+                return True  # Local-test infrastructure has no source-review wait.
+            head = (row.get('head') or {}).get('sha')
+            completed = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND head=? "
+                "AND kind='review' AND status='done' AND result IS NOT NULL",
+                (project['id'], number, head)).fetchone()
+            return bool(completed)
+        return True
 
     def prs(self, project, on_snapshot=None, owners=()):
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
@@ -1469,6 +1514,9 @@ class Coordinator:
             raw = [r for r in raw if r['number'] not in excluded]
         result = []
         for row in raw:
+            if (on_snapshot is not None and self.lane in ('source','integration')
+                    and self.batches.enabled(project) and not self.discovery_needed(project, row, owners)):
+                continue
             try:
                 pr = self.pr(project, row['number'], fields)
                 result.append(pr)
