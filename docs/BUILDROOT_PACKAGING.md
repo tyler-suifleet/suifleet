@@ -3,8 +3,8 @@
 The [external tree](../suifleet-edge/packaging/buildroot) packages the Rust edge
 client, CA certificates, and the Python launcher for the
 [portable signer](KEY_ISOLATION.md#portable-linux-signer). It creates separate
-unprivileged daemon and signer accounts. BusyBox and SysV init use
-`/etc/init.d/S95suifleet`. For a different init system, run
+unprivileged daemon and signer accounts. The tested profiles use BusyBox
+init with `/etc/init.d/S95suifleet`. For a different init system, run
 `/usr/sbin/suifleet-portable-signer` in the foreground as root and supervise
 the pair as one service.
 
@@ -21,12 +21,15 @@ make -C buildroot-2026.08.2 BR2_EXTERNAL=/path/to/suifleet/suifleet-edge/packagi
 make -C /absolute/path/to/output-glibc
 ```
 
-Use `suifleet_x86_64_musl_defconfig` and a second output directory for musl.
-Both profiles use Bootlin's pinned 2025.08-1 stable toolchain and produce
+Use a separate output directory with `suifleet_x86_64_musl_defconfig` for
+x86-64 musl or `suifleet_aarch64_glibc_defconfig` for 64-bit ARM glibc.
+All three profiles use Bootlin's pinned 2025.08-1 stable toolchain and produce
 `images/rootfs.cpio` for use with a board kernel or a VM kernel with initramfs,
 procfs, devtmpfs, tmpfs and Unix sockets enabled. Supply the kernel and boot
 arguments from your board configuration. For your own image, enable
 `BR2_PACKAGE_SUIFLEET` in the Buildroot configuration with the tree attached.
+If you customize BusyBox, keep the long options for `start-stop-daemon`,
+including `--output` for the init hook.
 Buildroot vendors the pinned source revision's `Cargo.lock` at download time,
 then builds with `--locked --offline`. Run `make legal-info` for the source
 and license archive, including the vendored Rust sources. Inspect individual
@@ -68,10 +71,14 @@ DeviceCap IDs and `[device.signer]` set to `kind = "service"` and
 
 Mount procfs for the service's PID namespace and keep `fs.suid_dumpable=0`.
 Start with `/etc/init.d/S95suifleet start` and use the same script to stop or
-restart. The foreground launcher stops both children when either exits. If the
-site requires automatic restart after a failure, supervise the foreground pair
-with the board's service manager. Platform scripts own firmware installation,
-reboot, boot confirmation and firmware rollback.
+restart. The init hook starts asynchronously and appends launcher and child
+stdout and stderr to the root-only `/run/suifleet-portable/launcher.log`.
+Check that log if the pair exits during startup. The log survives service
+restarts and clears on reboot when `/run` is volatile. Handle ongoing log
+retention through the board's service manager. The foreground launcher stops
+both children when either exits. Supervise the foreground pair if the site
+requires automatic restart after a failure. Platform scripts own firmware
+installation, reboot, boot confirmation and firmware rollback.
 
 ## Disposable VM test
 
@@ -113,9 +120,21 @@ qemu-system-x86_64 -m 1024 -smp 2 -nographic -no-reboot \
   -append 'console=ttyS0 suifleet_sf296_test=1' -nic user,model=e1000
 ```
 
-The fixture checks a fresh identity, claim-sponsored enrollment effects and
-cap ownership, harmless installation, and an authoritative Applied receipt
-from the node. It starts, restarts and stops the packaged service and checks
+For AArch64, use the matching ARM64 kernel and its own `e1000.ko`
+when creating the overlay, then boot with QEMU's `virt` machine.
+
+```sh
+qemu-system-aarch64 -machine virt -accel tcg -cpu cortex-a57 -m 1024 -smp 2 \
+  -nographic -no-reboot -kernel /path/to/arm64/vmlinuz -initrd test-initramfs.cpio \
+  -append 'console=ttyAMA0 suifleet_sf296_test=1' \
+  -netdev user,id=net0 -device e1000,netdev=net0,romfile=
+```
+
+The fixture deliberately triggers the launcher's binary permission check,
+verifies the error in the root-only log, and restores the binary mode before
+starting the service. It checks a fresh identity, claim-sponsored enrollment
+effects and cap ownership, harmless installation, and an authoritative Applied
+receipt from the node. It starts, restarts and stops the packaged service and checks
 that the signer endpoint disappears on stop. This uses an HTTP Walrus
 stand-in inside the isolated namespace. It exercises an application install
 in emulation. Physical and manual-wallet acceptance remains in
@@ -124,7 +143,9 @@ and production providers in [SF-087](https://github.com/tyler-suifleet/suifleet/
 
 ## Validation on 2026-11-25
 
-Built both defconfigs in separate clean Buildroot output directories with
+### Original x86-64 builds
+
+Built both x86-64 defconfigs in separate clean Buildroot output directories with
 `make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl -j10` (glibc) and
 `make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl -j7` (musl). Buildroot 2026.08.2
 used Bootlin GCC 14.3.0, Rust 1.97.1, Python 3.14.10, and BusyBox 1.38.0.
@@ -148,6 +169,50 @@ init hook.
 | x86-64 glibc | `e9b980ceecd6608d1507dc2550389ca225ce706df464500d4d0ee644c2c825ec` | `6Qq4xrt88MwoTaTPxDXHPXJSFdkUouEdd2f8rVBAtZQF` | `AJXd7B1jz3fs2mZ1wcDjuzLo3bguPvRfRzgcFoUpNzUR` |
 | x86-64 musl | `78a0f15f62290c2ed895696329dd7fb5ea3c3666a2f3c93d90085aa8bcd69f1a` | `CDaSc2PyDFx1Bz7hrxptxw8pvmHfvGMegpDBaCM7AMLo` | `Ew56dyt73ND2YZKetpYLno6Qd1VYiwfBuKU5NPT9aZMX` |
 
-The VM evidence covers BusyBox init and the two x86-64 profiles. Separate
-SysV, other architectures, PKCS#11, public testnet and deferred external
-acceptance were outside these local runs.
+### Startup diagnostics regression
+
+Rebooted the two x86-64 images with the repaired `S95suifleet` and the
+diagnostic fixture in the test overlay. Both QEMU 7.2.22/KVM runs printed
+`SF296_STARTUP_DIAGNOSTIC_PASS` and `SF296_GUEST_PASS` on isolated Sui 1.81.1
+localnet (chain `ca7f0b6a`, protocol 138). Each verified the rejected startup
+and the root-owned mode-0600 log, then completed enrollment, application
+installation, authoritative reporting and the init lifecycle.
+
+| Guest | Test initramfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|---|
+| x86-64 glibc | `0f6a8d43521587e8a62d89fe815e644aa0c4ffb9c9d9e1f35f23e4bd32823f03` | `ErgAJGLEJCu2u2cjdZiirvpLt7rzWSo478nnQ1eCwQru` | `EzfubA6NCohAttsMCq5KLUacRgAHqoUpNMwxVXCX1NRb` |
+| x86-64 musl | `c556b64caef6b156cbd939a89e8d619048e068ece986e969eff77afcb9bf65fa` | `BPg9DXzGKn3B1ND8DgarcPJVWRtTdJNcxDdJrSC9PMtG` | `9k3k4DEtq4NHZV3sHZXGoiYmDY4oSZJRKuQaqU4GFLTq` |
+
+### Clean AArch64 glibc build and boot
+
+Built `suifleet_aarch64_glibc_defconfig` from an empty output directory on
+`/mnt/suifleet-builds`. Buildroot 2026.08.2 used the pinned Bootlin 2025.08-1
+AArch64 glibc toolchain and Rust 1.97.1 for the locked offline package build.
+
+```sh
+make -C "$BUILDROOT" BR2_EXTERNAL="$EXTERNAL" O="$OUTPUT" suifleet_aarch64_glibc_defconfig
+make -C "$OUTPUT" BR2_DL_DIR=/tmp/sf296-build/dl -j16
+make -C "$OUTPUT" BR2_DL_DIR=/tmp/sf296-build/dl suifleet-legal-info
+```
+
+The package license hash passed. The CPIO contained the ELF64 AArch64 daemon
+with interpreter `/lib/ld-linux-aarch64.so.1`, launcher, repaired init hook and
+CA bundle. It contained no SuiFleet configuration, device keys, enrollment
+files or journal directory.
+
+QEMU 7.2.22 with `virt` and TCG booted that CPIO with Debian's
+`6.1.0-56-arm64` kernel (`6.1.192-2`) and a test-only overlay. The VM printed
+`SF296_STARTUP_DIAGNOSTIC_PASS` and `SF296_GUEST_PASS`. Isolated network-none
+Sui 1.81.1 localnet (chain `a11e33cd`, protocol 138) independently verified
+claim-sponsored enrollment effects, cap ownership and the authoritative
+Applied receipt. The guest verified the installed test app and its health,
+then completed duplicate start, restart and stop through the packaged hook.
+
+| Rootfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|
+| `b4931c34d1c456ea33d495d6a0924a8ca5757c4e1767423fccb7e977efe3f09d` | `4HDd6oHw67YqKXDhvPx7jkHPfFRhKRz3d5KUASNmRnvs` | `67o5vNBwW4pMKQvTVRJvAHd6BYnPyqrLcRFyVFEJbJ6W` |
+
+The VM runs cover the three BusyBox profiles with the file-backed signer.
+Separate SysV, ARMv7, AArch64 musl, PKCS#11 and certified Walrus were unrun.
+Hosted CI and applicable automatic public-testnet validation follow on the
+pushed head. Physical acceptance and firmware recovery remain separate.
