@@ -22,8 +22,12 @@ ansible_become as a connection variable throughout, a claim transfer with
 sudo-wrapped interpreter are refused by the host probe both with readable
 and with hidepid=2-hidden process ancestry (no staging), transfers with swap
 that can write to a disk are refused (the machine's real swap
-when it has any, then /proc/swaps fixtures), a claim transfer interrupted
-after staging with zram/dm-crypt swap (plain and Vault claims only in tmpfs, none on host persistent
+when the role classifies it unsafe, then /proc/swaps fixtures), transfers
+to hosts that could store a crash dump are refused (the machine's real
+core_pattern/session core limit when classified unsafe, then core_pattern fixtures
+for Apport, core files and systemd-coredump with a nonzero limit; nothing is
+crashed), a claim transfer interrupted after staging with zram/dm-crypt swap
+and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
 (changed=0), claim staging left by an enrollment interrupted after its record
@@ -171,6 +175,26 @@ SUDO_LOG_CONTROL_PLAY = """- hosts: suifleet_devices
         stdin: "{{ lookup('ansible.builtin.file', '/work/sudo-log-marker') }}"
       no_log: true
       changed_when: false
+"""
+# Runs the role's own swap and crash dump classifiers on every host, unescalated
+# like the claim transfer, so the harness knows how the role sees the test
+# machine's real configuration.
+CLASSIFY_PLAY = """- hosts: suifleet_devices
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+  tasks:
+    - ansible.builtin.command:
+        argv: [sh, -c, "{{ lookup('ansible.builtin.file', '/ansible/roles/suifleet/files/' ~ item ~ '_policy.sh') }}"]
+      loop: [swap, crash]
+      register: policy
+      changed_when: false
+    - ansible.builtin.debug:
+        msg: "CLASSIFY {{ inventory_hostname }} {{ item.item }} {{ item.stdout_lines | last }}"
+      loop: "{{ policy.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 """
 SUDO_IO_LOGS = "/var/log/sudo-io"
 # Lists files under the roots that contain any secret read from stdin. With
@@ -731,18 +755,35 @@ class Harness:
             if mounted != "0":
                 self.exec(container, "umount", target)
 
+    def classify(self):
+        """The role's swap and crash dump verdicts for every host: {host: {"swap": ..., "crash": ...}}."""
+        (self.work / "ctl/classify.yml").write_text(CLASSIFY_PLAY)
+        output, _ = self.ansible("classify the hosts' swap and crash dump policy", "/work/classify.yml")
+        verdicts = {name: {} for name in self.hosts}
+        for host, kind, verdict in re.findall(r'"msg": "CLASSIFY (\S+) (swap|crash) VERDICT ([^"]*)"', output):
+            verdicts[host][kind] = verdict
+        assert all(set(v) == {"swap", "crash"} for v in verdicts.values()), ("missing verdicts", verdicts)
+        return verdicts
+
     def swap_refused(self, vault):
         """Swap that can write tmpfs pages or process memory to a disk refuses the claim before it is read."""
+        # The test machine's own swap (for example WSL's disk swap) with no fixture. Only a
+        # configuration the role itself classifies as unsafe must be refused: zram without
+        # writeback or dm-crypt swap is accepted, and is covered by the fixtures below.
+        for host in self.hosts.values():
+            self.clear_swap_fixture(host["container"])
         real = subprocess.run(["sh", "-c", "sed 1d /proc/swaps"], text=True, capture_output=True, check=True).stdout.split()
-        if real:
-            # The test machine's own swap (for example WSL's disk swap) with no fixture.
-            for host in self.hosts.values():
-                self.clear_swap_fixture(host["container"])
+        verdicts = {name: v["swap"] for name, v in self.classify().items()}
+        assert len(set(verdicts.values())) == 1, ("hosts sharing one kernel disagree about its swap", verdicts)
+        verdict = next(iter(verdicts.values()))
+        if verdict == "unsafe":
             self.refused_claim_transfer("claim transfer with the machine's real swap is refused", vault,
                                         expected=["active swap that can write the claim", real[0]])
             print(f"PASS claim transfer refused with this machine's real disk swap ({real[0]} {real[1]})")
         else:
-            print("NOTE this machine has no active swap; the real-swap refusal case did not run (fixtures below did)")
+            assert verdict == "ok", ("unexpected swap verdict", verdict)
+            print(f"NOTE the role accepts this machine's real swap ({' '.join(real) or 'none'}); the real-swap"
+                  " refusal case did not run (fixtures below did)")
         unsafe = [("/swapfile", "file"), ("/dev/sdb2", "partition"), ("/dev/zram1", "partition"), ("/dev/dm-1", "partition"),
                   ("/dev/zram2", "partition")]
         # zram1 writes back to a disk, dm-1 is not dm-crypt (LVM), zram2 has no device.
@@ -754,13 +795,87 @@ class Harness:
             print("PASS claim transfer refused with a swap file, a disk partition, zram writeback, non-crypt dm and"
                   " an unknown zram device (each listed)")
         finally:
-            for host in self.hosts.values():
-                self.clear_swap_fixture(host["container"])
+            self.no_swap()
+
+    SYSTEMD_COREDUMP = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
+
+    def crash_fixture(self, pattern, limit_zero=False, storage_none=False):
+        """Replace kernel.core_pattern inside each host's mount namespace and set the SSH session's core limit.
+
+        The hosts share the test machine's kernel, whose core_pattern is
+        global, so no test process is ever crashed: a real crash would reach
+        the machine's own handler. Only the role's policy decision is tested.
+        """
+        for host in self.hosts.values():
+            container = host["container"]
+            self.clear_crash_fixture(container)
+            self.exec(container, "sh", "-c", "umask 022 && cat > /root/sf304-core-pattern", input=pattern + "\n")
+            self.exec(container, "mount", "--bind", "/root/sf304-core-pattern", "/proc/sys/kernel/core_pattern")
+            if storage_none:
+                self.exec(container, "sh", "-c", "mkdir -p /etc/systemd/coredump.conf.d && printf '[Coredump]\\nStorage=none\\n'"
+                          " > /etc/systemd/coredump.conf.d/sf304.conf")
+            if limit_zero:
+                # pam_limits sets each new SSH session's limits (each controller run
+                # connects afresh), starting from PID 1's, so sshd's own limit is not enough.
+                self.exec(container, "sh", "-c", "printf 'deploy soft core 0\\ndeploy hard core 0\\n'"
+                          " > /etc/security/limits.d/sf304-core.conf")
+
+    def clear_crash_fixture(self, container):
+        mounted = self.exec(container, "sh", "-c", "grep -c ' /proc/sys/kernel/core_pattern ' /proc/self/mounts || true").stdout.strip()
+        if mounted != "0":
+            self.exec(container, "umount", "/proc/sys/kernel/core_pattern")
+        self.exec(container, "rm", "-f", "/etc/systemd/coredump.conf.d/sf304.conf", "/etc/security/limits.d/sf304-core.conf")
+
+    def crash_refused(self, vault):
+        """A host that could store a crash dump of a claim-handling process refuses the claim before it is read."""
+        for host in self.hosts.values():
+            self.clear_crash_fixture(host["container"])
+        real = Path("/proc/sys/kernel/core_pattern").read_text().strip()
+        limits = {name: self.exec(h["container"], "sh", "-c", "grep '^Max core' /proc/$(systemctl show -p MainPID --value"
+                                  " ssh.service)/limits").stdout.split()[4] for name, h in self.hosts.items()}
+        verdicts = {name: v["crash"] for name, v in self.classify().items()}
+        if all(v.startswith("unsafe") for v in verdicts.values()):
+            self.refused_claim_transfer("claim transfer with the machine's real crash dump policy is refused", vault,
+                                        expected=["could store a crash dump containing the claim"])
+            print(f"PASS claim transfer refused with this machine's real crash dump policy ({real!r}, sshd core limit"
+                  f" {sorted(set(limits.values()))})")
+        else:
+            print(f"NOTE the role accepts this machine's real crash dump policy on some host ({verdicts});"
+                  " the real-policy refusal case did not run (fixtures below did)")
+        # The test containers' init and sshd inherit Docker's unlimited core limit, so every
+        # case below without limit_zero has a nonzero session limit.
+        assert all(lim == "unlimited" for lim in limits.values()), ("fixtures assume an unlimited sshd core limit", limits)
+        cases = [
+            ("a piped handler that ignores the limit (apport)", "|/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E",
+             {}, "the crash handler apport may store core dumps"),
+            ("core files with a nonzero limit", "core", {}, "core dumps are written to files (core)"),
+            ("systemd-coredump storing dumps with a nonzero limit", self.SYSTEMD_COREDUMP, {},
+             "systemd-coredump stores core dumps (Storage=external)"),
+        ]
+        try:
+            for label, pattern, options, reason in cases:
+                self.crash_fixture(pattern, **options)
+                self.refused_claim_transfer(f"claim transfer with {label} is refused", vault,
+                                            expected=["could store a crash dump containing the claim", reason])
+                print(f"PASS claim transfer refused with {label}")
+        finally:
+            self.safe_crash_policy()
+
+    def safe_crash_policy(self):
+        """systemd-coredump with Storage=none: no dump is stored whatever the session's core limit."""
+        self.crash_fixture(self.SYSTEMD_COREDUMP, storage_none=True)
 
     def accepted_swap(self):
-        """zram without writeback and dm-crypt swap keep plaintext off disks and are accepted."""
+        """zram without writeback and dm-crypt swap keep plaintext off disks and are accepted.
+
+        Core files with a session core limit of 0 (the kernel writes nothing) are
+        accepted alongside, so the other accepted crash dump policy carries a real claim.
+        """
         self.swap_fixture([("/dev/zram0", "partition"), ("/dev/dm-0", "partition")],
                           sysfs={"zram0/backing_dev": "none", "dm-0/dm/uuid": "CRYPT-LUKS2-sf304fixture-swap"})
+        self.crash_fixture("core", limit_zero=True)
+        verdicts = self.classify()
+        assert all(v == {"swap": "ok", "crash": "ok"} for v in verdicts.values()), ("fixtures not accepted", verdicts)
 
     def no_swap(self):
         """The rest of the run behaves as a host with swap off."""
@@ -941,8 +1056,10 @@ class Harness:
         self.ansible("vault-encrypt one claim", "encrypt", "/chain/batch/enrollment/SN-0002/claim.key",
                      "--vault-password-file", "/work/vault-pass", tool="ansible-vault")
         vault = ["--vault-password-file", "/work/vault-pass"]
-        # The test machine's own swap would refuse every enrollment; see swap_refused.
+        # The test machine's own swap and crash handler would refuse every enrollment;
+        # see swap_refused and crash_refused.
         self.no_swap()
+        self.safe_crash_policy()
 
         _, recap = self.ansible("check mode on fresh hosts", "site.yml", "--check", "--diff", *vault)
         for name, host in self.hosts.items():
@@ -952,9 +1069,13 @@ class Harness:
         self.sudo_log_control()
         self.escalated_claim_transfer_refused(vault)
         self.swap_refused(vault)
+        self.crash_refused(vault)
         self.accepted_swap()
         self.interrupted_claim_transfer(vault)
         self.no_swap()
+        self.safe_crash_policy()
+        verdicts = self.classify()
+        assert all(v == {"swap": "ok", "crash": "ok"} for v in verdicts.values()), ("enrollment fixtures not accepted", verdicts)
         self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
