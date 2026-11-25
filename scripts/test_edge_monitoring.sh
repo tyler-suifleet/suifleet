@@ -19,6 +19,7 @@ extract() {
   chmod 0755 "$out/$target"
 }
 extract "$PROMETHEUS_IMAGE" /bin/prometheus prometheus
+extract "$PROMETHEUS_IMAGE" /bin/promtool promtool
 extract "$OTELCOL_IMAGE" /otelcol otelcol
 docker run --rm --user 0:0 -v "$PWD:/workspace" -w /workspace "$SUIFLEET_DEV_IMAGE" \
   cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples -j 2

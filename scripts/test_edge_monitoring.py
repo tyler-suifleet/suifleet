@@ -24,6 +24,10 @@ keys or gas:
                                 credential or log canary in any export
   bounded resources          -> adapter peak RSS, collector memory limiter and
                                 Prometheus retention bounds recorded
+  documented alert rules     -> the EDGE_MONITORING.md example rules pass
+                                promtool check/test against rising, falling
+                                and partial deployment-outcome samples, and
+                                stay silent on the live ingested series
 """
 import argparse
 import hashlib
@@ -45,6 +49,7 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / 'docs/EDGE_MONITORING.md'
 BINARY = ROOT / 'suifleet-edge/target/debug/suifleet'
 ADAPTER = ROOT / 'scripts/edge_monitoring.py'
 CANARY = 'hunter2-monitoring-secret'
@@ -169,12 +174,77 @@ def collector_records(path):
     return metrics, logs
 
 
+def documented_alert_rules():
+    """The YAML block following "Example alert rules:" in EDGE_MONITORING.md."""
+    text = DOCS.read_text()
+    start = text.index('Example alert rules:')
+    start = text.index('```yaml\n', start) + len('```yaml\n')
+    return text[start:text.index('```', start)]
+
+
+def documented_alert_expr(rules, alert):
+    """The expr of one alert in the documented rules (single-line or `|` block)."""
+    lines = rules.splitlines()
+    i = next(n for n, line in enumerate(lines) if line.strip() == f'- alert: {alert}')
+    expr = lines[i + 1].strip()
+    assert expr.startswith('expr:'), expr
+    expr = expr[len('expr:'):].strip()
+    if expr != '|':
+        return expr
+    indent = len(lines[i + 1]) - len(lines[i + 1].lstrip())
+    block = []
+    for line in lines[i + 2:]:
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        block.append(line.strip())
+    return ' '.join(x for x in block if x)
+
+
+def outcome_series(name, values, **labels):
+    labels = dict(job='suifleet-edge', instance='127.0.0.1:9469', evidence='simulated', device='d1', **labels)
+    return {'series': name + '{' + ','.join(f'{k}="{v}"' for k, v in sorted(labels.items())) + '}', 'values': values}
+
+
+def check_documented_alerts(promtool_bin, root):
+    """Evaluate the documented example rules with the real Prometheus rule engine."""
+    rules_file, tests_file = root / 'alerts.yml', root / 'alerts.test.yml'
+    rules_file.write_text(documented_alert_rules())
+    fired = [{'exp_labels': dict(job='suifleet-edge', instance='127.0.0.1:9469', evidence='simulated',
+                                 device='d1', outcome='failed')}]
+
+    def case(failed, truncated, expectations):
+        return {'interval': '1m', 'input_series': [
+                    outcome_series('suifleet_deployment_outcomes', failed, outcome='failed'),
+                    outcome_series('suifleet_deployment_outcomes', '1x30', outcome='applied'),
+                    outcome_series('suifleet_deployment_outcomes_truncated', truncated)],
+                'alert_rule_test': [{'eval_time': t, 'alertname': 'SuiFleetDeploymentFailed', 'exp_alerts': e}
+                                    for t, e in expectations]}
+    # YAML is a superset of JSON, so promtool reads this test file directly.
+    tests_file.write_text(json.dumps({'rule_files': [rules_file.name], 'evaluation_interval': '1m', 'tests': [
+        # A steady historical failure does not page; a new failure does, until the hour passes.
+        case('1x10 2x80', '0x90', [('5m', []), ('12m', fired), ('60m', fired), ('80m', [])]),
+        # A falling count (an entry leaves the journal or changes outcome) never pages;
+        # increase() would read this fall as a counter reset and fire.
+        case('3x10 2x10 1x10 0x10', '0x40', [('11m', []), ('25m', []), ('35m', [])]),
+        # A partial read lowers then restores the count: suppressed while any snapshot in the hour was partial.
+        case('5x10 3x10 5x10 5x60', '0x10 1x10 0x70', [('15m', []), ('25m', []), ('40m', []), ('85m', [])]),
+        # A partial read that happens to raise the count is suppressed too.
+        case('2x10 4x10', '0x10 1x10', [('15m', [])]),
+        # A real failure after the hour that contained a partial read fires again.
+        case('5x10 3x10 5x60 6x10', '0x10 1x10 0x70', [('85m', fired)]),
+    ]}))
+    for args in (['check', 'rules', str(rules_file)], ['test', 'rules', str(tests_file)]):
+        result = subprocess.run([str(Path(promtool_bin).resolve()), *args], capture_output=True, text=True, timeout=60, cwd=root)
+        assert result.returncode == 0, f'promtool {" ".join(args)} failed:\n{result.stdout}{result.stderr}'
+    print('PASS: documented alert rules pass promtool check/test (rising failure fires; falling, steady and partial counts stay silent)')
+
+
 def run(bin_dir, evidence_path):
-    prometheus_bin, otelcol_bin = bin_dir / 'prometheus', bin_dir / 'otelcol'
-    for path in (prometheus_bin, otelcol_bin, BINARY):
+    prometheus_bin, otelcol_bin, promtool_bin = bin_dir / 'prometheus', bin_dir / 'otelcol', bin_dir / 'promtool'
+    for path in (prometheus_bin, otelcol_bin, promtool_bin, BINARY):
         assert path.is_file() and os.access(path, os.X_OK), f'missing executable {path}'
     evidence = dict(ticket='SF-303', evidence_class='simulated', binaries={
-        p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (prometheus_bin, otelcol_bin)})
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (prometheus_bin, otelcol_bin, promtool_bin)})
     for name, binary in (('prometheus', prometheus_bin), ('otelcol', otelcol_bin)):
         version = subprocess.run([str(binary), '--version'], capture_output=True, text=True, timeout=30)
         evidence.setdefault('versions', {})[name] = (version.stdout or version.stderr).splitlines()[0]
@@ -228,6 +298,7 @@ def run(bin_dir, evidence_path):
     try:
         with tempfile.TemporaryDirectory(prefix='sf303-') as temporary:
             root = Path(temporary)
+            check_documented_alerts(promtool_bin, root)
             key = root / 'device.key'
             key.write_text('07' * 32)
             key.chmod(0o600)
@@ -407,6 +478,13 @@ def run(bin_dir, evidence_path):
                      'wrong scrape token was not refused', timeout=30)
             assert not ingested('suifleet_up{job="wrong-token"} == 1')
             print('PASS: real Prometheus ingested current health (healthy) and historical failure (1) with evidence="simulated"; wrong scrape token refused (401)')
+            failed_alert = documented_alert_expr(documented_alert_rules(), 'SuiFleetDeploymentFailed')
+            wait_for(lambda: ingested('count_over_time(suifleet_deployment_outcomes_truncated{job="suifleet-edge"}[1h]) >= 3'),
+                     'Prometheus did not ingest repeated outcome snapshots', processes['prometheus'], timeout=30)
+            # A plain query error would also return []: confirm the expression itself evaluates.
+            prometheus_query(prom_port, failed_alert)
+            assert not ingested(failed_alert), 'documented failure alert fired on a steady historical failure'
+            print('PASS: documented SuiFleetDeploymentFailed expression evaluates on the live series and stays silent on a steady historical failure')
 
             # OTLP: metrics and redacted logs reach the real collector.
             def delivered():

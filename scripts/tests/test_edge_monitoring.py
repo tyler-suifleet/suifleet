@@ -1921,5 +1921,30 @@ class SetupDeadlineTests(Base):
         self.assertIsInstance(data, dict)
 
 
+class DocumentedAlertTests(unittest.TestCase):
+    """Offline guard for the example alert rules; the real-server harness
+    evaluates them with promtool against rising, falling and partial samples."""
+
+    def failed_alert_expr(self):
+        text = (Path(__file__).resolve().parents[2] / "docs/EDGE_MONITORING.md").read_text()
+        start = text.index("```yaml\n", text.index("Example alert rules:")) + len("```yaml\n")
+        rules = text[start:text.index("```", start)]
+        after = rules[rules.index("- alert: SuiFleetDeploymentFailed"):]
+        nxt = after.find("- alert:", 1)
+        return after if nxt < 0 else after[:nxt]
+
+    def test_outcomes_are_exported_as_a_gauge(self):
+        # A gauge can fall; counter functions would read a fall as a reset.
+        source = Path(em.__file__).read_text()
+        self.assertIn('m("suifleet_deployment_outcomes", "gauge"', source)
+
+    def test_failed_alert_avoids_counter_functions_and_guards_partial_reads(self):
+        expr = self.failed_alert_expr()
+        for function in ("increase(", "rate(", "irate(", "resets("):
+            self.assertNotIn(function, expr)
+        self.assertIn("min_over_time(suifleet_deployment_outcomes{outcome=\"failed\"}[1h])", expr)
+        self.assertIn("max_over_time(suifleet_deployment_outcomes_truncated[1h]) == 0", expr)
+
+
 if __name__ == "__main__":
     unittest.main()
