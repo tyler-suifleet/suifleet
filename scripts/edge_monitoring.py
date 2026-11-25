@@ -444,7 +444,8 @@ class Console:
             raise ConsoleError("too-large")
         try:
             parsed = json.loads(data)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # RecursionError: deeply nested arrays/objects within the size limit.
             raise ConsoleError("malformed") from None
         if not isinstance(parsed, dict) or parsed.get("version") != 1:
             raise ConsoleError("malformed")

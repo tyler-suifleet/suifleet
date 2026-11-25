@@ -73,6 +73,7 @@ class FakeConsole:
         self.requests = []
         self.status = None
         self.truncate = []          # queued HTTP statuses answered with a truncated body
+        self.raw = None             # verbatim 200 response body, when set
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
         self.server = server
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -94,6 +95,8 @@ class FakeConsole:
                 fake.requests.append((dict(self.headers), body))
                 if fake.truncate:
                     return send_truncated(self, fake.truncate.pop(0))
+                if fake.raw is not None:
+                    return self.send_raw(fake.raw)
                 if self.headers.get("Authorization") != "Bearer " + CONSOLE_TOKEN:
                     return self.reply(401, dict(version=1, status="unauthenticated"))
                 if fake.status:
@@ -116,6 +119,12 @@ class FakeConsole:
                 else:
                     return self.reply(403, dict(version=1, status="denied"))
                 self.reply(200, dict(version=1, status="ok", data=data))
+
+            def send_raw(self, data):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
 
             def reply(self, status, value):
                 data = json.dumps(value).encode()
@@ -628,6 +637,21 @@ class AdapterTests(Base):
         self.assertNotIn("suifleet_daemon_info", names_of(sent[1]))
         info = names_of(sent[2])["suifleet_daemon_info"]["gauge"]["dataPoints"][0]["attributes"]
         self.assertIn({"key": "version", "value": {"stringValue": "0.3.0"}}, info)
+
+    def test_deeply_nested_console_reply_is_malformed_and_recovers(self):
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+        depth = 20000                           # about 40 KiB, inside the console size limit
+        self.console.raw = (b'{"version":1,"status":"ok","data":{"health":' + b"[" * depth + b"]" * depth + b"}}")
+        self.assertFalse(exporter.poll(console))
+        self.assertEqual(exporter.polls["malformed"], 1)
+        text = exporter.render_prometheus().decode()
+        self.assertIn('suifleet_up{evidence="simulated",device="sim-1"} 0', text)
+        self.assertNotIn("suifleet_device_healthy", text)
+        self.console.raw = None
+        self.assertTrue(exporter.poll(console))
+        self.assertIn('suifleet_device_healthy{evidence="simulated",device="sim-1"} 0',
+                      exporter.render_prometheus().decode())
 
     def test_wrong_console_token_counts_unauthenticated(self):
         cfg, exporter, _ = self.make()
