@@ -328,7 +328,7 @@ class RecipeTests(unittest.TestCase):
     def test_images_install_the_codec(self):
         image = (ROOT/'suifleet-edge/meta-suifleet-integration/recipes-core/images/suifleet-pi-image.bb').read_text()
         self.assertIn(' suifleet-walrus-codec ', image)
-        for profile in ['packaging-qemu.yml', 'packaging-wrynose-qemu.yml']:
+        for profile in ['packaging-qemu.yml', 'packaging-wrynose-qemu.yml', 'packaging-kirkstone-qemu.yml']:
             self.assertIn(' suifleet-walrus-codec ', (ROOT/'kas'/profile).read_text(), profile)
 
     def test_daemon_pins_are_immutable_and_consistent(self):
