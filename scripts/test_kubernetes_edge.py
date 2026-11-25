@@ -1186,14 +1186,16 @@ def scenario(cluster, work, supervisor):
     cluster.admin("delete", "configmap", web_config, "-n", NAMESPACE, "--wait=true")
     cluster.admin("create", "-f", "-", stdin=json.dumps({
         "apiVersion": "v1", "kind": "ConfigMap", "immutable": True, "data": {"index.html": "<p>forged</p>\n"},
-        "metadata": {"name": web_config, "namespace": NAMESPACE, "labels": forged["metadata"]["labels"]}}))
+        "metadata": {"name": web_config, "namespace": NAMESPACE, "labels": forged["metadata"]["labels"],
+                     "annotations": forged["metadata"]["annotations"]}}))
     before = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
     result = helper("apply", profiles, v1)
     after = cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "jsonpath={.metadata.resourceVersion}").stdout
     check("apply refuses a content-addressed ConfigMap whose content differs from its name before writing anything",
           result.returncode == 2 and "differs from the content its name denotes" in result.stderr and before == after
           and cluster.admin("get", "configmap", "kept", "-n", NAMESPACE, ok=False).returncode == 0, result.stderr)
-    result = helper("ready", profiles, v1)
+    # The forged copy carries the markers of kept_v1, the last bundle applied.
+    result = helper("ready", profiles, kept_v1)
     check("readiness rejects the forged content-addressed ConfigMap",
           result.returncode == 1 and f"ConfigMap/{web_config} content differs" in result.stderr, result.stderr)
     cluster.admin("delete", "configmap", web_config, "-n", NAMESPACE, "--wait=true")
