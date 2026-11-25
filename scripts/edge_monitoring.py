@@ -706,7 +706,7 @@ class Exporter:
         for outcome in ("applied", "failed", "indeterminate", "pending"):
             outcomes.add(s["outcomes"][outcome], outcome=outcome)
         m("suifleet_deployment_outcomes_unreported", "gauge", "Historical: terminal journal outcomes whose receipt is not yet reported on chain.").add(s["outcomes_unreported"])
-        m("suifleet_deployment_outcomes_truncated", "gauge", f"1 when the journal holds more than {MAX_DEPLOYMENT_PAGES * 100} deployments and counts are partial.").add(int(s["outcomes_truncated"]))
+        m("suifleet_deployment_outcomes_truncated", "gauge", f"1 when the bounded journal read ({MAX_DEPLOYMENT_PAGES} pages of up to 100 entries) ends with entries left uncounted, so counts are partial.").add(int(s["outcomes_truncated"]))
         return out
 
     # --- poll

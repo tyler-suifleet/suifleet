@@ -807,8 +807,15 @@ class AdapterTests(Base):
         self.assertTrue(exporter.snapshot["outcomes_truncated"])
         calls = [body for _, body in self.console.requests if body["operation"] == "deployments"]
         self.assertLessEqual(len(calls), em.MAX_DEPLOYMENT_PAGES + len(em.PAGE_LIMITS) - 1)
-        self.assertIn('suifleet_deployment_outcomes_truncated{evidence="simulated",device="sim-1"} 1',
-                      exporter.render_prometheus().decode())
+        text = exporter.render_prometheus().decode()
+        self.assertIn('suifleet_deployment_outcomes_truncated{evidence="simulated",device="sim-1"} 1', text)
+        # 1,000 entries read through smaller pages is still truncated, so the
+        # description must name the bounded read, not a journal size.
+        self.assertIn("# HELP suifleet_deployment_outcomes_truncated 1 when the bounded journal read "
+                      f"({em.MAX_DEPLOYMENT_PAGES} pages of up to 100 entries) ends with entries left uncounted", text)
+        self.assertNotIn("holds more than", text)
+        otlp = {m["name"]: m for m in exporter.otlp_metrics()["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]}
+        self.assertIn("bounded journal read", otlp["suifleet_deployment_outcomes_truncated"]["description"])
 
     def test_page_refused_at_every_size_fails_the_poll_boundedly(self):
         cfg, exporter, console = self.make()
