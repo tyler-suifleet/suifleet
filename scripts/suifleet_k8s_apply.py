@@ -88,6 +88,7 @@ DEFAULT_PROFILE_ROOT = "/etc/suifleet/k8s"
 KUBECTL_TIMEOUT = 60  # process limit per kubectl call (seconds)
 REQUEST_TIMEOUT = 30  # kubectl --request-timeout per API request (seconds)
 WRITE_ATTEMPTS = 8
+MIN_RUN_INTERVAL = 1.0  # run: shortest accepted pause between reconciliations (seconds)
 
 # (apiVersion, kind) -> kubectl resource name used for get/list/prune.
 ALLOWED_KINDS = {
@@ -1109,17 +1110,19 @@ def main(argv=None):
     parser.add_argument("--component", default=os.environ.get("SUIFLEET_COMPONENT"))
     parser.add_argument("--version", default=os.environ.get("SUIFLEET_COMPONENT_VERSION", ""))
     parser.add_argument("--interval", type=float, default=30.0,
-                        help="run: seconds between reconciliations; must be finite and greater than 0")
+                        help=f"run: seconds between reconciliations; must be finite and at least {MIN_RUN_INTERVAL:g}")
     parser.add_argument("--timeout", type=float, default=300.0,
                         help="remove: seconds to wait, after the deletes are issued, for the objects (and their Pods) to disappear; polling API calls are cut off at this deadline; must be finite and 0 or greater")
     args = parser.parse_args(argv)
     try:
         # Reject unusable pacing before any profile, connection or write: a
-        # zero, negative or NaN interval would re-apply with no pause, and an
-        # infinite or NaN timeout cannot bound the removal wait.
+        # zero, negative, NaN or tiny interval (one below the monotonic
+        # clock's resolution adds nothing to a large reading) would re-apply
+        # with no real pause, and an infinite or NaN timeout cannot bound the
+        # removal wait.
         if args.command == "run":
-            _require(math.isfinite(args.interval) and args.interval > 0,
-                     "--interval must be a finite number of seconds greater than 0")
+            _require(math.isfinite(args.interval) and args.interval >= MIN_RUN_INTERVAL,
+                     f"--interval must be a finite number of seconds, at least {MIN_RUN_INTERVAL:g}")
         if args.command == "remove":
             _require(math.isfinite(args.timeout) and args.timeout >= 0,
                      "--timeout must be a finite number of seconds, 0 or greater")
@@ -1151,9 +1154,13 @@ def main(argv=None):
                 _log(f"applied {len(objects)} objects to {profile['namespace']}" + (f"; pruned {removed}" if removed else ""))
                 if args.command == "apply":
                     return 0
+                # Always pause at least once, so a reconciliation is never
+                # issued back to back even if the clock does not advance.
                 deadline = time.monotonic() + args.interval
-                while not stopping and time.monotonic() < deadline:
-                    time.sleep(min(0.2, args.interval))
+                while not stopping:
+                    time.sleep(0.2)
+                    if time.monotonic() >= deadline:
+                        break
                 if stopping:
                     return 0
     except Conflict as error:

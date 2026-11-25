@@ -1329,7 +1329,7 @@ class CliTest(unittest.TestCase):
             self.addCleanup(patch.stop)
         common = ["--component", "web", "--profile", "edge"]
         run = ["run", "--bundle", str(EXAMPLE)] + common
-        for interval in ("0", "-1", "-0", "nan", "inf", "-inf"):
+        for interval in ("0", "-1", "-0", "nan", "inf", "-inf", "1e-20", "0.5", "0.999"):
             calls.clear()
             self.assertEqual(k8s.main(run + ["--interval=" + interval]), 2, interval)
             self.assertEqual(calls, [], interval)
@@ -1343,11 +1343,48 @@ class CliTest(unittest.TestCase):
         self.assertEqual(k8s.main(["remove"] + common + ["--timeout", "0"]), 0)
         self.assertEqual(calls, ["load_profile", "connect", "remove"])
         calls.clear()
-        self.assertEqual(k8s.main(run + ["--interval", "0.5"]), 3)
+        self.assertEqual(k8s.main(run + ["--interval", "1"]), 3)
         self.assertEqual(calls, ["load_profile", "connect", "apply"])
         calls.clear()
         self.assertEqual(k8s.main(["apply", "--bundle", str(EXAMPLE)] + common + ["--interval", "0"]), 3)
         self.assertEqual(calls, ["load_profile", "connect", "apply"])
+
+    def test_run_pauses_between_successful_reconciliations(self):
+        events = []
+        clock = [1000000.0]
+
+        def fake_apply(*args, **kwargs):
+            events.append(("apply", clock[0]))
+            if len([e for e in events if e[0] == "apply"]) == 3:
+                raise k8s.Conflict("stop the loop")
+            return 0
+
+        def fake_sleep(seconds, advance):
+            events.append(("sleep", seconds))
+            clock[0] += advance
+
+        common = ["run", "--bundle", str(EXAMPLE), "--component", "web", "--profile", "edge"]
+        with mock.patch.object(k8s, "load_profile", return_value={"namespace": "suifleet-edge"}), \
+                mock.patch.object(k8s, "connect", return_value=object()), \
+                mock.patch.object(k8s, "apply", fake_apply), \
+                mock.patch.object(k8s.time, "monotonic", lambda: clock[0]):
+            # A frozen clock still sleeps after every successful apply; the
+            # minimum interval keeps the deadline above the clock resolution.
+            with mock.patch.object(k8s.time, "sleep", lambda s: fake_sleep(s, 0.0 if len(events) < 4 else 1.0)):
+                self.assertEqual(k8s.main(common + ["--interval", "1"]), 3)
+            kinds = [kind for kind, _ in events]
+            self.assertEqual(kinds[0], "apply")
+            for first, second in zip(kinds, kinds[1:]):
+                self.assertFalse(first == second == "apply", kinds)
+            # An advancing clock waits the whole interval between applies.
+            events.clear()
+            with mock.patch.object(k8s.time, "sleep", lambda s: fake_sleep(s, s)):
+                self.assertEqual(k8s.main(common + ["--interval", "2"]), 3)
+            applies = [at for kind, at in events if kind == "apply"]
+            self.assertEqual(len(applies), 3)
+            for earlier, later in zip(applies, applies[1:]):
+                self.assertGreaterEqual(later - earlier, 2.0)
+            self.assertTrue(all(seconds > 0 for kind, seconds in events if kind == "sleep"))
 
 
 if __name__ == "__main__":
