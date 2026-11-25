@@ -97,7 +97,11 @@ self-reported health do not.
 across `not_sent` failures (daemon restarting) until its `signal` aborts. For
 QoS 1, acknowledge each delivery before pulling the next one; an unacknowledged
 message is delivered again, including after a restart (at-least-once). Volatile
-inbox and QoS 0 reads are destructive.
+inbox and QoS 0 reads are destructive. Aborting the `signal` while the
+iterator is idle or before a `receive` is sent ends the iteration normally.
+Aborting while a `receive` is in flight throws that request's `TransportError`
+with outcome `unknown` instead, because the daemon may already have removed a
+volatile or QoS 0 message from the queue.
 
 ### Bounded buffering
 
@@ -163,7 +167,7 @@ reboots the platform or asserts firmware/boot health; platform tools own those.
 
 | Command | What it runs |
 |---|---|
-| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, iterator ack, buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, `null` configuration. |
+| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, abort, chunking/resume, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, `null` configuration. |
 | `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; `null` configuration before the first install handled by the sensor example; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
 
 Fake-peer unit tests establish client framing and classification only; the
