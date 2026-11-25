@@ -7,11 +7,13 @@ writes the input image or a physical device. Guest networking is disabled.
 
 --extended (SF-309) additionally records the guest kernel/systemd versions,
 rejects any systemd parse diagnostic for the SuiFleet units (an unknown
-directive is silently ignored, weakening the sandbox), runs the packaged Node
-runtime when installed, switches the device to
-the isolated signing service and checks key ownership/activation, and applies
-the harmless SF-030 test component with the packaged test updater. It needs
-suifleet-test-component in the image. It is emulation evidence only.
+directive is silently ignored, weakening the sandbox), requires and runs the
+packaged Node runtime, switches the device to the isolated signing service,
+checks key ownership, activates the service by a local socket connection and
+verifies harmless requests (address answer, refused signature, unknown op), and
+applies the harmless SF-030 test component with the packaged test updater. It
+needs suifleet-walrus-codec and suifleet-test-component in the image (both are
+in the QEMU profiles). It is emulation evidence only and sends no transaction.
 """
 import argparse
 import base64
@@ -161,17 +163,65 @@ def guest_value(guest, label, shell):
     return guest.expect(label.encode() + rb":([^\r\n]*):END")[1].decode()
 
 
+# One request per run over the activation socket; prints the response line.
+SIGNER_CLIENT = b'''const net = require("net");
+const requests = { address: { op: "address" }, sign: { op: "sign", tx: "AA==" }, unknown: { op: "sf309-unknown" } };
+const [path, name] = process.argv.slice(2);
+if (!requests[name]) { console.error("unknown probe " + name); process.exit(5); }
+const socket = net.createConnection(path);
+let data = "";
+socket.setTimeout(120000, () => { console.error("signer response timeout"); process.exit(2); });
+socket.on("connect", () => socket.write(JSON.stringify(requests[name]) + "\\n"));
+socket.on("data", (chunk) => {
+  data += chunk;
+  const end = data.indexOf("\\n");
+  if (end >= 0) { process.stdout.write("RESPONSE " + data.slice(0, end) + "\\n"); socket.destroy(); process.exit(0); }
+});
+socket.on("error", (error) => { console.error(error.message); process.exit(3); });
+socket.on("end", () => { console.error("signer closed without a response"); process.exit(4); });
+'''
+
+# Activation by connection, then verified responses. The probe runs as the
+# daemon user but is not the recorded daemon main process, so signatures are
+# refused (on old kernels without SO_PEERPIDFD the caller check uses the /proc
+# fallback; see SF-292). No transaction bytes are signed.
+SIGNER_REQUESTS = (
+    "probe() { su -s /bin/sh suifleet -c \"/usr/lib/suifleet/node/bin/node /tmp/sf309-signer.js "
+    "/run/suifleet-signer/sign.sock $1\"; }; "
+    "out=$(probe address); echo \"$out\"; "
+    "test \"$out\" = \"RESPONSE {\\\"address\\\":\\\"$(cat /etc/suifleet/device.address)\\\"}\"; "
+    "systemctl is-active --quiet suifleet-signer.service; "
+    "test $(systemctl show -p User --value suifleet-signer.service) = suifleet-signer; "
+    "journalctl -u suifleet-signer.service --no-pager | grep -q 'Device signing service ready'; "
+    "out=$(probe sign); echo \"$out\"; "
+    "case \"$out\" in 'RESPONSE {\"error\":\"caller pid '*' may not request signatures '*) ;; *) exit 1;; esac; "
+    "out=$(probe unknown); echo \"$out\"; "
+    "test \"$out\" = 'RESPONSE {\"error\":\"unknown request\"}'; "
+    "journalctl -u suifleet-signer.service --no-pager | grep -q 'Signing request refused'; "
+    "rm -f /tmp/sf309-signer.js"
+)
+
+
 def extended_checks(guest):
     """Signer, unit-parse and harmless-update checks for an advertised runtime profile."""
     kernel = guest_value(guest, "KERNEL", "uname -r")
     systemd = guest_value(guest, "SYSTEMD", "systemctl --version | sed -n 1p")
     print(f"INFO: guest kernel {kernel}; {systemd}", flush=True)
     # systemd logs "unit:LINE: ..." for unknown keys/values it then ignores.
-    guest.command("if journalctl -b --no-pager | grep -E 'suifleet[a-z-]*\\.(service|socket|path):[0-9]+: '; "
-                  "then exit 1; fi")
+    # Capture the journal with its exit status checked, then require grep's
+    # clean no-match status (1): a match (0) or a grep error (2) both fail.
+    # The daemon's offline-retry line (checked above) proves the capture
+    # includes SuiFleet unit output.
+    guest.command("journal=/tmp/sf309-journal; journalctl -b --no-pager > $journal || { "
+                  "echo 'journalctl failed'; exit 1; }; "
+                  "grep -q 'currently unavailable: tcp connect error' $journal || { "
+                  "echo \"journal capture lacks SuiFleet output ($(wc -l < $journal) lines)\"; exit 1; }; "
+                  "rc=0; grep -E 'suifleet[a-z-]*\\.(service|socket|path):[0-9]+: ' $journal || rc=$?; "
+                  "rm -f $journal; test $rc -eq 1 || { echo \"parse diagnostic scan status $rc\"; exit 1; }")
     print("PASS: no systemd parse diagnostics for SuiFleet units", flush=True)
     # The prebuilt archive runtime must load against this image's glibc/libstdc++.
-    guest.command("node=/usr/lib/suifleet/node/bin/node; test -e $node || exit 0; "
+    # Node is required: the extended profile installs the codec, which needs it.
+    guest.command("node=/usr/lib/suifleet/node/bin/node; test -x $node; "
                   "test \"$($node --version)\" = v$(sed -n 's/.*\"node\": *\"\\([0-9.]*\\)\".*/\\1/p' "
                   "/usr/lib/suifleet/walrus-codec/manifest.json); "
                   "$node -e 'process.exit(require(\"fs\").existsSync(process.argv[1]) ? 0 : 1)' "
@@ -199,7 +249,8 @@ def extended_checks(guest):
     print("PASS: test updater installs, refuses a malformed artifact and upgrades as the daemon user", flush=True)
 
     # Isolated signer: the key moves to suifleet-signer and the daemon user
-    # loses read access; the socket-activated service starts and is ready.
+    # loses read access; a local connection activates the service, which
+    # answers harmless requests.
     manifest = json.loads((Path(__file__).resolve().parents[1] /
                            "manifests/fixture.localnet.json").read_text())
     manifest["rpc_url"] = "http://127.0.0.1:9000"
@@ -223,6 +274,7 @@ command = "/usr/bin/false"
 state_dir = "/var/lib/suifleet"
 poll_seconds = 1
 ''')
+    guest.put("/tmp/sf309-signer.js", SIGNER_CLIENT)
     guest.command("key_hash=$(sha256sum /etc/suifleet/device.key | cut -d' ' -f1); "
                   "chown root:suifleet-signer /etc/suifleet/signer.toml; chmod 640 /etc/suifleet/signer.toml; "
                   "chown root:suifleet /etc/suifleet/deployment.json /etc/suifleet/config.toml.new; "
@@ -236,15 +288,12 @@ poll_seconds = 1
                   "if su -s /bin/sh suifleet -c 'cat /etc/suifleet/device.key' >/dev/null 2>&1; then exit 1; fi; "
                   "systemctl is-active --quiet suifleet-signer.socket; "
                   "test $(stat -c %U:%G:%a /run/suifleet-signer/sign.sock) = suifleet-signer:suifleet:660; "
-                  "systemctl start suifleet-signer.service; "
-                  "attempt=0; until journalctl -u suifleet-signer.service --no-pager | grep -q 'Device signing service ready'; do "
-                  "attempt=$((attempt + 1)); test $attempt -lt 60 || { "
-                  "systemctl status suifleet-signer.service --no-pager || :; "
-                  "journalctl -u suifleet-signer.service --no-pager; exit 1; }; sleep 1; done; "
-                  "systemctl is-active --quiet suifleet-signer.service; "
-                  "test $(systemctl show -p User --value suifleet-signer.service) = suifleet-signer; "
-                  "journalctl -u suifleet-signer.service --no-pager | grep -q \"$(cat /etc/suifleet/device.address)\"", timeout=240)
-    print("PASS: service signer owns the unchanged key, daemon user cannot read it, socket-activated signer is ready", flush=True)
+                  "if systemctl is-active --quiet suifleet-signer.service; then exit 1; fi; "
+                  "chmod 644 /tmp/sf309-signer.js; "
+                  + SIGNER_REQUESTS, timeout=240)
+    print("PASS: service signer owns the unchanged key, daemon user cannot read it; a socket connection "
+          "activated the signer, which answered the device address, refused a non-daemon signature and an "
+          "unknown op", flush=True)
     # Return to the legacy unenrolled state for the next boot.
     guest.command("systemctl stop suifleet-signer.service suifleet.service; "
                   "rm /etc/suifleet/config.toml /etc/suifleet/deployment.json /etc/suifleet/signer.toml; "
