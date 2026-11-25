@@ -1,11 +1,15 @@
 ---
 # A crash dump of a process holding the claim (Ansible's module, cat,
 # runuser, suifleet --enroll) is a copy of its memory. Before any claim is
-# read, the host must not be able to store one:
+# read, /proc/sys/kernel/core_pattern must be served by the kernel's procfs
+# sysctl (not a file or other entry bind-mounted over it) and the host must
+# not be able to store one:
 #
 #   - kernel.core_pattern pipes to systemd-coredump and the SSH session's
-#     core dump size limit is 0 (systemd-coredump honors the crashing
-#     process's RLIMIT_CORE) or coredump.conf sets both Storage=none and
+#     core dump size limit is 0 with the pattern's arguments starting
+#     "%P %u %g %s %t %c" (systemd-coredump honors the crashing process's
+#     RLIMIT_CORE, which it reads only from that %c) or coredump.conf sets
+#     both Storage=none and
 #     ProcessSizeMax=0 (with Storage=none alone it may still write the dump
 #     to disk while processing it). Only assignments in a [Coredump]
 #     section count, each file starts outside any section and the last
@@ -16,6 +20,9 @@
 #   - kernel.core_pattern pipes to false/true (nothing is kept); or
 #   - kernel.core_pattern names a file and the SSH session's limit is 0 (the
 #     kernel writes nothing).
+#
+# Socket collectors (@path, @@path) receive the dump whatever the limit and
+# are refused.
 #
 # Handlers are identified by full path, not name: systemd-coredump must be
 # /usr/lib/systemd/systemd-coredump or /lib/systemd/systemd-coredump and

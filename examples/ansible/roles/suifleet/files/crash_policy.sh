@@ -27,10 +27,38 @@ host_view() {
   [ "$init" = "$(cat /proc/self/mountinfo 2>/dev/null)" ] \
     || v unsafe "this session's mounts or root differ from init's, so the piped crash handler $h, which the kernel runs in the host's view, cannot be verified"
 }
+# The pattern is read from /proc/sys/kernel/core_pattern only once that path
+# is shown to be the kernel's sysctl: the mount serving it (the deepest mount
+# point containing it, the last such when stacked) must be a procfs whose
+# file there is /sys/kernel/core_pattern. A file, another filesystem or another
+# procfs entry bind-mounted over it (an isolated view can mask the
+# machine-wide pattern this way) is refused, as is an unreadable mount table.
+kernel_pattern() {
+  t=/proc/sys/kernel/core_pattern
+  src=$(LC_ALL=C awk -v t="$t" '
+    BEGIN { best = -1 }
+    {
+      split($0, h, " - "); split(h[2], f, " "); mp = $5
+      if (mp == "/") rel = t
+      else if (t == mp) rel = ""
+      else if (index(t, mp "/") == 1) rel = substr(t, length(mp) + 1)
+      else next
+      if (length(mp) >= best) { best = length(mp); fs = f[1]; root = ($4 == "/" ? "" : $4); r = rel }
+    }
+    END { if (best < 0) exit 1; print fs " " root r }' /proc/self/mountinfo 2>/dev/null) \
+    || v unsafe "the mount serving $t could not be determined, so kernel.core_pattern cannot be verified as the kernel's"
+  [ "$src" = 'proc /sys/kernel/core_pattern' ] \
+    || v unsafe "$t is not the kernel's sysctl (it is served by ${src:-nothing}), so the effective kernel.core_pattern cannot be verified"
+}
 lim=$(ulimit -c) || v unsafe "the core dump size limit could not be read"
+kernel_pattern
 pat=$(cat /proc/sys/kernel/core_pattern) || v unsafe "kernel.core_pattern could not be read"
 printf 'CORE limit=%s pattern=%s\n' "$lim" "$pat"
 case $pat in
+  '@'*)
+    # Linux 6.17 and later connect to a socket collector ("@path" or "@@path")
+    # with an unlimited dump size whatever the limit; it may keep the dump.
+    v unsafe "core dumps are sent to a socket collector ($pat), which receives them whatever the size limit" ;;
   '|'*)
     # The kernel runs a piped handler whatever the limit; only handlers known
     # to store nothing, or to honor the crashing process's limit, are safe.
@@ -66,11 +94,23 @@ case $pat in
     case $kind in
       discard) host_view; v ok ;;
       systemd-coredump)
-        # systemd-coredump stores nothing for a process whose limit is 0.
+        # systemd-coredump stores nothing for a process whose limit is 0, but
+        # it learns that limit only from its sixth argument, which the kernel
+        # fills from %c (the kernel itself pipes the dump whatever the limit).
+        # Every supported version's pattern starts "%P %u %g %s %t %c"; any
+        # other arguments (a literal limit, a reordered or missing %c) mean the
+        # handler may not see the actual limit, so the limit counts for
+        # nothing and the configuration must disable storage by itself.
         # Otherwise it disables all dump processing and storage only with
         # both Storage=none and ProcessSizeMax=0: with Storage=none alone it
         # may still write the dump to disk temporarily while processing it.
-        [ "$lim" = 0 ] && { host_view; v ok; }
+        set -f; set -- ${pat#|}; set +f
+        args="$2 $3 $4 $5 $6 $7"
+        if [ "$args" = '%P %u %g %s %t %c' ]; then
+          [ "$lim" = 0 ] && { host_view; v ok; }
+        elif [ "$lim" = 0 ]; then
+          lim="0, which the handler does not receive (its arguments start '$args', not '%P %u %g %s %t %c')"
+        fi
         conf=$(systemd-analyze cat-config systemd/coredump.conf 2>/dev/null) \
           || v unsafe "systemd-coredump's configuration could not be read and the core dump size limit is $lim"
         # Resolve the effective [Coredump] values as systemd does: only
