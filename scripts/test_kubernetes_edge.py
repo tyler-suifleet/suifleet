@@ -51,7 +51,9 @@ ServiceAccount credential:
   rollback fits and converges. After a prune deletes two ConfigMaps and then
   fails (a test admission policy denies the third delete), another bundle is
   refused before any write and the rollback recreates them within the full
-  quota. A failed update that
+  quota. The same holds while an update that replaced a Deployment name still
+  waits for the old Deployment's foreground deletion (a finalizer holds its
+  Pod), and after that deletion completes. A failed update that
   omits a stable ConfigMap keeps it with its data; a successful one prunes it.
 - A bundle with an immutable ConfigMap is rejected offline, and a live owned
   stable-name ConfigMap made immutable out of band (or a content-addressed one
@@ -1371,6 +1373,63 @@ def scenario(cluster, work, supervisor):
     result = helper("apply", profiles, quota[4], component="quota-app", version="5.0.0")
     check("the update then applies and prunes completely", result.returncode == 0, result.stderr[-500:])
     wait_ready(profiles, quota[4], "5.0.0", component="quota-app")
+
+    # Review 4652: an update that replaces a Deployment name prunes the old
+    # Deployment with foreground deletion. While a finalizer holds its Pod it
+    # stays terminating after quota-v5's ConfigMaps are gone, so the
+    # namespace still holds two bundles: another bundle is refused before any
+    # write, and the rollback can recreate quota-v5's ConfigMaps within the
+    # full quota.
+    renamed = quota_bundle(work, "quota-v6", "q6")
+    bundle = json.loads(renamed.read_text())
+    app = next(item for item in bundle["resources"] if item["metadata"]["name"] == "quota-app")
+    app["metadata"]["name"] = "quota-next"
+    app["metadata"]["labels"] = app["spec"]["selector"]["matchLabels"] = \
+        app["spec"]["template"]["metadata"]["labels"] = {"app": "quota-next"}
+    renamed.write_text(json.dumps(bundle))
+
+    def quota_app_pods():
+        listed = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=quota-app", "-o", "json").stdout)
+        return [item["metadata"]["name"] for item in listed["items"]]
+
+    held_pods = [pod for pod in quota_app_pods() if cluster.admin(
+        "patch", "pod", pod, "-n", NAMESPACE, "--type=merge",
+        "-p", '{"metadata":{"finalizers":["example.com/hold"]}}', ok=False).returncode == 0]
+    check("a live quota-app Pod is held before the Deployment-replacing update", bool(held_pods), str(held_pods))
+    result = helper("apply", profiles, renamed, component="quota-app", version="6.0.0")
+    old_app = json.loads(cluster.admin("get", "deployment", "quota-app", "-n", NAMESPACE, "-o", "json",
+                                       ok=False).stdout or "null")
+    check("the Deployment-replacing update prunes quota-v5, leaving quota-app terminating",
+          result.returncode == 0 and "deployments.apps/quota-app" in result.stderr and old_app is not None
+          and old_app["metadata"].get("deletionTimestamp")
+          and not {published(quota[4], f"quota-{index}") for index in range(publisher.MAX_CONFIGMAPS)} & set(configmaps()),
+          result.stderr[-500:])
+    result = helper("ready", profiles, renamed, component="quota-app", version="6.0.0")
+    check("the Deployment-replacing update is not ready while quota-app terminates",
+          result.returncode == 1 and "deployments.apps/quota-app not yet pruned" in result.stderr, result.stderr[-500:])
+    before = configmaps()
+    result = helper("apply", profiles, quota[2], component="quota-app", version="3.0.0")
+    check("a third bundle is refused before any write while the pruned Deployment terminates",
+          result.returncode == 2 and "not converged" in result.stderr and configmaps() == before,
+          result.stderr[-800:])
+    result = helper("apply", profiles, quota[4], component="quota-app", version="5.0.0")
+    check("the rollback recreates quota-v5's ConfigMaps within the full quota, then waits for quota-app's deletion",
+          result.returncode == 2 and "being deleted" in result.stderr
+          and len(configmaps()) == 2 + 2 * publisher.MAX_CONFIGMAPS, f"{result.stderr[-500:]} {configmaps()}")
+    for pod in held_pods:
+        cluster.admin("patch", "pod", pod, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}')
+    wait("the replaced quota-app Deployment's deletion to complete",
+         lambda: cluster.admin("get", "deployment", "quota-app", "-n", NAMESPACE, ok=False).returncode != 0,
+         timeout=180, interval=2)
+    result = helper("apply", profiles, quota[2], component="quota-app", version="3.0.0")
+    check("after the deletion completes the namespace still holds two bundles and a third is refused",
+          result.returncode == 2 and "not converged" in result.stderr, result.stderr[-800:])
+    result = helper("apply", profiles, quota[4], component="quota-app", version="5.0.0")
+    check("the rollback then converges and prunes the replacing update",
+          result.returncode == 0 and "deployments.apps/quota-next" in result.stderr, result.stderr[-800:])
+    wait_ready(profiles, quota[4], "5.0.0", component="quota-app")
+    check("the rollback restored quota-v5 with one bundle of ConfigMaps",
+          len(configmaps()) == 2 + publisher.MAX_CONFIGMAPS, str(configmaps()))
     check("quota test component retires",
           helper("apply", profiles, retire_config, component="quota-app").returncode == 0)
     wait_ready(profiles, retire_config, "1.0.0", component="quota-app")
