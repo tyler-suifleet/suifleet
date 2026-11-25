@@ -100,6 +100,15 @@ test('unsupported, malformed and oversize responses are protocol errors with unk
     'not json\n',
     { version: 1, data: 1 },
     { version: 1, ok: true },
+    { version: 1, ok: false },
+    { version: 1, ok: false, error: null },
+    { version: 1, ok: false, error: 7 },
+    { version: 1, ok: false, error: '' },
+    { version: 1, ok: false, error: { code: 'request_failed' } },
+    { version: 1, ok: false, error: 'evicted', oldest: 'x' },
+    { version: 1, ok: false, error: 'evicted', oldest: -1 },
+    { version: 1, ok: false, error: 'evicted', oldest: 1.5 },
+    { version: 1, ok: false, error: 'evicted', oldest: null },
     `${'x'.repeat(MAX_FRAME + 10)}\n`,
   ];
   for (const reply of replies) {
@@ -421,6 +430,34 @@ test('OutboundBuffer stops on an uncertain delivery until the caller decides', a
   assert.deepEqual(await buffer.flush(), { sent: 1, pending: 0 });
   assert.deepEqual(server.requests.map((r) => r.payload), ['a', 'b']);
   await server.close();
+});
+
+test('OutboundBuffer stops uncertain without replaying when a failure envelope has no error code', async () => {
+  // A reply without a valid string error gives no evidence the publish was refused.
+  for (const reply of [{ version: 1, ok: false }, { version: 1, ok: false, error: 3 }]) {
+    let bad = true;
+    const server = await serve((r) => {
+      if (bad) { bad = false; return reply; }
+      return ok(r.operation === 'publish' ? { delivered: 1, durable: 0, volatile: 0 } : { sequence: 0 });
+    });
+    try {
+      const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+      buffer.publish('t', 'a');
+      buffer.publish('t', 'b');
+      await assert.rejects(buffer.flush({ maxAttempts: 5, retryDelayMs: 1 }),
+        (e) => e instanceof UncertainDeliveryError && e.item.payload === 'a' && e.cause instanceof ProtocolError && e.cause.outcome === 'unknown');
+      assert.equal(buffer.blocked, true);
+      assert.equal(buffer.pending, 2);
+      assert.deepEqual(server.requests.map((r) => r.payload), ['a'], 'an ambiguous publish was replayed');
+      await assert.rejects(buffer.flush(), /resolveUncertain/);
+      assert.deepEqual(server.requests.map((r) => r.payload), ['a']);
+      buffer.resolveUncertain('discard');
+      assert.deepEqual(await buffer.flush(), { sent: 1, pending: 0 });
+      assert.deepEqual(server.requests.map((r) => r.payload), ['a', 'b']);
+    } finally {
+      await server.close();
+    }
+  }
 });
 
 test('OutboundBuffer never replays a stream_append that may have been stored', async () => {

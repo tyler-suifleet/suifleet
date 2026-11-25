@@ -161,8 +161,16 @@ export function decodeResponse(operation: string, line: Buffer): unknown {
     return response.data;
   }
   if (response.ok === false) {
-    const code = typeof response.error === 'string' ? response.error : 'request_failed';
-    throw new IpcError(operation, code, typeof response.oldest === 'number' ? response.oldest : undefined);
+    // A failure envelope must carry a string error code (interfaces/ipc-v1.json).
+    // Without one there is no evidence the daemon refused the request, so the
+    // outcome is unknown rather than a definite request_failed rejection.
+    if (typeof response.error !== 'string' || response.error.length === 0) {
+      throw new ProtocolError(operation, 'failure response without error code');
+    }
+    if ('oldest' in response && !(Number.isSafeInteger(response.oldest) && (response.oldest as number) >= 0)) {
+      throw new ProtocolError(operation, 'failure response with invalid oldest');
+    }
+    throw new IpcError(operation, response.error, 'oldest' in response ? response.oldest as number : undefined);
   }
   throw new ProtocolError(operation, 'malformed response');
 }
