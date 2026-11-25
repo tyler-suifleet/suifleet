@@ -359,10 +359,12 @@ class DecisionTest(unittest.TestCase):
                           "a genuinely different path is still drift")
         # Explicit empty strings match only plain-string defaults.
         pod = "spec.template.spec"
-        self.assertIsNone(k8s.spec_drift({"imagePullPolicy": ""}, {"imagePullPolicy": "IfNotPresent"},
-                                         f"{pod}.containers[0]"))
-        self.assertEqual(k8s.spec_drift({"imagePullPolicy": ""}, {"imagePullPolicy": "Never"},
-                                        f"{pod}.containers[0]"), f"{pod}.containers[0].imagePullPolicy")
+        pinned = "docker.io/library/busybox@sha256:" + "a" * 64
+        self.assertIsNone(k8s.spec_drift({"image": pinned, "imagePullPolicy": ""},
+                                         {"image": pinned, "imagePullPolicy": "IfNotPresent"}, f"{pod}.containers[0]"))
+        self.assertEqual(k8s.spec_drift({"image": pinned, "imagePullPolicy": ""},
+                                        {"image": pinned, "imagePullPolicy": "Never"}, f"{pod}.containers[0]"),
+                         f"{pod}.containers[0].imagePullPolicy")
         self.assertEqual(k8s.spec_drift({"maxSurge": ""}, {"maxSurge": "25%"}, "spec.strategy.rollingUpdate"),
                          "spec.strategy.rollingUpdate.maxSurge", "pointer IntOrString keeps an explicit value")
         self.assertEqual(k8s.spec_drift({"image": ""}, {"image": "x"}, f"{pod}.containers[0]"),
@@ -561,6 +563,12 @@ class DecisionTest(unittest.TestCase):
             resources["requests"]["cpu"] = other
             self.assertIn('requests["cpu"]', k8s.object_ready(live, deploy, "web-app")[1], other)
         resources["requests"]["cpu"] = "11m"
+        # The server never stores an unrounded value, so even the identical
+        # unrounded text is drift; typed comparison precedes text equality.
+        self.assertEqual(k8s.spec_drift("10.1m", "10.1m", 'spec.template.spec.containers[0].resources.requests["cpu"]'),
+                         'spec.template.spec.containers[0].resources.requests["cpu"]')
+        self.assertEqual(k8s.spec_drift({"cpu": "0.0001"}, {"cpu": "0.0001"}, "spec.overhead"), 'spec.overhead["cpu"]')
+        self.assertIsNone(k8s.spec_drift({"cpu": "10m"}, {"cpu": "10m"}, "spec.overhead"))
         self.assertEqual(k8s.spec_drift({"cpu": "1.0005"}, {"cpu": "1001m"}, "spec.overhead"), None)
         self.assertEqual(k8s.spec_drift({"cpu": "1.0005"}, {"cpu": "1000500u"}, "spec.overhead"),
                          'spec.overhead["cpu"]')
@@ -573,6 +581,78 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(k8s.spec_drift({"x.resources.limits.cpu": "10.1m"}, {"x.resources.limits.cpu": "11m"},
                                         "spec.template.metadata.annotations"),
                          'spec.template.metadata.annotations["x.resources.limits.cpu"]')
+
+    def test_deployment_readiness_derives_image_pull_policy_default_from_image(self):
+        # SetDefaults_Container fills an omitted, null or empty imagePullPolicy
+        # from the container's image: Always for a "latest" tag (or no tag and
+        # no digest), otherwise IfNotPresent. Readiness must expect exactly
+        # that value, not accept either.
+        digest = "@sha256:" + "a" * 64
+        cases = {"docker.io/library/busybox" + digest: "IfNotPresent",
+                 "docker.io/library/busybox:latest" + digest: "Always",
+                 "docker.io/library/busybox:1.37" + digest: "IfNotPresent",
+                 "registry.example:5000/app" + digest: "IfNotPresent",
+                 "registry.example:5000/app:latest" + digest: "Always",
+                 "registry.example:5000/app": "Always",
+                 "registry.example:5000/app:v2": "IfNotPresent"}
+        for image, expected in cases.items():
+            self.assertEqual(k8s._image_pull_policy_default(image), expected, image)
+        for image in ("docker.io/library/busybox" + digest, "docker.io/library/busybox:latest" + digest):
+            expected = cases[image]
+            changed = "Always" if expected == "IfNotPresent" else "IfNotPresent"
+            for unset in ("omitted", None, ""):
+                bundle = example()
+                container = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]
+                container["image"] = image
+                if unset != "omitted":
+                    container["imagePullPolicy"] = unset
+                k8s.validate_bundle(bundle)
+                deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+                live = self.healthy(deploy)
+                live_container = live["spec"]["template"]["spec"]["containers"][0]
+                live_container["imagePullPolicy"] = expected  # as the API server defaults it
+                self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"), (image, unset))
+                for other in (changed, "Never"):
+                    live_container["imagePullPolicy"] = other
+                    self.assertIn("containers[0].imagePullPolicy differs", k8s.object_ready(live, deploy, "web-app")[1],
+                                  (image, unset, other))
+        # Render sends the image's default explicitly, so SuiFleet owns the
+        # field: the server keeps a previously defaulted policy across a later
+        # image change and would otherwise never correct it. A stale policy
+        # left over from the previous image is drift.
+        for image, expected in (("docker.io/library/busybox" + digest, "IfNotPresent"),
+                                ("docker.io/library/busybox:latest" + digest, "Always")):
+            for unset in ("omitted", None, ""):
+                bundle = example()
+                container = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]
+                container["image"] = image
+                if unset != "omitted":
+                    container["imagePullPolicy"] = unset
+                bundle_before = json.dumps(bundle, sort_keys=True)
+                deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+                self.assertEqual(json.dumps(bundle, sort_keys=True), bundle_before, "render copies the bundle")
+                self.assertEqual(deploy["spec"]["template"]["spec"]["containers"][0]["imagePullPolicy"], expected,
+                                 (image, unset))
+        bundle = example()
+        container = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]
+        container["image"] = "docker.io/library/busybox:latest" + digest
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        live["spec"]["template"]["spec"]["containers"][0]["imagePullPolicy"] = "IfNotPresent"  # stale default
+        self.assertIn("imagePullPolicy differs", k8s.object_ready(live, deploy, "web-app")[1])
+        # An explicit policy is compared exactly, whatever the image implies.
+        bundle = example()
+        container = deployment(bundle)["spec"]["template"]["spec"]["containers"][0]
+        container["imagePullPolicy"] = "Always"
+        self.assertEqual(k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]["spec"]["template"][
+            "spec"]["containers"][0]["imagePullPolicy"], "Always", "render keeps an explicit policy")
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        live_container = live["spec"]["template"]["spec"]["containers"][0]
+        live_container["imagePullPolicy"] = "Always"
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        live_container["imagePullPolicy"] = "IfNotPresent"
+        self.assertIn("imagePullPolicy differs", k8s.object_ready(live, deploy, "web-app")[1])
 
     def test_deployment_readiness_keeps_dotted_map_keys_literal(self):
         # A map key that merely ends in a field path (".emptyDir.sizeLimit",

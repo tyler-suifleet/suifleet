@@ -289,7 +289,8 @@ def validate_component(component):
 
 def render(bundle, namespace, component, version, digest):
     """Objects to apply: namespace forced, ownership labels/annotations added,
-    ServiceAccount token automount disabled."""
+    ServiceAccount token automount disabled and each container's unset
+    imagePullPolicy set to the default its image implies."""
     rendered = []
     for resource in bundle["resources"]:
         item = json.loads(json.dumps(resource))
@@ -301,7 +302,18 @@ def render(bundle, namespace, component, version, digest):
             annotations[VERSION_ANNOTATION] = version
         metadata["annotations"] = annotations
         if item["kind"] == "Deployment":
-            item["spec"]["template"]["spec"]["automountServiceAccountToken"] = False
+            pod = item["spec"]["template"]["spec"]
+            pod["automountServiceAccountToken"] = False
+            for container in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+                # The API server defaults an unset imagePullPolicy from the
+                # image only when the field is empty, and keeps a previously
+                # defaulted value across later image changes. Send the default
+                # explicitly so SuiFleet owns the field and an image change
+                # (for example to "repo:latest@sha256:...") updates it.
+                if container.get("imagePullPolicy") in (None, ""):
+                    default = _image_pull_policy_default(container.get("image"))
+                    if default:
+                        container["imagePullPolicy"] = default
         rendered.append(item)
     return rendered
 
@@ -401,6 +413,22 @@ def _round_up_milli(value):
     scaled = value * 1000
     return Fraction(math.ceil(scaled) if scaled >= 0 else math.floor(scaled), 1000)
 FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Containers of the pod template, whose imagePullPolicy default depends on the
+# container's own image.
+CONTAINER_PATH = re.compile(r"^spec\.template\.spec\.(?:containers|initContainers)\[[0-9]+\]$")
+
+
+def _image_pull_policy_default(image):
+    """imagePullPolicy the API server fills in for an omitted, null or empty
+    policy (SetDefaults_Container): Always when the image reference's tag is
+    "latest" or it has neither a tag nor a digest, otherwise IfNotPresent. A
+    digest-pinned image without a tag therefore defaults to IfNotPresent and
+    "repo:latest@sha256:..." to Always. None for a non-string image."""
+    if not isinstance(image, str):
+        return None
+    name, _, digest = image.partition("@")
+    tag = name.rsplit("/", 1)[-1].partition(":")[2]  # a registry port is not a tag
+    return "Always" if tag == "latest" or not (tag or digest) else "IfNotPresent"
 
 
 def _child(path, key, *, is_map=False):
@@ -447,9 +475,6 @@ def _server_defaults():
         table.update({
             f"{container}.terminationMessagePath": ("/dev/termination-log",),
             f"{container}.terminationMessagePolicy": ("File",),
-            # Digest-pinned images default to IfNotPresent; a ":latest" tag
-            # alongside the digest defaults to Always. Both pull the pinned digest.
-            f"{container}.imagePullPolicy": ("IfNotPresent", "Always"),
             f"{container}.ports[].protocol": ("TCP",),
             f"{container}.env[].valueFrom.fieldRef.apiVersion": ("v1",),
             **_http_get_defaults(f"{container}.lifecycle.postStart"),
@@ -596,6 +621,14 @@ def spec_drift(desired, live, path):
     if isinstance(desired, dict):
         if not isinstance(live, dict):
             return path
+        if CONTAINER_PATH.match(path) and desired.get("imagePullPolicy") in (None, "") and \
+                live.get("imagePullPolicy") is not None:
+            # The server derives an unset policy from this container's image,
+            # so compare the live policy with exactly that default; an explicit
+            # policy is compared as given.
+            default = _image_pull_policy_default(desired.get("image"))
+            if default:
+                desired = {**desired, "imagePullPolicy": default}
         is_map = _is_map(path, desired)
         if is_map:
             drift = _map_drift(desired, live, path)
@@ -632,19 +665,20 @@ def spec_drift(desired, live, path):
             if drift:
                 return drift
         return None
+    if QUANTITY_PATH.search(path):
+        # Typed comparison first: the server stores a ResourceList entry
+        # rounded up to milli precision and the live value is exact, so any
+        # other live value, including the identical unrounded text, is drift.
+        want, have = _quantity(desired), _quantity(live)
+        if want is not None and have is not None:
+            if MILLI_ROUNDED_PATH.search(path):
+                want = _round_up_milli(want)
+            return None if want == have else path
     if type(desired) is type(live) and desired == live:
         return None
     if isinstance(desired, (int, float)) and isinstance(live, (int, float)) and \
             not isinstance(desired, bool) and not isinstance(live, bool) and desired == live:
         return None
-    if QUANTITY_PATH.search(path):
-        want, have = _quantity(desired), _quantity(live)
-        if want is not None and MILLI_ROUNDED_PATH.search(path):
-            # Compare against what the server stores; the live value is exact,
-            # so any other live value (including the unrounded one) is drift.
-            want = _round_up_milli(want)
-        if want is not None and want == have:
-            return None
     if desired == "" and isinstance(live, str):
         allowed = EMPTY_STRING_DEFAULTS.get(re.sub(r"\[[0-9]+\]", "[]", path), ())
         if live in allowed:
