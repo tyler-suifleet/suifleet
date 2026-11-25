@@ -582,6 +582,34 @@ class DecisionTest(unittest.TestCase):
                                         "spec.template.metadata.annotations"),
                          'spec.template.metadata.annotations["x.resources.limits.cpu"]')
 
+    def test_deployment_readiness_accounts_for_quantity_nano_round_up(self):
+        # ParseQuantity rounds a nonzero quantity away from zero to nano
+        # precision, so an accepted emptyDir sizeLimit of 0.1n is stored as 1n.
+        bundle = example()
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        pod["volumes"] = pod.get("volumes", []) + [{"name": "tiny", "emptyDir": {"medium": "Memory",
+                                                                                  "sizeLimit": "0.1n"}}]
+        k8s.validate_bundle(bundle)
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        volume = live["spec"]["template"]["spec"]["volumes"][-1]
+        self.assertEqual(volume["name"], "tiny")
+        volume["emptyDir"]["sizeLimit"] = "1n"  # as the API server stores it
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        for other in ("2n", "0.1n", "100p"):  # other or unrounded live values are drift
+            volume["emptyDir"]["sizeLimit"] = other
+            self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1], other)
+        parent = "spec.volumes[0].emptyDir"
+        for want, have, same in [("1.0000000001", "1000000001n", True), ("1.0000000001", "1", False),
+                                 ("-0.1n", "-1n", True), ("1.5n", "2n", True), ("0", "0", True),
+                                 ("0.0000000000015Ki", "2n", True), (1e-10, "1n", True), ("1500u", "1500u", True),
+                                 ("1500u", "2m", False)]:
+            drift = k8s.spec_drift({"sizeLimit": want}, {"sizeLimit": have}, parent)
+            self.assertEqual(drift is None, same, f"{want!r} vs {have!r}")
+        # ResourceLists keep the further milli round-up on top of nano parsing.
+        self.assertIsNone(k8s.spec_drift({"cpu": "0.1n"}, {"cpu": "1m"}, "spec.overhead"))
+        self.assertEqual(k8s.spec_drift({"cpu": "0.1n"}, {"cpu": "1n"}, "spec.overhead"), 'spec.overhead["cpu"]')
+
     def test_deployment_readiness_derives_image_pull_policy_default_from_image(self):
         # SetDefaults_Container fills an omitted, null or empty imagePullPolicy
         # from the container's image: Always for a "latest" tag (or no tag and

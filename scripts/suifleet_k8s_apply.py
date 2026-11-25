@@ -378,7 +378,7 @@ QUANTITY_BINARY = {"Ki": 10, "Mi": 20, "Gi": 30, "Ti": 40, "Pi": 50, "Ei": 60}
 def _quantity(value):
     """Exact value of a Kubernetes resource quantity, or None if not one. The
     API server accepts JSON numbers and canonicalises quantities (for example
-    0.1 or "0.1" becomes "100m")."""
+    0.1 or "0.1" becomes "100m"); see _parsed_quantity for its rounding."""
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         return None
     if isinstance(value, float):
@@ -407,11 +407,24 @@ QUANTITY_PATH = re.compile(r'(?:\.resources\.(?:limits|requests)|\.overhead)\["[
 MILLI_ROUNDED_PATH = re.compile(r'(?:\.resources\.(?:limits|requests)|\.overhead)\["[^"]*"\]$')
 
 
+def _round_away(value, digits):
+    """Value rounded away from zero to 10**-digits precision (inf.RoundUp)."""
+    scaled = value * 10 ** digits
+    return Fraction(math.ceil(scaled) if scaled >= 0 else math.floor(scaled), 10 ** digits)
+
+
+def _parsed_quantity(value):
+    """Value the API server stores for a quantity it parses: ParseQuantity
+    rounds a nonzero value away from zero to nano precision ("0.1n" is stored
+    as "1n"), for every quantity field."""
+    return _round_away(value, 9)
+
+
 def _round_up_milli(value):
     """Quantity rounded away from zero to milli precision, as
     resource.Quantity.RoundUp(-3) does."""
-    scaled = value * 1000
-    return Fraction(math.ceil(scaled) if scaled >= 0 else math.floor(scaled), 1000)
+    return _round_away(value, 3)
+
 FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # Containers of the pod template, whose imagePullPolicy default depends on the
 # container's own image.
@@ -607,8 +620,9 @@ def spec_drift(desired, live, path):
     resource lists, ...) must have exactly the bundle's keys, even when an
     extra key's value is empty. A field the server omits matches a zero/empty
     desired value (Go omitempty), and resource quantities (resource limits and
-    requests, overhead, emptyDir sizeLimit) compare by value, resource lists
-    after the server's round-up to milli precision."""
+    requests, overhead, emptyDir sizeLimit) compare by value after the
+    server's parse-time round-up to nano precision, resource lists after its
+    further round-up to milli precision."""
     if live is None:
         if desired is None:
             return None
@@ -666,11 +680,13 @@ def spec_drift(desired, live, path):
                 return drift
         return None
     if QUANTITY_PATH.search(path):
-        # Typed comparison first: the server stores a ResourceList entry
-        # rounded up to milli precision and the live value is exact, so any
-        # other live value, including the identical unrounded text, is drift.
+        # Typed comparison first: the server parses every quantity rounded up
+        # to nano precision and stores a ResourceList entry further rounded up
+        # to milli precision; the live value is canonical, so any other live
+        # value, including the identical unrounded text, is drift.
         want, have = _quantity(desired), _quantity(live)
         if want is not None and have is not None:
+            want = _parsed_quantity(want)
             if MILLI_ROUNDED_PATH.search(path):
                 want = _round_up_milli(want)
             return None if want == have else path
