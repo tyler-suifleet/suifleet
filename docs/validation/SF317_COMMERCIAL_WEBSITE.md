@@ -65,3 +65,36 @@ assembly. The manifest now references the actual preserved script snapshot,
 retains the separate render-input hashes, and passes the full provenance checks.
 No integrity validation was bypassed. Human/mainnet walkthrough capture remains
 separate from these historical tutorial edits.
+
+## Mobile landing-page follow-up
+
+The user requested a clearer mobile flow after the first audit. The home page
+now leads with a concise product explanation and “How it works”, followed by a
+readable illustrative deployment, prepare/deploy/verify steps, platform integration,
+security and getting started. Removed repeated links, a redundant platform card,
+numbered security lists and recipe terminology. Kept the existing brand and
+platform-owned installation/reboot responsibilities.
+
+Added native disclosure navigation for the home page at phone/tablet widths.
+It works without JavaScript and keeps all six destinations available. Other
+pages retain their existing navigation and guide layout. Home-only responsive
+styles improve body copy to at least 15px and keep primary navigation/touch
+controls at least 44px high.
+
+Measured at 390px: header 176→81px, workflow section 1494→977px, total page
+5013→4364px while increasing body-text size. At 320px: total 5414→4748px.
+These are observed results, not brittle pixel limits in the regression test.
+
+Additional verification:
+
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node site/tests/landing_browser.cjs /tmp/sf317-mobile-site /tmp/sf317-mobile-shots`
+  — passed 320, 390, 560, 768, 800, 801 and 1440px. JavaScript disabled;
+  keyboard open/close/tab navigation, real Pricing navigation, touch targets,
+  menu/document bounds, legible phone body copy and desktop navigation.
+- Static site build and all 84 site tests passed after the header/layout changes.
+- All 30 subscription-pricing tests passed, preserving the automatic CI repair.
+- Shared guide browser checks passed (all 80 instructions, keyboard, captions,
+  playback, static fallback and media recovery). How it works passed all eight
+  viewport checks. Final copy/footer refinements are scoped to the landing page.
+- Visually inspected full phone and desktop renders; no fabricated customer
+  metrics, testimonials or production acceptance were added.
