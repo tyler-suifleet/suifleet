@@ -98,3 +98,39 @@ Additional verification:
   viewport checks. Final copy/footer refinements are scoped to the landing page.
 - Visually inspected full phone and desktop renders; no fabricated customer
   metrics, testimonials or production acceptance were added.
+
+## How it works section videos
+
+The user found that later How it works sections lacked videos. Portrait CSS
+hid the shared animation after the introduction; the remaining sections were
+text-only. Each now has a matching narrated clip, and the media area stays
+visible on phones. The overview remains the full introduction. Four excerpts
+from its approved animation cover approvals (12s), release-to-result (60s),
+platform installation (12s), and shared services/device clients (24s).
+
+`site/overview/render_sections.py` reproduces the excerpts from the digest-checked
+original widescreen MP4 using the pinned offline ffmpeg image. It retimes optional
+captions from complete original narration cues, creates posters, verifies duration
+and fully decodes every output. `sections.json` binds source manifest/video,
+renderer, clip files, posters and captions. Build validation rejects drift or
+missing section coverage. These are edited illustrative chapters, not new app,
+wallet, mainnet or hardware recordings. No new speech or artwork was invented.
+
+Verification:
+
+- Site build: 90 files including all new video/caption/poster assets.
+- Existing 84 site tests passed. Two additional section-integrity regressions
+  passed with all seven overview tests, rejecting changed bytes/captions and
+  incomplete section coverage.
+- How it works browser suite: all eight viewports passed with one visible,
+  matching video for every section and no document/text overflow. All 18 written
+  explanations remain reachable, including the 320×568 viewport.
+- Actual playback, duration, native caption loading and inactive-player pause
+  passed for all four excerpts at 390px and 1440px. Captions remain optional.
+- Inactive players cannot resume when a late buffered-media download finishes.
+
+Final combined results: all 86 site tests passed. The shared product-guide suite
+passed all 80 instructions, native captions/playback, keyboard and recovery checks.
+The original overview suite passed real decoded movement in every scene, native
+caption playback, actual MP4 fallback and rejection of a tampered buffered source.
+Visually inspected the phone's second section with its video and written details.
