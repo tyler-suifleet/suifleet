@@ -183,6 +183,34 @@ def stopped_repair(dispatcher, project, owner, reserved=False, before=None, orig
                 directory=str(source), claim=json.dumps(owner), pid=job['pid'], started=job['started'], message='stopped coordinator repair')
 
 
+def stopped_prelaunch(dispatcher, project, owner):
+    """Find an archived original linked to a private, never-launched intent."""
+    matches = []
+    for intent in dispatcher.db.execute(
+            "SELECT * FROM runs WHERE project=? AND status='orphaned' AND message=?",
+            (project['id'], 'Explicit recovery launch uncertain; inspect receipt before retry')):
+        if not intent['claim'] or json.loads(intent['claim']).get('token') != owner['token']:
+            continue
+        directory = Path(intent['directory'])
+        if (intent['pid'] is not None or intent['started'] is not None
+                or directory != dispatcher.state/'implementations'/intent['session']
+                or directory.is_symlink() or not directory.is_dir()
+                or directory.stat().st_uid != os.getuid() or directory.stat().st_mode & 0o077
+                or any(directory.iterdir())):
+            continue
+        for source in dispatcher.db.execute("""
+            SELECT r.* FROM runs r JOIN retired_runs a ON r.session=a.session
+            WHERE r.project=? AND r.status='finished' AND r.message=?
+                AND a.original_status IN ('parked','quarantined')
+            """, (project['id'], 'explicit same-claim recovery reserved as '+intent['session'])):
+            claims = (json.loads(source['claim']), json.loads(intent['claim']))
+            if (source['family'] == intent['family'] == owner['agent']
+                    and all(all(claim.get(k) == owner.get(k) for k in FIELDS) for claim in claims)):
+                matches.append((source, intent))
+    require(len(matches) <= 1, 'ambiguous pre-launch recovery receipts')
+    return matches[0] if matches else (None, None)
+
+
 def resume(dispatcher, project, slot, key, reason, worker_path, origin=None, blocked_engineering_repair=False):
     """Caller holds activation, daemon and dispatcher authority locks."""
     require(isinstance(reason, str) and len(reason.strip()) >= 20, 'specific actionable repair instruction required')
@@ -191,15 +219,16 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None, blo
     candidates = [r for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('parked','quarantined')", (project['id'],))
                   if r['claim'] and json.loads(r['claim']).get('token') == owner.get('token')]
     require(len(candidates) <= 1, 'ambiguous retained implementation receipts')
-    repair = not candidates
+    source, prelaunch = stopped_prelaunch(dispatcher, project, owner) if not candidates else (None, None)
+    repair = not candidates and source is None
     if repair:
         require(not any(r['claim'] and json.loads(r['claim']).get('token') == owner.get('token')
                         for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status!='finished'", (project['id'],))),
                 'another implementation recovery remains reserved')
-    row = stopped_repair(dispatcher, project, owner, origin=origin, blocked_engineering_repair=blocked_engineering_repair) if repair else candidates[0]
+    row = stopped_repair(dispatcher, project, owner, origin=origin, blocked_engineering_repair=blocked_engineering_repair) if repair else (source if prelaunch else candidates[0])
     claim = json.loads(row['claim'])
     require(json.loads((Path(row['directory'])/'command.json').read_text()) == dispatcher.config['workers'][slot['family']], 'original command changed')
-    fence(dispatcher, project, row, claim)
+    fence(dispatcher, project, row, claim, reserved_session=prelaunch['session'] if prelaunch else None)
     owners = dispatcher.ticket(project, 'list')
     # Explicit operator recovery must respect another worker's family-wide quota
     # wait. Automatic quota recovery owns clearing that pause after its reset.
@@ -217,9 +246,19 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None, blo
     directory = dispatcher.state/'implementations'/session
     dispatcher.db.execute('BEGIN IMMEDIATE')
     try:
-        changed = 1 if repair else dispatcher.db.execute("UPDATE runs SET status='finished',message=? WHERE session=? AND status=?", ('explicit same-claim recovery reserved as '+session, row['session'], row['status'])).rowcount
-        require(changed == 1, 'source reservation changed')
-        dispatcher.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)', (row['session'], row['status'], row['message'], reason, time.time()))
+        if prelaunch:
+            changed = dispatcher.db.execute(
+                "UPDATE runs SET status='finished',message=? WHERE session=? AND status='orphaned'",
+                ('verified pre-launch intent superseded by '+session, prelaunch['session'])).rowcount
+            require(changed == 1, 'pre-launch reservation changed')
+        if not repair:
+            changed = dispatcher.db.execute(
+                "UPDATE runs SET status='finished',message=? WHERE session=? AND status=?",
+                ('explicit same-claim recovery reserved as '+session, row['session'], row['status'])).rowcount
+            require(changed == 1, 'source reservation changed')
+        if not prelaunch:
+            dispatcher.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)',
+                                  (row['session'], row['status'], row['message'], reason, time.time()))
         dispatcher.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (session, project['id'], slot['family'], 'launching', str(directory), json.dumps(claim), None, None, 'explicit retained-claim recovery intent'))
         dispatcher.db.execute('COMMIT')
     finally:
@@ -353,4 +392,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        sys.exit(f'Recovery subprocess failed (exit {error.returncode}); inspect retained receipts.')
