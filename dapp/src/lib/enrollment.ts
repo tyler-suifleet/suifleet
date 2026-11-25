@@ -292,9 +292,9 @@ export function enrollToml(c: Pick<ClaimCredential, "serial" | "alias">, policyI
 
 /**
  * A POSIX ustar archive: `enrollment/<serial>/{enroll.toml,claim.key,deployment.json}`
- * per device, with private (0600/0700) modes.
+ * per device, with an optional operator config.template.toml and private modes.
  */
-export function credentialArchive(credentials: ClaimCredential[], policyId: string, manifestJson: string, keypairPath?: string, fleet?: NamedFleet): Uint8Array {
+export function credentialArchive(credentials: ClaimCredential[], policyId: string, manifestJson: string, keypairPath?: string, fleet?: NamedFleet, configTemplate?: string): Uint8Array {
   const encoder = new TextEncoder(), blocks: Uint8Array[] = [];
   const mtime = Math.floor(Date.now() / 1000);
   const octal = (value: number, width: number) => value.toString(8).padStart(width - 1, "0") + "\0";
@@ -311,11 +311,13 @@ export function credentialArchive(credentials: ClaimCredential[], policyId: stri
   }
   entry("enrollment/", null, 0o700);
   const manifest = encoder.encode(manifestJson.endsWith("\n") ? manifestJson : manifestJson + "\n");
+  const template = configTemplate === undefined ? undefined : encoder.encode(configTemplate);
   for (const c of credentials) {
     entry(`enrollment/${c.serial}/`, null, 0o700);
     entry(`enrollment/${c.serial}/enroll.toml`, encoder.encode(enrollToml(c, policyId, keypairPath, fleet)), 0o600);
     entry(`enrollment/${c.serial}/claim.key`, encoder.encode(c.seedHex + "\n"), 0o600);
     entry(`enrollment/${c.serial}/deployment.json`, manifest, 0o644);
+    if (template) entry(`enrollment/${c.serial}/config.template.toml`, template, 0o600);
   }
   blocks.push(new Uint8Array(1024));
   const out = new Uint8Array(blocks.reduce((n, b) => n + b.length, 0));

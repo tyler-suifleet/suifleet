@@ -26,8 +26,8 @@ import { transactionStage } from "@/lib/tx-feedback";
 import { parseSerials, planLostCredentials, type LostCredentialPlan } from "@/lib/credential-recovery";
 
 const STATUS_LABEL: Record<EntryStatus, string> = {
-  unregistered: "Reserved", unfunded: "Needs enrollment gas", "awaiting-device": "Waiting for device", revoked: "Revoked",
-  confirming: "Confirming registration", withdrawn: "Claim withdrawn", binding: "Enrolled, naming", complete: "Enrolled", conflict: "Conflict", untrusted: "Not yours",
+  unregistered: "Reserved", unfunded: "Needs enrollment gas", "awaiting-device": "Funded, unused", revoked: "Revoked",
+  confirming: "Confirming registration", withdrawn: "Claim withdrawn", binding: "Consumed, pending binding", complete: "Bound", conflict: "Conflict", untrusted: "Not yours",
 };
 const MIST = BigInt(1_000_000_000);
 const sui = (mist: bigint) => `${Number(mist) / 1e9} SUI`;
@@ -360,6 +360,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
   const [check, setCheck] = useState<ReservationCheck & { parseIssues: number } | null>(null);
   // The archive is the only copy of its claim keys: confirm before each download.
   const [acknowledged, setAcknowledged] = useState(false);
+  const [configTemplate, setConfigTemplate] = useState("");
   useEffect(() => { setCheck(null); setAcknowledged(false); }, [mode, csv, template, start, alias, serial, groupId]);
 
   function validate() {
@@ -375,7 +376,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
     if (!mist || mist > MIST / BigInt(10)) return alert("Enrollment gas per claim must be more than 0 and at most 0.1 SUI");
     const { entries, credentials } = generateCredentials(check.accepted);
     // The archive is the only copy of the claim keys: they are not stored.
-    download(`suifleet-enrollment-${policy.id.slice(2, 10)}-${Date.now()}.tar`, credentialArchive(credentials, policy.id, JSON.stringify(requireManifest(), null, 2), undefined, policy.fleet), "application/x-tar");
+    download(`suifleet-enrollment-${policy.id.slice(2, 10)}-${Date.now()}.tar`, credentialArchive(credentials, policy.id, JSON.stringify(requireManifest(), null, 2), undefined, policy.fleet, configTemplate.trim() ? configTemplate : undefined), "application/x-tar");
     credentials.length = 0;
     onAdd(entries, mist.toString());
     setStart(start + entries.length);
@@ -419,6 +420,11 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
             <label>Enrollment gas per claim (SUI) <input aria-label="Enrollment gas per claim" value={fund} onChange={(e) => setFund(e.target.value)} className={`${input} w-20 ml-1`} /></label>
             <button className={button} disabled={!inventory.ready} onClick={validate}>{inventory.ready || inventory.error ? "Check" : "Loading devices and groups…"}</button>
           </div>
+          <label className="block text-sm">
+            Batch configuration template (optional)
+            <textarea className={`${input} mt-1 block w-full font-mono`} rows={4} value={configTemplate}
+              onChange={(event) => { setConfigTemplate(event.target.value); setAcknowledged(false); }} />
+          </label>
           <div role="note" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1" data-testid="credential-warning">
             <p className="font-medium">Before you download: this file is the only copy of the claim keys.</p>
             <p>SuiFleet does not keep them and cannot download them again. Put each <code>enrollment/SERIAL/</code> folder on that device&apos;s private provisioning media, keep the archive offline and delete it once devices have enrolled.</p>
