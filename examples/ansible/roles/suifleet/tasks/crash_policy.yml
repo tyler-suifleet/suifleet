@@ -7,7 +7,10 @@
 #     core dump size limit is 0 (systemd-coredump honors the crashing
 #     process's RLIMIT_CORE) or coredump.conf sets both Storage=none and
 #     ProcessSizeMax=0 (with Storage=none alone it may still write the dump
-#     to disk while processing it; an unreadable configuration is refused);
+#     to disk while processing it). Only assignments in a [Coredump]
+#     section count, each file starts outside any section and the last
+#     assignment wins, as in systemd; a configuration that cannot be read or
+#     uses line continuations is refused;
 #   - kernel.core_pattern pipes to false/true (nothing is kept); or
 #   - kernel.core_pattern names a file and the SSH session's limit is 0 (the
 #     kernel writes nothing).
