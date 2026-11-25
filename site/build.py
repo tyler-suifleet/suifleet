@@ -321,7 +321,9 @@ def build(out, config=None):
         if page["path"] in ("/guide/", "/how-it-works/"):
             integrity = guide_integrity()
             if page['path'] == '/guide/': rendered = rendered.replace("<body>", '<body class="guide-page">')
-            else: rendered = rendered.replace("media-src 'self';", "media-src 'self' blob:; connect-src 'self';")
+            else:
+                rendered = rendered.replace("<body>", '<body class="guide-page how-page">')
+                rendered = rendered.replace("media-src 'self';", "media-src 'self' blob:; connect-src 'self';")
             rendered = rendered.replace("base-uri 'none'; form-action 'none'", f"base-uri 'none'; form-action 'none'; script-src '{integrity}'")
             rendered = rendered.replace("</body>", f'<script src="{guide_script_url()}" integrity="{integrity}" defer></script>\n</body>')
         target = output_path(out, page["path"])

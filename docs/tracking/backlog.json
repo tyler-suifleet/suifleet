@@ -5464,6 +5464,46 @@
         "Responsive browser navigation, playback/captions/retry, site tests/build/links pass; record comparison screenshots."
       ],
       "validation": "Run scoped regression tests and real browser checks at320/390px and desktop. Preserve existing review/CI and deferred human/Pi/mainnet acceptance."
+    },
+    {
+      "key": "SF-314",
+      "title": "Decouple review dispatch, CI recovery and integration scheduling",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Independent scheduling lanes prevent slow CI recovery and integration from delaying source reviews and feedback handoffs.",
+      "evidence": "Four integration candidates occupy capacity while sequential scans delay otherwise eligible source and final reviews.",
+      "acceptance": [
+        "Independent source, completion, CI recovery and integration scheduling; one main publisher and existing claims/security gates retained.",
+        "Meaningful offline concurrency and regression tests; install verified committed-main runtime and verify lane activity."
+      ],
+      "validation": "Focused scheduling/concurrency and coordinator regression tests; no unrelated application builds."
+    },
+    {
+      "key": "SF-315",
+      "title": "Fit How it works into a single desktop and mobile viewport",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site"
+      ],
+      "resources": [],
+      "description": "Viewport-sized How it works with accessible topic/text navigation and the existing overview video.",
+      "evidence": "User reports How it works requires page scrolling while the guide fits within the viewport.",
+      "acceptance": [
+        "No document or text overflow across desktop, narrow phone and short landscape viewports.",
+        "All explanatory content remains reachable and existing playback/captions and product guide work."
+      ],
+      "validation": "Static site build/tests and real browser layout, navigation and media checks."
     }
   ]
 }
