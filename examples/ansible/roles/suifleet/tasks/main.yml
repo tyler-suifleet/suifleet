@@ -1,0 +1,34 @@
+---
+# Order matters (docs/INSTALL_DEVICE_CLIENT.md): package -> on-device identity
+# -> enrollment -> deployment.json -> signer.toml -> config.toml -> services.
+- name: Preflight
+  ansible.builtin.import_tasks: preflight.yml
+
+- name: Install the Debian package
+  ansible.builtin.include_tasks: install_deb.yml
+  when: suifleet_selected_profile == 'deb'
+
+- name: Install the release binary and systemd units
+  ansible.builtin.include_tasks: install_binary.yml
+  when: suifleet_selected_profile == 'systemd-binary'
+
+- name: Read installation state
+  ansible.builtin.stat:
+    path: /usr/bin/suifleet
+  register: suifleet_binary_installed
+
+# In check mode on a host without the client, the remaining steps cannot be
+# evaluated; the install tasks above already report the pending change.
+- name: Provision, enroll, configure and start
+  when: suifleet_binary_installed.stat.exists
+  block:
+    - name: Device identity
+      ansible.builtin.import_tasks: identity.yml
+    - name: Enrollment
+      ansible.builtin.import_tasks: enroll.yml
+    - name: Configuration
+      ansible.builtin.import_tasks: configure.yml
+    - name: Services
+      ansible.builtin.import_tasks: service.yml
+    - name: Health
+      ansible.builtin.import_tasks: verify.yml
