@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "web-content"
+      },
+      "data": {
+        "index.html": "<p>hello from SuiFleet v1</p>\n"
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "web",
+        "labels": {
+          "app": "web"
+        }
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "web"
+          }
+        },
+        "progressDeadlineSeconds": 120,
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "web"
+            },
+            "annotations": {
+              "example.com/content": "hello from SuiFleet v1"
+            }
+          },
+          "spec": {
+            "securityContext": {
+              "runAsNonRoot": true,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            },
+            "containers": [
+              {
+                "name": "web",
+                "image": "docker.io/library/busybox@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4",
+                "command": [
+                  "httpd",
+                  "-f",
+                  "-v",
+                  "-p",
+                  "8080",
+                  "-h",
+                  "/www"
+                ],
+                "ports": [
+                  {
+                    "containerPort": 8080,
+                    "name": "http"
+                  }
+                ],
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/",
+                    "port": "http"
+                  },
+                  "periodSeconds": 2
+                },
+                "resources": {
+                  "requests": {
+                    "cpu": "10m",
+                    "memory": "8Mi"
+                  },
+                  "limits": {
+                    "cpu": "100m",
+                    "memory": "32Mi"
+                  }
+                },
+                "securityContext": {
+                  "runAsNonRoot": true,
+                  "runAsUser": 65534,
+                  "runAsGroup": 65534,
+                  "allowPrivilegeEscalation": false,
+                  "readOnlyRootFilesystem": true,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  },
+                  "seccompProfile": {
+                    "type": "RuntimeDefault"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "content",
+                    "mountPath": "/www",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "content",
+                "configMap": {
+                  "name": "web-content"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
