@@ -53,6 +53,22 @@ switch (spec.action) {
     }
     break;
   }
+  case 'iterate': {
+    // Collect spec.count deliveries from messages() with the given QoS,
+    // acknowledging each one, and report what each ack returned.
+    const signal = AbortSignal.timeout(spec.timeoutMs ?? 30_000);
+    const deliveries = [];
+    try {
+      for await (const delivery of client.messages(spec.filter, { qos: spec.qos, pollIntervalMs: 50, signal })) {
+        deliveries.push({ message: delivery.message, durable: delivery.durable, acknowledged: await delivery.ack() });
+        if (deliveries.length >= spec.count) break;
+      }
+      emit({ ok: true, deliveries });
+    } catch (error) {
+      emit({ ok: false, deliveries, error: describe(error) });
+    }
+    break;
+  }
   default:
     throw new Error(`unknown action ${spec.action}`);
 }

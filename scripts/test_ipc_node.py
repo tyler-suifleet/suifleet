@@ -29,8 +29,8 @@ import test_ota
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 ROOT = Path(__file__).resolve().parents[1]
-SENSOR, CONSUMER, INBOX, APP, STRANGER = 64001, 64002, 64003, 64004, 64005
-NAMES = {SENSOR: 'sensor', CONSUMER: 'consumer', INBOX: 'inbox', APP: 'app', STRANGER: 'stranger', 0: ''}
+SENSOR, CONSUMER, INBOX, APP, STRANGER, WATCHER = 64001, 64002, 64003, 64004, 64005, 64006
+NAMES = {SENSOR: 'sensor', CONSUMER: 'consumer', INBOX: 'inbox', APP: 'app', STRANGER: 'stranger', WATCHER: 'watcher', 0: ''}
 THING = 'dev1'
 DELTA = f'$aws/things/{THING}/shadow/name/config/update/delta'
 SPOOL = 16  # durable QoS 1 messages per subscription
@@ -139,6 +139,9 @@ def run(package=None):
                 'publish = ["sensor/events", "bulk/samples"]\nstreams = ["sensor-*"]\n'
                 f'[ipc.components.consumer]\nuid = {CONSUMER}\noperations = ["subscribe", "receive", "ack", "unsubscribe"]\n'
                 '[[ipc.components.consumer.pubsub_policies]]\noperations = ["aws.greengrass#SubscribeToTopic"]\nresources = ["sensor/#"]\n'
+                # QoS 0 reader deliberately without the ack operation.
+                f'[ipc.components.watcher]\nuid = {WATCHER}\noperations = ["subscribe", "receive", "unsubscribe"]\n'
+                '[[ipc.components.watcher.pubsub_policies]]\noperations = ["aws.greengrass#SubscribeToTopic"]\nresources = ["sensor/events"]\n'
                 f'[ipc.components.inbox]\nuid = {INBOX}\noperations = ["receive"]\nsubscribe = ["bulk/samples"]\n'
                 f'[ipc.components.app]\nuid = {APP}\n'
                 'operations = ["shadow_get", "shadow_update", "shadow_list", "subscribe", "receive", "ack"]\n'
@@ -321,6 +324,32 @@ def run(package=None):
             assert [m['payload'] for m in json.loads(out.splitlines()[-1])['received']] == ['before-restart', 'after-restart']
             print('PASS: reconnect: missing socket is not_sent (ENOENT); connect retries and the consumer iterator span a '
                   'daemon restart; the unacknowledged durable message is redelivered in order', flush=True)
+
+            # QoS 0 through the iterator: the daemon sends the same id-bearing shape as
+            # QoS 1, but the reads are destructive, so the SDK must not send ack (this
+            # reader is not even allowed to). QoS 1 ack/redelivery is covered above.
+            assert ok(WATCHER, 'subscribe', 'sensor/events', {'qos': 0}) == {'subscribed': 'sensor/events', 'qos': 0}
+            denied(WATCHER, 'ack', 'sensor/events', 1)
+            for n in range(2):
+                python(SENSOR, 'publish', 'sensor/events', {'qos0': n})
+            watched = scenario(WATCHER, dict(action='iterate', filter='sensor/events', qos=0, count=2))
+            assert watched['ok'], watched
+            assert [(d['message']['payload'], d['durable'], d['acknowledged']) for d in watched['deliveries']] \
+                == [({'qos0': 0}, False, True), ({'qos0': 1}, False, True)], watched
+            assert all(isinstance(d['message']['id'], int) for d in watched['deliveries']), watched
+            assert ok(WATCHER, 'receive', 'sensor/events') is None, 'QoS 0 messages were not consumed on read'
+            # A QoS 1 iterator over the same reader would need ack: the refusal surfaces instead of being hidden.
+            python(SENSOR, 'publish', 'sensor/events', {'qos0': 2})
+            wrong = scenario(WATCHER, dict(action='iterate', filter='sensor/events', qos=1, count=1))
+            assert not wrong['ok'] and wrong['error']['code'] == 'request_failed', wrong
+            # The consumer's QoS 1 copies of these publications are still queued until acknowledged.
+            redelivered = example(CONSUMER, 'consumer.mjs', {'CONSUMER_COUNT': '3'})['received']
+            assert [m['payload'] for m in redelivered] == [{'qos0': 0}, {'qos0': 1}, {'qos0': 2}], redelivered
+            queues = sorted((s['principal'], s['qos'], s['queued']) for s in ok(0, 'messaging')['subscriptions']
+                            if s['principal'] in ('consumer', 'watcher'))
+            assert queues == [('consumer', 1, 0), ('watcher', 0, 0)], queues
+            print('PASS: QoS 0 iterator with an ACL without ack: id-bearing deliveries are not durable, ack sends nothing, '
+                  'reads are destructive; QoS 1 copies of the same publications still wait for ack', flush=True)
 
             # Shadows: desired from an operator, the example reports it back.
             ok(APP, 'subscribe', DELTA, {'qos': 1})
