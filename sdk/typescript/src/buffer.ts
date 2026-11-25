@@ -220,9 +220,14 @@ export class OutboundBuffer {
               }
               if (!RETRYABLE_STREAM_CODES.has(error.code)) return { sent, pending: this.entries.length, error, rejected: true };
             }
+            // A not_sent error may come from this same signal (for example, an abort
+            // during client connect backoff). Its listener would never fire again,
+            // so stop now; the unsent head stays pending.
+            options.signal?.throwIfAborted();
             if (attempt >= maxAttempts) return { sent, pending: this.entries.length, error };
             await new Promise<void>((resolve, reject) => {
               const signal = options.signal;
+              if (signal?.aborted) { reject(signal.reason); return; }
               const abort = () => { clearTimeout(timer); reject(signal?.reason); };
               const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, delay);
               signal?.addEventListener('abort', abort, { once: true });

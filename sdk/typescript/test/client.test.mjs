@@ -469,3 +469,32 @@ test('OutboundBuffer keeps uncertain-head discard behind resolveUncertain', asyn
   assert.equal(buffer.pending, 0);
   await server.close();
 });
+
+test('OutboundBuffer flush stops promptly when its signal aborts a nested client retry', async () => {
+  const path = join(directory, `late${counter++}.sock`);
+  const buffer = new OutboundBuffer(new Client({ socketPath: path, connectAttempts: 2, connectRetryDelayMs: 1000 }));
+  buffer.append('s', 'a');
+  const controller = new AbortController();
+  const reason = new Error('caller cancelled');
+  const started = Date.now();
+  setTimeout(() => controller.abort(reason), 80);
+  await assert.rejects(buffer.flush({ signal: controller.signal, retryDelayMs: 1200 }), (e) => e === reason);
+  assert.ok(Date.now() - started < 900, 'abort is not delayed by the buffer retry delay');
+  assert.equal(buffer.pending, 1, 'the unsent head stays pending');
+  // The flush slot is released at once; the same head is later sent exactly once.
+  const requests = [];
+  const server = createServer((socket) => {
+    socket.on('data', (chunk) => { requests.push(JSON.parse(String(chunk).split('\n')[0])); socket.end(`${JSON.stringify(ok({ seq: 1 }))}\n`); });
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(path, resolve));
+  const before = new AbortController();
+  before.abort(reason);
+  // Already-aborted signal: refused before any request.
+  await assert.rejects(buffer.flush({ signal: before.signal }), (e) => e === reason);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(await buffer.flush(), { sent: 1, pending: 0 });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].operation, 'stream_append');
+  await new Promise((resolve) => server.close(resolve));
+});
