@@ -610,6 +610,36 @@ class DecisionTest(unittest.TestCase):
         self.assertIsNone(k8s.spec_drift({"cpu": "0.1n"}, {"cpu": "1m"}, "spec.overhead"))
         self.assertEqual(k8s.spec_drift({"cpu": "0.1n"}, {"cpu": "1n"}, "spec.overhead"), 'spec.overhead["cpu"]')
 
+    def test_deployment_readiness_accounts_for_binary_si_quantity_cap(self):
+        # ParseQuantity caps a BinarySI magnitude at 2**63-1 after nano
+        # rounding, so an accepted emptyDir sizeLimit of 8Ei is stored as
+        # 9223372036854775807; decimal SI and exponent forms are not capped.
+        bundle = example()
+        pod = deployment(bundle)["spec"]["template"]["spec"]
+        pod["volumes"] = pod.get("volumes", []) + [{"name": "huge", "emptyDir": {"sizeLimit": "8Ei"}}]
+        k8s.validate_bundle(bundle)
+        deploy = k8s.render(bundle, "suifleet-apps", "web-app", "1.0.0", "d" * 64)[1]
+        live = self.healthy(deploy)
+        volume = live["spec"]["template"]["spec"]["volumes"][-1]
+        self.assertEqual(volume["name"], "huge")
+        volume["emptyDir"]["sizeLimit"] = "9223372036854775807"  # as the API server stores it
+        self.assertEqual(k8s.object_ready(live, deploy, "web-app"), (True, "ready"))
+        for other in ("8Ei", "9223372036854775808", "9223372036854775806"):
+            volume["emptyDir"]["sizeLimit"] = other
+            self.assertIn("emptyDir.sizeLimit", k8s.object_ready(live, deploy, "web-app")[1], other)
+        parent = "spec.volumes[0].emptyDir"
+        cap = str(2 ** 63 - 1)
+        for want, have, same in [("8Ei", cap, True), ("7.999999999999999999999Ei", cap, True),
+                                 ("7.99999999999Ei", cap, False),
+                                 ("7Ei", str(7 * 2 ** 60), True), ("-8Ei", "-" + cap, True),
+                                 ("8Ei", str(2 ** 63), False), ("9223372036854775808", cap, False),
+                                 ("9223372036854775808", str(2 ** 63), True), ("10E", "10E", True),
+                                 ("10E", cap, False), ("1e19", "10E", True), (1e19, "10E", True)]:
+            drift = k8s.spec_drift({"sizeLimit": want}, {"sizeLimit": have}, parent)
+            self.assertEqual(drift is None, same, f"{want!r} vs {have!r}")
+        # The cap also applies to ResourceList entries, before the milli round-up.
+        self.assertIsNone(k8s.spec_drift({"memory": "16Ei"}, {"memory": cap}, "spec.overhead"))
+
     def test_deployment_readiness_derives_image_pull_policy_default_from_image(self):
         # SetDefaults_Container fills an omitted, null or empty imagePullPolicy
         # from the container's image: Always for a "latest" tag (or no tag and

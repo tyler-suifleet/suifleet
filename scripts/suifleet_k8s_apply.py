@@ -413,11 +413,27 @@ def _round_away(value, digits):
     return Fraction(math.ceil(scaled) if scaled >= 0 else math.floor(scaled), 10 ** digits)
 
 
-def _parsed_quantity(value):
+# resource.Quantity's maxAllowed: ParseQuantity caps BinarySI magnitudes here.
+QUANTITY_BINARY_MAX = 2 ** 63 - 1
+
+
+def _is_binary_si(value):
+    """Whether ParseQuantity reads this quantity in BinarySI format (a Ki..Ei
+    suffix); JSON numbers and decimal/exponent suffixes are never BinarySI."""
+    match = QUANTITY.match(value) if isinstance(value, str) else None
+    return bool(match) and match.group(2) in QUANTITY_BINARY
+
+
+def _parsed_quantity(value, binary=False):
     """Value the API server stores for a quantity it parses: ParseQuantity
     rounds a nonzero value away from zero to nano precision ("0.1n" is stored
-    as "1n"), for every quantity field."""
-    return _round_away(value, 9)
+    as "1n"), for every quantity field, then caps a BinarySI magnitude at
+    2**63-1 ("8Ei" is stored as "9223372036854775807"; decimal "10E" is not
+    capped)."""
+    value = _round_away(value, 9)
+    if binary and abs(value) > QUANTITY_BINARY_MAX:
+        value = QUANTITY_BINARY_MAX if value > 0 else -QUANTITY_BINARY_MAX
+    return value
 
 
 def _round_up_milli(value):
@@ -621,7 +637,7 @@ def spec_drift(desired, live, path):
     extra key's value is empty. A field the server omits matches a zero/empty
     desired value (Go omitempty), and resource quantities (resource limits and
     requests, overhead, emptyDir sizeLimit) compare by value after the
-    server's parse-time round-up to nano precision, resource lists after its
+    server's parse-time round-up to nano precision and BinarySI cap, resource lists after its
     further round-up to milli precision."""
     if live is None:
         if desired is None:
@@ -681,12 +697,12 @@ def spec_drift(desired, live, path):
         return None
     if QUANTITY_PATH.search(path):
         # Typed comparison first: the server parses every quantity rounded up
-        # to nano precision and stores a ResourceList entry further rounded up
+        # to nano precision (BinarySI capped at 2**63-1) and stores a ResourceList entry further rounded up
         # to milli precision; the live value is canonical, so any other live
         # value, including the identical unrounded text, is drift.
         want, have = _quantity(desired), _quantity(live)
         if want is not None and have is not None:
-            want = _parsed_quantity(want)
+            want = _parsed_quantity(want, _is_binary_si(desired))
             if MILLI_ROUNDED_PATH.search(path):
                 want = _round_up_milli(want)
             return None if want == have else path
