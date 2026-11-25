@@ -478,6 +478,34 @@ class ConfigTests(Base):
         cfg = em.Config(self.config(otlp=dict(endpoint="http://127.0.0.1:4318/a%3Fb%23c")))
         self.assertEqual(cfg.otlp["metrics_url"], "http://127.0.0.1:4318/a%3Fb%23c/v1/metrics")
 
+    def test_empty_userinfo_is_rejected_by_check_config(self):
+        # urlsplit reports an empty username/password as "" (falsy), but urllib
+        # would still send "@127.0.0.1" to the resolver, so a permanent
+        # misconfiguration would look like an endless collector outage.
+        for endpoint in ("http://@127.0.0.1:4318", "http://:@127.0.0.1:4318", "https://@collector.example",
+                         "https://:@collector.example/c", "http://user@127.0.0.1:4318"):
+            path = self.write("config.json", json.dumps(self.config(otlp=dict(endpoint=endpoint))))
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaisesRegex(em.ConfigError, "without credentials, query or fragment"):
+                    em.Config(self.config(otlp=dict(endpoint=endpoint)))
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                self.assertIn("configuration rejected",
+                              "".join(call.args[0] for call in stderr.write.call_args_list))
+        for url in ("http://@127.0.0.1:1441", "http://:@127.0.0.1:1441", "http://u:p@127.0.0.1:1441"):
+            console = dict(url=url, token_file=self.token_file)
+            path = self.write("config.json", json.dumps(self.config(console=console)))
+            with self.subTest(console=url):
+                with self.assertRaisesRegex(em.ConfigError, "console.url must be"):
+                    em.Config(self.config(console=console))
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                self.assertIn("configuration rejected",
+                              "".join(call.args[0] for call in stderr.write.call_args_list))
+        # Percent-encoded "@" in the path is an ordinary path character.
+        cfg = em.Config(self.config(otlp=dict(endpoint="http://127.0.0.1:4318/a%40b")))
+        self.assertEqual(cfg.otlp["metrics_url"], "http://127.0.0.1:4318/a%40b/v1/metrics")
+
     def test_collector_path_receives_the_otlp_route(self):
         collector = FakeCollector()
         self.addCleanup(collector.close)

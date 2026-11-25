@@ -207,7 +207,7 @@ class Config:
         _only(console, ("url", "token_file"), "console")
         url = _split_url(console.get("url", "http://127.0.0.1:1441"))
         if url is None or url.scheme != "http" or not url.hostname or not _loopback_host(url.hostname) \
-                or url.path not in ("", "/") or url.query or url.fragment or url.username or url.password \
+                or url.path not in ("", "/") or url.query or url.fragment or "@" in url.netloc \
                 or _port(url) is None:
             raise ConfigError("console.url must be http://<loopback address>:<port> (the console is loopback-only)")
         self.console_url = f"http://{url.netloc}"
@@ -255,7 +255,7 @@ class Config:
                 raise ConfigError("otlp.endpoint must be an http(s) URL with a valid port and without credentials, query or fragment")
             parsed = _split_url(endpoint)
             if parsed is None or parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.query \
-                    or parsed.fragment or parsed.username or parsed.password or _port(parsed, default=0) is None:
+                    or parsed.fragment or "@" in parsed.netloc or _port(parsed, default=0) is None:
                 raise ConfigError("otlp.endpoint must be an http(s) URL with a valid port and without credentials, query or fragment")
             for key in ("headers_file", "ca_file"):
                 if otlp.get(key) is not None and not isinstance(otlp[key], str):
