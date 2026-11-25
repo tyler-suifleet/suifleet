@@ -81,11 +81,11 @@ precision (not reachable by the documented limits).
 | Error | Meaning | Safe reaction |
 |---|---|---|
 | `IpcError` (`code`, `operation`, `oldest`) | The daemon processed and refused the request. `request_failed` covers authorization, validation and lifecycle failures (details stay in daemon logs); streams/shadows return protocol codes such as `full`, `evicted`, `exists`, `not-found`, `conflict`, `quota`. | Denied requests and coded stream/shadow refusals stored nothing. A generic `request_failed` from a mutation is not a guarantee: a `stream_append` can return it after the record was stored (for example when a later segment cleanup fails), so check the stream's `newest` before resending. Fix the ACL or request; for `full`/backpressure retry later. |
-| `TransportError` with `outcome: 'not_sent'` | No request byte reached the daemon (missing socket during a restart, refused connection, abort before connect). | Retrying is safe for every operation. `connectAttempts` does this automatically for ENOENT/ECONNREFUSED/EAGAIN. |
+| `TransportError` with `outcome: 'not_sent'` | No request byte reached the daemon (missing socket during a restart, refused connection, abort before connect or during `connectAttempts` backoff; the abort reason is the `cause`). | Retrying is safe for every operation. `connectAttempts` does this automatically for ENOENT/ECONNREFUSED/EAGAIN. |
 | `TransportError` with `outcome: 'unknown'` | The request may have executed: timeout, closed connection, truncated response. An unmapped UID also sees a closed connection. | Never retry a mutation blindly. Inspect status, stream `newest`, shadow version or the deployment outcome first. |
 | `ProtocolError` (a `TransportError`, outcome `unknown`) | Unsupported response version, malformed or oversize frame. | As above; check SDK/daemon versions. |
 | `DataPutError` (`upload`, `chunk`, `receipts`) | A chunk failed. | Resume with the same `upload` and `startChunk: chunk` and the same bytes. |
-| `RangeError`, `TypeError` | Refused locally before sending: request frame > 64 KiB, publish payload > 4096 serialized bytes, data > 64 MiB, invalid options, `data_put` metadata that is not a string-to-string map within the daemon's limits. | Fix the input. |
+| `RangeError`, `TypeError` | Refused locally before sending: request frame > 64 KiB, publish payload > 4096 serialized bytes, data > 64 MiB, invalid options, `data_put` metadata that is not a string-to-string map within the daemon's limits (an explicit `null` is refused; only an omitted or `undefined` value defaults to `{}`). | Fix the input. |
 
 The SDK never resends a request after a byte was sent. Each request uses its own
 connection because v1 has no pipelining or streaming, so a daemon restart needs
