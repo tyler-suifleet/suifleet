@@ -109,6 +109,13 @@ Aborting while a `receive` is in flight throws that request's `TransportError`
 with outcome `unknown` instead, because the daemon may already have removed a
 volatile or QoS 0 message from the queue.
 
+`pollIntervalMs` (default 500) and `maxReconnectDelayMs` (default 5000) must be
+finite numbers in [0, 2147483647]. The first `next()` rejects anything else with
+`RangeError` before sending a `receive`, so an out-of-range value can never
+become Node's 1 ms fallback and poll a restarting or idle daemon in a tight
+loop. Reconnect backoff starts at `pollIntervalMs` and doubles up to
+`maxReconnectDelayMs`.
+
 ### Bounded buffering
 
 `OutboundBuffer` queues `publish` and `stream_append` items in process memory,
@@ -180,7 +187,7 @@ reboots the platform or asserts firmware/boot health; platform tools own those.
 
 | Command | What it runs |
 |---|---|
-| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, one `timeoutMs` deadline spanning backoff (no dispatch after expiry, including a connect callback delayed past it by an event-loop stall; remaining-time response wait), abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, prompt `flush` abort during a nested client connect retry, `null` configuration, `timeoutMs`/`connectRetryDelayMs`/`connectAttempts` timer-range boundaries (2147483647 ms honored, larger/non-finite refused without a `TimeoutOverflowWarning`), invalid `maxAttempts`/`retryDelayMs` refused before any send. |
+| `make test-sdk-node` | Locked install, strict build and pack; `scripts/tests/test_ipc_interface.py` (daemon/Python/TypeScript contract); `node --test test/client.test.mjs` against a local fake socket peer: exact frames, every outcome class, split/oversize/malformed/future-version responses, no resend after send, connect retry across a late listener, one `timeoutMs` deadline spanning backoff (no dispatch after expiry, including a connect callback delayed past it by an event-loop stall; remaining-time response wait), abort, chunking/resume, `data_put` metadata accepted as a string map and refused locally (never sent) for non-string values or limit violations, including through the CLI, iterator ack, iterator abort (in-flight `receive` throws `unknown`; idle or unsent abort ends cleanly), buffer bounds/order/uncertain stop, no replay of a `stream_append` `request_failed`, transient/permanent stream codes, payload snapshot across a retry, prompt `flush` abort during a nested client connect retry, `null` configuration, `timeoutMs`/`connectRetryDelayMs`/`connectAttempts` timer-range boundaries (2147483647 ms honored, larger/non-finite refused without a `TimeoutOverflowWarning`), invalid `maxAttempts`/`retryDelayMs` refused before any send, `messages()` `pollIntervalMs`/`maxReconnectDelayMs` refused before any `receive` and the 2147483647 ms maximum honored for both polling and reconnect backoff. |
 | `make test-ipc-node` | `scripts/test_ipc_node.py --package <tarball>`: the packed SDK and its unmodified examples against the real debug daemon with local chain/Walrus simulators, as distinct real Unix UIDs in a disposable root, network-none container. Administrator install/list/status/logs; `null` configuration before the first install handled by the sensor example; configuration, health, streams, QoS 1 pub/sub with ack; Python↔Node interoperability on one daemon; default-deny for admin-only, cross-component, topic, stream, shadow-section and spoofed-name requests without side effects, unmapped UID; bounded buffering against the 32-message volatile inbox, the durable spool limit and a full `RejectNewData` stream; reconnect across a daemon restart with redelivery of the unacknowledged message; shadow deltas with conditional updates, `conflict` and `not-found`; `data_put` refusal with resume information. |
 
 Fake-peer unit tests establish client framing and classification only; the
