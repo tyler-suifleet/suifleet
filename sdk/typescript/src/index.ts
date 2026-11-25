@@ -10,9 +10,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createConnection } from 'node:net';
 import {
   DATA_CHUNK_SIZE, DEFAULT_SOCKET, DataPutError, MAX_DATA_SIZE, MAX_FRAME, MAX_PUBLISH_PAYLOAD, ProtocolError, TransportError,
-  decodeResponse, encodeRequest,
+  decodeResponse, encodeRequest, validateDataMetadata,
 } from './protocol.js';
-import type { DataPutReceipt, JsonObject, JsonValue } from './protocol.js';
+import type { DataMetadata, DataPutReceipt, JsonObject, JsonValue } from './protocol.js';
 
 export * from './protocol.js';
 
@@ -85,8 +85,11 @@ export interface ShadowDocument {
 
 export interface DataPutOptions {
   contentType?: string;
-  /** Public JSON metadata; never put secrets here. */
-  metadata?: JsonObject;
+  /**
+   * Public string-to-string metadata, checked locally against the daemon's
+   * limits (see validateDataMetadata); never put secrets here.
+   */
+  metadata?: DataMetadata;
   /** Stable 64-hex upload ID; preserve it across an uncertain retry. */
   upload?: string;
   startChunk?: number;
@@ -330,12 +333,13 @@ export class Client {
     const chunks = Math.max(1, Math.ceil(data.length / DATA_CHUNK_SIZE));
     const startChunk = options.startChunk ?? 0;
     if (!Number.isInteger(startChunk) || startChunk < 0 || startChunk >= chunks) throw new RangeError('invalid startChunk');
+    const metadata = validateDataMetadata(options.metadata ?? {});
     const receipts: DataPutReceipt[] = [];
     for (let chunk = startChunk; chunk < chunks; chunk++) {
       const part = Buffer.from(data.buffer, data.byteOffset + chunk * DATA_CHUNK_SIZE,
         Math.min(DATA_CHUNK_SIZE, data.length - chunk * DATA_CHUNK_SIZE));
       const descriptor: JsonObject = {
-        stream, key, content_type: options.contentType ?? 'application/octet-stream', metadata: options.metadata ?? {},
+        stream, key, content_type: options.contentType ?? 'application/octet-stream', metadata,
         upload, chunk, chunks, total_size: data.length, size: part.length,
         sha256: [...createHash('sha256').update(part).digest()],
       };

@@ -10,6 +10,39 @@ export const MAX_PUBLISH_PAYLOAD = 4096;
 /** Raw bytes per `data_put` chunk, as in the Python SDK. */
 export const DATA_CHUNK_SIZE = 24576;
 export const MAX_DATA_SIZE = 64 * 1024 * 1024;
+/** `data_put` descriptor metadata limits (suifleet-edge/src/opaque.rs `Metadata::validate`). */
+export const MAX_DATA_METADATA_ENTRIES = 16;
+export const MAX_DATA_METADATA_KEY_BYTES = 64;
+export const MAX_DATA_METADATA_VALUE_BYTES = 256;
+export const MAX_DATA_METADATA_BYTES = 6144;
+/** `data_put` metadata: the daemon accepts only a string-to-string map. */
+export type DataMetadata = Readonly<Record<string, string>>;
+
+const wellFormed = (text: string) => Buffer.from(text, 'utf8').toString('utf8') === text;
+/**
+ * Check `data_put` metadata against the daemon's wire contract (a JSON object of
+ * at most 16 non-empty string keys of up to 64 UTF-8 bytes, string values of up
+ * to 256 UTF-8 bytes, at most 6144 serialized bytes) and return a detached copy.
+ * Throws TypeError for a wrong shape and RangeError for a limit, before any request.
+ */
+export function validateDataMetadata(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('metadata must be an object of strings');
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) throw new TypeError('metadata must be a plain object of strings');
+  const copy: Record<string, string> = Object.create(null) as Record<string, string>;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > MAX_DATA_METADATA_ENTRIES) throw new RangeError(`metadata exceeds ${MAX_DATA_METADATA_ENTRIES} entries`);
+  for (const [key, item] of entries) {
+    if (typeof item !== 'string') throw new TypeError(`metadata value for ${JSON.stringify(key)} must be a string`);
+    if (!wellFormed(key) || !wellFormed(item)) throw new TypeError('metadata must be well-formed Unicode');
+    const keyBytes = Buffer.byteLength(key, 'utf8');
+    if (keyBytes === 0 || keyBytes > MAX_DATA_METADATA_KEY_BYTES) throw new RangeError(`metadata keys must be 1-${MAX_DATA_METADATA_KEY_BYTES} UTF-8 bytes`);
+    if (Buffer.byteLength(item, 'utf8') > MAX_DATA_METADATA_VALUE_BYTES) throw new RangeError(`metadata values must be at most ${MAX_DATA_METADATA_VALUE_BYTES} UTF-8 bytes`);
+    copy[key] = item;
+  }
+  if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > MAX_DATA_METADATA_BYTES) throw new RangeError(`metadata exceeds ${MAX_DATA_METADATA_BYTES} serialized bytes`);
+  return { ...copy };
+}
 
 /** Operation names of protocol v1, in daemon order (interfaces/ipc-v1.json). */
 export const OPERATIONS = [

@@ -1,15 +1,17 @@
 // Client framing, outcome classification and buffering against a local fake
 // Unix-socket peer. Real-daemon behavior is covered by scripts/test_ipc_node.py.
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   BufferFullError, Client, DATA_CHUNK_SIZE, DataPutError, IpcError, MAX_FRAME, OutboundBuffer, ProtocolError,
-  TransportError, UncertainDeliveryError, encodeRequest,
+  TransportError, UncertainDeliveryError, encodeRequest, validateDataMetadata,
 } from '../dist/index.js';
 
 const directory = mkdtempSync(join(tmpdir(), 'sf302-unit-'));
@@ -180,6 +182,53 @@ test('putData chunks, hashes and resumes with a stable upload ID', async () => {
   assert.equal(Buffer.from(last.data_base64, 'base64').length, 5);
   assert.deepEqual(Object.keys(last.descriptor), ['stream', 'key', 'content_type', 'metadata', 'upload', 'chunk', 'chunks', 'total_size', 'size', 'sha256']);
   await assert.rejects(client.putData('sensor', 'k', data, { upload: 'nothex' }), RangeError);
+  await server.close();
+});
+
+test('putData metadata matches the daemon string map contract and is refused locally otherwise', async () => {
+  const server = await serve((r) => ok({ sequence: r.payload.descriptor.chunk, state: 'queued', storage_acknowledged: false }));
+  const client = new Client({ socketPath: server.path, component: 'svc' });
+  const metadata = { sampleCount: '5', 'unit ☃': 'mV' };
+  await client.putData('sensor', 'k', Buffer.from([1, 2]), { metadata });
+  assert.deepEqual(server.requests.at(-1).payload.descriptor.metadata, metadata);
+  await client.putData('sensor', 'k', Buffer.from([1]));
+  assert.deepEqual(server.requests.at(-1).payload.descriptor.metadata, {});
+  const sent = server.requests.length;
+  const refused = [
+    [{ sampleCount: 5 }, TypeError], [{ nested: { a: '1' } }, TypeError], [{ flag: true }, TypeError], [{ none: null }, TypeError],
+    [['a'], TypeError], ['text', TypeError], [new Map([['a', 'b']]), TypeError], [{ bad: '\ud800' }, TypeError],
+    [{ '': 'x' }, RangeError], [{ ['k'.repeat(65)]: 'x' }, RangeError], [{ k: 'é'.repeat(129) }, RangeError],
+    [Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, 'v'])), RangeError],
+    // Within per-entry limits, but control characters serialize to \\u0001 (6 bytes) and exceed 6144 serialized bytes.
+    [Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`k${i}`, '\u0001'.repeat(100)])), RangeError],
+  ];
+  for (const [value, kind] of refused) {
+    await assert.rejects(client.putData('sensor', 'k', Buffer.from([1]), { metadata: value }), kind, JSON.stringify(String(value)));
+  }
+  assert.equal(server.requests.length, sent, 'refused metadata never reaches the daemon');
+  // Limits are inclusive; the copy is detached from the caller's object.
+  const max = { ['k'.repeat(64)]: 'é'.repeat(128) };
+  const copy = validateDataMetadata(max);
+  assert.deepEqual(copy, max);
+  assert.notEqual(copy, max);
+  await server.close();
+});
+
+test('CLI data_put refuses non-string metadata before connecting and forwards a string map', async () => {
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+  const file = join(directory, 'blob.bin');
+  writeFileSync(file, Buffer.from([9, 8, 7]));
+  const run = (socket, metadata) => new Promise((resolve) => execFile(process.execPath,
+    [cli, '--socket', socket, '--component', 'svc', '--topic', 'sensor', '--file', file, '--metadata', metadata, 'data_put'],
+    (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr })));
+  const server = await serve((r) => ok({ sequence: 1, state: 'queued', storage_acknowledged: false }));
+  const bad = await run(server.path, '{"sampleCount":5}');
+  assert.equal(bad.code, 1);
+  assert.match(bad.stderr, /metadata value for "sampleCount" must be a string/);
+  assert.equal(server.requests.length, 0);
+  const good = await run(server.path, '{"sampleCount":"5"}');
+  assert.equal(good.code, 0, good.stderr);
+  assert.deepEqual(server.requests[0].payload.descriptor.metadata, { sampleCount: '5' });
   await server.close();
 });
 
