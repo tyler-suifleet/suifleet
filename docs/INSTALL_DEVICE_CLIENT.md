@@ -153,7 +153,9 @@ The included units require systemd, and their signer configuration requires
 Linux 6.5 or later for caller identity checks. For a source installation on an
 older kernel or a host without systemd, follow the separate
 [portable signer setup](KEY_ISOLATION.md#portable-linux-signer) and its runtime
-requirements. The service signer remains incompatible with daemon self-update.
+requirements. That profile supports [managed client updates](DAEMON_UPDATE.md#managed-updates-with-the-portable-signer)
+with a platform-approved executable. The native systemd signer uses
+platform-managed package updates.
 Keep device keys isolated from the daemon account.
 Follow [key isolation](KEY_ISOLATION.md) for the current signer and PKCS#11
 build requirements. The standard bundles use the current service signer
