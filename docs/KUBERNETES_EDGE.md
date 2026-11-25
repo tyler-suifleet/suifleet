@@ -174,11 +174,20 @@ How the helper keeps two controllers from fighting:
      retrying the partially applied bundle itself fits within the two-bundle
      headroom. The prune after the writes is not atomic either: it can
      delete some of the previous bundle's objects and then fail, and a
-     rollback must then recreate them. So while the component's live
-     objects carry two bundle digests (a partial apply or a partial prune),
-     `apply` refuses, with exit code 2 before any write, every bundle except
-     those two. The supervisor rollback (the previous bundle) and a retry
-     (the new one) are allowed; both stay within the two bundles'
+     rollback must then recreate them. So until the component has
+     converged, `apply` refuses, with exit code 2 before any write, every
+     bundle except the last fully applied one and the new one. Converged
+     means every listed object belongs to one bundle and all of that
+     bundle's objects are listed (`apply` writes the bundle's object count
+     in `suifleet.io/bundle-objects`); a single listed digest is not enough,
+     because a partial apply can overwrite every object it shares with the
+     last fully applied bundle (for example a stable ConfigMap) and replace
+     that bundle's own digest. Each write therefore also records the last
+     fully applied bundle in `suifleet.io/rollback-bundle-sha256`, with a
+     `suifleet.io/apply-generation` that starts a new sequence on each
+     forward update from a converged namespace; only the latest
+     generation's record counts. The supervisor rollback (the previous
+     bundle) and a retry (the new one) are allowed; both stay within the two bundles'
      ConfigMaps, so the rollback always fits. An empty retirement bundle
      creates nothing and is also allowed. Once one of them succeeds, its
      prune removes the other's objects and any bundle can be applied again.
@@ -570,6 +579,11 @@ It checks the following:
   Deployment is being deleted. After the Pod is released and that deletion
   completes, a third bundle is still refused, and the rollback converges and
   prunes the renamed Deployment.
+  An update from a ConfigMap-only bundle that rewrites its stable ConfigMap,
+  creates another and then fails at its Deployment create (twice, a retry
+  included) leaves only the update's digest listed; a further update is
+  still refused before any write, and the rollback to the ConfigMap-only
+  bundle is allowed, prunes the update's ConfigMap and converges.
 - A stable-name ConfigMap made immutable out of band, and a content-addressed
   ConfigMap recreated with other content, each stop the apply before any
   write; readiness rejects the forged one, and the apply recreates both after
