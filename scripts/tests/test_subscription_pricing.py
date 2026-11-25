@@ -436,7 +436,7 @@ class PublicPricingTests(unittest.TestCase):
         self.assertIn(f'Up to {at_cost["max_devices"]:,} devices per organization', plan)
         self.assertIn(f'Up to {partners["max_devices"]:,} devices each at cost for {partners["term_months"]} months', plan)
         page = self.site.generated()
-        self.assertIn('Running a pilot?', page)
+        self.assertIn('Larger fleet or a pilot?', page)
         # Managed support, at-cost and design-partner terms are quoted individually, not public plans.
         for text in ('Managed', 'managed', 'At-cost', 'at cost', 'per organization', 'design partner', 'case study',
                      self.site.usd(managed['monthly_minimum_usd'])):
@@ -458,7 +458,7 @@ class PublicPricingTests(unittest.TestCase):
 
     def test_fleet_summary_applies_minimum_like_the_console(self):
         page = self.site.generated()
-        summary = page[page.index('summary-table'):page.index('</table>', page.index('summary-table'))]
+        summary = page[page.index('<h3>Monthly cost by fleet size</h3>'):]
         mark = ' <span class="min-mark" title="Monthly minimum">min</span>'
         self.assertIn(f'<tr><td>100</td><td>$49{mark}</td><td>$49{mark}</td><td>$49{mark}</td></tr>', summary)
         self.assertIn(f'<tr><td>500</td><td>$49{mark}</td><td>$90</td><td>$100</td></tr>', summary)
@@ -466,22 +466,21 @@ class PublicPricingTests(unittest.TestCase):
         self.assertIn('<tr><td>10,000</td><td>$800</td><td>$1,800</td><td>$2,000</td></tr>', summary)
         self.assertIn('Your price includes the network fees for your chosen settings.', page)
 
-    def test_detailed_estimates_are_expandable_with_annual_and_activation(self):
+    def test_price_estimates_are_expandable(self):
         page = self.site.generated()
         self.assertIn('<details class="estimates">', page)
-        self.assertIn('See detailed estimates', page)
+        self.assertIn('See price estimates', page)
         mark = ' <span class="min-mark" title="Monthly minimum">min</span>'
-        # 1,000 devices: monthly $80/$180/$200; annual prepay 10% off; $100 activation.
-        self.assertIn('<tr><td>1,000</td><td>$80</td><td>$180</td><td>$200</td><td>$72</td><td>$162</td><td>$180</td><td>$100</td></tr>', page)
-        # The discount also applies to the minimum.
-        self.assertIn(f'<tr><td>50</td><td>$49{mark}</td><td>$49{mark}</td><td>$49{mark}</td><td>$44.10{mark}</td>', page)
+        self.assertIn('<tr><td>1,000</td><td>$80</td><td>$180</td><td>$200</td></tr>', page)
+        self.assertIn(f'<tr><td>50</td><td>$49{mark}</td><td>$49{mark}</td><td>$49{mark}</td></tr>', page)
+        self.assertIn('Annual prepay takes 10% off. Activation is $0.10 per device, once.', page)
         for text in ('Encrypted delivery (Seal)', 'Every 5 minutes', '10 MB written per month', '$0.10 per GB'):
             self.assertIn(text, page)
 
     def test_only_first_band_is_published(self):
         page = self.site.generated()
         tiers = self.prices['base']['tiers']
-        self.assertIn(f'Over {tiers[0]["upToDevices"]:,} devices?', page)
+        self.assertIn(f'Over {tiers[0]["upToDevices"]:,} devices, or', page)
         for tier in tiers[1:]:
             self.assertNotIn(f'{tier["upToDevices"]:,}', page)
         for text in ('Custom, from', f'{tiers[0]["upToDevices"] + 1:,}'):
@@ -509,7 +508,7 @@ class PublicPricingTests(unittest.TestCase):
         prices['settings']['checkIntervalMs'][0]['usdPerDeviceMonth'] = 0.77
         prices['data']['writeUsdPerGB'] = 0.33
         page = self.site.render(prices, self.policy, 'digest')
-        for text in ('Over 12,345 devices?', '<div class="amount">$0.09 <small>', '$0.77', '$0.33 per GB'):
+        for text in ('Over 12,345 devices, or', '<div class="amount">$0.09 <small>', '$0.77', '$0.33 per GB'):
             self.assertIn(text, page)
         policy = copy.deepcopy(self.policy)
         policy['renewal_repricing_trigger_multiple'] = '4'
@@ -521,7 +520,7 @@ class PublicPricingTests(unittest.TestCase):
 
     def test_policy_and_estimator_are_explicit(self):
         page = self.site.generated()
-        for text in ('{{app:settings/}}', 'never change mid-term', 'at least 3×', '30 days', 'token-price rises'):
+        for text in ('{{app:settings/}}', 'never changes mid-term', 'at least 3×', '30 days', 'token-price rises'):
             self.assertIn(text, page)
         self.assertNotIn('Prices shown help you compare options.', page)
 

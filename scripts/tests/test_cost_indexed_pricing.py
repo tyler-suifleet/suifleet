@@ -68,7 +68,7 @@ class CostIndexedPricingTests(unittest.TestCase):
         page = site_pricing.render(self.prices, self.policy, 'digest', costs)
         for rate in ('$0.10', '$0.25', '$0.26'):
             self.assertIn(f'<div class="amount">{rate} <small>', page)
-        self.assertIn('network costs as of 2027-01-15', page)
+        self.assertIn('Network costs as of 2027-01-15', page)
         # 1,000 devices on Essentials at the raised rate.
         self.assertIn('<tr><td>1,000</td><td>$100</td>', page)
 
