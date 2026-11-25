@@ -14,13 +14,13 @@ integration layer inherits with identical task signatures. Its remaining glibc
 usrmerge guard is local cache hygiene, not an upstream defect.
 
 Standalone consumers that hit those OE-Core defects enable
-`INHERIT += "suifleet-core-fixes"`. The extracted export, including the class,
-passed yocto-check-layer on both pinned series, but that is not a recipe
-task-execution build. Before advertising standalone build support, build
-`suifleet`, `suifleet-node`, `suifleet-walrus-codec` and an image from the
-extracted export without meta-suifleet-integration on both pinned series,
-recording package QA. The core repository's
-`docs/YOCTO_STANDALONE_VALIDATION.md` records the current status. Do not add the
+`INHERIT += "suifleet-core-fixes"`. On both pinned series, the extracted export
+with the class enabled and without meta-suifleet-integration built `suifleet`,
+`suifleet-node`, `suifleet-walrus-codec` and `core-image-minimal` for
+`qemuarm64`. Package QA passed and the image booted in QEMU. The core
+repository's `docs/YOCTO_STANDALONE_VALIDATION.md` records the results. Repeat
+that build for any other series, machine or distro before claiming support for
+it. Those emulator results are not physical target acceptance. Do not add the
 integration layer blindly: it also contains board/access/test policy.
 
 ## Source availability and synchronization

@@ -52,8 +52,10 @@ It changes only these recipes and suppresses no QA:
   recursive `install_sw` relink race. The setting does not change task signatures.
 - `libcap`, Wrynose: passes the cross toolchain to the install-time `capsh`
   relink, which otherwise falls back to the host gcc.
-- `xz`, Wrynose target: points `xzmore` at `${bindir}/bash` and adds bash to
-  RDEPENDS, which satisfies file-rdeps package QA.
+- `xz`, Wrynose target: adds bash to RDEPENDS. If the generated `xzmore` uses
+  `#!/bin/bash`, it is pointed at `${bindir}/bash` so it satisfies file-rdeps
+  package QA. Pinned OE-Core normally generates `#!/bin/sh`, which makes the
+  rewrite a no-op.
 
 Each was still unfixed on OE-Core scarthgap, wrynose and master on 2026-11-24.
 The integration layer inherits the same class, so the pinned profiles keep
