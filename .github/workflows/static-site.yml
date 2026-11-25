@@ -1,8 +1,36 @@
 name: Static site
 on:
   pull_request:
+    paths:
+      - '**'
+      - '!site/src/**/*.html'
+      - '!site/src/**/*.css'
+      - '!docs/*.md'
+      - '!docs/**/*.md'
+      - '!README.md'
+      - 'docs/PR_COORDINATION.md'
+      - 'docs/ATOMIC_TICKETING.md'
+      - 'docs/IMPLEMENTATION_ACCEPTANCE.md'
+      - 'docs/SMALL_CHANGES.md'
+      - 'docs/TESTNET.md'
+      - 'docs/SECURITY_CI.md'
+      - 'docs/OPERATIONS.md'
   push:
     branches: [main]
+    paths:
+      - '**'
+      - '!site/src/**/*.html'
+      - '!site/src/**/*.css'
+      - '!docs/*.md'
+      - '!docs/**/*.md'
+      - '!README.md'
+      - 'docs/PR_COORDINATION.md'
+      - 'docs/ATOMIC_TICKETING.md'
+      - 'docs/IMPLEMENTATION_ACCEPTANCE.md'
+      - 'docs/SMALL_CHANGES.md'
+      - 'docs/TESTNET.md'
+      - 'docs/SECURITY_CI.md'
+      - 'docs/OPERATIONS.md'
   workflow_dispatch:
     inputs:
       approved_sha256:

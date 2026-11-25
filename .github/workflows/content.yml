@@ -1,0 +1,85 @@
+name: Content checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: content-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scope:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      marketing: ${{ steps.scope.outputs.marketing }}
+      docs: ${{ steps.scope.outputs.docs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        run: python3 scripts/content_scope.py --event "$GITHUB_EVENT_PATH" --output "$GITHUB_OUTPUT"
+  check:
+    needs: scope
+    if: needs.scope.outputs.full == 'false' && needs.scope.outputs.marketing == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test scope guard
+        run: python3 -m unittest discover -s scripts/tests -p test_content_scope.py -v
+      - name: Check marketing content
+        if: needs.scope.outputs.marketing == 'true'
+        run: |
+          python3 -m unittest discover -s site/tests -v
+          python3 site/build.py --out "$RUNNER_TEMP/content-site"
+          python3 site/check.py "$RUNNER_TEMP/content-site"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.22.2
+      - name: Check affected presentation without rebuilding the app or media
+        run: |
+          npm install --global pnpm@11.0.8
+          pnpm --dir dapp install --frozen-lockfile --ignore-scripts
+          CHROME_EXECUTABLE=/usr/bin/google-chrome node site/tests/content_browser.cjs "$RUNNER_TEMP/content-site"
+  security-dependencies:
+    needs: scope
+    if: needs.scope.outputs.full == 'false'
+    name: Security dependencies, secrets and configuration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify and install pinned security scanner
+        run: python3 scripts/install_security_scanner.py "$RUNNER_TEMP/security-tools/trivy"
+      - name: Scan source, lockfiles and deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '{}\n' > "$RUNNER_TEMP/security-empty.yaml"
+          "$RUNNER_TEMP/security-tools/trivy" filesystem \
+            --config "$RUNNER_TEMP/security-empty.yaml" \
+            --secret-config "$RUNNER_TEMP/security-empty.yaml" \
+            --ignorefile /dev/null --include-dev-deps \
+            --scanners vuln,secret,misconfig \
+            --skip-dirs '.git,**/node_modules,**/.next,**/target,.ci-cache' \
+            --format json --output "$RUNNER_TEMP/trivy-private.json" --quiet .
+          python3 scripts/security_audit.py trivy "$RUNNER_TEMP/trivy-private.json" \
+            --output security-reports/dependencies.json
+      - name: Publish sanitized findings only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-dependencies
+          path: security-reports/dependencies.json
+          retention-days: 14
+          if-no-files-found: warn
