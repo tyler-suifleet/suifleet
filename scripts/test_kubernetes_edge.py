@@ -532,6 +532,54 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, v1, "1.0.0")
     check("readiness succeeds once the other manager relinquishes its nodeSelector", True)
 
+    # Optional pointer fields keep presence: a container runAsGroup 0 overrides
+    # the pod's runAsGroup, an absent one inherits it. The server keeps an
+    # explicit 0, and readiness must reject another manager adding one.
+    def container_group():
+        context = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]["spec"]["containers"][0]["securityContext"]
+        return "runAsGroup" in context, context.get("runAsGroup")
+
+    bundle = json.loads(v1.read_text())
+    pod = bundle["resources"][1]["spec"]["template"]["spec"]
+    # containerd rejects a pod sandbox group without a pod user.
+    pod["securityContext"].update(runAsUser=65534, runAsGroup=65534)
+    pod["containers"][0]["securityContext"]["runAsGroup"] = 0
+    explicit = work / "group-explicit-zero.json"
+    explicit.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, explicit)
+    check("helper applies a bundle with an explicit container runAsGroup 0", result.returncode == 0, result.stderr)
+    wait_ready(profiles, explicit, "1.0.0")
+    check("the server keeps an explicit container runAsGroup 0 and readiness accepts it",
+          container_group() == (True, 0), repr(container_group()))
+    del pod["containers"][0]["securityContext"]["runAsGroup"]
+    inherited = work / "group-inherited.json"
+    inherited.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, inherited)
+    check("helper applies a bundle whose container inherits the pod runAsGroup", result.returncode == 0, result.stderr)
+    wait_ready(profiles, inherited, "1.0.0")
+    check("the inherited bundle leaves the container runAsGroup absent", container_group() == (False, None),
+          repr(container_group()))
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps({
+        "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+        "spec": {"template": {"spec": {"containers": [{"name": "web", "securityContext": {"runAsGroup": 0}}]}}}}))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    overridden = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)
+    result = helper("ready", profiles, inherited)
+    check("readiness rejects a healthy rollout that overrides the inherited group with runAsGroup 0",
+          container_group() == (True, 0) and overridden["status"].get("availableReplicas") == 1
+          and result.returncode == 1
+          and "spec.template.spec.containers[0].securityContext.runAsGroup differs" in result.stderr,
+          result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    wait_ready(profiles, inherited, "1.0.0")
+    check("readiness succeeds once the other manager relinquishes its runAsGroup", container_group() == (False, None),
+          repr(container_group()))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the runAsGroup bundles", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}

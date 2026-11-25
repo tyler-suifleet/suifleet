@@ -281,7 +281,20 @@ plain-string field the server defaults (such as an httpGet `path`) matches
 that default too, as does an explicit `0` for a probe's `timeoutSeconds`,
 `periodSeconds`, `successThreshold` or `failureThreshold` (non-pointer fields
 the server defaults to 1, 10, 1 and 3). Pointer fields such as
-`terminationGracePeriodSeconds` keep an explicit `0`. Anything else the bundle omits,
+`terminationGracePeriodSeconds` keep an explicit `0`. For optional pointer
+fields, presence itself is meaningful in both directions: a container
+`runAsGroup: 0` overrides the pod's `runAsGroup` while an absent one inherits
+it, and an empty `namespaceSelector` selects all namespaces while an absent one
+selects only the pod's own. A pointer field the bundle sets (even to `0`,
+`false` or `{}`) must be present live, and a live pointer field the bundle omits
+is drift unless it holds the server default. These include the
+`securityContext` fields (`runAsUser`, `runAsGroup`, `runAsNonRoot`,
+`fsGroup`, `allowPrivilegeEscalation`, `readOnlyRootFilesystem`,
+`privileged` and others), `optional`, `defaultMode`, `mode`,
+`tolerationSeconds`, `activeDeadlineSeconds`, `labelSelector` and
+`namespaceSelector`. Plain fields that the server omits when zero, such as
+`minReadySeconds` or a volume mount's `readOnly`, keep the zero-value
+tolerance. Anything else the bundle omits,
 such as an injected init container or sidecar, extra `env`, a `nodeSelector`
 or an extra pod-template annotation (including `kubectl rollout restart`'s
 `restartedAt`), is drift and not ready. Map fields (pod-template labels and
@@ -378,6 +391,10 @@ It checks the following:
 - Another manager adding the empty-valued `nodeSelector`
   `{"example.com/pool": ""}` rolls out healthily on a node labelled to match
   but is not ready. Readiness succeeds after that manager relinquishes it.
+- An explicit container `runAsGroup: 0` is kept by the server and is ready. In
+  a bundle whose container inherits the pod's `runAsGroup`, another manager
+  adding container `runAsGroup: 0` rolls out healthily but is not ready.
+  Readiness succeeds after that manager relinquishes it.
 - A kubectl wrapper injects administrator actions between the helper's
   ownership check and its write. A competing creation, a replacement by a
   customer object and a relabel are each refused (exit code 3) and left
