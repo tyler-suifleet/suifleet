@@ -620,6 +620,45 @@ def scenario(cluster, work, supervisor):
     check("apply returns to v1 after the null-field bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
 
+    # emptyDir sizeLimit is a Kubernetes quantity the server canonicalises
+    # ("1.5Gi" is returned as "1536Mi"); readiness must compare it by value and
+    # still reject a genuine size change.
+    def size_limit():
+        pod = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)[
+            "spec"]["template"]["spec"]
+        return {v["name"]: v.get("emptyDir", {}).get("sizeLimit") for v in pod.get("volumes", [])}.get("scratch")
+
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["volumes"].append(
+        {"name": "scratch", "emptyDir": {"sizeLimit": "1.5Gi"}})
+    sized = work / "size-limit.json"
+    sized.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, sized)
+    check("helper applies a bundle with an emptyDir sizeLimit of 1.5Gi", result.returncode == 0, result.stderr)
+    wait_ready(profiles, sized, "1.0.0")
+    check("the server canonicalises sizeLimit 1.5Gi to 1536Mi and readiness accepts it",
+          size_limit() == "1536Mi", repr(size_limit()))
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "--force-conflicts", "-f", "-",
+                  stdin=json.dumps({
+                      "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE},
+                      "spec": {"template": {"spec": {"volumes": [
+                          {"name": "scratch", "emptyDir": {"sizeLimit": "2Gi"}}]}}}}))
+    cluster.admin("rollout", "status", "deployment/web", "-n", NAMESPACE, "--timeout=120s")
+    result = helper("ready", profiles, sized)
+    check("readiness rejects another manager's emptyDir sizeLimit change",
+          size_limit() == "2Gi" and result.returncode == 1 and "emptyDir.sizeLimit differs" in result.stderr,
+          result.stderr)
+    cluster.admin("apply", "--server-side", "--field-manager=customer-gitops", "-f", "-", stdin=json.dumps(
+        {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "web", "namespace": NAMESPACE}}))
+    result = helper("apply", profiles, sized)
+    check("apply restores the sizeLimit bundle after the other manager relinquishes it", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, sized, "1.0.0")
+    check("readiness succeeds once the sizeLimit is restored", size_limit() == "1536Mi", repr(size_limit()))
+    result = helper("apply", profiles, v1)
+    check("apply returns to v1 after the sizeLimit bundle", result.returncode == 0, result.stderr)
+    wait_ready(profiles, v1, "1.0.0")
+
     def labels_of(name):
         item = json.loads(cluster.admin("get", "configmap", name, "-n", NAMESPACE, "-o", "json").stdout)
         return item["metadata"].get("labels") or {}, item.get("data") or {}
