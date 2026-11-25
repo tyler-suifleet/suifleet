@@ -502,6 +502,56 @@ class ConfigBindingTest(unittest.TestCase):
         self.assertEqual(sorted(cluster.store["configmaps"]), sorted([self.name("v1"), self.name("v3")]))
         self.assertEqual(cluster.pod_reads(), ["v1"])
 
+    def with_stable(self, message, settings=None):
+        """Objects for `message`, plus an unconsumed (stable, mutable)
+        ConfigMap customer-settings when `settings` is given."""
+        bundle = self.bundle(message)
+        if settings is not None:
+            bundle["resources"].insert(1, {"apiVersion": "v1", "kind": "ConfigMap",
+                                           "metadata": {"name": "customer-settings"}, "data": {"mode": settings}})
+        k8s.validate_bundle(bundle)
+        return k8s.render(bundle, "suifleet-apps", "web-app", "1", hashlib.sha256(message.encode()).hexdigest())
+
+    def test_failed_apply_keeps_a_stable_configmap_the_new_bundle_omits(self):
+        """Review 4621: a stable ConfigMap of the last converged bundle may be
+        read by a consumer outside the bundle. An update that omits it and
+        then fails must leave it in place with its prior data; only the
+        prune after a successful apply removes it."""
+        cluster = ModelCluster()
+        v1 = self.with_stable("v1", settings="previous")
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        cluster.refuse_deployments = True
+        with self.assertRaisesRegex(k8s.Rejected, "injected"):
+            k8s.apply(cluster, self.with_stable("v2"), "web-app", cluster)
+        stable = cluster.store["configmaps"].get("customer-settings")
+        self.assertIsNotNone(stable, "the failed apply deleted a stable ConfigMap")
+        self.assertEqual(stable["data"], {"mode": "previous"})
+        self.assertEqual(cluster.pod_reads(), ["v1"])
+        # A second failed attempt (which runs the pre-write freeing pass with
+        # the v2 leftover present) still keeps it.
+        with self.assertRaisesRegex(k8s.Rejected, "injected"):
+            k8s.apply(cluster, self.with_stable("v3"), "web-app", cluster)
+        self.assertEqual(cluster.store["configmaps"]["customer-settings"]["data"], {"mode": "previous"})
+        self.assertNotIn(self.name("v2"), cluster.store["configmaps"], "content-addressed leftover freed")
+        # Rolling back restores convergence with the stable map untouched.
+        cluster.refuse_deployments = False
+        self.assertEqual(sorted(k8s.apply(cluster, v1, "web-app", cluster)), [f"configmaps/{self.name('v3')}"])
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        # A successful update that omits it prunes it after every write.
+        v2 = self.with_stable("v2")
+        removed = k8s.apply(cluster, v2, "web-app", cluster)
+        self.assertIn("configmaps/customer-settings", removed)
+        self.assertNotIn("customer-settings", cluster.store["configmaps"])
+
+    def test_freeing_never_deletes_stable_configmaps(self):
+        cluster = ModelCluster()
+        k8s.apply(cluster, self.with_stable("v1", settings="kept"), "web-app", cluster)
+        self.assertEqual(k8s.free_configmaps(cluster, "web-app", self.objects("v2"), cluster), [])
+        self.assertIn("customer-settings", cluster.store["configmaps"])
+        self.assertIn(self.name("v1"), cluster.store["configmaps"], "still referenced by the live Deployment")
+
     def test_configmap_changed_after_write_is_not_bound(self):
         cluster = ModelCluster()
         cluster.tamper = lambda item: item["data"].update({"index.html": "foreign"})

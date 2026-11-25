@@ -1197,21 +1197,38 @@ def live_config_refs(deployment):
     return names
 
 
+def content_addressed(configmap):
+    """True for a ConfigMap this helper published under a content-addressed
+    name for a bundle Deployment: immutable, annotated with its bundle name
+    and named NAME-HASH. Only bundle Deployments consume these; stable
+    (mutable, bundle-named) ConfigMaps may have consumers outside the bundle."""
+    metadata = configmap.get("metadata") or {}
+    name = metadata.get("name")
+    return (configmap.get("immutable") is True and isinstance(name, str) and bool(CONTENT_NAME.search(name))
+            and isinstance((metadata.get("annotations") or {}).get(CONFIG_NAME_ANNOTATION), str))
+
+
 def free_configmaps(kubectl, component, objects, writer):
-    """Before creating ConfigMaps, delete this component's ConfigMaps that the
-    bundle does not contain and no live (non-terminating) component
-    Deployment references -- leftovers of an earlier apply that failed before
-    pruning. The end-of-apply prune would delete them anyway; doing it first
-    keeps them from consuming the namespace's ConfigMap quota, so a retry or
-    new bundle after a partial apply needs room for only the live and the
-    desired ConfigMaps."""
+    """Before creating ConfigMaps, delete this component's content-addressed
+    ConfigMaps that the bundle does not contain and no live (non-terminating)
+    component Deployment references -- leftovers of an earlier apply that
+    failed before pruning. Nothing can still read such an object: only bundle
+    Deployments consume content-addressed names, and none references it.
+    The end-of-apply prune would delete them anyway; doing it first keeps
+    them from consuming the namespace's ConfigMap quota, so a retry or new
+    bundle after a partial apply needs room for only the live and the
+    desired ConfigMaps. Stable ConfigMaps are never freed here: one of the
+    last converged bundle may be in use by a consumer outside the bundle,
+    and a leftover cannot be told apart from it, so only the prune after a
+    fully successful apply removes them."""
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     listed = kubectl.json("get", "deployments.apps", "-l", selector) or {}
     keep = {item["metadata"]["name"] for item in objects if item["kind"] == "ConfigMap"}
     for deployment in listed.get("items") or []:
         if not (deployment.get("metadata") or {}).get("deletionTimestamp"):
             keep |= live_config_refs(deployment)
-    return prune(kubectl, component, {"configmaps": keep}, writer, resources=("configmaps",))
+    return prune(kubectl, component, {"configmaps": keep}, writer, resources=("configmaps",),
+                 only=content_addressed)
 
 
 def preflight(writer, objects):
@@ -1257,13 +1274,17 @@ def apply(kubectl, objects, component, writer=None):
     return freed + prune(kubectl, component, desired, writer)
 
 
-def prune(kubectl, component, desired, writer=None, resources=None):
+def prune(kubectl, component, desired, writer=None, resources=None, only=None):
+    """Delete this component's listed objects the bundle does not contain;
+    with `only`, just those the predicate accepts. Each delete is bound to
+    the listed object's UID and resourceVersion (Writer.delete)."""
     writer = writer or Writer(kubectl, component)
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     removed = []
     for resource in resources or ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}
-        items = {item["metadata"]["name"]: item for item in listed.get("items") or []}
+        items = {item["metadata"]["name"]: item for item in listed.get("items") or []
+                 if only is None or only(item)}
         for name in prune_candidates(list(items.values()), desired.get(resource, set())):
             if items[name]["metadata"].get("deletionTimestamp"):
                 continue  # Already deleted, held by a finalizer; readiness waits for it.
