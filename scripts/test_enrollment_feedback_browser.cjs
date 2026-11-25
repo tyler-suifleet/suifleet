@@ -46,11 +46,10 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
 
     // 1. The single-copy warning precedes the download, which needs an explicit acknowledgment.
     await tab.getByRole("tab", { name: "Pair one device" }).click();
-    await tab.getByLabel("Alias").fill("pi-9"); await tab.getByLabel("Serial number").fill("SN-9");
-    await tab.getByRole("button", { name: "Check", exact: true }).click();
+    await tab.getByLabel("Name", { exact: true }).fill("pi-9"); await tab.getByLabel("Serial number").fill("SN-9");
     const download = tab.getByRole("button", { name: "Download credentials for 1 device" }), ack = tab.getByRole("checkbox", { name: "I understand this download is the only copy of these credentials" });
     const warning = tab.getByTestId("credential-warning");
-    assert.match(await warning.innerText(), /Before you download: this file is the only copy of the claim keys/);
+    assert.match(await warning.innerText(), /This file is the only copy of the credentials; SuiFleet cannot download it again/);
     assert.match(await warning.innerText(), /Lost a credential file\?/);
     assert.equal(await warning.evaluate((w, b) => !!(w.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING), await download.elementHandle()), true, "the warning comes before the download button");
     assert.equal(await download.isDisabled(), true, "download waits for acknowledgment");
@@ -100,9 +99,8 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
 
     // Reissue: the same serial is accepted again and a new file can be downloaded.
     await tab.getByRole("tab", { name: "Pair one device" }).click();
-    await tab.getByLabel("Alias").fill("pi-1"); await tab.getByLabel("Serial number").fill("SN-1");
-    await tab.getByRole("button", { name: "Check", exact: true }).click();
-    assert.match(await tab.getByTestId("reservation-check").innerText(), /^1 ready\./);
+    await tab.getByLabel("Serial number").fill("SN-1");
+    assert.match(await tab.getByTestId("reservation-check").innerText(), /^Ready: SN-1/, "a blank name defaults to the serial");
     await ack.check();
     const [again] = await Promise.all([tab.waitForEvent("download"), tab.getByRole("button", { name: "Download credentials for 1 device" }).click()]); await again.delete();
     assert.equal(await statusOf("SN-1"), "Reserved");

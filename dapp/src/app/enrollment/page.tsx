@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { PageHeader, ConnectionRequired } from "@/components/ui";
-import { DeviceClientHelp } from "@/components/DeviceClientHelp";
+import { DeviceClientHelp, GuideLink } from "@/components/DeviceClientHelp";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
@@ -60,11 +60,17 @@ export default function EnrollmentPage() {
     enabled: !!account?.address, refetchInterval: 60_000, placeholderData: keepPreviousData });
   const policy = policies.data?.find((p) => p.id === selected);
   const loadingSelected = !!selected && !policy && policies.isFetching;
+  // Start with a batch that can accept enrollments, so a returning operator has nothing to choose.
+  useEffect(() => {
+    if (selected || !policies.data?.length) return;
+    const open = policies.data.find((p) => !policyAccepting(p));
+    if (open) setSelected(open.id);
+  }, [selected, policies.data]);
 
   async function run(transaction: Transaction) {
     setBusy(true); setError(""); failure.clear();
     try { return await mutateAsync({ transaction }); }
-    catch (e) { failure.report(e, "The policy change"); return undefined; }
+    catch (e) { failure.report(e, "The batch change"); return undefined; }
     finally { setBusy(false); }
   }
 
@@ -76,35 +82,51 @@ export default function EnrollmentPage() {
     if (!result) return;
     let id;
     try { id = policyFromEvents(result.events) ?? await createdPolicy(client, result.digest); }
-    catch (e) { setError(`The policy was created, but could not be read yet: ${(e as Error).message}. Refresh the page instead of creating another.`); return; }
+    catch (e) { setError(`The batch was created, but could not be read yet: ${(e as Error).message}. Refresh the page instead of creating another.`); return; }
     setCreated((c) => c.includes(id) ? c : [...c, id]);
     setSelected(id);
   }
 
+  const hasPolicies = !!policies.data?.length || loadingSelected;
+  const createForm = (
+    <form onSubmit={create} className="flex flex-wrap gap-2 items-end">
+      <label>Quota <input name="quota" type="number" min={1} defaultValue={100} required className={`${input} w-28 ml-1`} /></label>
+      <label>Valid for days (0 = no expiry) <input name="days" type="number" min={0} defaultValue={14} required className={`${input} w-20 ml-1`} /></label>
+      <button type="submit" disabled={busy || loadingSelected} className={primary}>Create batch</button>
+    </form>
+  );
+
   if (!account) return <ConnectionRequired title="Enrollment" description="Prepare device batches and securely enroll devices with single-use credentials." />;
   return (
     <div className="space-y-4 max-w-5xl text-sm">
-      <PageHeader title="Enrollment" subtitle="Reserve device names and serial numbers; devices enroll themselves with single-use credentials" />
-      <DeviceClientHelp variant="enroll" />
+      <PageHeader title="Enrollment" subtitle="Add devices by serial number. Each device enrolls itself with a one-time credential file; no addresses to copy." />
+      <details className="rounded border border-gray-200 bg-white px-4 py-2">
+        <summary className="cursor-pointer font-medium">How device enrollment works</summary>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-gray-700">
+          <li>Choose or create an enrollment batch.</li>
+          <li>Add devices by serial number and download their credential file.</li>
+          <li>Register the credentials with one wallet approval.</li>
+          <li>Give each device its own folder from the file; it enrolls itself and appears under Devices.</li>
+        </ol>
+        <div className="mt-3"><DeviceClientHelp variant="enroll" /></div>
+      </details>
       {error && <p role="alert" className="text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
       <TransactionFeedback feedback={failure.feedback} onDismiss={failure.clear} />
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
-        <h2 className="font-semibold">1. Enrollment batch policy</h2>
-        <p className="text-gray-500">A policy limits how many devices may enroll and until when. Each reservation gets one single-use claim; you can revoke unused claims or close the policy at any time.</p>
-        <div className="flex flex-wrap gap-2 items-center">
-          <label htmlFor="policy">Policy</label>
+        <h2 className="font-semibold">1. Enrollment batch</h2>
+        {hasPolicies ? <div className="flex flex-wrap gap-2 items-center">
+          <label htmlFor="policy">Batch</label>
           <select id="policy" className={input} value={selected} onChange={(e) => setSelected(e.target.value)}>
-            <option value="">Select a policy…</option>
+            <option value="">Select a batch…</option>
             {policies.data?.map((p) => <option key={p.id} value={p.id}>{policyLabel(p)}</option>)}
-            {loadingSelected && <option value={selected}>New policy · loading…</option>}
+            {loadingSelected && <option value={selected}>New batch · loading…</option>}
           </select>
-          {loadingSelected && <span role="status" className="text-gray-500">Loading the new policy…</span>}
-        </div>
-        <form onSubmit={create} className="flex flex-wrap gap-2 items-end">
-          <label>Quota <input name="quota" type="number" min={1} defaultValue={100} required className={`${input} w-28 ml-1`} /></label>
-          <label>Valid for days (0 = no expiry) <input name="days" type="number" min={0} defaultValue={14} required className={`${input} w-20 ml-1`} /></label>
-          <button type="submit" disabled={busy || loadingSelected} className={primary}>Create policy</button>
-        </form>
+          {loadingSelected && <span role="status" className="text-gray-500">Loading the new batch…</span>}
+        </div> : <p className="text-gray-500">{policies.isLoading ? "Loading your batches…" : "A batch sets how many devices may enroll and until when. Create one to start; the defaults suit most fleets."}</p>}
+        {hasPolicies ? <details>
+          <summary className="cursor-pointer text-[#2e6fb0]">Create another batch</summary>
+          <div className="mt-2">{createForm}</div>
+        </details> : !policies.isLoading && createForm}
         {policy && <PolicyControls policy={policy} busy={busy} run={async (tx) => { if (await run(tx)) await policies.refetch(); }} />}
       </section>
       {policy && <JobPanel key={policy.id} policy={policy} operator={fleet?.id ?? account.address} onError={setError} onFailure={(e, action) => { setError(""); failure.report(e, action); }} />}
@@ -114,7 +136,7 @@ export default function EnrollmentPage() {
 
 function policyLabel(p: PolicyState) {
   const state = policyAccepting(p);
-  return `${p.id.slice(0, 10)}… · ${p.enrolled} enrolled · ${p.remaining} left · ${p.unusedClaims} unused claims${state ? ` · ${state}` : ""}`;
+  return `Batch ${p.id.slice(2, 8)} · ${p.enrolled} enrolled · ${p.remaining} left${p.unusedClaims ? ` · ${p.unusedClaims} unused claims` : ""}${state ? ` · ${state}` : ""}`;
 }
 
 function PolicyControls({ policy, busy, run }: { policy: PolicyState; busy: boolean; run: (tx: Transaction) => Promise<void> }) {
@@ -128,12 +150,12 @@ function PolicyControls({ policy, busy, run }: { policy: PolicyState; busy: bool
         {policy.enrolled.toString()} enrolled · {policy.remaining.toString()} remaining · {policy.unusedClaims} unused claims ·{" "}
         {policy.expiresAtMs === BigInt(0) ? "no expiry" : `expires ${new Date(Number(policy.expiresAtMs)).toLocaleString()}`}
       </p>
-      {policy.open && <div className="flex flex-wrap gap-2 items-end">
+      {policy.open && <details><summary className="cursor-pointer text-[#2e6fb0]">Change limits or close this batch</summary><div className="mt-2 flex flex-wrap gap-2 items-end">
         <label>Remaining quota <input value={quota} onChange={(e) => setQuota(e.target.value)} type="number" min={0} className={`${input} w-28 ml-1`} /></label>
         <label>Valid for days from now (0 = no expiry) <input value={days} onChange={(e) => setDays(e.target.value)} type="number" min={0} className={`${input} w-20 ml-1`} /></label>
         <button disabled={busy} className={button} onClick={() => run(buildSetLimitsTx(policy.id, BigInt(quota || 0), Number(days) > 0 ? BigInt(Date.now() + Number(days) * 86_400_000) : BigInt(0), policy.fleet))}>Set limits</button>
-        <button disabled={busy} className={`${button} text-red-600`} onClick={() => confirm("Close this policy permanently? No device can enroll under it afterwards.") && run(buildClosePolicyTx(policy.id, policy.fleet))}>Close policy</button>
-      </div>}
+        <button disabled={busy} className={`${button} text-red-600`} onClick={() => confirm("Close this batch permanently? No device can enroll under it afterwards.") && run(buildClosePolicyTx(policy.id, policy.fleet))}>Close batch</button>
+      </div></details>}
     </div>
   );
 }
@@ -304,20 +326,16 @@ function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyStat
       <AddReservations job={job} policy={policy} devices={devices} groups={groups} inventory={inventory} onAdd={(entries, fund) =>
         setJob({ ...job, claimFundMist: fund, entries: [...job.entries, ...entries] })} onImport={importJob} />
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
-        <h2 className="font-semibold">3. Register claims, then devices enroll themselves</h2>
-        <p className="text-gray-500">
-          Each claim sponsors only its own enrollment transaction ({sui(BigInt(job.claimFundMist))} each). On first boot the device runs{" "}
-          <code>suifleet --enroll /path/to/enroll.toml</code> with its own device key. Once its enrollment is on chain, the alias, serial and group are applied here.
-          Work is split into transactions of at most {LIMITS.claimsPerTx} claims or {LIMITS.bindsPerTx} devices; each needs one wallet approval.
-        </p>
+        <h2 className="font-semibold">3. Register and enroll</h2>
+        {views.length > 0 && <NextStep views={views} counts={counts} runnable={runnable} fund={BigInt(job.claimFundMist)} />}
         <div className="flex flex-wrap gap-2" data-testid="status-counts">
           {(Object.keys(STATUS_LABEL) as EntryStatus[]).filter((s) => counts[s]).map((s) =>
             <span key={s} className="px-2 py-0.5 rounded bg-gray-100">{STATUS_LABEL[s]}: {counts[s]}</span>)}
-          {!views.length && <span className="text-gray-400">{chain.isLoading ? "Reading chain…" : "No reservations yet."}</span>}
+          {!views.length && <span className="text-gray-400">{chain.isLoading ? "Reading chain…" : "No devices added yet."}</span>}
         </div>
         {chain.error && <p role="alert" className="text-red-700">Chain read failed: {(chain.error as Error).message}</p>}
-        {accepting && steps.some((s) => s.kind === "claims") && <p className="text-amber-700">The policy is {accepting}: devices cannot enroll and claims cannot be registered until you change its limits.</p>}
-        {quotaShort > 0 && <p className="text-amber-700">The policy allows {quotaShort} fewer enrollments than you have reserved; raise its quota.</p>}
+        {accepting && steps.some((s) => s.kind === "claims") && <p className="text-amber-700">This batch is {accepting}: devices cannot enroll and credentials cannot be registered until you change its limits.</p>}
+        {quotaShort > 0 && <p className="text-amber-700">This batch allows {quotaShort} fewer enrollments than you have added; raise its quota.</p>}
         {progress && <div role="status" className="text-[#2e6fb0]">{progress.label} (transaction {progress.step} of {progress.total}){progress.phase === "wallet" ? " · approve in your wallet" : progress.phase === "confirming" ? " · confirming" : ""}</div>}
         <div className="flex flex-wrap gap-2">
           <button className={primary} disabled={!!progress || !runnable.length} onClick={() => runSteps(runnable)}>
@@ -325,22 +343,51 @@ function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyStat
           </button>
           {progress && <button className={button} onClick={() => { stop.current = true; }}>Stop after this transaction</button>}
           <button className={button} disabled={!!progress} onClick={() => chain.refetch()}>Refresh</button>
-          <button className={button} disabled={!!progress} onClick={revokeUnused}>Revoke unused claims</button>
-          <button className={button} disabled={!!progress || !views.some(v => v.status === "confirming" && !v.entry.registrationDigest && !v.entry.observedRegistered)} onClick={recoverInterrupted}>Reset interrupted submissions</button>
-          <button className={button} disabled={!!progress || !counts.withdrawn} onClick={reRegisterWithdrawn}>Re-register withdrawn claims</button>
-          <button className={button} disabled={!!progress} onClick={forgetReserved}>Remove unused reservations</button>
-          <button className={button} onClick={() => download(`suifleet-enrollment-job-${policy.id.slice(2, 10)}.json`, JSON.stringify(job, null, 2), "application/json")}>Export job</button>
+          {/* Recovery actions appear only when they apply. */}
+          {views.some(v => v.status === "confirming" && !v.entry.registrationDigest && !v.entry.observedRegistered) &&
+            <button className={button} disabled={!!progress} onClick={recoverInterrupted}>Reset interrupted submissions</button>}
+          {!!counts.withdrawn && <button className={button} disabled={!!progress} onClick={reRegisterWithdrawn}>Re-register withdrawn claims</button>}
         </div>
-        <div className="flex flex-wrap gap-2 items-end border-t pt-3">
-          <span className="text-gray-500">Ongoing device gas is separate from enrollment sponsorship:</span>
+        {!!(counts.complete || counts.binding) && <div className="flex flex-wrap gap-2 items-end border-t pt-3">
+          <span className="text-gray-500">Devices pay a little gas for each status report. Send each enrolled device:</span>
           <label>SUI per device <input value={deviceGas} onChange={(e) => setDeviceGas(e.target.value)} className={`${input} w-20 ml-1`} /></label>
-          <button className={button} disabled={!!progress || !(counts.complete || counts.binding)} onClick={fundDevices}>Fund enrolled devices</button>
-        </div>
+          <button className={button} disabled={!!progress} onClick={fundDevices}>Fund enrolled devices</button>
+        </div>}
         <EntryTable views={views} groups={groups} />
+        <details className="border-t pt-3" data-testid="more-actions">
+          <summary className="cursor-pointer font-medium">More actions</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button className={button} disabled={!!progress} onClick={revokeUnused}>Revoke unused claims</button>
+            <button className={button} disabled={!!progress} onClick={forgetReserved}>Remove unused reservations</button>
+            <button className={button} onClick={() => download(`suifleet-enrollment-job-${policy.id.slice(2, 10)}.json`, JSON.stringify(job, null, 2), "application/json")}>Export job</button>
+          </div>
+        </details>
         <LostCredentials views={views} busy={!!progress} onRevoke={revokeLost} onRelease={releaseLost} />
       </section>
     </>
   );
+}
+
+/** One sentence: what the operator should do now. */
+function NextStep({ views, counts, runnable, fund }: { views: EntryView[]; counts: Partial<Record<EntryStatus, number>>; runnable: { kind: "claims" | "bind" }[]; fund: bigint }) {
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const toRegister = (counts.unregistered ?? 0) + (counts.unfunded ?? 0);
+  const waiting = views.filter((v) => v.status === "awaiting-device");
+  const box = "rounded border border-blue-200 bg-blue-50 px-3 py-2 text-[#1f4f80]";
+  if (runnable.some((s) => s.kind === "claims") && toRegister)
+    return <div className={box} data-testid="next-step"><b>Next:</b> register {plural(toRegister, "device credential")} with your wallet ({sui(fund)} enrollment gas each), so {toRegister === 1 ? "the device" : "the devices"} can enroll.</div>;
+  if (runnable.some((s) => s.kind === "bind"))
+    return <div className={box} data-testid="next-step"><b>Next:</b> {plural((counts.binding ?? 0), "device")} enrolled. Apply {(counts.binding ?? 0) === 1 ? "its name and group" : "their names and groups"} with your wallet.</div>;
+  if (waiting.length) {
+    const serial = waiting[0].entry.serial;
+    return <div className={box} data-testid="next-step">
+      <p><b>Next:</b> waiting for {plural(waiting.length, "device")} to enroll. Copy each device&apos;s own folder from the credential file onto it, then run on the device:</p>
+      <pre className="mt-1 overflow-x-auto rounded bg-white px-2 py-1 text-xs text-gray-800">sudo suifleet --enroll enrollment/{waiting.length === 1 ? serial : "SERIAL"}/enroll.toml</pre>
+      <p className="mt-1 text-xs">Refresh here afterwards. See <GuideLink section="enroll">first-boot enrollment</GuideLink> for setting up the client after enrollment.</p>
+    </div>;
+  }
+  if (counts.complete === views.length) return <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-green-800" data-testid="next-step">All {plural(views.length, "device")} enrolled. They appear on the Devices page.</div>;
+  return null;
 }
 
 type Inventory = { ready: boolean; error?: string; retry?: () => void };
@@ -349,7 +396,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
   job: EnrollmentJob; policy: PolicyState; devices: DeviceObject[]; groups: DeviceGroup[]; inventory: Inventory;
   onAdd: (entries: EnrollmentJob["entries"], claimFundMist: string) => void; onImport: (text: string) => void;
 }) {
-  const [mode, setMode] = useState<AddMode>("csv");
+  const [mode, setMode] = useState<AddMode>("pair");
   const [csv, setCsv] = useState("serial,alias,group\n");
   const [template, setTemplate] = useState("device-{n:4}");
   const [start, setStart] = useState(job.entries.length + 1);
@@ -357,37 +404,44 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
   const [serial, setSerial] = useState("");
   const [groupId, setGroupId] = useState("");
   const [fund, setFund] = useState((Number(job.claimFundMist) / 1e9).toString());
-  const [check, setCheck] = useState<ReservationCheck & { parseIssues: number } | null>(null);
+  const [downloaded, setDownloaded] = useState(0);
   // The archive is the only copy of its claim keys: confirm before each download.
   const [acknowledged, setAcknowledged] = useState(false);
   const [configTemplate, setConfigTemplate] = useState("");
-  useEffect(() => { setCheck(null); setAcknowledged(false); }, [mode, csv, template, start, alias, serial, groupId]);
+  useEffect(() => { setAcknowledged(false); }, [mode, csv, template, start, alias, serial, groupId]);
 
-  function validate() {
-    if (!inventory.ready) return;
-    const parsed = mode === "pair" ? { rows: [{ line: 1, serial: serial.trim(), alias: alias.trim() }], issues: [] } : parseRoster(csv, template, start);
+  // Checked as the operator types; nothing is sent anywhere.
+  const check = useMemo<ReservationCheck | null>(() => {
+    if (!inventory.ready || mode === "roster") return null;
+    const parsed = mode === "pair"
+      ? { rows: serial.trim() ? [{ line: 1, serial: serial.trim(), alias: alias.trim() || serial.trim() }] : [], issues: [] }
+      : parseRoster(csv, template, start);
+    if (!parsed.rows.length && !parsed.issues.length) return null;
     const result = checkReservations(parsed.rows, { devices, groups, defaultGroupId: groupId || undefined,
       reserved: [...storedReservations(localStorage), ...job.entries] });
-    setCheck({ accepted: result.accepted, issues: [...parsed.issues, ...result.issues], parseIssues: parsed.issues.length });
-  }
+    return { accepted: result.accepted, issues: [...parsed.issues, ...result.issues] };
+  }, [inventory.ready, mode, serial, alias, csv, template, start, devices, groups, groupId, job.entries]);
+
   function generate() {
     if (!check?.accepted.length || !acknowledged) return;
     const mist = toMist(fund);
-    if (!mist || mist > MIST / BigInt(10)) return alert("Enrollment gas per claim must be more than 0 and at most 0.1 SUI");
+    if (!mist || mist > MIST / BigInt(10)) return alert("Enrollment gas per device must be more than 0 and at most 0.1 SUI");
     const { entries, credentials } = generateCredentials(check.accepted);
     // The archive is the only copy of the claim keys: they are not stored.
     download(`suifleet-enrollment-${policy.id.slice(2, 10)}-${Date.now()}.tar`, credentialArchive(credentials, policy.id, JSON.stringify(requireManifest(), null, 2), undefined, policy.fleet, configTemplate.trim() ? configTemplate : undefined), "application/x-tar");
     credentials.length = 0;
     onAdd(entries, mist.toString());
+    setDownloaded(entries.length);
     setStart(start + entries.length);
-    setCheck(null); setAcknowledged(false); setAlias(""); setSerial("");
+    setAcknowledged(false); setAlias(""); setSerial("");
   }
 
+  const count = check?.accepted.length ?? 0;
   return (
     <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
-      <h2 className="font-semibold">2. Reserve names and serial numbers</h2>
+      <h2 className="font-semibold">2. Add devices</h2>
       <div className="flex gap-2" role="tablist">
-        {([["csv", "Import CSV"], ["pair", "Pair one device"], ["roster", "Import roster file"]] as [AddMode, string][]).map(([m, label]) =>
+        {([["pair", "Pair one device"], ["csv", "Import CSV"], ["roster", "Import roster file"]] as [AddMode, string][]).map(([m, label]) =>
           <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? primary : button} onClick={() => setMode(m)}>{label}</button>)}
       </div>
       {mode === "roster" ? (
@@ -396,51 +450,53 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
           <input type="file" accept=".json,application/json" aria-label="Roster or job file" disabled={!inventory.ready} onChange={async (e) => { const f = e.target.files?.[0]; if (f) onImport(await f.text()); e.target.value = ""; }} />
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {mode === "csv" ? <>
-            <p className="text-gray-500">Columns: <code>serial</code> (required), <code>alias</code> and <code>group</code> (a group name or ID). Blank aliases come from the naming template: <code>{"{n:4}"}</code> is the row number zero-padded to 4 digits, <code>{"{serial}"}</code> the serial.</p>
+            <p className="text-gray-500">One device per line. <code>serial</code> is required; <code>alias</code> (its name) and <code>group</code> are optional. Blank names come from the naming template: <code>{"{n:4}"}</code> is the row number padded to 4 digits, <code>{"{serial}"}</code> the serial.</p>
             <textarea aria-label="Roster CSV" value={csv} onChange={(e) => setCsv(e.target.value)} rows={6} className={`${input} w-full font-mono`} />
             <div className="flex flex-wrap gap-2 items-end">
               <input type="file" accept=".csv,text/csv" aria-label="Roster CSV file" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); e.target.value = ""; }} />
               <label>Naming template <input aria-label="Naming template" value={template} onChange={(e) => setTemplate(e.target.value)} className={`${input} w-40 ml-1 font-mono`} /></label>
               <label>First number <input type="number" min={0} value={start} onChange={(e) => setStart(Number(e.target.value))} className={`${input} w-24 ml-1`} /></label>
             </div>
-          </> : <div className="flex flex-wrap gap-2 items-end">
-            <p className="text-gray-500 w-full">Reserve a name for one device. You download its enrollment files; the device generates its own key and proves it when it enrolls. No address is needed.</p>
-            <label>Alias <input aria-label="Alias" value={alias} onChange={(e) => setAlias(e.target.value)} placeholder="pi-kitchen" className={`${input} ml-1`} /></label>
+          </> : <div className="flex flex-wrap gap-3 items-end">
             <label>Serial number <input aria-label="Serial number" value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="SN-000123" className={`${input} ml-1`} /></label>
+            <label>Name <span className="text-gray-400">(optional)</span> <input aria-label="Name" value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={serial.trim() || "same as serial"} className={`${input} ml-1`} /></label>
           </div>}
-          <div className="flex flex-wrap gap-2 items-end">
+          <div className="flex flex-wrap gap-3 items-end">
             <label>Group {mode === "csv" ? "(rows without one)" : ""}
               <select aria-label="Default group" value={groupId} onChange={(e) => setGroupId(e.target.value)} className={`${input} ml-1`}>
                 <option value="">No group</option>
                 {groups.map((g) => <option key={g.objectId} value={g.objectId}>{g.name}</option>)}
               </select>
             </label>
-            <label>Enrollment gas per claim (SUI) <input aria-label="Enrollment gas per claim" value={fund} onChange={(e) => setFund(e.target.value)} className={`${input} w-20 ml-1`} /></label>
-            <button className={button} disabled={!inventory.ready} onClick={validate}>{inventory.ready || inventory.error ? "Check" : "Loading devices and groups…"}</button>
-          </div>
-          <label className="block text-sm">
-            Batch configuration template (optional)
-            <textarea className={`${input} mt-1 block w-full font-mono`} rows={4} value={configTemplate}
-              onChange={(event) => { setConfigTemplate(event.target.value); setAcknowledged(false); }} />
-          </label>
-          <div role="note" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1" data-testid="credential-warning">
-            <p className="font-medium">Before you download: this file is the only copy of the claim keys.</p>
-            <p>SuiFleet does not keep them and cannot download them again. Put each <code>enrollment/SERIAL/</code> folder on that device&apos;s private provisioning media, keep the archive offline and delete it once devices have enrolled.</p>
-            <p>If the file is lost before a device enrolls, use “Lost a credential file?” below to revoke that claim and issue a new one. Enrolled devices keep their own keys and never need a new file.</p>
-            <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={acknowledged} disabled={!check?.accepted.length} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand this download is the only copy of these credentials</label>
-          </div>
-          <div className="flex flex-wrap gap-2 items-end">
-            <button className={primary} disabled={!check?.accepted.length || !acknowledged} onClick={generate}>
-              {check ? `Download credentials for ${check.accepted.length} device${check.accepted.length === 1 ? "" : "s"}` : "Download credentials"}
-            </button>
+            {!inventory.ready && !inventory.error && <span role="status" className="text-gray-500">Loading devices and groups…</span>}
           </div>
           {inventory.error && <p role="alert" className="text-red-700">{inventory.error} <button className="underline" onClick={inventory.retry}>Retry</button></p>}
           {check && <div data-testid="reservation-check" className="space-y-1">
-            <p>{check.accepted.length} ready{check.issues.length ? `, ${check.issues.length} rejected` : ""}.{check.accepted.length > BROWSER_CREDENTIAL_LIMIT && ` The browser generates at most ${BROWSER_CREDENTIAL_LIMIT}; use scripts/claims.py.`}</p>
-            {check.issues.slice(0, 50).map((i) => <p key={`${i.line}-${i.message}`} className="text-red-700 text-xs">Line {i.line}{i.serial ? ` (${i.serial})` : ""}: {i.message}</p>)}
+            {mode === "csv" ? <p>{check.accepted.length} ready{check.issues.length ? `, ${check.issues.length} rejected` : ""}.</p>
+              : check.accepted[0] && <p className="text-green-700">Ready: {check.accepted[0].alias}{check.accepted[0].alias !== check.accepted[0].serial ? ` (serial ${check.accepted[0].serial})` : ""}</p>}
+            {check.accepted.length > BROWSER_CREDENTIAL_LIMIT && <p className="text-amber-700">The browser generates at most {BROWSER_CREDENTIAL_LIMIT} credentials at once; use scripts/claims.py for larger batches.</p>}
+            {check.issues.slice(0, 50).map((i) => <p key={`${i.line}-${i.message}`} className="text-red-700 text-xs">{mode === "csv" ? `Line ${i.line}${i.serial ? ` (${i.serial})` : ""}: ` : ""}{i.message}</p>)}
           </div>}
+          <details>
+            <summary className="cursor-pointer text-gray-500">Advanced</summary>
+            <label className="mt-2 block">Enrollment gas per device (SUI) <input aria-label="Enrollment gas per claim" value={fund} onChange={(e) => setFund(e.target.value)} className={`${input} w-20 ml-1`} />
+              <span className="text-gray-500"> pays only for the device&apos;s enrollment transaction.</span></label>
+            <label className="mt-2 block text-sm">
+              Batch configuration template (optional)
+              <textarea className={`${input} mt-1 block w-full font-mono`} rows={4} value={configTemplate}
+                onChange={(event) => { setConfigTemplate(event.target.value); setAcknowledged(false); }} />
+            </label>
+          </details>
+          <div role="note" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1" data-testid="credential-warning">
+            <p><b>This file is the only copy of the credentials;</b> SuiFleet cannot download it again. Give each device only its own <code>enrollment/SERIAL/</code> folder and delete the file once devices have enrolled. Lost it before a device enrolled? Use “Lost a credential file?” in step 3.</p>
+            <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={acknowledged} disabled={!count} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand this download is the only copy of these credentials</label>
+          </div>
+          <button className={primary} disabled={!count || !acknowledged} onClick={generate}>
+            {count ? `Download credentials for ${count} device${count === 1 ? "" : "s"}` : "Download credentials"}
+          </button>
+          {downloaded > 0 && !count && <p role="status" className="text-green-700">Downloaded credentials for {downloaded} device{downloaded === 1 ? "" : "s"}. Next: register {downloaded === 1 ? "it" : "them"} in step 3.</p>}
         </div>
       )}
     </section>
