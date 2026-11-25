@@ -10,7 +10,7 @@ index 189d9e44..af06f3d4 100644
 @@ -533,7 +533,7 @@ pub struct EnrollConfig {
      pub signer: Option<SignerConfig>,
  }
- 
+
 -#[derive(Debug, Clone, Deserialize)]
 +#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
  #[serde(deny_unknown_fields)]
@@ -18,7 +18,7 @@ index 189d9e44..af06f3d4 100644
      pub customer_id: String,
 @@ -843,8 +843,11 @@ impl Config {
      }
- 
+
      pub fn load(path: &Path) -> anyhow::Result<Self> {
 -        let raw = std::fs::read_to_string(path)?;
 -        let mut cfg: Self = toml::from_str(&raw)?;
@@ -693,7 +693,7 @@ index 29cdb070..0e543abd 100644
 @@ -2333,6 +2344,108 @@ impl SuiClient {
          Ok(transaction)
      }
- 
+
 +    /// Read the device's enrollment under this policy before spending a claim.
 +    /// The trusted lower bound must precede the policy's creation.
 +    #[cfg(target_os = "linux")]
