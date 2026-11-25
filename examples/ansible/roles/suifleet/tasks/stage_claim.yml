@@ -10,13 +10,22 @@
 # temporary directory). Instead the controller reads the claim into
 # memory (the file lookup decrypts Vault in memory) and passes it as
 # the command module's stdin. With pipelining the module and its
-# arguments reach the host on the SSH stream, never in a file, and
-# the current key holder writes the claim straight to tmpfs.
+# arguments reach the host on the SSH stream, never in a file.
+#
+# The claim must also never pass through privilege escalation: sudo (or
+# another become method) can record a command's standard input, and with
+# pipelining that input is the whole module, claim included (sudoers
+# `Defaults log_input` writes it to persistent I/O logs). So the claim
+# travels without become, as the SSH account, into a private directory
+# on a memory-backed filesystem. A root task then moves it to the
+# staging directory; that task's module carries only paths.
 - name: Check that modules reach the host through pipelining
   ansible.builtin.command:
     argv: [sh, -c, 'tr "\0" " " < /proc/$PPID/cmdline']
+  become: false
   register: suifleet_module_parent
   changed_when: false
+  check_mode: false
 
 - name: Refuse to send the claim without pipelining
   ansible.builtin.assert:
@@ -26,6 +35,20 @@
       Ansible wrote its module to a file on {{ inventory_hostname }}, so
       the claim would reach persistent storage. Enable SSH pipelining
       (examples/ansible/ansible.cfg) and leave ANSIBLE_KEEP_REMOTE_FILES unset.
+
+- name: Read the claim transfer filesystem type
+  ansible.builtin.command:
+    argv: [stat, -f, -c, "%T", "{{ suifleet_claim_transfer_dir }}"]
+  become: false
+  register: suifleet_transfer_fs
+  changed_when: false
+  check_mode: false
+
+- name: Require a memory-backed claim transfer directory
+  ansible.builtin.assert:
+    that: suifleet_transfer_fs.stdout == 'tmpfs'
+    quiet: true
+    fail_msg: "{{ suifleet_claim_transfer_dir }} must be a tmpfs writable by the SSH account so the claim never reaches persistent storage on the host."
 
 - name: Erase a claim left by an interrupted run
   ansible.builtin.file:
@@ -40,18 +63,51 @@
     group: "{{ suifleet_claim_group }}"
     mode: "0700"
 
-- name: Stage the single-use claim key in memory-backed storage
-  ansible.builtin.command:
-    argv:
-      - runuser
-      - -u
-      - "{{ suifleet_claim_owner }}"
-      - --
-      - sh
-      - -c
-      - umask 077 && cat > "$1"
-      - sh
-      - "{{ suifleet_enroll_staging }}/claim.key"
-    stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
-  no_log: true
-  diff: false
+- name: Transfer and stage the claim
+  block:
+    - name: Send the single-use claim key without privilege escalation
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - umask 077 && d=$(mktemp -d "$1/suifleet-claim.XXXXXXXXXX") && printf '%s\n' "$d" && cat > "$d/claim.key"
+          - sh
+          - "{{ suifleet_claim_transfer_dir }}"
+        stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
+      become: false
+      register: suifleet_claim_transfer
+      no_log: true
+      diff: false
+
+    - name: Check the claim transfer directory
+      ansible.builtin.assert:
+        that: suifleet_claim_transfer.stdout is match('^' ~ (suifleet_claim_transfer_dir | regex_escape) ~ '/suifleet-claim[.][A-Za-z0-9]{10}$')
+        quiet: true
+        fail_msg: The claim transfer did not report its private directory.
+
+    # Root reads the transferred file and the current key holder writes
+    # it; the claim moves through a pipe inside this command, never
+    # through sudo's standard input.
+    - name: Stage the single-use claim key in memory-backed storage
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - >-
+            set -eu; src="$1/claim.key";
+            test -f "$src" && test ! -L "$src";
+            runuser -u "$2" -- sh -c 'umask 077 && cat > "$1"' sh "$3" < "$src"
+          - sh
+          - "{{ suifleet_claim_transfer.stdout }}"
+          - "{{ suifleet_claim_owner }}"
+          - "{{ suifleet_enroll_staging }}/claim.key"
+      diff: false
+  always:
+    - name: Erase the claim transfer directory
+      ansible.builtin.file:
+        path: "{{ suifleet_claim_transfer.stdout }}"
+        state: absent
+      become: false
+      when:
+        - suifleet_claim_transfer.stdout is defined
+        - suifleet_claim_transfer.stdout is match('^' ~ (suifleet_claim_transfer_dir | regex_escape) ~ '/suifleet-claim[.][A-Za-z0-9]{10}$')

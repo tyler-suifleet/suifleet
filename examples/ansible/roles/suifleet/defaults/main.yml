@@ -46,6 +46,10 @@ suifleet_enrollment_root: ""
 suifleet_serial: ""
 # Private, memory-backed staging directory for the claim during enrollment.
 suifleet_enroll_staging: /run/suifleet-enroll
+# Memory-backed directory writable by the SSH account (not root). The claim
+# reaches the host here without privilege escalation, because sudo may log a
+# command's standard input; enrollment refuses a directory that is not tmpfs.
+suifleet_claim_transfer_dir: /dev/shm
 
 # Daemon configuration (config.toml). The defaults deliver nothing: replace
 # /usr/bin/false with your platform's reviewed installer (docs/PLATFORM_INSTALLERS.md).

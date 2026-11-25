@@ -137,6 +137,34 @@
     path: "{{ suifleet_enroll_staging }}"
     state: absent
 
+# A run killed during the claim transfer (stage_claim.yml) can leave the SSH
+# account's private transfer directory on its tmpfs.
+- name: Read the SSH account's user ID
+  ansible.builtin.command:
+    argv: [id, -u]
+  become: false
+  register: suifleet_transfer_uid
+  changed_when: false
+  check_mode: false
+
+- name: Find claim transfer directories left by an interrupted run
+  ansible.builtin.find:
+    paths: "{{ suifleet_claim_transfer_dir }}"
+    patterns: "suifleet-claim.*"
+    file_type: directory
+  become: false
+  register: suifleet_transfer_left
+  check_mode: false
+
+- name: Erase claim transfer directories left by an interrupted run
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  become: false
+  loop: "{{ suifleet_transfer_left.files | selectattr('uid', 'equalto', suifleet_transfer_uid.stdout | int) | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Read the enrollment record
   ansible.builtin.slurp:
     src: /etc/suifleet/enrollment.json
