@@ -44,5 +44,22 @@ const {chromium}=require('../../dapp/node_modules/playwright');
    assert.deepEqual(errors,[]);console.log(`PASS landing ${width}px: navigation without JavaScript, keyboard/touch targets, customer path and responsive layout`);
    await context.close();
   }
+  for(const [width,height] of [[320,568],[390,664],[667,375]]) {
+   const context=await browser.newContext({viewport:{width,height},javaScriptEnabled:false});
+   const page=await context.newPage();
+   await page.route('https://landing.test/**',async route=>{
+    const pathname=new URL(route.request().url()).pathname;
+    try{await route.fulfill({path:path.join(root,pathname,pathname.endsWith('/')?'index.html':'')})}
+    catch{await route.fulfill({status:404,body:''})}
+   });
+   await page.goto('https://landing.test/');await page.evaluate(()=>document.fonts.ready);
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),'phone homepage must fit one viewport');
+   for(const selector of ['.hero h1','.hero-description','.hero .actions','.fleet-visual','.mobile-landing-links'])
+    assert.ok(await page.locator(selector).evaluate(e=>{const r=e.getBoundingClientRect();return r.height>0&&r.top>=0&&r.bottom<=innerHeight+1}),selector+' must be visible without scrolling');
+   await page.getByRole('link',{name:'Explore product',exact:true}).click();
+   await page.getByRole('heading',{name:'Built around your fleet.',exact:true}).waitFor();
+   assert.equal(await page.getByRole('heading',{name:'Prepare a release.',exact:true}).isVisible(),true,'longer explanations remain accessible');
+   await context.close();console.log(`PASS single-screen landing ${width}x${height} and product details navigation`);
+  }
  } finally {await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

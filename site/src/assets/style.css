@@ -2086,3 +2086,54 @@ td.num,th.num {
   .landing-page .footer-top>div>p {font-size:14px}
   .landing-page .footer-bottom,.landing-page .footer-bottom p {font-size:11px;line-height:1.6}
 }
+
+/* The phone homepage is a single-screen introduction. Details remain on /product/. */
+.mobile-landing-links{display:none}
+@media(max-width:800px){
+ .landing-page:not(.product-details-page){height:100dvh;min-height:0;display:grid;grid-template-rows:64px minmax(0,1fr)}
+ .landing-page:not(.product-details-page) .site-header{height:64px;min-height:0}
+ .landing-page:not(.product-details-page) .header-row{height:64px;min-height:0}
+ .landing-page:not(.product-details-page) main{min-height:0;display:flex;flex-direction:column}
+ .landing-page:not(.product-details-page) main>:not(.hero),.landing-page:not(.product-details-page)>.site-footer{display:none}
+ .landing-page:not(.product-details-page) .hero{flex:1;min-height:0;width:100%;padding:20px 24px 12px;display:grid;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr) 44px;gap:16px;align-items:stretch}
+ .landing-page:not(.product-details-page) .hero-copy{min-height:0}
+ .landing-page:not(.product-details-page) .preview-label{display:none}
+ .landing-page:not(.product-details-page) .hero h1{font-size:44px;line-height:1.06;margin:0 0 12px}
+ .landing-page:not(.product-details-page) .hero-description{font-size:16px;line-height:1.5;margin:0 0 16px;max-width:540px}
+ .landing-page:not(.product-details-page) .hero .actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0}
+ .landing-page:not(.product-details-page) .hero .actions>a{min-height:44px;padding:10px 8px;font-size:14px;justify-content:center}
+ .landing-page:not(.product-details-page) .fleet-visual{min-height:0;max-height:380px;margin:0;width:100%;max-width:520px;justify-self:center;display:flex;flex-direction:column;box-shadow:0 8px 24px -20px #226aa150;border-radius:18px;overflow:hidden}
+ .landing-page:not(.product-details-page) .visual-topbar{flex-shrink:0;padding:10px 14px;min-height:36px}
+ .landing-page:not(.product-details-page) .visual-brand{font-size:13px}
+ .landing-page:not(.product-details-page) .visual-body{padding:12px 14px;min-height:0;flex:1;display:flex;flex-direction:column;justify-content:center}
+ .landing-page:not(.product-details-page) .visual-heading,.landing-page:not(.product-details-page) .visual-bottom,.landing-page:not(.product-details-page) .fleet-visual figcaption{display:none}
+ .landing-page:not(.product-details-page) .release-summary{padding:10px;gap:8px;margin:0;flex-shrink:0}
+ .landing-page:not(.product-details-page) .package-symbol{display:none}
+ .landing-page:not(.product-details-page) .release-summary strong{font-size:14px}
+ .landing-page:not(.product-details-page) .release-summary div>span,.landing-page:not(.product-details-page) .verified-label{font-size:12px}
+ .landing-page:not(.product-details-page) .rollout-stages{padding:16px 0;flex-shrink:0}
+ .landing-page:not(.product-details-page) .device-list>div{padding:10px 0;font-size:13px}
+ .landing-page:not(.product-details-page) .device-list .device-list-heading{font-size:12px;padding:0 0 8px}
+ .landing-page:not(.product-details-page) .device-list>div:nth-child(3){display:none}
+ .landing-page:not(.product-details-page) .applied,.landing-page:not(.product-details-page) .updating{font-size:12px}
+ .landing-page:not(.product-details-page) .mobile-landing-links{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:520px;width:100%;justify-self:center;align-self:end}
+ .mobile-landing-links a{display:flex;min-height:44px;align-items:center;font-size:14px;font-weight:550;color:var(--brand)}
+}
+@media(max-width:800px) and (max-height:700px){
+ .landing-page:not(.product-details-page) .hero{padding:12px 20px 8px;gap:10px}
+ .landing-page:not(.product-details-page) .hero h1{font-size:36px;margin-bottom:9px}
+ .landing-page:not(.product-details-page) .hero-description{line-height:1.4;margin-bottom:12px}
+ .landing-page:not(.product-details-page) .rollout-stages{display:none}
+ .landing-page:not(.product-details-page) .device-list .device-list-heading,.landing-page:not(.product-details-page) .device-list>div:last-child{display:none}
+ .landing-page:not(.product-details-page) .visual-body{padding:8px 12px}
+ .landing-page:not(.product-details-page) .visual-topbar{padding:7px 12px;min-height:30px}
+}
+@media(max-width:800px) and (max-height:480px) and (orientation:landscape){
+ .landing-page:not(.product-details-page){grid-template-rows:60px minmax(0,1fr)}
+ .landing-page:not(.product-details-page) .site-header,.landing-page:not(.product-details-page) .header-row{height:60px}
+ .landing-page:not(.product-details-page) .hero{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) 44px;column-gap:24px}
+ .landing-page:not(.product-details-page) .hero-copy{align-self:center}
+ .landing-page:not(.product-details-page) .hero h1{font-size:32px}
+ .landing-page:not(.product-details-page) .hero-description{font-size:16px;margin-bottom:10px}
+ .landing-page:not(.product-details-page) .mobile-landing-links{grid-column:1/-1;max-width:none;justify-content:center;gap:40px}
+}

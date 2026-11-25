@@ -26,6 +26,7 @@
   ],
   "pages": [
     {"source": "index.html", "path": "/", "title": "SuiFleet: verifiable OTA updates and fleet management", "description": "Deploy software to Linux device fleets with signed release authority, encrypted delivery and tamper-evident update records. No application servers."},
+    {"source": "product.html", "path": "/product/", "title": "Explore SuiFleet", "description": "Software delivery, device integration and access controls for connected device fleets."},
     {"source": "how-it-works.html", "path": "/how-it-works/", "title": "How it works", "description": "What you need for a first device update, how releases reach devices and what stays under your platform’s control."},
     {"source": "guide.html", "path": "/guide/", "title": "Guide", "description": "Step-by-step walkthrough of the SuiFleet console with written instructions: sign in, fund, register, enroll, publish, deploy and roll out."},
     {"source": "pricing.html", "path": "/pricing/", "title": "Pricing", "description": "Per-device pricing for the SuiFleet platform and managed plans, with network fees included."},

@@ -315,6 +315,10 @@ def expand(text, config, source):
             return how_section_video(arg)
         if name == "overview_player" and arg is None:
             return overview_player()
+        if name == "product_details" and arg is None:
+            homepage = (SRC / "pages/index.html").read_text(encoding="utf-8")
+            details = homepage[homepage.index('<section class="use-cases"'):]
+            return expand(details, config, "index.html product details")
         if name == "guide_steps" and arg is None:
             return render_guide(config)
         raise BuildError(f"{source}: unknown token {match.group(0)}")
@@ -355,6 +359,8 @@ def build(out, config=None):
             rendered=rendered.replace("</head>", '<meta name="robots" content="noindex, nofollow">\n</head>')
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
         rendered = rendered.replace('href="/assets/style.css"', f'href="/assets/style.css?v={style_version}"')
+        if page["path"] == "/product/":
+            rendered = rendered.replace("<body>", '<body class="landing-page product-details-page">')
         if page["path"] in ("/guide/", "/how-it-works/"):
             integrity = guide_integrity()
             if page['path'] == '/guide/': rendered = rendered.replace("<body>", '<body class="guide-page">')
