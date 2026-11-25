@@ -11,6 +11,8 @@
   const status = root.querySelector("[data-guide-status]");
   const progress = root.querySelector("[data-guide-progress]");
   const complete = root.querySelector("[data-guide-complete]");
+  const unit = root.dataset.guideUnit || "stage";
+  const itemLabel = root.dataset.guideItem || "Instruction";
   let stageIndex = 0, instruction = 0, part = 0, chunks = [], finished = false;
   const clamp = (value, maximum) => Math.max(0, Math.min(Number.isInteger(value) ? value : 0, maximum));
   function readLocation() {
@@ -48,9 +50,12 @@
       });
     });
     complete.hidden = !finished;
+    root.querySelectorAll(".overview-video").forEach(video => {
+      if (!video.getClientRects().length) video.pause();
+    });
     select.value = finished ? "complete" : stages[stageIndex].id;
     if (finished) {
-      status.textContent = "Walkthrough complete"; progress.value = stages.length; next.textContent = "Start again ↻";
+      status.textContent = root.dataset.guideCompleteLabel || "Walkthrough complete"; progress.value = stages.length; next.textContent = "Start again ↻";
     } else {
       const stage = stages[stageIndex], record = records[stageIndex][instruction];
       const copy = stage.querySelector(".guide-copy"), paragraph = copy.querySelector("p");
@@ -59,12 +64,12 @@
       part = part < 0 ? chunks.length - 1 : clamp(part, chunks.length - 1);
       paragraph.textContent = chunks[part];
       stage.dataset.instruction = instruction; stage.dataset.part = part;
-      stage.querySelector("[data-guide-part]").textContent = `Instruction ${instruction + 1} of ${records[stageIndex].length}${chunks.length > 1 ? ` · Part ${part + 1} of ${chunks.length}` : ""}`;
-      status.textContent = `Stage ${stageIndex + 1} of ${stages.length} · ${stage.dataset.title}`;
+      stage.querySelector("[data-guide-part]").textContent = `${itemLabel} ${instruction + 1} of ${records[stageIndex].length}${chunks.length > 1 ? ` · Part ${part + 1} of ${chunks.length}` : ""}`;
+      status.textContent = `${unit[0].toUpperCase() + unit.slice(1)} ${stageIndex + 1} of ${stages.length} · ${stage.dataset.title}`;
       stage.querySelector("[data-guide-prev-part]").disabled = instruction === 0 && part === 0;
       stage.querySelector("[data-guide-forward]").disabled = instruction === records[stageIndex].length - 1 && part === chunks.length - 1;
       progress.value = stageIndex + 1;
-      next.textContent = stageIndex === stages.length - 1 ? "Finish guide ✓" : "Next stage →";
+      next.textContent = stageIndex === stages.length - 1 ? (root.dataset.guideFinish || "Finish guide ✓") : `Next ${unit} →`;
     }
     back.disabled = !finished && stageIndex === 0;
     // Disabled or newly hidden controls cannot retain keyboard focus.

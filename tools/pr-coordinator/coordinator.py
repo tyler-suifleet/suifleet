@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Persistent local reciprocal PR reviews. GitHub is never a model identity oracle."""
 import argparse
+import contextlib
+import signal
 from datetime import date, datetime
 import fcntl
 import hashlib
@@ -24,6 +26,7 @@ CI_HANDOFF = ('Do NOT wait for, watch or poll hosted CI (no sleep/watch loops, m
               'approval: the coordinator enforces exact-head/base checks, independent review and merge gates, and '
               'dispatches CI repair if a check fails.')
 FAMILIES = {'Codex', 'Claude'}
+LANES = ('source', 'completion', 'ci', 'integration')
 
 
 def shared_github_snapshot(args, env, invoke):
@@ -1349,6 +1352,8 @@ class Coordinator:
             network_authorization(project)
         self.store = Store(state / 'reviews.sqlite3', config.get('review_worker_limits'),
                            config.get('ci_repair_attempt_limit', 3))
+        self.lane = 'all'
+        self.advanced_batches = set()
         self.children = {}
         self.immutable_reads = {}
         self.open_numbers = {}
@@ -1450,7 +1455,18 @@ class Coordinator:
         self.open_numbers[project['id']] = {row['number'] for row in raw}
         if on_snapshot is not None:
             priority = {owner.get('branch'): owner.get('spec', {}).get('priority', 'P9') for owner in owners}
-            raw.sort(key=lambda row: (priority.get((row.get('head') or {}).get('ref'), 'P9'), row['number']))
+            active_candidates = {r[0] for r in self.store.db.execute(
+                "SELECT pr FROM integration_batches WHERE project=? AND status NOT IN ('done','invalidated','failed')",
+                (project['id'],))} if self.lane == 'integration' else set()
+            raw.sort(key=lambda row: (row['number'] not in active_candidates,
+                priority.get((row.get('head') or {}).get('ref'), 'P9'), row['number']))
+        # The source lane never scans candidates or their reserved members.
+        # The integration lane alone makes reservation/publication decisions.
+        if self.lane == 'source':
+            excluded = self.batches.reserved_members(project)
+            excluded |= {r[0] for r in self.store.db.execute(
+                'SELECT pr FROM integration_batches WHERE project=? AND pr IS NOT NULL', (project['id'],))}
+            raw = [r for r in raw if r['number'] not in excluded]
         result = []
         for row in raw:
             try:
@@ -1693,12 +1709,16 @@ class Coordinator:
         spawning = False
         try:
             if kind == 'review':
-                run(['git','fetch','origin',pr['baseRefName']],cwd=project['root'])
+                run(['git','fetch','--no-write-fetch-head','origin',pr['baseRefName']],cwd=project['root'])
                 base=run(['git','rev-parse',f"origin/{pr['baseRefName']}"],cwd=project['root']).strip()
                 if base != pr['baseRefOid']: raise RuntimeError('integration base changed during review checkout')
-                run(['git', 'fetch', 'origin', f"pull/{pr['number']}/head"], cwd=project['root'])
+                # FETCH_HEAD is shared with other lanes and external builders.
+                # A job-specific ref binds this fetch without reading that file.
+                review_ref = f'refs/pr-coordinator/reviews/{job}'
+                run(['git', 'fetch', '--no-write-fetch-head', 'origin',
+                     f"+refs/pull/{pr['number']}/head:{review_ref}"], cwd=project['root'])
                 # Never run review on a moved branch or implementation checkout.
-                actual = run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=project['root']).strip()
+                actual = run(['git', 'rev-parse', review_ref], cwd=project['root']).strip()
                 if actual != pr['headRefOid']: raise RuntimeError('PR changed during checkout')
                 worktree = directory / 'checkout'
                 if worktree.exists():
@@ -2048,7 +2068,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
                     continue
                 child = self.children.get(row['id'])
-                alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
+                alive = child.poll() is None if child else runnable_identity(row['pid']) == row['started']
                 if alive:
                     if row['kind'] == 'fix':
                         # Locate by branch from fresh PR; never renew somebody else's claim.
@@ -2075,7 +2095,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.hold_authentication(row)
                         continue
                     # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
-                    retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
+                    retry = row['kind'] == 'review' and receipt_path.exists() and runnable_identity(row['pid']) != row['started']
                     status = 'retry' if retry else 'orphaned'
                     delay = min(3600,300*(2**min(row['attempts'],4)))
                     # SF-145: an explicit provider quota reset is never retried before that time.
@@ -2238,6 +2258,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             self.store.db.execute(f'UPDATE jobs SET {column}=? WHERE id=?',(posted['node_id'],row['id']))
 
     def tick(self, execute=False):
+        # Launching lanes own the subprocess handles. The completion lane
+        # independently consumes the durable exit and same-session evidence.
+        for job, child in list(self.children.items()):
+            if child.poll() is not None:
+                del self.children[job]
         for project in self.config['projects']:
             try:
                 self.tick_project(project,execute)
@@ -2340,9 +2365,52 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 print(f"{project['id']} PR#{row['pr']}: stopped review retirement held ({type(error).__name__})", flush=True)
                 continue
 
+    def advance_candidate_snapshot(self, project, pr):
+        """Advance existing candidates before fetching unrelated source PRs.
+
+        Only the integration lane calls this. All live member, head/base, CI,
+        review and uncertain-publication checks remain in BatchController.
+        Building/collecting batches still need the complete source selection.
+        """
+        if self.lane != 'integration':
+            return
+        row = self.store.db.execute(
+            "SELECT * FROM integration_batches WHERE project=? AND pr=? "
+            "AND status IN ('awaiting_ci','awaiting_review','ready','approving_members',"
+            "'publish_pending','published','reconciling')", (project['id'], pr['number'])).fetchone()
+        if row is None:
+            return
+        batch = dict(row)
+        maximum, delay = self.batches.settings(project)
+        publish_allowed = not any(r['id'] != batch['id'] and r.get('publish_intent')
+            and r['status'] not in ('done', 'invalidated', 'failed') for r in self.batches.rows(project))
+        self.batches.advance(project, batch, [], maximum, delay, [], set(), publish_allowed)
+        self.advanced_batches.add(batch['id'])
+
+    def tick_ci(self, project):
+        """Recovery needs check identity, not full review threads and source trees."""
+        if project.get('shared_acceptance_repair'):
+            from batch_integration import SharedAcceptanceRepair
+            shared = SharedAcceptanceRepair(self).tick(project)
+            print(json.dumps(dict(project=project['id'], shared_acceptance_repair=shared)), flush=True)
+        pages = json.loads(self.gh(project, ['api',
+            f"repos/{project['repository']}/pulls?state=open&per_page=100", '--paginate', '--slurp']))
+        for row in (r for page in pages for r in page):
+            try:
+                pr = json.loads(self.gh(project, ['pr', 'view', str(row['number']), '--repo',
+                    project['repository'], '--json',
+                    'number,headRefOid,state,isDraft,isCrossRepository,statusCheckRollup']))
+                for notice in self.hosted_runner_recovery.scan(project, [pr]):
+                    print(json.dumps(dict(project=project['id'], hosted_runner_recovery=notice)), flush=True)
+            except Exception as error:
+                print(f"{project['id']} CI PR#{row['number']}: deferred ({type(error).__name__})", flush=True)
+
     def tick_project(self, project, execute):
+        self.advanced_batches = set()
+        if execute and self.lane == 'ci':
+            return self.tick_ci(project)
         owners = self.owners(project)
-        if execute:
+        if execute and self.lane in ('all', 'completion'):
             # Completion can commit locally before its remote mirror fails.
             # Publish that same immutable revision before included-source closure.
             for index, owner in enumerate(owners):
@@ -2354,7 +2422,10 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     except Exception as error:
                         print(f"{project['id']} {owner['key']}: completed publication retained ({type(error).__name__})", flush=True)
             self.collect(project,owners)
-        if execute and project.get('shared_acceptance_repair'):
+            if self.lane == 'completion':
+                self.retire_closed_review_retries(project)
+                return
+        if execute and self.lane == 'all' and project.get('shared_acceptance_repair'):
             try:
                 from batch_integration import SharedAcceptanceRepair
                 shared = SharedAcceptanceRepair(self).tick(project)
@@ -2363,15 +2434,20 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 print(f"{project['id']}: shared acceptance recovery held ({type(error).__name__}); continuing other work", flush=True)
         early_reviews = set()
         def on_snapshot(pr):
+            if self.lane == 'integration':
+                self.advance_candidate_snapshot(project, pr)
+                return
             if self.start_source_review(project, pr, owners):
                 early_reviews.add(pr['number'])
-        if execute and self.batches.enabled(project):
+        if execute and self.lane in ('all', 'source', 'integration') and self.batches.enabled(project):
             prs = self.prs(project, on_snapshot, owners)
         else:
             prs = self.prs(project)
-        if execute:
+        if self.lane == 'source':
+            return
+        if execute and self.lane == 'all':
             self.retire_closed_review_retries(project)
-        if execute and getattr(self, 'hosted_runner_recovery', None):
+        if execute and self.lane == 'all' and getattr(self, 'hosted_runner_recovery', None):
             for notice in self.hosted_runner_recovery.scan(project, prs):
                 print(json.dumps(dict(project=project['id'], hosted_runner_recovery=notice)), flush=True)
         # Historical reconciliation cannot delay independent source workers.
@@ -2480,7 +2556,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 elif repair:
                     if not repair_blocker and not owner.get('expired') and owner.get('model'):
                         self.launch(project,repair,owner,'fix')
-                elif pr['number'] not in early_reviews and (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
+                elif self.lane == 'all' and pr['number'] not in early_reviews and (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
@@ -2642,6 +2718,102 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             print(f"{project['id']}: retained non-clean scratch worktree {path}",flush=True)
 
 
+@contextlib.contextmanager
+def lane_lock(state, project, lane):
+    if lane not in (*LANES, 'all') or not re.fullmatch(r'[A-Za-z0-9_.-]+', project):
+        raise ValueError('invalid scheduling lane identity')
+    directory = state / project / 'lanes'
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (directory / (lane + '.lock')).open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield directory / (lane + '.json')
+
+
+def supervise_lanes(config, args):
+    """One process/SQLite connection per lane; only integration publishes main.
+
+    No worker process groups are signalled. Children own separate lane locks;
+    duplicate supervisors cannot launch a second collector or publisher.
+    """
+    children, retry = {}, {}
+    script = str(Path(__file__).resolve())
+    schedule = []
+    for project in config['projects']:
+        lanes = LANES if project.get('integration_batch', {}).get('enabled') is True else ('all',)
+        schedule.extend((project['id'], lane) for lane in lanes)
+    def stop(signum, frame):
+        raise SystemExit(0)
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        while True:
+            for project, lane in schedule:
+                key = (project, lane)
+                child = children.get(key)
+                if child is not None and child.poll() is None:
+                    continue
+                if child is not None:
+                    print(f'{project} {lane}: lane exited {child.returncode}; retry in 30s', flush=True)
+                    retry[key] = time.monotonic() + 30
+                    del children[key]
+                if time.monotonic() < retry.get(key, 0):
+                    continue
+                argv = [sys.executable, script, '--config', str(args.config), '--state', str(args.state),
+                        '--execute', '--watch', '--interval', str(args.interval), '--lane', lane,
+                        '--project-id', project, '--parent-pid', str(os.getpid())]
+                children[key] = subprocess.Popen(argv, start_new_session=True)
+                print(f'{project} {lane}: lane started PID {children[key].pid}', flush=True)
+            time.sleep(2)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        for child in children.values():
+            if child.poll() is None:
+                child.terminate()
+        for child in children.values():
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
+
+
+def run_lane(config, args):
+    # Linux parent-death notification closes the SIGKILL/restart gap. Existing
+    # model wrappers survive because only this scheduling process gets SIGTERM.
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), 'could not establish lane parent fence')
+    if os.getppid() != args.parent_pid:
+        raise RuntimeError('lane supervisor changed during startup')
+    projects = [p for p in config['projects'] if p['id'] == args.project_id]
+    if len(projects) != 1:
+        raise ValueError('lane requires one configured project')
+    config = {**config, 'projects': projects}
+    with lane_lock(args.state, args.project_id, args.lane) as receipt:
+        # Serialize schema migration only, never network scans or worker work.
+        with (args.state / 'lanes-init.lock').open('a') as startup:
+            fcntl.flock(startup, fcntl.LOCK_EX)
+            coordinator = Coordinator(config, args.state)
+        coordinator.lane = args.lane
+        interval = dict(completion=15, ci=120, integration=30).get(args.lane, args.interval)
+        while os.getppid() == args.parent_pid:
+            started = time.monotonic()
+            from activation import atomic
+            value = dict(pid=os.getpid(), parent=args.parent_pid, lane=args.lane,
+                         runtime=str(Path(__file__).resolve().parent), started=time.time(), phase='running')
+            atomic(receipt, value)
+            try:
+                coordinator.tick(True)
+                value.update(phase='idle', completed=time.time())
+            except Exception as error:
+                value.update(phase='retry', completed=time.time(), error=type(error).__name__)
+                print(f'{args.project_id} {args.lane}: tick failed ({type(error).__name__})', flush=True)
+            atomic(receipt, value)
+            # Cadence includes processing time; never add another full interval
+            # after a slow scan. Different lanes continue independently.
+            time.sleep(max(2, interval - (time.monotonic() - started)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',type=Path,required=True)
@@ -2649,12 +2821,26 @@ def main():
     parser.add_argument('--execute',action='store_true',help='Launch workers and merge under the configured gates')
     parser.add_argument('--watch',action='store_true')
     parser.add_argument('--interval',type=int,default=60)
+    parser.add_argument('--lane', choices=(*LANES, 'all'), help=argparse.SUPPRESS)
+    parser.add_argument('--project-id', help=argparse.SUPPRESS)
+    parser.add_argument('--parent-pid', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     args.state.mkdir(parents=True,exist_ok=True)
-    # One orchestrator across projects/processes; SQLite reservations also protect concurrent scans.
+    if args.lane:
+        if not args.execute or not args.watch or not args.parent_pid or not args.project_id:
+            parser.error('lanes require an executing supervisor and one project')
+        return run_lane(config, args)
     with open(args.state/'daemon.lock','w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        parallel = config.get('parallel_pipeline', False)
+        if type(parallel) is not bool:
+            raise ValueError('parallel_pipeline must be a boolean')
+        if args.execute and args.watch and parallel:
+            if Path(__file__).with_name('installed.json').exists():
+                from activation import ready
+                ready(args.state, 'coordinator')
+            return supervise_lanes(config, args)
         coordinator = Coordinator(config,args.state)
         if args.execute and args.watch and Path(__file__).with_name('installed.json').exists():
             from activation import ready
