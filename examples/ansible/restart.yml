@@ -1,0 +1,42 @@
+---
+# Rolling daemon restart with health and identity checks. Restarts only the
+# SuiFleet units; it never reboots hosts.
+- name: Restart the SuiFleet daemon
+  hosts: "{{ suifleet_hosts | default('suifleet_devices') }}"
+  serial: "{{ suifleet_restart_batch | default(1) }}"
+  max_fail_percentage: 0
+  gather_facts: false
+  tasks:
+    - name: Read the public device address before the restart
+      ansible.builtin.slurp:
+        src: /etc/suifleet/device.address
+      register: suifleet_address_before
+
+    - name: Restart the daemon
+      ansible.builtin.systemd_service:
+        name: suifleet.service
+        state: restarted
+
+    - name: Wait for the daemon to be active
+      ansible.builtin.command: systemctl is-active suifleet.service
+      register: suifleet_active
+      until: suifleet_active.stdout == 'active'
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Check configuration, identity and journal binding as the daemon user
+      ansible.builtin.command:
+        argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
+      changed_when: false
+
+    - name: Read the public device address after the restart
+      ansible.builtin.slurp:
+        src: /etc/suifleet/device.address
+      register: suifleet_address_after
+
+    - name: Refuse a changed identity
+      ansible.builtin.assert:
+        that: suifleet_address_before.content == suifleet_address_after.content
+        quiet: true
+        fail_msg: The device address changed across a restart.

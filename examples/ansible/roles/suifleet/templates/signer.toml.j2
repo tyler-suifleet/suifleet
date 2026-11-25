@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+# SuiFleet signing service (docs/KEY_ISOLATION.md). The key never leaves this host.
+manifest_path = "deployment.json"
+device_cap_id = "{{ suifleet_enrollment.device_cap_id }}"
+keypair_path = "/etc/suifleet/device.key"
+caller_unit = "suifleet.service"
+{% if suifleet_signer_extra | length > 0 %}
+
+{{ suifleet_signer_extra }}
+{% endif %}
