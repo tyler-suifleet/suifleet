@@ -308,7 +308,9 @@ when its value is empty, because for example `nodeSelector:
 zero/empty bundle value, and Kubernetes quantities (resource
 `limits`/`requests`, `overhead` and emptyDir `sizeLimit`) compare by value
 (`0.1`, `"0.1"` and `100m` are equal; `1.5Gi` equals the server's `1536Mi`;
-`1E` equals `1000P`; `1G` does not equal `1Gi`). Every quantity is compared
+`1E` equals `1000P`; `1G` does not equal `1Gi`). Surrounding whitespace is
+trimmed as Go's `strings.TrimSpace` does before the server parses a quantity
+(`" 64Mi "` is stored, and accepted, as `64Mi`). Every quantity is compared
 after the API server's parse-time round-up (away from zero) to nano precision
 (an emptyDir `sizeLimit` of `0.1n` is stored, and accepted, as `1n`), and a
 binary-suffixed (`Ki`…`Ei`) quantity is then capped at 2^63−1 as the server

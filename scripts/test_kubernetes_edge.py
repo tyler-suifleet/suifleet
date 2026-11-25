@@ -684,6 +684,20 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, capped, "1.0.0")
     check("the server caps the BinarySI sizeLimit at 2**63-1 and readiness accepts it",
           size_limit() == "9223372036854775807", repr(size_limit()))
+
+    # Quantity.UnmarshalJSON trims surrounding whitespace before parsing, so a
+    # padded " 64Mi " is stored as "64Mi"; readiness must trim it too.
+    bundle = json.loads(v1.read_text())
+    bundle["resources"][1]["spec"]["template"]["spec"]["volumes"].append(
+        {"name": "scratch", "emptyDir": {"sizeLimit": " 64Mi "}})
+    padded = work / "size-limit-padded.json"
+    padded.write_text(json.dumps(bundle))
+    result = helper("apply", profiles, padded)
+    check("helper applies a bundle with a whitespace-padded emptyDir sizeLimit", result.returncode == 0,
+          result.stderr)
+    wait_ready(profiles, padded, "1.0.0")
+    check("the server trims the padded sizeLimit and readiness accepts it",
+          size_limit() == "64Mi", repr(size_limit()))
     result = helper("apply", profiles, v1)
     check("apply returns to v1 after the sizeLimit bundle", result.returncode == 0, result.stderr)
     wait_ready(profiles, v1, "1.0.0")
