@@ -299,6 +299,12 @@ class ConfigTests(Base):
             dict(console=dict(url="http://127.0.0.1:" + "9" * 5000, token_file=self.token_file)),
             dict(otlp=dict(endpoint="https://collector.example:" + "9" * 5000)),
             dict(console="http://127.0.0.1:1441"), dict(logs=["svc"]), dict(otlp="http://127.0.0.1:4318"),
+            # Embedded NUL or lone-surrogate paths make os.lstat raise ValueError.
+            dict(console=dict(url="http://127.0.0.1:1441", token_file=self.token_file + "\0x")),
+            dict(console=dict(url="http://127.0.0.1:1441", token_file="/tmp/\ud800.token")),
+            dict(otlp=dict(endpoint="http://127.0.0.1:4318", headers_file="/tmp/h\0x")),
+            dict(otlp=dict(endpoint="https://collector.example", ca_file="/tmp/ca\0x")),
+            dict(otlp=dict(endpoint="https://collector.example", ca_file="/tmp/\udcff.pem")),
         ]
         for overrides in bad:
             with self.subTest(overrides=overrides), self.assertRaises(em.ConfigError):
@@ -320,6 +326,20 @@ class ConfigTests(Base):
             with self.subTest(listen=listen):
                 self.assertEqual(em._split_listen(listen), expected)
                 em.Config(self.config(prometheus=dict(listen=listen)))
+
+    def test_deeply_nested_configuration_is_rejected(self):
+        # 1500 nested arrays fit within the 64 KiB limit but exceed the JSON
+        # decoder's recursion limit; that is malformed input, not a crash.
+        for text in ("[" * 1500 + "]" * 1500, '{"a":' * 1500 + "1" + "}" * 1500):
+            with self.subTest(size=len(text)):
+                path = self.write("config.json", text)
+                with self.assertRaises(em.ConfigError):
+                    em.load_config(path)
+                with unittest.mock.patch("sys.stderr") as stderr:
+                    self.assertEqual(em.main(["--config", path, "--check-config"]), 2)
+                written = "".join(call.args[0] for call in stderr.write.call_args_list)
+                self.assertIn("configuration rejected", written)
+                self.assertNotIn("Traceback", written)
 
     def test_secret_files_are_protected(self):
         link = self.dir / "link.token"

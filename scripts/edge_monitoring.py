@@ -124,11 +124,13 @@ def _loopback_host(host):
 
 
 def _check_private_file(path, label, secret):
-    if not os.path.isabs(path):
+    # os.lstat raises ValueError for an embedded NUL or an unencodable
+    # (lone-surrogate) path; both are malformed configuration, not a crash.
+    if not os.path.isabs(path) or "\0" in path:
         raise ConfigError(f"{label} must be an absolute path")
     try:
         info = os.lstat(path)
-    except OSError:
+    except (OSError, ValueError):
         raise ConfigError(f"{label} is not readable") from None
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise ConfigError(f"{label} must be a regular file, not a symlink")
@@ -347,7 +349,8 @@ def load_config(path, *, check_files=True):
         raise ConfigError("configuration is too large")
     try:
         raw = json.loads(data)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError: deeply nested arrays/objects within the size limit.
         raise ConfigError("configuration is not valid JSON") from None
     return Config(raw, check_files=check_files)
 
