@@ -20,8 +20,10 @@ every host) records a become command's stdin, the inventory enables
 ansible_become as a connection variable throughout, a claim transfer with
 -e ansible_become=true is refused on the controller, transfers through a
 sudo-wrapped interpreter are refused by the host probe both with readable
-and with hidepid=2-hidden process ancestry (no staging), a claim transfer interrupted
-after staging (plain and Vault claims only in tmpfs, none on host persistent
+and with hidepid=2-hidden process ancestry (no staging), transfers with swap
+that can write to a disk are refused (the machine's real swap
+when it has any, then /proc/swaps fixtures), a claim transfer interrupted
+after staging with zram/dm-crypt swap (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
 (changed=0), claim staging left by an enrollment interrupted after its record
@@ -702,6 +704,68 @@ class Harness:
             left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
             assert left == "0", (name, phase, "a transfer directory was created")
 
+    SWAPS_HEADER = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+
+    def swap_fixture(self, entries, sysfs=None):
+        """Replace /proc/swaps (and optionally /sys/block) inside each host's mount namespace.
+
+        The hosts share the test machine's kernel, so its real swap shows in
+        /proc/swaps; these fixtures stand in for other swap configurations.
+        Nothing is ever swapped on or off.
+        """
+        lines = self.SWAPS_HEADER + "".join(f"{dev}\t{kind}\t1048576\t0\t-2\n" for dev, kind in entries)
+        for host in self.hosts.values():
+            container = host["container"]
+            self.clear_swap_fixture(container)
+            self.exec(container, "sh", "-c", "umask 022 && cat > /root/sf304-swaps", input=lines)
+            self.exec(container, "mount", "--bind", "/root/sf304-swaps", "/proc/swaps")
+            if sysfs:
+                self.exec(container, "mount", "-t", "tmpfs", "-o", "mode=0755", "sf304-sysblock", "/sys/block")
+                for path, value in sysfs.items():
+                    self.exec(container, "sh", "-c", f"umask 022 && mkdir -p \"$(dirname /sys/block/{path})\""
+                              f" && printf '%s\\n' '{value}' > /sys/block/{path}")
+
+    def clear_swap_fixture(self, container):
+        for target in ("/sys/block", "/proc/swaps"):
+            mounted = self.exec(container, "sh", "-c", f"grep -c ' {target} ' /proc/self/mounts || true").stdout.strip()
+            if mounted != "0":
+                self.exec(container, "umount", target)
+
+    def swap_refused(self, vault):
+        """Swap that can write tmpfs pages or process memory to a disk refuses the claim before it is read."""
+        real = subprocess.run(["sh", "-c", "sed 1d /proc/swaps"], text=True, capture_output=True, check=True).stdout.split()
+        if real:
+            # The test machine's own swap (for example WSL's disk swap) with no fixture.
+            for host in self.hosts.values():
+                self.clear_swap_fixture(host["container"])
+            self.refused_claim_transfer("claim transfer with the machine's real swap is refused", vault,
+                                        expected=["active swap that can write the claim", real[0]])
+            print(f"PASS claim transfer refused with this machine's real disk swap ({real[0]} {real[1]})")
+        else:
+            print("NOTE this machine has no active swap; the real-swap refusal case did not run (fixtures below did)")
+        unsafe = [("/swapfile", "file"), ("/dev/sdb2", "partition"), ("/dev/zram1", "partition"), ("/dev/dm-1", "partition"),
+                  ("/dev/zram2", "partition")]
+        # zram1 writes back to a disk, dm-1 is not dm-crypt (LVM), zram2 has no device.
+        self.swap_fixture(unsafe, sysfs={"zram1/backing_dev": "/dev/sdb3", "dm-1/dm/uuid": "LVM-sf304fixture"})
+        try:
+            self.refused_claim_transfer("claim transfer with disk-backed swap is refused", vault,
+                                        expected=["active swap that can write the claim",
+                                                  "/swapfile, /dev/sdb2, /dev/zram1, /dev/dm-1, /dev/zram2"])
+            print("PASS claim transfer refused with a swap file, a disk partition, zram writeback, non-crypt dm and"
+                  " an unknown zram device (each listed)")
+        finally:
+            for host in self.hosts.values():
+                self.clear_swap_fixture(host["container"])
+
+    def accepted_swap(self):
+        """zram without writeback and dm-crypt swap keep plaintext off disks and are accepted."""
+        self.swap_fixture([("/dev/zram0", "partition"), ("/dev/dm-0", "partition")],
+                          sysfs={"zram0/backing_dev": "none", "dm-0/dm/uuid": "CRYPT-LUKS2-sf304fixture-swap"})
+
+    def no_swap(self):
+        """The rest of the run behaves as a host with swap off."""
+        self.swap_fixture([])
+
     def escalated_claim_transfer_refused(self, vault):
         """Escalation the role's task variables cannot remove, and unverifiable transport, refuse the claim."""
         # Extra vars outrank task variables: the controller sees escalation still on.
@@ -877,6 +941,8 @@ class Harness:
         self.ansible("vault-encrypt one claim", "encrypt", "/chain/batch/enrollment/SN-0002/claim.key",
                      "--vault-password-file", "/work/vault-pass", tool="ansible-vault")
         vault = ["--vault-password-file", "/work/vault-pass"]
+        # The test machine's own swap would refuse every enrollment; see swap_refused.
+        self.no_swap()
 
         _, recap = self.ansible("check mode on fresh hosts", "site.yml", "--check", "--diff", *vault)
         for name, host in self.hosts.items():
@@ -885,7 +951,10 @@ class Harness:
             assert self.exec(host["container"], "test", "-e", "/etc/suifleet/device.key", check=False).returncode != 0, name
         self.sudo_log_control()
         self.escalated_claim_transfer_refused(vault)
+        self.swap_refused(vault)
+        self.accepted_swap()
         self.interrupted_claim_transfer(vault)
+        self.no_swap()
         self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
