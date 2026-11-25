@@ -22,6 +22,8 @@ in [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32) and
 
 Redacted remote logs, diagnostic bundles and alerts build on this path: see [LOGS.md](LOGS.md) (SF-020).
 
+For customer-owned Prometheus or OpenTelemetry monitoring of the same device-local health, deployment results and bounded logs, without a SuiFleet server or chain writes, see [EDGE_MONITORING.md](EDGE_MONITORING.md) (SF-303).
+
 Devices report a heartbeat with their installed components and health. The fleet indexer ([INDEXER.md](INDEXER.md)) receives these reports, and the dApp shows online, last-seen and degraded state for each device.
 
 Telemetry is **off-chain** and high-volume. It never replaces the compact, authoritative receipts that devices report on chain for each deployment. Nothing in this path writes to the chain, and no contract changed.

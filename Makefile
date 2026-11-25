@@ -693,6 +693,12 @@ test-aws-credentials:
 test-cloudwatch-metrics:
 	bash scripts/test_cloudwatch_metrics.sh
 
+# SF-303: pinned real Prometheus/OpenTelemetry Collector binaries, then the real
+# daemon, console and monitoring adapter end to end, network-none.
+.PHONY: test-edge-monitoring
+test-edge-monitoring:
+	bash scripts/test_edge_monitoring.sh
+
 # SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
 .PHONY: test-stream-export
 test-stream-export:
