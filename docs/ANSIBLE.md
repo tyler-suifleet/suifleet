@@ -114,8 +114,9 @@ Delete the batch once every host is enrolled.
 Hosts need SSH, sudo and Python 3; `deb` hosts also need `python3-apt` (present on
 standard Debian and Ubuntu installs) for the `apt` module. Enrolling hosts also
 need a tmpfs the SSH account can write (`/dev/shm` by default, see
-`suifleet_claim_transfer_dir`) and no swap that can write to a disk while
-they enroll ([claim storage](#claim-storage)). Use a controller with
+`suifleet_claim_transfer_dir`), no swap that can write to a disk and no crash
+handler that can store a core dump while they enroll
+([claim storage](#claim-storage)). Use a controller with
 ansible-core 2.16 or later. The examples use only
 `ansible.builtin` modules. The tested controller is pinned in
 [`requirements-controller.txt`](../examples/ansible/requirements-controller.txt):
@@ -202,7 +203,7 @@ restarted once.
   the SSH account's transfer directories left by a killed run. An interrupted
   run leaves the claim only on those tmpfs mounts until the next run or a reboot. Revoke a claim that was exposed before use.
   tmpfs alone is not enough, because its pages and the memory of the
-  processes holding the claim can be swapped out; see
+  processes holding the claim can be swapped out or saved in a crash dump; see
   [claim storage](#claim-storage).
 - **One enrollment per device.** `/etc/suifleet/enrollment.json` records the
   public IDs, and a recorded host never enrolls again. A host that has
@@ -238,8 +239,37 @@ unrecognized refuse the claim, and the message names the devices. Hibernation
 writes memory to swap, so it is covered by the same rule. For a host with
 ordinary disk swap, run `swapoff -a` before enrolling it and `swapon -a`
 afterwards (recorded hosts never handle a claim again), or move it to zram
-or encrypted swap. This check covers the hosts; keep the controller, which
-also holds the claim in memory, on a machine whose swap is encrypted or off.
+or encrypted swap.
+
+A crash dump is also a copy of a process's memory. Before the claim is read,
+the role reads `kernel.core_pattern` and, without privilege escalation, the
+core dump size limit (`ulimit -c`) that the SSH session receiving the claim
+inherits. It refuses the host unless a crash could store nothing:
+
+- **`kernel.core_pattern` names a file** (for example Debian's default
+  `core`) and the session's limit is 0: the kernel writes nothing;
+- **it pipes to `systemd-coredump`** and either the session's limit is 0
+  (systemd-coredump honors the crashing process's limit) or `coredump.conf`
+  sets `Storage=none`;
+- **it pipes to `false` or `true`**: nothing is kept.
+
+Any other piped handler is refused, because the kernel runs it whatever the
+limit and it may keep the dump: Apport (Ubuntu's default), ABRT, the WSL
+crash handler or a vendor handler. The message gives the reason. To enroll
+such a host, stop the handler for the enrollment (for example
+`systemctl stop apport`, which restores a file pattern), add
+`/etc/systemd/coredump.conf.d/` with `Storage=none` on systemd-coredump hosts,
+or set the deploy account's `core` limit to 0 in `/etc/security/limits.d/`
+(`pam_limits` sets SSH sessions' limits, starting from PID 1's, so
+`LimitCORE=0` on the SSH service alone may not reach them). The root-run staging and enrollment commands
+set their own limit to 0 after `sudo` and `runuser` apply their PAM limits.
+
+These checks cover the hosts. The controller also holds the claim in memory
+(`ansible-playbook` reads and decrypts it); run it on a machine whose swap
+is encrypted or off and whose crash dumps are disabled, for example with
+`ulimit -c 0` in the shell that starts `ansible-playbook` and no piped crash
+handler that ignores that limit (macOS writes `/cores` only when the limit
+allows it). The role does not check the controller.
 
 ## Recovery
 
@@ -260,6 +290,9 @@ also holds the claim in memory, on a machine whose swap is encrypted or off.
   Never issue an enrolled device a new claim, and never replace its key.
 - **Swap refusal.** See [claim storage](#claim-storage): enroll with swap
   off, on zram without writeback or on dm-crypt swap. Nothing was sent.
+- **Crash dump refusal.** See [claim storage](#claim-storage): disable core
+  dumps for the enrollment (limit 0 with a file pattern or systemd-coredump,
+  or `Storage=none`). Nothing was sent.
 - **A lost or exposed claim before enrollment.** Revoke it on the Enrollment
   page (*Lost a credential file?*).
 - **Removing a host** from the fleet is a separate, deliberate decision. The
@@ -301,16 +334,29 @@ The harness checks these phases:
    host probe because the process chain changes user), and the same with
    `/proc` remounted `hidepid=2` (refused because the chain is not fully
    readable). Swap is checked next. The hosts share the test machine's
-   kernel, so when that machine has active swap (for example WSL's disk swap),
-   a claim transfer with it unchanged must be refused, naming the device. Then
+   kernel; the role's own classifier is run on them first, and when it
+   reports that machine's swap unsafe (for example WSL's disk swap), a claim
+   transfer with it unchanged must be refused, naming the device. Accepted
+   real swap (zram without writeback, dm-crypt) skips that case. Then
    `/proc/swaps` (and `/sys/block`) are replaced inside each host's mount
    namespace; nothing is swapped on or off. A transfer must be refused,
    listing every unsafe device, with a swap file, a disk partition,
    zram writing back to a disk, a non-crypt device-mapper device and an
    unknown zram device. All other phases see a `/proc/swaps` with no swap.
+   Crash dumps are checked the same way: when the classifier reports the
+   machine's real `kernel.core_pattern` and SSH session core limit unsafe (WSL's piped
+   crash handler is), a transfer with them must be refused. Then
+   `kernel.core_pattern` is bind-mounted inside each host's mount namespace,
+   and transfers must be refused, giving the reason, for Apport, for core files
+   with a nonzero limit and for systemd-coredump storing dumps with a nonzero
+   limit (the containers' init and sshd inherit Docker's unlimited limit). No test
+   process is crashed: `kernel.core_pattern` is global to the shared kernel,
+   so a real crash would reach the machine's own handler. Enrollment runs with
+   systemd-coredump and `Storage=none`.
    Then a claim transfer is
    interrupted right after staging, for plain and Vault claims, with zram
-   without writeback and dm-crypt swap (accepted): the claim must
+   without writeback and dm-crypt swap and with core files under a
+   `limits.d` core limit of 0 for the deploy account (all accepted): the claim must
    exist only in the tmpfs staging directory, not anywhere on the host's
    persistent filesystem (including Ansible's remote temporary directories)
    or in the controller's files and Ansible home, and no transfer copy may
