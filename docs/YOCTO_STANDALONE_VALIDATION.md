@@ -74,7 +74,8 @@ export contains none of these appends. No recipe task-execution build from the
 extracted export without the integration layer was run on either series. Its
 yocto-check-layer passes above do not establish that build path. Standalone
 consumers must supply equivalent distro fixes/guards and validate them, or accept
-unvalidated status and possible build failures.
+unvalidated status and possible build failures. (SF-308 later added the opt-in
+class and ran that build path; see the standalone recipe and image builds below.)
 
 Codec inputs are the verified artifacts already present at
 `/home/tyler/dev/codex/yocto-sf120/build/suifleet-walrus-codec/2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`.
@@ -161,7 +162,7 @@ These are documented in the layer README.
 
 ### Offline tests
 
-`scripts/tests/test_yocto_core_fixes.py` (9 tests) runs from
+`scripts/tests/test_yocto_core_fixes.py` (8 tests) runs from
 `make test-yocto-packaging` and checks the following:
 
 - It executes the class's anonymous function against a fake datastore for every
@@ -221,43 +222,132 @@ a clean `--shared` clone at `b9bb2ef6210624d732ab2de2075ea1826e5300c1`, with
 matched all five recipe SHA-256 pins: `4bdf599f…`, `649f85e5…`, `91811ce2…`,
 `eb308bd5…` and `dcd292a9…`.
 
-### Standalone recipe and image builds: not yet completed
+### Standalone recipe and image builds
 
-The planned acceptance build uses a fresh build directory and the extracted
-export above, without the integration layer and with `INHERIT +=
-"suifleet-core-fixes"`. It targets `MACHINE = "qemuarm64"` with
-`bitbake -k suifleet suifleet-node suifleet-walrus-codec core-image-minimal` on
-both series (`xz libcap` are added on Wrynose to force their package QA). The
-build uses read-only sstate mirrors and copies of the existing hash-equivalence
-databases.
+These builds ran on 2026-11-24 from an extracted export of commit `70fdc4c6`.
+Two exports were byte-identical (23 files, SHA-256
+`a8ee6380ea8621ba69f91cff468336dee66bb674d6b995fd419c3677445e936f`); the layer
+metadata matches the `efd1e58c` export checked above, and only `RELEASE.md`
+differs. The integration layer was not in BBLAYERS, and no QA, sanity or
+signature check was disabled. Each series used a fresh build directory on a
+dedicated build disk, with its own `TMPDIR`, `SSTATE_DIR` and copied hash-equivalence
+database. The shared download directory and existing sstate caches were used as
+read-only mirrors. Concurrency was limited to three BitBake threads and `-j4` per
+series. The configuration added:
 
-So far that build has only been planned, not run. The shared host's root
-filesystem stayed between 1.4 and 16 GB free because of concurrent builds, and
-the build needs about 1,260 tasks on Scarthgap and about 4,740 on Wrynose. Every
-earlier build carried the integration glibc guard, so target sstate keyed on
-stock glibc does not exist. `bitbake -n` plans were:
+```
+MACHINE = "qemuarm64"
+INHERIT += "suifleet-core-fixes"
+INHERIT += "rm_work"
+SUIFLEET_WALRUS_CODEC_DIR = "<the rebuilt codec artifacts above>"
+# Disposable emulator validation image only; not layer policy:
+IMAGE_INSTALL:append = " suifleet suifleet-walrus-codec"
+IMAGE_FSTYPES = "ext4"
+EXTRA_IMAGE_FEATURES:append = " allow-empty-password empty-root-password allow-root-login"
+PACKAGECONFIG:remove:pn-qemu-system-native = "<as in the series' kas QEMU profile>"
+```
 
-- **Scarthgap image:** 5016 tasks, 1260 to execute. Sstate matched 1899 of 2277.
-- **Wrynose recipes:** 4738 tasks. Sstate matched 1417 of 2413, and 996 sstate
-  tasks were missed, including glibc, gcc, libstd-rs and linux-yocto.
+The distro settings were the same as for yocto-check-layer: Scarthgap used
+`DISTRO = "poky"` with systemd and usrmerge, and Wrynose used
+`DISTRO = "nodistro"` with `INIT_MANAGER = "systemd"` and usrmerge.
 
-The Wrynose attempt began at 14:52 with 15 GB free. BitBake attempted 1160
-tasks: 1057 were reused, and the rest executed without any failures, among them `libcap-native` `do_compile`/`do_install` with the class's
-toolchain arguments. BitBake's disk monitor (`STOPTASKS` at 5 GB, set to protect
-the other builds) then stopped the attempt; no target task had executed. Scratch
-space was released afterwards.
+| | Scarthgap | Wrynose |
+|---|---|---|
+| Layers | poky `a53cae3d` (core, meta-poky), meta-lts-mixins `eedcdc74`, meta-oe `ae7dfb12`, export | OE-Core `0f03c732`, meta-oe `f28a144a`, export |
+| BitBake / Rust | 2.8.1 / 1.98.1 (mixin) | 2.18.0 / 1.94.1 (core) |
+| `bitbake -k` targets | `suifleet suifleet-node suifleet-walrus-codec openssl core-image-minimal` | the same plus `xz libcap` |
+| Result | exit 0: 5018 tasks attempted, all succeeded | exit 0: 5046 tasks attempted, all succeeded |
+| Warnings | local hash-equivalence server combined with sstate mirrors; systemd `/home/root` notice | local hash-equivalence server combined with sstate mirrors |
 
-This means no standalone recipe or image task execution, package QA or emulated
-boot has yet been established for the extracted export. Rerun the build when
-roughly 40 GB or more is free, and record the results here. Until then, the
-evidence consists of the parse and yocto-check-layer results above, together
-with the integration-profile builds whose openssl, libcap and xz task signatures
-the class reproduces exactly.
+The first attempt on each series was cut off when its supervising shell reached a
+two-hour limit. BitBake then resumed in the same build directories, with no failed
+task. On Wrynose, the first configuration removed only `virglrenderer epoxy` from
+`qemu-system-native`. SDL then pulled in mesa-native, libclc and a source build
+of clang-native. The rerun used the Wrynose kas QEMU profile's setting
+(`virglrenderer epoxy sdl sdl-image alsa`), which removed clang from the task
+graph. That setting configures the host emulator only; it is not a layer requirement.
+
+**suifleet tasks executed.** `suifleet` ran `do_verify_lock`,
+`do_verify_toolchain`, `do_configure`, `do_compile` (Cargo build),
+`do_install`, `do_package` and `do_package_qa` on both series.
+`suifleet-walrus-codec` ran `do_verify_codec`, `do_install`, `do_package` and
+`do_package_qa` on both. `suifleet-node` ran `do_install`, `do_package` and
+`do_package_qa` on Scarthgap. On Wrynose, the main build restored suifleet-node
+from sstate, so `bitbake -C install suifleet-node` followed by
+`bitbake -f -c package_qa suifleet-node` executed those tasks; both succeeded.
+`core-image-minimal` ran `do_rootfs`, `do_image_ext4` and `do_image_qa` on both
+series. The image manifests list `suifleet`, `suifleet-node` and
+`suifleet-walrus-codec`.
+
+**Class-affected recipes executed.** The main builds restored openssl, libcap and
+xz from sstate. That is expected, because the class reproduces the integration
+builds' task signatures exactly. To execute the class's own changes, the
+target recipes were tainted with `bitbake -C compile openssl libcap xz`, and the
+native recipes' `do_install` was requested explicitly
+(`openssl-native:do_install`, `libcap-native:do_install` and, on Wrynose,
+`xz-native:do_install`). On Wrynose, hash equivalence then restored the
+unchanged package output, so `bitbake -f -c package_qa openssl libcap xz` ran QA
+explicitly. Results:
+
+- On both series, target and native openssl re-ran `do_compile` and
+  `do_install`. The generated `run.do_install` calls `make -j1` for the
+  install step.
+- Wrynose libcap and libcap-native re-ran `do_compile` and `do_install`. The
+  target install received the cross `CC`, `AR`, `RANLIB` and `OBJCOPY`, and
+  native `BUILD_CC`.
+- Target openssl, libcap and xz `do_package_qa` executed and passed on both
+  series.
+- **xz finding:** pinned Wrynose OE-Core sets `gl_cv_posix_shell=/bin/sh`. In
+  this build, the generated `xzmore` (like `xzdiff`, `xzgrep` and `xzless`)
+  began with `#!/bin/sh`. Its file-rdeps were therefore only `/bin/sh`, and
+  the class's guarded `#!/bin/bash` rewrite matched nothing. The bash
+  RDEPENDS it adds is redundant here but harmless. The original integration
+  failure (e3e75de6) was not reproduced on this host. Whether the xz fix is
+  still needed is reported for triage in the existing issue; the class is
+  unchanged so the integration profiles keep identical signatures.
+
+**Emulated boot.** Each series' `core-image-minimal` ext4 image booted under
+the built `qemu-system-aarch64` (`-machine virt -cpu cortex-a57`, `-snapshot`,
+user networking). The serial console was scripted with
+`root=/dev/vda console=ttyAMA0`.
+
+| | Scarthgap | Wrynose |
+|---|---|---|
+| Kernel / systemd | 6.6.123-yocto-standard / 255 | 6.18.52-yocto-standard / 259.5 |
+| `systemctl is-system-running --wait` | `running`, 0 failed units | `running`, 0 failed units |
+| `suifleet-provision.service` | exited 0 and printed a fresh device address | exited 0 and printed a fresh device address |
+| `suifleet-signer.socket` | listening on `/run/suifleet-signer/sign.sock` | same |
+| `suifleet.service` | skipped: `ConditionPathExists=/etc/suifleet/config.toml` unmet | same |
+| `/etc/suifleet` | examples plus the runtime-generated `device.key` and `device.address` | same |
+| Codec `build-info` | `source_revision=b9bb2ef6…`, `crate_version=0.2.3` | same |
+
+`suifleet.service` is skipped because no enrollment configuration is installed,
+which is the intended state for an image with no device configuration. No key was
+present in the image; first boot generated it.
+
+**Optional archive runtime.** `suifleet-node` and `suifleet-walrus-codec` were
+built and passed package QA separately on both series, and both images include
+them. A second boot of each image checked the following:
+
+- `/usr/lib/suifleet/node/bin/node --version` printed `v22.22.2`.
+- `sha256sum` of the five installed codec files matched the recipe pins
+  (`eb308bd5…`, `91811ce2…`, `dcd292a9…`, `4bdf599f…` and `649f85e5…`).
+- The pinned Node ran the codec bundle with the offline request
+  `{"chain":"00000000"}`. The codec rejected the foreign chain before any
+  network access, printed its generic `Walrus codec operation failed` and
+  exited 1, the same as on the host.
+
+No Walrus or Sui network operation was attempted from the emulator. Archive upload
+and registration on a network are outside this build validation.
+
+These are disposable emulator images with test-only root login. They are not
+release images, a physical target or a hardware boot. Physical acceptance stays
+in SF-031/#32.
 
 
 ## Limits and publication follow-through
 
-No new bootable image, emulated boot, physical programming, public-testnet
+No release image, physical programming, public-testnet
 transaction, mainnet transaction, production credential or manual wallet test is
 claimed. Existing physical/real-wallet/provider acceptance stays in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
