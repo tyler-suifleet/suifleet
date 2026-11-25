@@ -1,4 +1,5 @@
 import copy
+import re
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -427,61 +428,75 @@ class PublicPricingTests(unittest.TestCase):
         self.assertIn(f'| Monthly minimum | ${self.prices["base"]["monthlyMinimumUsd"]} |', plan)
         self.assertIn(f'| Annual prepay | {self.prices["base"]["annualPrepayDiscountPercent"]}% discount |', plan)
 
-    def test_public_offers_match_plan_and_render_from_policy(self):
-        from unittest.mock import patch
+    def test_public_offers_match_plan_and_stay_private(self):
         offers = self.policy['public_offers']
         managed, at_cost, partners = (offers[key] for key in ('managed', 'at_cost', 'design_partners'))
         plan = self.site.PLAN.read_text()
         self.assertIn(f'Managed plan: the platform price plus {self.site.usd(managed["premium_usd_per_device_month"])} per device per month, with a ${managed["monthly_minimum_usd"]} monthly minimum.', plan)
         self.assertIn(f'Up to {at_cost["max_devices"]:,} devices per organization', plan)
-        self.assertIn(f'about {self.site.usd(at_cost["estimated_usd_per_device_month"])} per device per month', plan)
         self.assertIn(f'Up to {partners["max_devices"]:,} devices each at cost for {partners["term_months"]} months', plan)
         page = self.site.generated()
-        for text in ('Managed plan', '$0.10 per device per month', '$199.00 monthly minimum',
-                     '100 devices per organization', '$0.01', '5,000 devices each at cost for 12 months',
-                     'community support only', 'Billed annually in advance', 'case study'):
-            self.assertIn(text, page)
-        # Each canonical offer field must affect the page and invalidate committed output.
-        for group, values in offers.items():
-            for key, value in values.items():
-                policy = copy.deepcopy(self.policy)
-                policy['public_offers'][group][key] = str(Decimal(str(value)) + 1) if isinstance(value, str) else value + 1
-                changed = self.site.render(self.prices, policy, 'digest')
-                self.assertNotEqual(self.site.render(self.prices, self.policy, 'digest'), changed)
-                with patch.object(self.site, 'generated', return_value=changed):
-                    with self.assertRaisesRegex(ValueError, 'stale'):
-                        self.site.generate(check=True)
+        self.assertIn('Running a pilot?', page)
+        # Managed support, at-cost and design-partner terms are quoted individually, not public plans.
+        for text in ('Managed', 'managed', 'At-cost', 'at cost', 'per organization', 'design partner', 'case study',
+                     self.site.usd(managed['monthly_minimum_usd'])):
+            self.assertNotIn(text, page)
 
-    def test_examples_include_minimum_and_separate_activation(self):
+    def test_configurations_price_from_the_table(self):
         page = self.site.generated()
-        self.assertIn('50 × $0.08 = $4.00</td><td>$49.00</td><td>$5.00', page)
-        self.assertIn('1,000 × $0.08 = $80.00</td><td>$80.00</td><td>$100.00', page)
-        self.assertRegex(
-            page,
-            r'<li><strong>Included:</strong>[^<]*all-in subscription quote includes network fees'
-            r'[^<]*not charged again as a separate network estimate\.</li>',
-        )
-        self.assertIn('Those rates alone are not an all-in total', page)
-        self.assertIn('href="/contact/"', page)
+        for name, rate in (('Essentials', '$0.08'), ('Extended logs', '$0.18'), ('Full-year logs', '$0.20')):
+            self.assertRegex(page, re.compile(rf'<h3>{name}</h3>.*?<div class="amount">{re.escape(rate)} <small>', re.S))
+        for text in ('Weekly log uploads, kept 6 weeks', 'Daily log uploads, kept 6 months', 'Daily log uploads, kept 1 year',
+                     'Update checks every 30 minutes', 'Daily health reports'):
+            self.assertIn(text, page)
+        # Archive add-on prices flow through to the configuration rate.
+        prices = copy.deepcopy(self.prices)
+        for item in prices['settings']['archiveRetentionDays']:
+            if item['value'] == 365:
+                item['usdPerDeviceMonth'] = 0.5
+        self.assertIn('<div class="amount">$0.66 <small>', self.site.render(prices, self.policy, 'digest'))
 
-    def test_examples_follow_changed_tier_boundaries(self):
+    def test_fleet_summary_applies_minimum_like_the_console(self):
+        page = self.site.generated()
+        summary = page[page.index('summary-table'):page.index('</table>', page.index('summary-table'))]
+        mark = ' <span class="min-mark" title="Monthly minimum">min</span>'
+        self.assertIn(f'<tr><td>100</td><td>$49{mark}</td><td>$49{mark}</td><td>$49{mark}</td></tr>', summary)
+        self.assertIn(f'<tr><td>500</td><td>$49{mark}</td><td>$90</td><td>$100</td></tr>', summary)
+        self.assertIn('<tr><td>1,000</td><td>$80</td><td>$180</td><td>$200</td></tr>', summary)
+        self.assertIn('<tr><td>10,000</td><td>$800</td><td>$1,800</td><td>$2,000</td></tr>', summary)
+        self.assertIn('Your price includes the network fees for your chosen settings.', page)
+
+    def test_detailed_estimates_are_expandable_with_annual_and_activation(self):
+        page = self.site.generated()
+        self.assertIn('<details class="estimates">', page)
+        self.assertIn('See detailed estimates', page)
+        mark = ' <span class="min-mark" title="Monthly minimum">min</span>'
+        # 1,000 devices: monthly $80/$180/$200; annual prepay 10% off; $100 activation.
+        self.assertIn('<tr><td>1,000</td><td>$80</td><td>$180</td><td>$200</td><td>$72</td><td>$162</td><td>$180</td><td>$100</td></tr>', page)
+        # The discount also applies to the minimum.
+        self.assertIn(f'<tr><td>50</td><td>$49{mark}</td><td>$49{mark}</td><td>$49{mark}</td><td>$44.10{mark}</td>', page)
+        for text in ('Encrypted delivery (Seal)', 'Every 5 minutes', '10 MB written per month', '$0.10 per GB'):
+            self.assertIn(text, page)
+
+    def test_only_first_band_is_published(self):
+        page = self.site.generated()
+        tiers = self.prices['base']['tiers']
+        self.assertIn(f'Over {tiers[0]["upToDevices"]:,} devices?', page)
+        for tier in tiers[1:]:
+            self.assertNotIn(f'{tier["upToDevices"]:,}', page)
+        for text in ('Custom, from', f'{tiers[0]["upToDevices"] + 1:,}'):
+            self.assertNotIn(text, page)
+
+    def test_estimates_stay_within_the_first_band(self):
         prices = copy.deepcopy(self.prices)
         prices['base']['tiers'][0]['upToDevices'] = 500
-        page = self.site.render(prices, self.policy, 'digest')
-        self.assertIn('500 × $0.08 + 500 × $0.05 = $65.00</td><td>$65.00</td><td>$100.00', page)
-        self.assertIn('50 × $0.08 = $4.00</td><td>$49.00', page)
-        self.assertIn('Above 1,000,000</td><td>Custom', page)
-
-    def test_examples_require_quote_beyond_published_tiers(self):
-        prices = copy.deepcopy(self.prices)
-        prices['base']['tiers'] = [dict(upToDevices=500, usdPerDeviceMonth=0.08)]
-        with self.assertRaisesRegex(ValueError, 'custom quote'):
+        with self.assertRaisesRegex(ValueError, 'quoted'):
             self.site.render(prices, self.policy, 'digest')
 
     def test_model_changes_invalidate_page(self):
         from unittest.mock import patch
         original = self.site.generated()
-        for key in ('monthlyMinimumUsd', 'activationUsdPerDevice', 'annualPrepayDiscountPercent', 'customFromUsdPerDeviceMonth'):
+        for key in ('monthlyMinimumUsd', 'activationUsdPerDevice', 'annualPrepayDiscountPercent'):
             prices = copy.deepcopy(self.prices)
             prices['base'][key] += 1
             changed = self.site.render(prices, self.policy, 'changed')
@@ -492,24 +507,23 @@ class PublicPricingTests(unittest.TestCase):
         prices = copy.deepcopy(self.prices)
         prices['base']['tiers'][0] = dict(upToDevices=12345, usdPerDeviceMonth=0.09)
         prices['settings']['checkIntervalMs'][0]['usdPerDeviceMonth'] = 0.77
+        prices['data']['writeUsdPerGB'] = 0.33
         page = self.site.render(prices, self.policy, 'digest')
-        for text in ('First 12,345', '12,346 to 100,000', '$0.09', '$0.77'):
+        for text in ('Over 12,345 devices?', '<div class="amount">$0.09 <small>', '$0.77', '$0.33 per GB'):
             self.assertIn(text, page)
         policy = copy.deepcopy(self.policy)
         policy['renewal_repricing_trigger_multiple'] = '4'
         policy['renewal_notice_days'] = 45
         policy['hedge']['term_sui_purchased_fraction'] = '0.5'
         page = self.site.render(prices, policy, 'digest')
-        for text in ('at least 4×', '45 days', '50% of the term'):
+        for text in ('at least 4×', '45 days', 'buy 50% of the SUI'):
             self.assertIn(text, page)
 
     def test_policy_and_estimator_are_explicit(self):
         page = self.site.generated()
-        for text in ('{{app:settings/}}', 'SUI pays', 'WAL pays', 'never change mid-term', 'at least 3×', '30 days', 'gas-price',
-                     'Prices shown help you compare options.',
-                     'Final terms are set in your written quote.',
-                     'Contact us to confirm availability and a written quote.'):
+        for text in ('{{app:settings/}}', 'never change mid-term', 'at least 3×', '30 days', 'token-price rises'):
             self.assertIn(text, page)
+        self.assertNotIn('Prices shown help you compare options.', page)
 
 
 if __name__ == '__main__':
