@@ -4,7 +4,7 @@ Integrate the daemon, isolated signer and runtime provisioning into your own Yoc
 
 ## Prerequisites
 
-Use a reviewed source checkout, Ubuntu 22.04 and kas 4.7 with the pinned profiles. Obtain build resources and storage for BitBake. No standalone public layer repository or Layer Index listing is offered yet; use the layer in this checkout.
+Use a reviewed source checkout, Ubuntu 22.04 and kas 4.7 with the pinned profiles. Obtain build resources and storage for BitBake. The pinned profiles fetch the public standalone software layer. Its OpenEmbedded Layer Index submission is still pending.
 
 ## Steps
 
