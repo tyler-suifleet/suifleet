@@ -111,6 +111,10 @@ test('unsupported, malformed and oversize responses are protocol errors with unk
     { version: 1, ok: false, error: 'evicted', oldest: 1.5 },
     { version: 1, ok: false, error: 'evicted', oldest: null },
     `${'x'.repeat(MAX_FRAME + 10)}\n`,
+    // Invalid UTF-8 inside an otherwise intact success envelope (IPC v1 frames are UTF-8 JSON).
+    Buffer.concat([Buffer.from('{"version":1,"ok":true,"data":"a'), Buffer.from([0xff]), Buffer.from('b"}\n')]),
+    Buffer.concat([Buffer.from('{"version":1,"ok":true,"data":"'), Buffer.from([0xed, 0xa0, 0x80]), Buffer.from('"}\n')]),
+    Buffer.concat([Buffer.from('{"version":1,"ok":true,"data":"'), Buffer.from([0xc3]), Buffer.from('"}\n')]),
   ];
   for (const reply of replies) {
     const server = await serve(() => reply);
@@ -118,6 +122,13 @@ test('unsupported, malformed and oversize responses are protocol errors with unk
     await assert.rejects(client.list(), (e) => e instanceof ProtocolError && e.outcome === 'unknown', JSON.stringify(reply).slice(0, 40));
     await server.close();
   }
+});
+
+test('valid multibyte UTF-8 response data is decoded unchanged', async () => {
+  const text = 'é€😀\u0000';
+  const server = await serve(() => Buffer.from(`${JSON.stringify(ok({ text }))}\n`, 'utf8'));
+  assert.equal((await new Client({ socketPath: server.path }).list()).text, text);
+  await server.close();
 });
 
 test('responses split across reads are reassembled; bytes after LF are ignored', async () => {
@@ -540,7 +551,9 @@ test('OutboundBuffer stops on an uncertain delivery until the caller decides', a
 
 test('OutboundBuffer stops uncertain without replaying when a failure envelope has no error code', async () => {
   // A reply without a valid string error gives no evidence the publish was refused.
-  for (const reply of [{ version: 1, ok: false }, { version: 1, ok: false, error: 3 }]) {
+  // Nor does a success envelope whose bytes are not valid UTF-8.
+  for (const reply of [{ version: 1, ok: false }, { version: 1, ok: false, error: 3 },
+    Buffer.concat([Buffer.from('{"version":1,"ok":true,"data":"a'), Buffer.from([0xff]), Buffer.from('b"}\n')])]) {
     let bad = true;
     const server = await serve((r) => {
       if (bad) { bad = false; return reply; }

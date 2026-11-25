@@ -23,6 +23,8 @@ export const MAX_DATA_METADATA_BYTES = 6144;
 /** `data_put` metadata: the daemon accepts only a string-to-string map. */
 export type DataMetadata = Readonly<Record<string, string>>;
 
+/** IPC v1 frames are UTF-8 JSON; malformed bytes are rejected, never replaced with U+FFFD. */
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const wellFormed = (text: string) => Buffer.from(text, 'utf8').toString('utf8') === text;
 /**
  * Check `data_put` metadata against the daemon's wire contract (a JSON object of
@@ -149,7 +151,8 @@ export function encodeRequest(operation: string, component: string, topic: strin
 export function decodeResponse(operation: string, line: Buffer): unknown {
   let value: unknown;
   try {
-    value = JSON.parse(line.toString('utf8'));
+    // A corrupt frame with an intact envelope must not resolve as success.
+    value = JSON.parse(strictUtf8.decode(line));
   } catch {
     throw new ProtocolError(operation, 'malformed response');
   }
