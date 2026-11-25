@@ -5591,6 +5591,34 @@
         "Integrate and activate the verified merged runtime using the user-authorized local-infrastructure policy, then verify live batch advancement."
       ],
       "validation": "Focused discovery/batch regressions, full local coordinator suite and tracking/bootstrap checks; verify actual installed generation and live candidate creation."
+    },
+    {
+      "key": "SF-321",
+      "title": "Add a proportional fast lane for cosmetic website and documentation work",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/SMALL_CHANGES.md",
+        "docs/PR_COORDINATION.md",
+        ".github/workflows",
+        "scripts/content_scope.py",
+        "scripts/tests/test_content_scope.py"
+      ],
+      "resources": [],
+      "description": "Stop routing small direct user-requested cosmetic marketing/docs edits through tickets, batch review, full app/platform builds and testnet. Record a narrow fast lane, scope hosted checks to changed content, preserve security scanning and all risky-code/release authorization boundaries.",
+      "evidence": "User reports unacceptable throughput after small landing-page changes triggered full workflows and tracking failures blocked visual fixes.",
+      "acceptance": [
+        "Small direct user-requested cosmetic/docs edits do not require a new issue or multi-model review loop; use focused checks once and existing deployment authorization.",
+        "Only narrow static HTML/CSS/Markdown edits use content-only CI; mixed, unknown, code, config, dependencies, auth, wallet, Move and edge changes keep normal CI.",
+        "Content-only changes retain static/docs and credential/security scanning without runtime-platform or testnet jobs; preserve protected workflow/manual release controls.",
+        "Offline classifier and workflow-structure regressions cover mixed changes, deletes/renames and unknown/invalid event ranges."
+      ],
+      "validation": "Focused classifier/workflow/security tests, workflow syntax checks, and component build/check smoke; no unrelated application or coordinator suite repetition."
     }
   ]
 }
