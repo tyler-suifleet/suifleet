@@ -113,6 +113,27 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.deepEqual(await tab.evaluate(() => window.fx.calls), [["revoke_claim"]], "one deliberate retry after the reload; reissue needs no wallet request");
     assert.ok(dialogs.every((d) => d.startsWith("confirm")), `no browser alerts: ${dialogs}`);
     assert.deepEqual(errors, []);
+
+    // Device capacity: with no free slot, registration and new downloads pause before any wallet request.
+    await tab.setViewportSize({ width: 1280, height: 900 });
+    await tab.evaluate(() => localStorage.setItem("fixture-fleet", JSON.stringify({ active: 1, limit: 1 })));
+    const reopen = async () => { await tab.goto(origin); await tab.locator("#policy").selectOption({ index: 1 }); await tab.getByTestId("enrollment-entries").waitFor(); };
+    await reopen();
+    assert.match(await tab.getByTestId("device-capacity").innerText(), /All 1 device slots are in use\. Devices cannot enroll until you raise the limit\./);
+    await tab.getByTestId("capacity-short").waitFor();
+    assert.equal(await tab.getByRole("button", { name: "Nothing pending" }).isDisabled(), true, "registration waits for a free slot");
+    await tab.getByLabel("Serial number").fill("SN-7");
+    await tab.getByTestId("capacity-download").waitFor();
+    assert.equal(await tab.getByRole("button", { name: "Download credentials for 1 device" }).isDisabled(), true, "no credential without a slot");
+    // A raised limit resumes registration.
+    await tab.evaluate(() => localStorage.setItem("fixture-fleet", JSON.stringify({ active: 1, limit: 10 })));
+    await reopen();
+    assert.match(await tab.getByTestId("device-capacity").innerText(), /Device slots: 1 of 10 in use, 9 free\./);
+    assert.equal(await tab.getByTestId("capacity-short").count(), 0);
+    assert.equal(await tab.getByRole("button", { name: /^Run \d+ pending transactions?$/ }).isEnabled(), true);
+    assert.deepEqual(await tab.evaluate(() => window.fx.calls), [], "capacity checks send nothing");
+    assert.deepEqual(errors, []);
+    console.log("PASS: device capacity pauses registration and downloads at the limit and resumes when raised");
     console.log("PASS: single-copy warning and acknowledgment before each credential download; lost-file revoke/reissue limited to unused claims, enrolled device never reissued; unconfirmed double-clicked revocation sends one request, keeps its marker and guidance across reload; confirmed revoke frees the serial for a new credential; desktop and phone width; fixture chain/wallet only");
   } finally { if (browser) await browser.close(); if (server) await new Promise((r) => server.close(r)); await fs.rm(temp, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });

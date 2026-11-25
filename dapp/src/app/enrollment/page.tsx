@@ -12,7 +12,7 @@ import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 import { NETWORK } from "@/lib/constants";
-import { requireManifest } from "@/lib/deployment-manifest";
+import { MANIFEST, requireManifest } from "@/lib/deployment-manifest";
 import {
   BROWSER_CREDENTIAL_LIMIT, LIMITS, buildClosePolicyTx, buildCreatePolicyTx, buildRevokeClaimsTx, buildSetLimitsTx, buildTransferTx,
   checkReservations, chunk, createdPolicy, policyFromEvents, credentialArchive, entryStatuses, fetchPolicies, generateCredentials, loadJob, newJob,
@@ -24,6 +24,7 @@ import type { Transaction } from "@mysten/sui/transactions";
 import { TransactionFeedback, useTransactionFeedback } from "@/components/TransactionFeedback";
 import { transactionStage } from "@/lib/tx-feedback";
 import { parseSerials, planLostCredentials, type LostCredentialPlan } from "@/lib/credential-recovery";
+import Link from "next/link";
 
 const STATUS_LABEL: Record<EntryStatus, string> = {
   unregistered: "Reserved", unfunded: "Needs enrollment gas", "awaiting-device": "Funded, unused", revoked: "Revoked",
@@ -110,6 +111,7 @@ export default function EnrollmentPage() {
         </ol>
         <div className="mt-3"><DeviceClientHelp variant="enroll" /></div>
       </details>
+      {fleet && <CapacityNotice active={fleet.activeDevices} limit={fleet.deviceLimit} />}
       {error && <p role="alert" className="text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
       <TransactionFeedback feedback={failure.feedback} onDismiss={failure.clear} />
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
@@ -129,7 +131,7 @@ export default function EnrollmentPage() {
         </details> : !policies.isLoading && createForm}
         {policy && <PolicyControls policy={policy} busy={busy} run={async (tx) => { if (await run(tx)) await policies.refetch(); }} />}
       </section>
-      {policy && <JobPanel key={policy.id} policy={policy} operator={fleet?.id ?? account.address} onError={setError} onFailure={(e, action) => { setError(""); failure.report(e, action); }} />}
+      {policy && <JobPanel key={policy.id} policy={policy} operator={fleet?.id ?? account.address} freeSlots={fleet ? (fleet.deviceLimit > fleet.activeDevices ? Number(fleet.deviceLimit - fleet.activeDevices) : 0) : undefined} onError={setError} onFailure={(e, action) => { setError(""); failure.report(e, action); }} />}
     </div>
   );
 }
@@ -162,7 +164,7 @@ function PolicyControls({ policy, busy, run }: { policy: PolicyState; busy: bool
 
 type AddMode = "csv" | "pair" | "roster";
 
-function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyState; operator: string; onError: (message: string) => void; onFailure: (error: unknown, action: string) => void }) {
+function JobPanel({ policy, operator, freeSlots, onError, onFailure }: { policy: PolicyState; operator: string; freeSlots?: number; onError: (message: string) => void; onFailure: (error: unknown, action: string) => void }) {
   const client = useCurrentClient();
   const devicesQuery = useDevices(), groupsQuery = useGroups();
   const devices = useMemo(() => devicesQuery.data ?? [], [devicesQuery.data]), groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
@@ -198,7 +200,14 @@ function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyStat
   const accepting = policyAccepting(policy);
   // Claims cannot be registered under a policy that no longer accepts
   // enrollments; naming and grouping already-enrolled devices still can.
-  const runnable = accepting ? steps.filter((s) => s.kind === "bind") : steps;
+  // Each registered, not yet enrolled claim will take one of the organization's
+  // device slots when its device enrolls. Do not pay to register claims that
+  // cannot enroll: the contract refuses enrollment once the limit is reached.
+  const awaiting = (counts["awaiting-device"] ?? 0) + (counts.confirming ?? 0);
+  const toRegister = (counts.unregistered ?? 0) + (counts.unfunded ?? 0);
+  const slotsLeft = freeSlots === undefined ? undefined : freeSlots - awaiting;
+  const capacityShort = slotsLeft === undefined ? 0 : Math.max(0, toRegister - Math.max(0, slotsLeft));
+  const runnable = accepting || capacityShort ? steps.filter((s) => s.kind === "bind") : steps;
   const quotaShort = (counts.unregistered ?? 0) + (counts.unfunded ?? 0) + (counts["awaiting-device"] ?? 0) - Number(policy.remaining);
 
   function record(action: string, count: number, digest?: string, error?: string) {
@@ -323,11 +332,14 @@ function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyStat
 
   return (
     <>
-      <AddReservations job={job} policy={policy} devices={devices} groups={groups} inventory={inventory} onAdd={(entries, fund) =>
+      <AddReservations job={job} policy={policy} slotsLeft={slotsLeft === undefined ? undefined : Math.max(0, slotsLeft - toRegister)} devices={devices} groups={groups} inventory={inventory} onAdd={(entries, fund) =>
         setJob({ ...job, claimFundMist: fund, entries: [...job.entries, ...entries] })} onImport={importJob} />
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
         <h2 className="font-semibold">3. Register and enroll</h2>
-        {views.length > 0 && <NextStep views={views} counts={counts} runnable={runnable} fund={BigInt(job.claimFundMist)} />}
+        {capacityShort > 0 && <p role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-800" data-testid="capacity-short">
+          {capacityShort === toRegister ? `Registration is paused: your organization has no free device slots for ${toRegister === 1 ? "this device" : `these ${toRegister} devices`}.` : `Registration is paused: ${capacityShort} of ${toRegister} devices would exceed your organization's device limit.`}{" "}
+          Raise the limit first; nothing is charged until then.</p>}
+        {views.length > 0 && !capacityShort && <NextStep views={views} counts={counts} runnable={runnable} fund={BigInt(job.claimFundMist)} />}
         <div className="flex flex-wrap gap-2" data-testid="status-counts">
           {(Object.keys(STATUS_LABEL) as EntryStatus[]).filter((s) => counts[s]).map((s) =>
             <span key={s} className="px-2 py-0.5 rounded bg-gray-100">{STATUS_LABEL[s]}: {counts[s]}</span>)}
@@ -368,6 +380,17 @@ function JobPanel({ policy, operator, onError, onFailure }: { policy: PolicyStat
   );
 }
 
+/** The organization's device slots; enrollment fails on chain once they are used up. */
+function CapacityNotice({ active, limit }: { active: bigint; limit: bigint }) {
+  const free = limit > active ? limit - active : BigInt(0);
+  const checkout = !!MANIFEST?.type_origins["subscription::Account"] && !!MANIFEST?.subscription_coins;
+  if (free > BigInt(0)) return <p role="status" className="text-gray-600" data-testid="device-capacity">Device slots: {active.toString()} of {limit.toString()} in use, {free.toString()} free. <Link href="/entitlements" className="underline">Device capacity</Link></p>;
+  return <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-800 space-y-1" data-testid="device-capacity">
+    <p className="font-medium">{limit === BigInt(0) ? "Your organization has no device slots yet." : `All ${limit.toString()} device slots are in use.`} Devices cannot enroll until you raise the limit.</p>
+    <p>{checkout ? <><Link href="/billing" className="underline">Choose a plan</Link> or review <Link href="/entitlements" className="underline">Device capacity</Link>.</> : <>Ask your service administrator to raise it on <Link href="/entitlements" className="underline">Device capacity</Link>.</>} Credentials can be downloaded once a slot is free; nothing is charged before then.</p>
+  </div>;
+}
+
 /** One sentence: what the operator should do now. */
 function NextStep({ views, counts, runnable, fund }: { views: EntryView[]; counts: Partial<Record<EntryStatus, number>>; runnable: { kind: "claims" | "bind" }[]; fund: bigint }) {
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -392,8 +415,8 @@ function NextStep({ views, counts, runnable, fund }: { views: EntryView[]; count
 
 type Inventory = { ready: boolean; error?: string; retry?: () => void };
 
-function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImport }: {
-  job: EnrollmentJob; policy: PolicyState; devices: DeviceObject[]; groups: DeviceGroup[]; inventory: Inventory;
+function AddReservations({ job, policy, slotsLeft, devices, groups, inventory, onAdd, onImport }: {
+  job: EnrollmentJob; policy: PolicyState; slotsLeft?: number; devices: DeviceObject[]; groups: DeviceGroup[]; inventory: Inventory;
   onAdd: (entries: EnrollmentJob["entries"], claimFundMist: string) => void; onImport: (text: string) => void;
 }) {
   const [mode, setMode] = useState<AddMode>("pair");
@@ -423,7 +446,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
   }, [inventory.ready, mode, serial, alias, csv, template, start, devices, groups, groupId, job.entries]);
 
   function generate() {
-    if (!check?.accepted.length || !acknowledged) return;
+    if (!check?.accepted.length || !acknowledged || overCapacity) return;
     const mist = toMist(fund);
     if (!mist || mist > MIST / BigInt(10)) return alert("Enrollment gas per device must be more than 0 and at most 0.1 SUI");
     const { entries, credentials } = generateCredentials(check.accepted);
@@ -437,6 +460,7 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
   }
 
   const count = check?.accepted.length ?? 0;
+  const overCapacity = slotsLeft !== undefined && count > slotsLeft;
   return (
     <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
       <h2 className="font-semibold">2. Add devices</h2>
@@ -491,9 +515,10 @@ function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImp
           </details>
           <div role="note" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1" data-testid="credential-warning">
             <p><b>This file is the only copy of the credentials;</b> SuiFleet cannot download it again. Give each device only its own <code>enrollment/SERIAL/</code> folder and delete the file once devices have enrolled. Lost it before a device enrolled? Use “Lost a credential file?” in step 3.</p>
-            <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={acknowledged} disabled={!count} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand this download is the only copy of these credentials</label>
+            <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={acknowledged} disabled={!count || overCapacity} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand this download is the only copy of these credentials</label>
           </div>
-          <button className={primary} disabled={!count || !acknowledged} onClick={generate}>
+          {overCapacity && <p role="alert" className="text-red-700" data-testid="capacity-download">{slotsLeft === 0 ? "No device slots are free" : `Only ${slotsLeft} device slot${slotsLeft === 1 ? " is" : "s are"} free`} for new devices. Raise your device limit above, then download.</p>}
+          <button className={primary} disabled={!count || !acknowledged || overCapacity} onClick={generate}>
             {count ? `Download credentials for ${count} device${count === 1 ? "" : "s"}` : "Download credentials"}
           </button>
           {downloaded > 0 && !count && <p role="status" className="text-green-700">Downloaded credentials for {downloaded} device{downloaded === 1 ? "" : "s"}. Next: register {downloaded === 1 ? "it" : "them"} in step 3.</p>}
