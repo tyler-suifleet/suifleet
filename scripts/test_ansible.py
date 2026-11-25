@@ -27,7 +27,8 @@ to hosts that could store a crash dump are refused (the machine's real
 core_pattern/session core limit when classified unsafe, then core_pattern fixtures
 for Apport, core files, systemd-coredump with a nonzero limit and
 systemd-coredump with Storage=none but a default/nonzero ProcessSizeMax (or with the
-disabling settings outside an effective [Coredump] section); nothing is
+disabling settings outside an effective [Coredump] section, or only in a main
+coredump.conf outside /etc that systemd 252's handler does not read); nothing is
 crashed), a claim transfer interrupted after staging with zram/dm-crypt swap
 and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
@@ -801,7 +802,7 @@ class Harness:
 
     SYSTEMD_COREDUMP = "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
 
-    def crash_fixture(self, pattern, limit_zero=False, coredump_conf=None):
+    def crash_fixture(self, pattern, limit_zero=False, coredump_conf=None, vendor_main_conf=None):
         """Replace kernel.core_pattern inside each host's mount namespace and set the SSH session's core limit.
 
         The hosts share the test machine's kernel, whose core_pattern is
@@ -817,6 +818,10 @@ class Harness:
                 self.exec(container, "sh", "-c", "mkdir -p /etc/systemd/coredump.conf.d"
                           " && umask 022 && cat > /etc/systemd/coredump.conf.d/sf304.conf",
                           input="".join(f"{line}\n" for line in coredump_conf))
+            if vendor_main_conf is not None:
+                self.exec(container, "sh", "-c", "mkdir -p /usr/local/lib/systemd"
+                          " && umask 022 && cat > /usr/local/lib/systemd/coredump.conf",
+                          input="".join(f"{line}\n" for line in vendor_main_conf))
             if limit_zero:
                 # pam_limits sets each new SSH session's limits (each controller run
                 # connects afresh), starting from PID 1's, so sshd's own limit is not enough.
@@ -827,7 +832,8 @@ class Harness:
         mounted = self.exec(container, "sh", "-c", "grep -c ' /proc/sys/kernel/core_pattern ' /proc/self/mounts || true").stdout.strip()
         if mounted != "0":
             self.exec(container, "umount", "/proc/sys/kernel/core_pattern")
-        self.exec(container, "rm", "-f", "/etc/systemd/coredump.conf.d/sf304.conf", "/etc/security/limits.d/sf304-core.conf")
+        self.exec(container, "rm", "-f", "/etc/systemd/coredump.conf.d/sf304.conf", "/etc/security/limits.d/sf304-core.conf",
+                  "/usr/local/lib/systemd/coredump.conf")
 
     def crash_refused(self, vault):
         """A host that could store a crash dump of a claim-handling process refuses the claim before it is read."""
@@ -887,6 +893,13 @@ class Harness:
             ("systemd-coredump configuration with a malformed section header", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["[Coredump]", "[Bad", "Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump's configuration uses syntax this check does not support"),
+            # With /etc/systemd/coredump.conf absent, cat-config lists a main file from
+            # /usr/local/lib (or /run, /usr/lib), but systemd 252's handler (Debian 12) reads
+            # only /etc/systemd/coredump.conf besides the drop-ins, so these settings
+            # may not apply; such a file is refused rather than trusted.
+            ("systemd-coredump with the disabling settings only in a /usr/local/lib main file", self.SYSTEMD_COREDUMP,
+             {"vendor_main_conf": ["[Coredump]", "Storage=none", "ProcessSizeMax=0"]},
+             "systemd-coredump's main configuration file is not /etc/systemd/coredump.conf"),
             ("systemd-coredump configuration with a line continuation", self.SYSTEMD_COREDUMP,
              {"coredump_conf": ["[Coredump]", "Storage=external \\", "Storage=none", "ProcessSizeMax=0"]},
              "systemd-coredump's configuration uses line continuations"),
