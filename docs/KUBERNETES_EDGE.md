@@ -82,7 +82,9 @@ How the helper keeps two controllers from fighting:
    ownership and could apply different versions. This is unsupported, and the
    labels cannot detect it.
 6. **A multi-object apply is not transactional.** Objects are written one at a
-   time, in bundle order. If a later write fails (a conflict, a rejection or a
+   time: all ConfigMaps first, then Deployments, each group in bundle order.
+   Writing ConfigMaps first means a Pod the new Deployment template starts
+   reads the new configuration rather than keeping the old values. If a later write fails (a conflict, a rejection or a
    cluster error), earlier objects may already carry the new bundle, and
    nothing is pruned in that run. `ready` keeps failing until every object
    carries the new bundle's digest and pruning has converged, so the
@@ -90,6 +92,24 @@ How the helper keeps two controllers from fighting:
    converges, and a supervisor rollback re-applies the previous bundle. A
   rollback can restore every object in place because bundles cannot contain
   immutable ConfigMaps (see Helper validation).
+7. **Configuration changes roll the Pods out.** Kubernetes never restarts
+   Pods when a ConfigMap they read changes. Values read through `env`,
+   `envFrom` and `subPath` mounts stay as they were when the container
+   started, and a whole-volume mount refreshes only after a kubelet sync
+   delay. A configuration-only bundle change or rollback would therefore
+   leave the old configuration running behind a Deployment that looks healthy
+   and current. The helper prevents this. For every Deployment that consumes
+   bundle ConfigMaps (`envFrom` `configMapRef`, `env`
+   `valueFrom.configMapKeyRef` or a `configMap` volume, in any container or
+   init container), it adds the Pod-template annotation
+   `suifleet.io/config-sha256`, a digest of those ConfigMaps' data. A
+   configuration change then changes the Pod template and starts a rollout,
+   and a rollback restores the earlier template and its ReplicaSet. `ready`
+   compares the live Pod template with the rendered one and waits for that
+   rollout, so it never reports a configuration change ready while Pods still
+   run the previous configuration. A change to a ConfigMap that no Deployment
+   consumes restarts nothing. Whole-volume consumers are restarted too, for
+   the same guarantee.
 
 Stopping or restarting the SuiFleet client leaves the workload running. The
 cluster keeps serving the last applied bundle. There are two ways to retire
@@ -203,6 +223,12 @@ waits again and reports the current state.
     `serviceAccountName` or `imagePullSecrets`
   - privileged mode, privilege escalation, root UID or added capabilities
   - images not pinned by `@sha256`
+  - a Deployment that consumes a ConfigMap (`envFrom`, `configMapKeyRef` or a
+    volume, including `optional` references) that the same bundle does not
+    define. Its content could change without any rollout, so `ready` could not
+    vouch for the configuration the Pods run. Configuration therefore travels
+    in the bundle, and administrator-provided configuration needs a mechanism
+    outside the bundle.
   - `immutable: true` on a ConfigMap. Kubernetes never lets an immutable
     ConfigMap's data change or the flag return to `false`, so a supervisor
     rollback could not restore the previous bundle in place. Bundles manage
@@ -415,6 +441,11 @@ It checks the following:
   bundle offline.
 - Apply, rollout readiness and the content an administrator-owned Service
   actually serves work.
+- A configuration-only update of a ConfigMap consumed through `envFrom`,
+  `configMapKeyRef` and a `subPath` mount starts a new rollout, and every
+  running Pod reports the new value through all three when `ready` succeeds.
+  Rolling back restores the old value in the Pods the same way. A Deployment
+  consuming a ConfigMap outside its bundle is rejected offline.
 - Readiness of a ConfigMap-only bundle fails while the object is missing, is a
   pre-existing foreign object with matching data, belongs to another
   component or comes from a stale bundle digest, and succeeds once applied.
