@@ -459,10 +459,13 @@ def check_first_boot(root, manifest, policy, operator, claims, client, transacti
     recovered, recovery_media = prepare("reboot-after-submit", claims["c2"][0])
     # Simulate a stop immediately after chain effects and before any config is
     # published. The old CLI executes exactly the same sponsored call.
+    prior_policy_version = int(client("object", policy)["version"])
     result = subprocess.run([str(DAEMON), "--enroll", recovery_media / "enroll.toml"],
                             capture_output=True, text=True, check=True, timeout=60)
     previous = json.loads(result.stdout)
     assert not (recovered / "config.toml").exists()
+    wait_for(lambda: int(client("object", policy)["version"]) > prior_policy_version,
+             "confirmed enrollment did not reach policy state")
     confirmed_policy_version = client("object", policy)["version"]
     run_boot(recovered, recovery_media, "enrolled")
     actual = check_install(recovered, recovery_media)
