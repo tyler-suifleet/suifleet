@@ -36,5 +36,23 @@
   ]
  },
  "local_tests": "86 site, 32 subscription-pricing, 9 cost-indexed-pricing and 10 docs unit tests; site and docs checks; landing, pricing, render, content, How it works, guide, docs browser and customer-flow suites",
- "notes": "Deployed from the unmerged site-redesign branch at the user's direction; replaces the earlier sf-253 branch build on suifleet.io."
+ "notes": "Deployed from the unmerged site-redesign branch at the user's direction; replaces the earlier sf-253 branch build on suifleet.io.",
+ "updates": [
+  {
+   "date": "2026-11-25",
+   "scope": "website-only",
+   "change": "Simplified the pricing page below the plan cards",
+   "source_revision": "e6b41e84a8e6fd6dc2e222f4098c44a6a742fc97",
+   "release_sha256": "0c56fba09d83cb3ced1ade3c11836d8d43859ca9218ec94778b58a65613d1ff6",
+   "deployment_prefix": "3898ad72",
+   "url": "https://3898ad72.suifleet-marketing.pages.dev",
+   "docs_unchanged": true,
+   "app_unchanged": true,
+   "served_verification": [
+    "https://suifleet.io/pricing/",
+    "https://suifleet.io/",
+    "https://suifleet.io/assets/style.css"
+   ]
+  }
+ ]
 }
