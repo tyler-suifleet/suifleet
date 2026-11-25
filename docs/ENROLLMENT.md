@@ -103,13 +103,14 @@ The optional template uses ordinary daemon TOML fields, such as `[apply]`,
 Keep secret values out of the template and provision any credential files
 independently. With no template, the client uses a refusing updater.
 
-The service starts after key provisioning and exits early if `config.toml`
-exists. It validates the pinned files and deployment, validates the policy's
-registry and operator, and looks up the local device address in checkpointed
-enrollment events before signing. It retries chain errors with delays up to 32
-seconds for a bounded number of attempts. After confirming the applicable cap
-and identity, it installs the manifest, isolated signer settings and daemon
-settings. The device key stays on the device. The claim file is overwritten,
+The service waits for key provisioning and the systemd network-online target.
+It runs only while `config.toml` is absent. Before signing, it verifies the
+pinned files, deployment, policy registry and operator, then looks up the local
+device address in checkpointed enrollment events. It retries chain errors with delays up to 32
+seconds for a bounded number of attempts. If the service fails, systemd waits
+60 seconds before trying again, up to four starts in 30 minutes. After
+confirming the applicable cap and identity, it installs the manifest, isolated
+signer settings and daemon settings. The device key stays on the device. The claim file is overwritten,
 synchronized and unlinked before the daemon configuration becomes visible.
 On flash and copy-on-write media these steps remove the live file. Residual
 blocks, snapshots and archive copies require separate media sanitization.
@@ -117,9 +118,11 @@ blocks, snapshots and archive copies require separate media sanitization.
 Read `enrollment-status.json` in the serial folder or use
 `journalctl -u suifleet-first-boot-enrollment.service`. A chain error can
 indicate an offline endpoint, unavailable history or a claim the policy no
-longer accepts. After correcting the cause, restart the unit with the same
-media. Keep the existing device key and the original claim with the unit
-until the service reports completion.
+longer accepts. If automatic retries are exhausted, correct the cause and use
+`systemctl reset-failed suifleet-first-boot-enrollment.service` followed by
+`systemctl start suifleet-first-boot-enrollment.service` with the same media.
+Keep the existing device key and the original claim with the unit until the
+service reports completion.
 
 ## Address-free bulk enrollment in the dApp (SF-100)
 
