@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+# SuiFleet daemon configuration (docs/INSTALL_DEVICE_CLIENT.md#configuration-file).
+[sui]
+manifest_path = "deployment.json"
+
+[device]
+device_object_id = "{{ suifleet_enrollment.device_object_id }}"
+device_cap_id = "{{ suifleet_enrollment.device_cap_id }}"
+
+[device.signer]
+kind = "service"
+socket = "/run/suifleet-signer/sign.sock"
+
+[apply]
+command = {{ suifleet_apply_command | to_json }}
+timeout_seconds = {{ suifleet_apply_timeout_seconds | int }}
+allow_recipe_commands = {{ suifleet_apply_allow_recipe_commands | bool | lower }}
+mode = {{ suifleet_apply_mode | to_json }}
+
+[runtime]
+state_dir = "/var/lib/suifleet"
+poll_seconds = {{ suifleet_poll_seconds | int }}
+replay_history = {{ suifleet_replay_history | bool | lower }}
+{% if suifleet_config_extra | length > 0 %}
+
+{{ suifleet_config_extra }}
+{% endif %}

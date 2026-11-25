@@ -1,0 +1,41 @@
+---
+# Installed in this order: deployment.json, signer.toml, then config.toml.
+# config.toml's appearance starts the daemon through suifleet-enrollment.path,
+# and the daemon asks the signing service for its address at startup.
+- name: Install the network manifest
+  ansible.builtin.copy:
+    src: "{{ suifleet_manifest_src }}"
+    dest: /etc/suifleet/deployment.json
+    owner: root
+    group: suifleet
+    mode: "0640"
+  register: suifleet_manifest_file
+
+- name: Configure only enrolled devices
+  when: suifleet_enrollment is defined
+  block:
+    - name: Install the signing service configuration
+      ansible.builtin.template:
+        src: signer.toml.j2
+        dest: /etc/suifleet/signer.toml
+        owner: root
+        group: suifleet-signer
+        mode: "0640"
+      register: suifleet_signer_file
+
+    # The provisioning helper hands the key to the signing service's user
+    # once signer.toml exists; the key itself never changes.
+    - name: Hand the device key to the signing service
+      ansible.builtin.systemd_service:
+        name: suifleet-provision.service
+        state: restarted
+      when: suifleet_signer_file is changed and not ansible_check_mode
+
+    - name: Install the daemon configuration last
+      ansible.builtin.template:
+        src: config.toml.j2
+        dest: /etc/suifleet/config.toml
+        owner: root
+        group: suifleet
+        mode: "0640"
+      register: suifleet_config_file

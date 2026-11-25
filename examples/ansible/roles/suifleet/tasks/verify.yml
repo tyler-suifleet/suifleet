@@ -1,0 +1,114 @@
+---
+# Read-only health checks. They run in check mode too once a host is
+# configured. Daemon health is not platform boot or firmware health.
+- name: Read the configured state
+  ansible.builtin.stat:
+    path: /etc/suifleet/config.toml
+  register: suifleet_configured
+
+- name: Check daemon health
+  when: suifleet_enrollment is defined and suifleet_configured.stat.exists
+  block:
+    - name: Wait for the daemon to be active
+      ansible.builtin.command: systemctl is-active suifleet.service
+      register: suifleet_active
+      until: suifleet_active.stdout == 'active'
+      retries: "{{ suifleet_health_retries }}"
+      delay: "{{ suifleet_health_delay }}"
+      changed_when: false
+      check_mode: false
+
+    # The journal stays on the host; only the exit status is reported.
+    - name: Wait for the daemon journal to initialize
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("initialized") else 1)
+          - /var/lib/suifleet/state.json
+      register: suifleet_journal
+      until: suifleet_journal.rc == 0
+      retries: "{{ suifleet_health_retries }}"
+      delay: "{{ suifleet_health_delay }}"
+      failed_when: false
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse an uninitialized journal
+      ansible.builtin.assert:
+        that: suifleet_journal.rc == 0
+        quiet: true
+        fail_msg: >-
+          The daemon on {{ inventory_hostname }} did not initialize its journal;
+          see journalctl -u suifleet.service on the host.
+
+    - name: Check configuration, identity and journal binding as the daemon user
+      ansible.builtin.command:
+        argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
+      changed_when: false
+      check_mode: false
+
+    # The on-disk checks above do not prove the running units loaded these
+    # inputs; this does. Every unit that was active on replaced inputs must now
+    # run a new invocation, the inputs must not have changed since they were
+    # measured, and nothing may wait for a daemon-reload or run a replaced
+    # executable. Skipped in check mode, where restarts are only planned.
+    - name: Check that the active units use the installed inputs
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', 'running_inputs.py') }}"
+          - --since
+          - "{{ suifleet_applied_record }}"
+          - "suifleet-signer.socket="
+          - "suifleet-enrollment.path="
+          - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
+          - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
+        stdin: "{{ suifleet_running | to_json }}"
+      register: suifleet_running_after
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Refuse units still using replaced inputs
+      vars:
+        after: "{{ suifleet_running_after.stdout | from_json }}"
+        failing: >-
+          {{ after | dict2items | selectattr('value.reload_needed')
+             | union(after | dict2items | selectattr('value.exe_replaced'))
+             | union(after | dict2items | selectattr('value.changed_since'))
+             | union(after | dict2items | selectattr('value.not_restarted'))
+             | map(attribute='key') | unique | list }}
+      ansible.builtin.assert:
+        that:
+          - after['suifleet.service'].active
+          - after['suifleet-signer.socket'].active
+          - after['suifleet-enrollment.path'].active
+          - failing | length == 0
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }}: {{ after | to_json }}. A SuiFleet unit
+          ({{ failing | join(', ') }}) did not load the installed binary, units or
+          configuration; rerun the play or see
+          journalctl -u suifleet.service -u suifleet-signer.service.
+      when: not ansible_check_mode
+
+    # Root-owned and public: digests of installed files only, no secrets.
+    - name: Create the applied-inputs record directory
+      ansible.builtin.file:
+        path: "{{ suifleet_applied_record | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: not ansible_check_mode
+
+    - name: Record the inputs the active units were verified against
+      ansible.builtin.copy:
+        dest: "{{ suifleet_applied_record }}"
+        content: "{{ dict(suifleet_running | dict2items | map(attribute='key')
+                     | zip(suifleet_running | dict2items | map(attribute='value.digest'))) | to_json(sort_keys=true) }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      when: not ansible_check_mode
