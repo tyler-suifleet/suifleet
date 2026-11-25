@@ -289,6 +289,15 @@ class ConfigTests(Base):
             dict(otlp=dict(endpoint="http://127.0.0.1:4318"), logs=dict(components=[{"a": 1}])),
             dict(otlp=dict(endpoint="http://127.0.0.1:4318"), logs=dict(components="svc")),
             dict(prometheus=dict(listen=9469)),
+            dict(prometheus=dict(listen="127.0.0.1:\u00b2")),
+            dict(prometheus=dict(listen="127.0.0.1:\u0669\u0664\u0666\u0669")),
+            dict(prometheus=dict(listen="127.0.0.1:" + "9" * 5000)),
+            dict(prometheus=dict(listen="127.0.0.1:094690")),
+            dict(prometheus=dict(listen="127.0.0.1:65536")),
+            dict(prometheus=dict(listen="127.0.0.1:")),
+            dict(console=dict(url="http://127.0.0.1:\u00b2", token_file=self.token_file)),
+            dict(console=dict(url="http://127.0.0.1:" + "9" * 5000, token_file=self.token_file)),
+            dict(otlp=dict(endpoint="https://collector.example:" + "9" * 5000)),
             dict(console="http://127.0.0.1:1441"), dict(logs=["svc"]), dict(otlp="http://127.0.0.1:4318"),
         ]
         for overrides in bad:
@@ -305,6 +314,12 @@ class ConfigTests(Base):
         self.assertEqual(em.Config(self.config(otlp=dict(endpoint="https://collector.example"))).otlp["metrics_url"],
                          "https://collector.example/v1/metrics")
         em.Config(self.config(otlp=dict(endpoint="http://[::1]:4318")))
+        # Supported listen settings are preserved.
+        for listen, expected in (("127.0.0.1:9469", ("127.0.0.1", 9469)), ("127.0.0.1:0", ("127.0.0.1", 0)),
+                                 ("localhost:9469", ("localhost", 9469)), ("[::1]:9469", ("[::1]", 9469))):
+            with self.subTest(listen=listen):
+                self.assertEqual(em._split_listen(listen), expected)
+                em.Config(self.config(prometheus=dict(listen=listen)))
 
     def test_secret_files_are_protected(self):
         link = self.dir / "link.token"

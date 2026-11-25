@@ -308,7 +308,10 @@ def _split_listen(listen):
     if not isinstance(listen, str):
         raise ConfigError("prometheus.listen must be host:port")
     host, sep, port = listen.rpartition(":")
-    if not sep or not host or not port.isdigit() or not 0 <= int(port) <= 65535:
+    # Bounded ASCII digits only: str.isdigit() also accepts characters such as
+    # superscripts that int() rejects, and int() of an overlong digit string
+    # raises ValueError instead of the sanitized ConfigError.
+    if not sep or not host or not re.fullmatch(r"[0-9]{1,5}", port) or not 0 <= int(port) <= 65535:
         raise ConfigError("prometheus.listen must be host:port")
     try:
         ipaddress.ip_address(host.strip("[]"))
