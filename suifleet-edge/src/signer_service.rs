@@ -86,6 +86,9 @@ pub struct ServiceConfig {
     /// Where that unit records its main process (`ExecStartPost=`).
     #[serde(default = "default_record")]
     pub caller_record: PathBuf,
+    /// Portable production mode. Requires descriptors from the root launcher.
+    #[serde(default)]
+    pub portable: bool,
     /// Development only: any process of this UID (weaker: components share it).
     #[serde(default)]
     pub caller_uid: Option<u32>,
@@ -133,8 +136,8 @@ impl ServiceConfig {
         use anyhow::Context;
         let config: Self = toml::from_str(&std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?)?;
         anyhow::ensure!(
-            config.caller_unit.is_some() != config.caller_uid.is_some(),
-            "set exactly one of caller_unit (production) or caller_uid (development)"
+            usize::from(config.caller_unit.is_some()) + usize::from(config.caller_uid.is_some()) + usize::from(config.portable) == 1,
+            "set exactly one of caller_unit, portable = true, or caller_uid (development)"
         );
         anyhow::ensure!(config.pkcs11.is_some() || !config.keypair_path.as_os_str().is_empty(), "set keypair_path or [pkcs11]");
         let manifest_path = if config.manifest_path.is_absolute() {
@@ -636,6 +639,7 @@ pub enum Callers {
     /// The main process of this systemd unit, as recorded by the unit itself.
     Unit { unit: String, record: PathBuf },
     Uid(u32),
+    Portable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -683,6 +687,7 @@ pub fn is_daemon(callers: &Callers, peer: Peer, main: Option<MainProcess>, proce
                 && process(peer.pid).is_some_and(|p| p.start == main.start && p.cgroup.rsplit('/').next() == Some(unit.as_str()))
         }),
         Callers::Uid(uid) => peer.uid == *uid,
+        Callers::Portable => false,
     }
 }
 
@@ -896,19 +901,124 @@ pub fn handle(
     result.unwrap_or_else(|error| json!({ "error": format!("{error:#}") }))
 }
 
+/// Enter the daemon account in the already-executed trusted binary. Doing
+/// this before starting Tokio avoids both a multithreaded credential transition
+/// and an exec under the shared component UID before dumpability is disabled.
+#[cfg(target_os = "linux")]
+pub fn enter_portable_daemon(uid: u32, gid: u32) -> anyhow::Result<()> {
+    use std::io::Read as _;
+    // SAFETY: reading this process's credentials.
+    anyhow::ensure!(unsafe { libc::geteuid() } == 0 && uid != 0 && gid != 0, "portable daemon requires a root launcher and non-root daemon account");
+    let mut gate = [0];
+    std::io::stdin().read_exact(&mut gate)?;
+    anyhow::ensure!(gate == [1], "portable daemon did not receive the launcher's readiness signal");
+    anyhow::ensure!(
+        std::fs::read_to_string("/proc/sys/fs/suid_dumpable")?.trim() == "0",
+        "portable daemon requires fs.suid_dumpable=0 before dropping privileges"
+    );
+    // SAFETY: this entry point runs before any runtime threads are started.
+    // UID/GID changes retain nondumpability with the required sysctl setting.
+    let dropped = unsafe {
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) == 0
+            && libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
+            && libc::setgroups(0, std::ptr::null()) == 0
+            && libc::setresgid(gid, gid, gid) == 0
+            && libc::setresuid(uid, uid, uid) == 0
+            && libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) == 0
+    };
+    anyhow::ensure!(dropped, "cannot enter the portable daemon account safely");
+    let status = std::fs::read_to_string("/proc/self/status")?;
+    for field in ["CapPrm:", "CapEff:"] {
+        anyhow::ensure!(
+            status.lines().find_map(|line| line.strip_prefix(field))
+                .and_then(|value| u64::from_str_radix(value.trim(), 16).ok()) == Some(0),
+            "portable daemon account retained capabilities ({field})"
+        );
+    }
+    Ok(())
+}
+
+/// A procfs task directory opened by the trusted launcher while the daemon
+/// child is still gated. Procfs operations through it cannot resolve a later
+/// process with the same numeric PID. The launcher creates the listener only
+/// after pinning the task, so all peer credentials postdate the pin.
+#[cfg(target_os = "linux")]
+struct PinnedDaemon {
+    task: std::os::fd::OwnedFd,
+    pid: u32,
+    uid: u32,
+}
+
+#[cfg(target_os = "linux")]
+fn task_pid(task: &std::os::fd::OwnedFd) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let stat = std::fs::read_to_string(format!("/proc/self/fd/{}/stat", task.as_raw_fd())).ok()?;
+    let (prefix, fields) = stat.rsplit_once(')')?;
+    match fields.split_whitespace().next()? {
+        "Z" | "X" | "x" => None,
+        _ => prefix.split_whitespace().next()?.parse().ok(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl PinnedDaemon {
+    fn accepts(&self, peer: Peer) -> bool {
+        peer.pid == self.pid && peer.uid == self.uid && task_pid(&self.task) == Some(self.pid)
+    }
+}
+
 /// `suifleet --signer-service CONFIG`: serve until stopped.
 #[cfg(target_os = "linux")]
 pub fn serve(path: &Path) -> anyhow::Result<()> {
-    let (config, mut policy) = ServiceConfig::load(path)?;
-    let key = config.key()?;
-    policy.device = Address::from_str(&key.address())?;
-    let sessions = config.sessions(key.clone(), &policy)?;
+    let (config, policy) = ServiceConfig::load(path)?;
+    anyhow::ensure!(!config.portable, "portable signer mode requires the root portable signer launcher");
     let callers = match (&config.caller_unit, config.caller_uid) {
         (Some(unit), _) => Callers::Unit { unit: unit.clone(), record: config.caller_record.clone() },
         (None, Some(uid)) => Callers::Uid(uid),
         _ => unreachable!(),
     };
+    if matches!(callers, Callers::Unit { .. }) {
+        let (probe, _peer) = UnixStream::pair()?;
+        anyhow::ensure!(peer_pidfd(&probe).is_some(), "systemd signer authentication requires SO_PEERPIDFD (Linux 6.5+); use the portable signer launcher on older Linux");
+    }
     let listener = listener(&config.socket)?;
+    serve_listener(config, policy, callers, listener, None)
+}
+
+/// Internal entry point for the root launcher. The inherited descriptors
+/// describe a fresh listener and the exact gated daemon process, respectively.
+#[cfg(target_os = "linux")]
+pub fn serve_portable(path: &Path, listener_fd: i32, task_fd: i32, uid: u32) -> anyhow::Result<()> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    anyhow::ensure!(listener_fd >= 3 && task_fd >= 3 && listener_fd != task_fd, "invalid portable signer descriptors");
+    for fd in [listener_fd, task_fd] {
+        // SAFETY: fcntl validates the supplied descriptor.
+        anyhow::ensure!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0,
+            "portable signer descriptor {fd} was not inherited");
+    }
+    // SAFETY: the children own the two distinct, validated descriptors.
+    let listener = unsafe { UnixListener::from_raw_fd(listener_fd) };
+    let task = unsafe { OwnedFd::from_raw_fd(task_fd) };
+    let (config, policy) = ServiceConfig::load(path)?;
+    // SAFETY: reading the signer's own effective UID.
+    let signer_uid = unsafe { libc::geteuid() };
+    anyhow::ensure!(config.portable && uid != 0 && signer_uid != 0 && uid != signer_uid,
+        "portable signer requires portable = true and separate unprivileged daemon and signer accounts");
+    let pid = task_pid(&task).ok_or_else(|| anyhow::anyhow!("cannot read the live pinned daemon through procfs"))?;
+    serve_listener(config, policy, Callers::Portable, listener, Some(PinnedDaemon { task, pid, uid }))
+}
+
+#[cfg(target_os = "linux")]
+fn serve_listener(
+    config: ServiceConfig,
+    mut policy: Policy,
+    callers: Callers,
+    listener: UnixListener,
+    pinned: Option<PinnedDaemon>,
+) -> anyhow::Result<()> {
+    let key = config.key()?;
+    policy.device = Address::from_str(&key.address())?;
+    let sessions = config.sessions(key.clone(), &policy)?;
     tracing::info!(address = key.address(), ?callers, "Device signing service ready");
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
@@ -916,11 +1026,14 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
         let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
         let response = match (peer(&stream), read_request(&stream)) {
             (Ok(peer), Ok(request)) => {
-                let pidfd = peer_pidfd(&stream);
+                let pidfd = if matches!(callers, Callers::Unit { .. }) { peer_pidfd(&stream) } else { None };
                 let daemon = || {
+                    if let Some(pinned) = &pinned {
+                        return pinned.accepts(peer);
+                    }
                     let main = match &callers {
                         Callers::Unit { record, .. } => std::fs::read_to_string(record).ok().and_then(|text| MainProcess::parse(&text)),
-                        Callers::Uid(_) => None,
+                        Callers::Uid(_) | Callers::Portable => None,
                     };
                     // Read /proc, then confirm the pidfd still names that live
                     // process: the PID was not reused in between.
@@ -928,7 +1041,7 @@ pub fn serve(path: &Path) -> anyhow::Result<()> {
                         let process = proc_process(pid)?;
                         match &pidfd {
                             Some(pidfd) => (pidfd_pid(pidfd) == Some(pid)).then_some(process),
-                            None => Some(process),
+                            None => None,
                         }
                     })
                 };
@@ -965,8 +1078,7 @@ fn listener(path: &Path) -> anyhow::Result<UnixListener> {
     Ok(UnixListener::bind(path)?)
 }
 
-/// The signing service trusts the daemon by its systemd unit and cgroup, so
-/// it exists only on Linux.
+/// Both production caller modes depend on Linux peer credentials and procfs.
 #[cfg(not(target_os = "linux"))]
 pub fn serve(_: &Path) -> anyhow::Result<()> {
     anyhow::bail!("the device signing service is not supported on {}", std::env::consts::OS)
@@ -1619,6 +1731,30 @@ mod tests {
         std::fs::write(&config, "[device\n").unwrap();
         assert!(key_holder(&config).is_err(), "an unparsable configuration must not move the key");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn portable_pin_accepts_only_the_live_bound_task() {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::process::{Command, Stdio};
+        use crate::supervisor::{forget_std_tracked, spawn_std_tracked};
+        let mut child = spawn_std_tracked(Command::new("sh")
+            .args(["-c", "read -r finish"])
+            .stdin(Stdio::piped())).unwrap();
+        let pid = child.id();
+        let task = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_PATH | libc::O_DIRECTORY)
+            .open(format!("/proc/{pid}")).unwrap().into();
+        // SAFETY: reading our own credentials; the child inherits them.
+        let uid = unsafe { libc::geteuid() };
+        let pinned = PinnedDaemon { task, pid, uid };
+        assert!(pinned.accepts(Peer { pid, uid }));
+        assert!(!pinned.accepts(Peer { pid, uid: uid + 1 }));
+        assert!(!pinned.accepts(Peer { pid: std::process::id(), uid }));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        forget_std_tracked(pid);
+        assert!(!pinned.accepts(Peer { pid, uid }), "matching numeric credentials cannot revive a dead pin");
     }
 
     #[cfg(target_os = "linux")]

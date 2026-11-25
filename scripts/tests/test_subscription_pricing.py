@@ -456,7 +456,11 @@ class PublicPricingTests(unittest.TestCase):
         page = self.site.generated()
         self.assertIn('50 × $0.08 = $4.00</td><td>$49.00</td><td>$5.00', page)
         self.assertIn('1,000 × $0.08 = $80.00</td><td>$80.00</td><td>$100.00', page)
-        self.assertIn('do not add the same network estimate to that bill again', page)
+        self.assertRegex(
+            page,
+            r'<li><strong>Included:</strong>[^<]*all-in subscription quote includes network fees'
+            r'[^<]*not charged again as a separate network estimate\.</li>',
+        )
         self.assertIn('Those rates alone are not an all-in total', page)
         self.assertIn('href="/contact/"', page)
 

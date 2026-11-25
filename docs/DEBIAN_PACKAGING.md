@@ -4,8 +4,8 @@ SF-231 provides local-file `.deb` packaging for amd64 and arm64 GNU/Linux.
 The package includes the daemon and the same isolated signing service used by
 Yocto. It requires systemd and Linux 6.5 or later (the signer pins callers with
 SO_PEERPIDFD); Debian 12 needs a suitable newer/backports kernel. Ubuntu 24.04
-has a suitable kernel. Non-systemd source builds remain available; this package
-does not change their runtime support.
+has a suitable kernel. For an older Linux or non-systemd source installation,
+see the [portable signer setup](KEY_ISOLATION.md#portable-linux-signer).
 
 ## Build and availability
 
