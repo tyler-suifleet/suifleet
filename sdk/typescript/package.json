@@ -1,0 +1,37 @@
+{
+  "name": "@suifleet/component-ipc",
+  "version": "1.0.0",
+  "description": "Native SuiFleet component IPC v1 client for Node.js (Unix-socket, kernel peer-UID authorization). Not AWS Greengrass IPC compatible.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "suifleet-ipc": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/client.test.mjs",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.39",
+    "typescript": "5.9.3"
+  }
+}
