@@ -115,8 +115,20 @@ class ProtocolPreflight(unittest.TestCase):
             tc.preflight(obsolete, facts, '4c78adac')
         self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 140)
 
+    def test_protocol142_refuses_previous_cli_and_accepts_pinned_cli(self):
+        # Runs 43958467064 (SF-278) and 43958804251 (SF-279), before writes.
+        facts = {'chain_identifier': '4c78adac', 'protocol_version': 142}
+        old = dict(tc.NETWORK, version='sui 1.83.0-16d2dc1e05ed', max_protocol=140)
+        with self.assertRaisesRegex(tc.Incompatible, r'142 exceeds.*support \(140\)'):
+            tc.preflight({'build': dict(tc.BUILD), 'network': old}, facts, '4c78adac')
+        result = tc.preflight(self.TOOLS, facts, '4c78adac')
+        self.assertEqual(result['protocol_version'], 142)
+        self.assertEqual(result['network_cli_max_protocol'], 144)
+        self.assertEqual(result['build_cli_max_protocol'], 138)
+        self.assertTrue(result['build_cli_offline'])
+
     def test_protocol144_refuses_previous_cli_and_accepts_pinned_cli(self):
-        # Reproduce Automatic testnet run 45905620444 before any writes.
+        # Run 45905675964 (SF-307 PR #860) stopped at read-only preflight.
         facts = {'chain_identifier': '4c78adac', 'protocol_version': 144}
         old = dict(tc.NETWORK, version='sui 1.84.0-9dc25070cf2e', max_protocol=142)
         with self.assertRaisesRegex(tc.Incompatible, r'144 exceeds.*support \(142\)'):
