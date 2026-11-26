@@ -1336,6 +1336,60 @@ class BatchController:
         error['candidate_retired'] = True
         self.update(batch, error=canonical(error))
 
+    @staticmethod
+    def affected_sources(ids, members):
+        if (not isinstance(ids, list) or not ids
+                or any(type(number) is not int or number <= 0 for number in ids)
+                or len(set(ids)) != len(ids)
+                or not set(ids) <= {member['pr'] for member in members}):
+            return None
+        return sorted(ids)
+
+    def review_attribution(self, project, batch, candidate, review):
+        from coordinator import feedback, review_result_body, publication_hash
+        if 'affected_source_prs' not in review['result']:
+            return None
+        try:
+            snapshot = json.loads((Path(review['directory']) / 'snapshot.json').read_text())
+            self.verify_manifest(project, batch)
+            if (review.get('project') != project['id'] or review.get('pr') != batch['pr']
+                    or review.get('kind') != 'review'
+                    or snapshot['number'] != batch['pr']
+                    or snapshot['headRefOid'] != batch['head']
+                    or snapshot['baseRefOid'] != batch['base']
+                    or snapshot['_integration_batch'] != self.marker(batch)
+                    or feedback(snapshot) != review['feedback']):
+                return None
+            published = next((item for item in candidate['reviews']
+                              if item['id'] == review.get('review_id')), None)
+            expected_body = review_result_body(review, review['result'])
+            if (not published or published.get('state') != 'CHANGES_REQUESTED'
+                    or published.get('author', {}).get('login') != project.get('review_github_account')
+                    or published.get('commit', {}).get('oid') != batch['head']
+                    or published.get('body') != expected_body
+                    or candidate.get('_receipts', {}).get(published['id']) != publication_hash(published)):
+                return None
+        except (OSError, KeyError, ValueError, TypeError, AttributeError, RuntimeError,
+                subprocess.CalledProcessError):
+            return None
+        return self.affected_sources(review['result']['affected_source_prs'], snapshot['_integration_batch']['members'])
+
+    def attribution_requests(self, project, candidate):
+        """Ask independent reviewers of smaller candidates to reproduce legacy findings."""
+        sources = {(m['pr'], m['head']) for m in candidate['_integration_batch']['members']}
+        requests = []
+        for batch in reversed(self.rows(project)):
+            error = self.review_failure(batch)
+            if batch['status'] != 'failed' or not error or error.get('affected_source_prs'):
+                continue
+            prior = {(m['pr'], m['head']) for m in json.loads(batch['members'])}
+            if len(prior) > 1 and sources & prior and not prior <= sources:
+                requests.append(dict(candidate_pr=batch['pr'], review_id=error['review_id'],
+                                     source_prs=sorted(number for number, _ in sources & prior)))
+            if len(requests) == 4:
+                break
+        return requests
+
     def reject_review(self, project, batch, candidate, review):
         from coordinator import feedback
         if (not review or review.get('head') != batch['head']
@@ -1353,6 +1407,11 @@ class BatchController:
                      review_head=review['head'], review_feedback=review['feedback'],
                      result_hash=hashlib.sha256(canonical(review['result']).encode()).hexdigest(),
                      findings=review['result']['evidence'], candidate_retired=False)
+        affected = self.review_attribution(project, batch, candidate, review)
+        if affected is not None:
+            error.update(affected_source_prs=affected, manifest_digest=batch['manifest_digest'])
+        elif len(json.loads(batch['members'])) > 1 or 'affected_source_prs' in review['result']:
+            error['attribution_required'] = True
         self.update(batch, status='failed', error=canonical(error))
         self.close_review_rejected_candidate(project, batch)
         return True
@@ -1466,50 +1525,57 @@ class BatchController:
         result = {}
         for batch in reversed(self.rows(project)):
             members = json.loads(batch['members'])
-            if batch['status'] == 'failed' and any(m['pr'] == pr['number'] and m['head'] == pr['headRefOid'] for m in members):
-                try:
-                    shared_error = batch_error(batch)
-                except (TypeError, ValueError):
-                    shared_error = {}
-                # This incident fences only the failed candidate's base. A new
-                # main permits recollection with unchanged source heads and fresh
-                # candidate acceptance; the durable receipt remains historical.
-                incident = (self.shared_harness_incident(project, batch, shared_error)
-                            if batch['base'] == pr.get('baseRefOid') else None)
-                if incident:
-                    result['_shared_acceptance_wait'] = incident
+            member = next((m for m in members
+                           if m['pr'] == pr['number'] and m['head'] == pr['headRefOid']), None)
+            if batch['status'] != 'failed' or member is None:
+                continue
+            error = batch_error(batch)
+            # Shared harness attribution only fences its original base.
+            incident = (self.shared_harness_incident(project, batch, error)
+                        if batch['base'] == pr.get('baseRefOid') else None)
+            if incident:
+                result['_shared_acceptance_wait'] = incident
+                break
+            if (len(members) == 1 and error.get('kind') == 'candidate_checks_failed'
+                    and batch['base'] == pr.get('baseRefOid')):
+                checks = error['checks']
+                # These rows were classified from the exact candidate/base
+                # by failed_checks before persistence. Provider failures cannot
+                # be repaired on an unchanged member's source branch. Retain
+                # the failed candidate/selection fence and all acceptance
+                # gates, but do not dispatch another owner repair for it.
+                if checks and all(check.get('name') == 'testnet/package-upgrade'
+                                  and check.get('workflowName') == 'Automatic testnet'
+                                  and check.get('classification') in ('funding', 'infrastructure')
+                                  for check in checks):
                     break
-            if (batch['status'] == 'failed' and len(members) == 1
-                    and members[0]['pr'] == pr['number'] and members[0]['head'] == pr['headRefOid']):
-                try:
-                    error = batch_error(batch)
-                except (TypeError, ValueError):
+                result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
+                                               candidate_base=batch['base'], checks=checks)
+                break
+            if (error.get('kind') != 'candidate_review_changes'
+                    or error.get('review_head') != batch['head']
+                    or type(error.get('review_id')) is not int or error['review_id'] <= 0
+                    or not isinstance(error.get('findings'), str) or not error['findings'].strip()
+                    or not isinstance(error.get('result_hash'), str)
+                    or not re.fullmatch(r'[0-9a-f]{64}', error['result_hash'])):
+                continue
+            affected = self.affected_sources(error.get('affected_source_prs'), members)
+            legacy_singleton = (len(members) == 1 and 'affected_source_prs' not in error
+                                and not error.get('attribution_required'))
+            if not legacy_singleton:
+                digest = manifest_digest(project['id'], batch['id'], batch['base'], batch['head'], members)
+                if (not affected or member['pr'] not in affected
+                        or error.get('manifest_digest') != digest or batch['manifest_digest'] != digest):
                     continue
-                if (error.get('kind') == 'candidate_checks_failed'
-                        and batch['base'] == pr.get('baseRefOid')):
-                    checks = error['checks']
-                    # These rows were classified from the exact candidate/base
-                    # by failed_checks before persistence. Provider failures cannot
-                    # be repaired on an unchanged member's source branch. Retain
-                    # the failed candidate/selection fence and all acceptance
-                    # gates, but do not dispatch another owner repair for it.
-                    if checks and all(check.get('name') == 'testnet/package-upgrade'
-                                      and check.get('workflowName') == 'Automatic testnet'
-                                      and check.get('classification') in ('funding', 'infrastructure')
-                                      for check in checks):
-                        break
-                    result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
-                                                   candidate_base=batch['base'], checks=checks)
-                    break
-                if (error.get('kind') == 'candidate_review_changes'
-                        and error.get('review_head') == batch['head']
-                        and type(error.get('review_id')) is int and error['review_id'] > 0
-                        and isinstance(error.get('findings'), str) and error['findings']
-                        and re.fullmatch(r'[0-9a-f]{64}', error.get('result_hash', ''))):
-                    result['_batch_review_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
-                        candidate_base=batch['base'], source_head=members[0]['head'],
-                        review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'])
-                    break
+            context = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
+                           candidate_base=batch['base'], source_head=member['head'],
+                           review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'],
+                           owner=member['owner'])
+            if not legacy_singleton:
+                context.update(affected_source_prs=affected,
+                               manifest_digest=error['manifest_digest'])
+            result['_batch_review_failure'] = context
+            break
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
         if row:
@@ -1544,7 +1610,8 @@ class BatchController:
         return result
 
     def select(self, project, candidates, base, maximum):
-        failed = []
+        failed = set()
+        rejected = set()
         for row in self.rows(project):
             if row['status'] != 'failed':
                 continue
@@ -1565,9 +1632,12 @@ class BatchController:
             if (recovery and exact_sources and tuple(recovery) ==
                     (row['manifest_digest'],hashlib.sha256(row['error'].encode()).hexdigest())):
                 continue  # Explicit durable authorization; the failed row is never reset.
-            failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
+            group = frozenset((m['pr'], m['head']) for m in original)
+            failed.add(group)
+            if kind == 'candidate_review_changes':
+                rejected.add(group)
         pool = self.exclude_included_sources(project,
-            [m for m in candidates if ((m['pr'],m['head']),) not in failed], base)
+            [m for m in candidates if frozenset({(m['pr'], m['head'])}) not in failed], base)
         # One acceptance reviewer must be independent of every member author.
         # Split mixed-family pools instead of attributing a fictitious author.
         if pool:
@@ -1576,7 +1646,10 @@ class BatchController:
         selected = pool[:maximum]
         # A failed combination is never submitted again. Split deterministically;
         # singleton failures become explicit owner repair contexts instead.
-        while selected and tuple((m['pr'],m['head']) for m in selected) in failed:
+        while selected:
+            group = frozenset((m['pr'], m['head']) for m in selected)
+            if group not in failed and not any(rejection < group for rejection in rejected):
+                break
             selected = selected[:len(selected)//2]
         return selected
 
