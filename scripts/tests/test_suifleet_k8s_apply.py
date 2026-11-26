@@ -425,6 +425,53 @@ class ConfigBindingTest(unittest.TestCase):
                                           "deletionTimestamp": "2026-11-26T00:00:00Z"}})
         self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
 
+    def test_multi_deployment_pod_list_follows_every_status_read(self):
+        """Combined review 4846: with two Deployments, a Pod list taken after
+        the first Deployment's status read is stale for the second. During
+        the second's rollout its previous Pod starts terminating, and then
+        its status completes, after that list but before its own GET. ready
+        must list Pods only after every Deployment status read, so the
+        terminating Pod is seen."""
+        bundle = self.bundle("v1")
+        api = copy.deepcopy(deployment(bundle))
+        api["metadata"]["name"] = "api"
+        api["metadata"]["labels"] = {"app": "api"}
+        api["spec"]["selector"]["matchLabels"] = {"app": "api"}
+        api["spec"]["template"]["metadata"]["labels"] = {"app": "api"}
+        bundle["resources"].append(api)
+        k8s.validate_bundle(bundle)
+        objects = k8s.render(bundle, "suifleet-apps", "web-app", "1", "3" * 64)
+        self.assertEqual([o["metadata"]["name"] for o in objects if o["kind"] == "Deployment"], ["web", "api"])
+
+        class Racing(ModelCluster):
+            """The api Deployment's rollout advances just before its GET:
+            api-v1 gains a deletionTimestamp and status reaches the target."""
+            armed = False
+
+            def json(self, *args, namespaced=True):
+                if self.armed and args[:3] == ("get", "deployments.apps", "api"):
+                    self.armed = False
+                    self.pods[0]["metadata"]["deletionTimestamp"] = "2026-11-26T00:00:00Z"
+                    self.pods.append({"metadata": {"name": "api-v2", "labels": {"app": "api"}}})
+                    self.roll_out()
+                return super().json(*args, namespaced=namespaced)
+
+        cluster = Racing()
+        k8s.apply(cluster, objects, "web-app", cluster)
+        cluster.roll_out()
+        cluster.pods = [{"metadata": {"name": "api-v1", "labels": {"app": "api"}}},
+                        {"metadata": {"name": "web-v1", "labels": {"app": "web"}}}]
+        # Before api's rollout completes its status is behind (generation
+        # bumped), and web's is complete.
+        cluster.store["deployments.apps"]["api"]["metadata"]["generation"] += 1
+        cluster.armed = True
+        ok, reason = k8s.ready(cluster, objects, "web-app")
+        self.assertFalse(cluster.armed, "the race fired during this readiness check")
+        self.assertFalse(ok)
+        self.assertIn("Deployment/api: previous Pod api-v1 still terminating", reason)
+        cluster.pods = cluster.pods[1:]
+        self.assertEqual(k8s.ready(cluster, objects, "web-app"), (True, "ready"))
+
     def test_partial_update_never_changes_the_data_a_template_names(self):
         """Review 4605: v2 writes its ConfigMap, then its Deployment write
         fails. A v1-template Pod that (re)starts in that window must still

@@ -1446,8 +1446,15 @@ def ready(kubectl, objects, component):
     that read-only `list pods` is the only Pod permission the helper uses.
     A Deployment's exact template names the content-addressed ConfigMaps its
     Pods read, so a completed rollout of it is a rollout of this bundle's
-    configuration."""
-    desired, pods = {}, None
+    configuration.
+
+    The Pod list is read once, after every desired Deployment's status: the
+    controller marks a previous Pod terminating before status stops counting
+    it, so a status that looks complete was read after that Pod's
+    deletionTimestamp was set, and a later list still shows it (or it is
+    gone). Listing before a Deployment's status read could miss a Pod that
+    started terminating in between (combined review 4846)."""
+    desired, deployments = {}, []
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
         name = item["metadata"]["name"]
@@ -1457,11 +1464,13 @@ def ready(kubectl, objects, component):
         if not ok:
             return False, reason
         if item["kind"] == "Deployment":
-            if pods is None:
-                pods = (kubectl.json("get", "pods") or {}).get("items") or []
+            deployments.append((name, current))
+    if deployments:
+        pods = (kubectl.json("get", "pods") or {}).get("items") or []
+        for name, current in deployments:
             held = terminating_pods(current, pods)
             if held:
-                return False, f"{item['kind']}/{name}: previous Pod {held[0]} still terminating ({len(held)} remaining)"
+                return False, f"Deployment/{name}: previous Pod {held[0]} still terminating ({len(held)} remaining)"
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     for resource in ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}

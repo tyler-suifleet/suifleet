@@ -488,7 +488,10 @@ while the Deployment's status already counts only the new ones
 `status.terminatingReplicas` exists only from Kubernetes 1.33 with its feature
 gate). `ready` therefore lists the namespace's Pods and is not ready while any
 Pod the Deployment's selector matches has a deletion timestamp; it also
-honours `status.terminatingReplicas` where the API server reports it. A Pod
+honours `status.terminatingReplicas` where the API server reports it. The
+Pod list is read once, after every Deployment's status: the controller marks
+an old Pod terminating before status stops counting it, so a list taken after
+a complete-looking status still shows that Pod. A Pod
 stuck terminating (for example on a lost node) keeps `ready` failing until
 the administrator resolves it.
 A replacement that never becomes ready
