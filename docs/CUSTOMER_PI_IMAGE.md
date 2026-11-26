@@ -31,3 +31,61 @@ If no artifact exists, report a failed/incomplete build rather than distributing
 ## Technical reference
 
 For integrators and auditors: [implementation details, API and validation provenance](PI_IMAGE.md). This reference includes engineering history; it is not an installation shortcut or a claim of production acceptance.
+
+## Reusable Testnet starter image
+
+The starter profile targets `raspberrypi3-64` and uses wired DHCP. A signed
+starter download is pending. For development builds with preconfigured SSH,
+use the separate profile above.
+
+The starter image has no authorized SSH keys. To opt in, use trusted local
+access to install your SSH **public** key in
+`/home/operator/.ssh/authorized_keys` (directory mode 0700, file mode 0600,
+both owned by `operator`). The operator account has administrative access.
+For batch onboarding, follow [automatic Linux first boot](ENROLLMENT.md#automatic-linux-first-boot)
+to stage the trusted batch configuration and per-unit media after writing
+each card.
+
+### Build and verify
+
+On a Linux Yocto build host with kas 4.7, check out the
+reviewed source commit and obtain the Testnet deployment manifest from the
+console. Use separate new paths on a filesystem with space for two independent
+Yocto builds:
+
+```sh
+python3 scripts/build_pi_starter.py --manifest /path/to/deployment-manifest.json \
+  --work /build/starter-work --out /build/starter-bundle
+```
+
+The build uses the public Scarthgap layer and pinned BSP and toolchain. It
+checks that the recipe and installed client versions are supported by the
+Testnet deployment manifest, checks for the automatic first-boot enrollment
+service, and compares the two images and their package inventories. The merged first-boot
+companion layer supplies the enrollment patch and systemd service for the pinned
+public daemon recipe. Preflight checks the effective BitBake recipe and records
+the daemon archive, Cargo.lock and enrollment file digests. A successful local
+build produces an unsigned candidate for validation. It inspects the disk with
+the filesystem tools from the pinned Yocto build.
+
+The release pipeline runs one independent build per parallel job on the
+larger runner selected by `PI_STARTER_BUILD_RUNNER`. Size that runner to
+finish a cold build and upload its candidate within GitHub's six-hour
+job limit. An unprivileged job compares the candidates. A fresh standard
+runner in the protected release environment checks the unsigned bundle
+against the release tag and verifies all sizes and digests before signing.
+The publication job verifies the signed files before uploading them. See the [release signing and verification
+reference](RELEASES.md) for details.
+
+When a signed bundle is available, collect all its assets in one directory
+and verify with a trusted SuiFleet CLI and independently obtained trust roots
+before decompressing or flashing:
+
+```sh
+suifleet --verify-release /path/to/bundle /path/to/trust.toml raspberrypi3-64-starter
+(cd /path/to/bundle && sha256sum -c SHA256SUMS)
+```
+
+The signed manifest covers the image, checksums, SPDX package inventory,
+provenance and target deployment manifest. Production signing setup and
+physical boot and network validation are pending.

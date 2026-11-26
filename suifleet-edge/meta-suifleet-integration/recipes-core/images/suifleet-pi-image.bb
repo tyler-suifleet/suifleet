@@ -10,11 +10,17 @@ IMAGE_FSTYPES = "wic.bz2 wic.bmap ext4"
 # Writable state is deliberately retained on the root filesystem.
 IMAGE_ROOTFS_EXTRA_SPACE = "524288"
 
+SUIFLEET_PI_REQUIRE_OPERATOR_KEY ??= "1"
+
 # Refuse an inaccessible development image. Keys belong in a private local layer.
 ROOTFS_POSTPROCESS_COMMAND += "suifleet_require_operator_key; "
 python suifleet_require_operator_key() {
     import os
     path = os.path.join(d.getVar('IMAGE_ROOTFS'), 'home/operator/.ssh/authorized_keys')
+    if d.getVar('SUIFLEET_PI_REQUIRE_OPERATOR_KEY') == '0':
+        if os.path.lexists(path):
+            bb.fatal('Starter images must not contain operator authorized_keys')
+        return
     if not os.path.isfile(path):
         bb.fatal('Install operator authorized_keys through a private local layer; see docs/PI_IMAGE.md')
     keys = open(path).read().splitlines()
