@@ -85,7 +85,8 @@ These static checks always run, on every recipe in the layer:
   the one BitBake uses in every configuration.
 - The reader follows BitBake's ordering. Plain `:append` and `:prepend` apply
   after every assignment, even one that comes later in the file. `??=` is a
-  weak default, used only when nothing else assigns the variable.
+  weak default, used only when nothing else assigns the variable; each later
+  `??=` replaces the previous weak default, while `?=` keeps the first.
 - The layer and `export-files.json` contain no runtime identity/state files.
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit

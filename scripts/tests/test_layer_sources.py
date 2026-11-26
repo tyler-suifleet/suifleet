@@ -321,11 +321,15 @@ class LayerAuditTests(unittest.TestCase):
             'SRC_URI += "https://example.com/plus.tar.gz"\n'
             'SRC_URI:append += "https://example.com/last.tar.gz"\n'
             'SRC_URI:prepend = "https://example.com/front.tar.gz "\n'
-            'X ??= "weak"\nX += "y"\nY ??= "weak"\nY ?= "soft"\nZ ??= "weak"\n')
+            'X ??= "weak"\nX += "y"\nY ??= "weak"\nY ?= "soft"\nZ ??= "weak"\n'
+            'W ??= "first"\nW ??= "second"\nV ?= "first"\nV ?= "second"\n'
+            'SRCREV ??= "%s"\nSRCREV ??= "%s"\n' % ('1' * 40, '2' * 40))
         recipe = audit.Recipe(recipe_path, self.layer)
         self.assertEqual([url.rsplit('/', 1)[1] for url, _ in recipe.sources()],
                          ['front.tar.gz', 'first.tar.gz', 'base.tar.gz', 'plus.tar.gz', 'late.tar.gz', 'last.tar.gz'])
         self.assertEqual((recipe.get('X'), recipe.get('Y'), recipe.get('Z')), (' y', 'soft', 'weak'))
+        # BitBake: each ??= replaces the previous weak default; ?= keeps the first assignment.
+        self.assertEqual((recipe.get('W'), recipe.get('V'), recipe.get('SRCREV')), ('second', 'first', '2' * 40))
         recipe_path.unlink()
         # An append before the base assignment is still audited: an unpinned source is reported.
         self.write_recipe(extra='')

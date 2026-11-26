@@ -14,7 +14,8 @@ Static checks (always):
     only a plain :append/:prepend is accepted, so the audited assignment is the
     one BitBake uses for every machine, distro and class. As in BitBake, those
     appends/prepends apply after every assignment wherever they appear, and
-    ??= is a weak default used only when nothing else assigns the variable;
+    ??= is a weak default used only when nothing else assigns the variable
+    (the last ??= wins, while ?= keeps the first assignment);
   * no runtime identity/state files in the layer, its export list or (with
     --fetch) any fetched and unpacked source;
   * coupled SuiFleet pins agree: PV equals the crate version, the codec source
@@ -160,7 +161,8 @@ class Recipe:
             elif op in ('=+', '=.'):
                 self.vars[base] = value + (' ' if op == '=+' else '') + old
             elif op == '??=':
-                self.weak.setdefault(base, value)
+                # Each weak default replaces the previous one; ?= keeps the first.
+                self.weak[base] = value
             elif op == '?=':
                 self.vars.setdefault(base, value)
             elif op == ':=':
