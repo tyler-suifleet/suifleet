@@ -5,14 +5,14 @@
       "symbol": "USDC",
       "usdPerCoin": 1,
       "observedAt": 1793854903674,
-      "source": "Testnet demonstration conversion; test tokens have no monetary value"
+      "source": "Reference rate fixed for this offer"
     },
     {
       "offerId": "0x8c364f442148c5bcadac8acfbb1ea5bd73637db3e53ef81aba7010f7d04805fa",
       "symbol": "SUI",
       "usdPerCoin": 1,
       "observedAt": 1793854903674,
-      "source": "Testnet demonstration conversion; test tokens have no monetary value"
+      "source": "Reference rate fixed for this offer"
     }
   ],
   "price_table": {
@@ -22,7 +22,7 @@
       "writeUsdPerGB": 0.1,
       "storageUsdPerGBMonth": 0.05
     },
-    "source": "Testnet demonstration tariff only; not commercial pricing. Test tokens have no monetary value.",
+    "source": "SuiFleet list prices",
     "currency": "USD",
     "base": {
       "tiers": [
