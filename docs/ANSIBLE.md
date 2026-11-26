@@ -90,7 +90,9 @@ Every controller path (`suifleet_manifest_src`, `suifleet_deb_src`,
 absolute and contain no `$`; the role refuses others before reading anything.
 Ansible would resolve a relative or `$` path to one file for the checksum and
 another for the copy. The role also checks each copy of the manifest on the host
-against the controller's SHA-256.
+against the controller's SHA-256. The installed `/etc/suifleet/deployment.json`
+is replaced only after the transferred bytes pass that check, so a controller
+file that changes during a run fails it and leaves the previous manifest in place.
 
 All defaults are in [`roles/suifleet/defaults/main.yml`](../examples/ansible/roles/suifleet/defaults/main.yml).
 
@@ -387,6 +389,15 @@ allows it). The role does not check the controller.
   complete receipt for the device's own key, without needing the credential
   batch. Any other non-empty content (for example a truncated file, or a
   receipt for another key) stops the run before the claim is staged.
+  The same key can enroll under another deployment, so each attempt also
+  records the SHA-256 of the manifest it enrolled under in
+  `/etc/suifleet/.enrollment.json.partial.deployment`, durably and before
+  anything is submitted. A receipt is promoted only while
+  `suifleet_manifest_src` still has those bytes. If the inventory now selects
+  another deployment, or no deployment is recorded, the run keeps the receipt
+  and stops before writing a record or any configuration (check mode too):
+  select the deployment the device enrolled under, or restore the record under
+  the selected one by hand as below.
 
   The role creates the partial file exclusively, and flushes it to disk,
   before it runs the enrollment command, so every attempt leaves it. An empty
@@ -439,7 +450,8 @@ allows it). The role does not check the controller.
   install -m 0640 -o root -g suifleet "$dir/receipt.json" /etc/suifleet/.enrollment.json.restore
   sync -f /etc/suifleet/.enrollment.json.restore
   ln /etc/suifleet/.enrollment.json.restore /etc/suifleet/enrollment.json
-  rm -f /etc/suifleet/.enrollment.json.restore /etc/suifleet/.enrollment.json.partial
+  rm -f /etc/suifleet/.enrollment.json.restore /etc/suifleet/.enrollment.json.partial \
+    /etc/suifleet/.enrollment.json.partial.deployment
   rm -r "$dir"
   EOF
   ```
@@ -623,7 +635,11 @@ The harness checks these phases:
    credential batch present, retries with a truncated receipt, with a
    receipt for another key, and with an empty file (the committed enrollment
    printed nothing) stop before any claim is staged or the enrollment command
-   runs, and keep the file unchanged. With the real receipt restored
+   runs, and keep the file unchanged. The interrupted attempt must have
+   recorded its manifest's SHA-256; the complete receipt with another
+   deployment selected in `suifleet_manifest_src`, and with no recorded
+   deployment, is refused in check mode and a retry, keeping the receipt and
+   writing no record, `deployment.json`, `signer.toml` or `config.toml`. With the real receipt restored
    and the batch removed, check mode reports the pending recovery without
    promoting it, and the run restores the record byte for byte without
    running the enrollment command again; key, address and enrollment are
@@ -684,9 +700,14 @@ The harness checks these phases:
    untouched. The converged and upgrade previews, where every signing service
    is active when the preview reads it, also dispatch no self-check. The real run then starts
    and verifies the hosts, and a rerun reports `changed=0`.
-16. A rolling-restart preview in check mode succeeds without restarting the
+16. On each host, a test-only copy of the role rewrites the controller manifest
+   after preflight hashed it and before it is copied: the copy fails its
+   digest validation, the installed `deployment.json` stays byte for byte,
+   no file is left in `/etc/suifleet`, no service restarts, and a rerun with
+   the original manifest reports `changed=0`.
+17. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
-17. Rolling restart.
+18. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that
