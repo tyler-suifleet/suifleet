@@ -108,24 +108,19 @@ class SharedReads(unittest.TestCase):
     def engine(self,d):
         return c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},Path(d))
 
-    def test_rate_limit_defers_other_prs_and_survives_restart_without_account_switch(self):
-        # This tests the coordinator's local backoff; isolate the installed
-        # provider so fake credentials never reach a real quota endpoint.
-        with tempfile.TemporaryDirectory() as d, patch.object(
-                c, 'shared_github_snapshot', side_effect=lambda args, env, invoke: invoke()):
-            engine=self.engine(d)
-            project={'id':'p','github_account':'expected','root':d,'repository':'owner/repo'}
-            error=subprocess.CalledProcessError(1,['gh'],stderr='HTTP 429 Retry-After: 120')
-            with patch.object(c,'run',side_effect=['private-token',error]) as run:
-                with self.assertRaises(RuntimeError):engine.gh(project,['pr','view','1'])
-                self.assertEqual(run.call_count,2)
-                engine=self.engine(d)
-                with self.assertRaises(RuntimeError):engine.gh(project,['pr','view','2'])
-                self.assertEqual(run.call_count,2)
-                self.assertEqual(engine.store.db.execute('SELECT account FROM github_backoff').fetchone()[0],'expected')
-            engine.store.db.execute('UPDATE github_backoff SET retry_after=0')
-            with patch.object(c,'run',side_effect=['private-token','ok']):
-                self.assertEqual(engine.gh(project,['pr','view','2']),'ok')
+    def test_provider_rate_failure_does_not_create_a_second_account_pause(self):
+        with tempfile.TemporaryDirectory() as d:
+            engine = self.engine(d)
+            project = {'id': 'p', 'github_account': 'expected', 'root': d, 'repository': 'owner/repo'}
+            error = subprocess.CalledProcessError(1, ['gh'], stderr='GitHub rate limit: shared cooldown')
+            with patch.object(c, 'shared_github_snapshot', side_effect=[error, 'fresh']) as provider, \
+                    patch.object(c, 'run', return_value='private-test-token') as run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    engine.gh(project, ['pr', 'view', '1'])
+                self.assertEqual(engine.gh(project, ['api', 'repos/owner/repo/issues/1']), 'fresh')
+                self.assertEqual(provider.call_count, 2)
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(provider.call_args.args[1]['GH_HOST'], 'github.com')
 
     def test_immutable_reads_key_exact_sha_and_account_only(self):
         with tempfile.TemporaryDirectory() as d:

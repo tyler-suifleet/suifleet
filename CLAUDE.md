@@ -6,7 +6,9 @@ The imported `AGENTS.md` is the shared infrastructure, build, test, deployment a
 
 **Do not create new tickets, GitHub issues, sub-issues or draft issues unless the user explicitly authorizes Claude to do so. Codex is the only agent with default ticket-creation authority.** An implementation assignment does not grant ticket-creation permission. Do not run the tracking bootstrap with `--apply` without that explicit exception.
 
-Work on existing assigned issues. Report additional findings to Codex through the existing issue or the handoff, without creating a new tracking item. Record Claude/model version, branch, changed areas, dependencies and exact test results. Keep operational instructions in `AGENTS.md` and its linked runbooks rather than maintaining a divergent copy here.
+For direct small cosmetic/docs requests, use the explicit fast-lane exception in AGENTS.md and [SMALL_CHANGES.md](docs/SMALL_CHANGES.md): no mandatory new ticket, claim, PR or second-model review; focused checks and actual publication authorization still apply. This does not permit creating issues or overriding an assigned automation job.
+
+For normal engineering work, work on existing assigned issues. Report additional findings to Codex through the existing issue or the handoff, without creating a new tracking item. Record Claude/model version, branch, changed areas, dependencies and exact test results. Keep operational instructions in `AGENTS.md` and its linked runbooks rather than maintaining a divergent copy here.
 
 For “implement the next ticket”, use `ticket --project suifleet` and the shared coordinator from AGENTS.md with `--agent Claude`, your actual model and a unique session. Enter the returned worktree; keep its lease and token valid. Do not independently claim through GitHub fields, use a separate clone, or create issues.
 

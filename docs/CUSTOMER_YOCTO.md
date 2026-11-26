@@ -4,7 +4,7 @@ Integrate the daemon, isolated signer and runtime provisioning into your own Yoc
 
 ## Prerequisites
 
-Use a reviewed source checkout, Ubuntu 22.04 and kas 4.7 with the pinned profiles. Obtain build resources and storage for BitBake. No standalone public layer repository or Layer Index listing is offered yet; use the layer in this checkout.
+Use a reviewed source checkout, Ubuntu 22.04 and kas 4.7 with the pinned profiles. Obtain build resources and storage for BitBake. The pinned profiles fetch the public standalone software layer. Its OpenEmbedded Layer Index submission is still pending.
 
 ## Steps
 
@@ -16,10 +16,10 @@ export KAS_BUILD_DIR="$KAS_WORK_DIR/build-packaging"
 kas build kas/packaging.yml
 ```
 
-2. For Wrynose use `kas/packaging-wrynose.yml` in separate work/build trees. Preserve the pinned daemon source revision; source updates must regenerate the crate include and lock digest together.
-3. For a custom image, add `suifleet-edge/meta-suifleet` and the `suifleet` package. Pi image/test integration also needs `suifleet-edge/meta-suifleet-integration`; the committed kas profiles include it.
+2. For Wrynose use `kas/packaging-wrynose.yml`, and for Kirkstone `kas/packaging-kirkstone.yml`, each in separate work/build trees. Kirkstone kernels lack the signer's strong caller binding and Dunfell is unsupported; see [older Yocto series](YOCTO_LEGACY_SERIES.md). Preserve the pinned daemon source revision; source updates must regenerate the crate include and lock digest together.
+3. For a custom image, add the [standalone software layer](https://github.com/tyler-suifleet/meta-suifleet) and the `suifleet` package. The public layer at `c78e6297` provides the base client without the automatic first-boot enrollment command or unit. For automatic first-boot enrollment on a custom systemd image, also add `suifleet-edge/meta-suifleet-enrollment` from the core checkout to `BBLAYERS`. This companion layer depends only on `meta-suifleet`. Pi image/test integration additionally uses `suifleet-edge/meta-suifleet-integration`. The committed kas profiles include both companion layers.
 4. Inspect the package manifest and root filesystem. Builds must contain no device keys, enrollment credentials or journals.
-5. At first boot provision a new key, then complete [device setup](INSTALL_DEVICE_CLIENT.md). Supply the manifest, Linux signer configuration and daemon configuration in that order.
+5. For automatic enrollment, prepare the public batch settings and per-device provisioning media as described in the [enrollment guide](CUSTOMER_ENROLLMENT.md). For manual enrollment, provision a new key at first boot and complete [device setup](INSTALL_DEVICE_CLIENT.md), supplying the manifest, Linux signer configuration and daemon configuration in that order.
 
 ## Expected result
 
@@ -27,7 +27,7 @@ BitBake produces packages for the selected profile. The provisioning service cre
 
 ## Recovery and limits
 
-For missing dependencies, reproduce with the pinned layers rather than substituting arbitrary revisions. Keep Scarthgap and Wrynose TMPDIRs separate. QEMU test profiles allow passwordless console login and are disposable validation only. A package or QEMU boot is not a physical Pi, power-loss or firmware recovery result.
+For missing dependencies, reproduce with the pinned layers rather than substituting arbitrary revisions. Keep each series' TMPDIR separate. QEMU test profiles allow passwordless console login and are disposable validation only. A package or QEMU boot is not a physical Pi, power-loss or firmware recovery result.
 
 ## Technical reference
 

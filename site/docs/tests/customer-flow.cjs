@@ -27,7 +27,7 @@ const assert = require("node:assert/strict");
       await page.setViewportSize({ width, height: 900 });
       await page.goto("https://suifleet.io/docs/");
       assert.ok(!(await page.locator("main").innerText()).includes("not live"));
-      assert.equal(await page.locator("nav").first().getByRole("link", { name: "Docs", exact: true }).getAttribute("href"), "https://docs.suifleet.io/");
+      assert.equal(await page.locator("nav").first().getByRole("link", { name: "Docs", exact: true, includeHidden: true }).getAttribute("href"), "https://docs.suifleet.io/");
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       if (screenshots) await page.screenshot({ path: path.join(screenshots, `marketing-${width}.png`), fullPage: true });
       await page.getByRole("link", { name: "Install and connect your first device", exact: true }).click();

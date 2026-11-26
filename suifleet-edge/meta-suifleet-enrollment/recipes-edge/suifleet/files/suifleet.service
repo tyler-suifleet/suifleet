@@ -1,0 +1,85 @@
+[Unit]
+ConditionPathExists=!/etc/suifleet/migration.pending
+Description=SuiFleet Edge Deployment Client
+After=network-online.target suifleet-provision.service
+Wants=network-online.target
+Requires=suifleet-provision.service
+# Signatures come from the device signing service (SF-053) when configured.
+Wants=suifleet-signer.socket
+After=suifleet-signer.socket
+ConditionPathExists=/etc/suifleet/config.toml
+
+[Service]
+Type=notify
+# Unprivileged daemon. Firmware writes go through suifleet-firmware.path;
+# recipe install scripts run as this user inside this sandbox.
+User=suifleet
+Group=suifleet
+StateDirectory=suifleet
+StateDirectoryMode=0700
+UMask=0077
+# Provisioning runs independently before enrollment; this service is unprivileged.
+# As root ("+"): the device key's owner follows this configuration, which may
+# have just been installed or switched to the signing service (SF-053).
+ExecStartPre=+/usr/libexec/suifleet-provision
+# The platform's read-only base binary starts first. With [daemon_update]
+# enabled it execs a staged or confirmed daemon update (same PID, so readiness
+# and the watchdog apply to it); a new daemon that exits or never becomes ready
+# is restarted by this unit until the launcher falls back (docs/DAEMON_UPDATE.md).
+ExecStart=/usr/bin/suifleet --launch
+# As root ("+"), from systemd's $MAINPID once ready: the signing service
+# signs status reports only for this exact process (PID and start time), never
+# for a component, including one orphaned after killing the daemon (SF-053).
+# The read-only base binary, not an update the daemon user could write; it
+# refuses to record a main process running any other executable.
+ExecStartPost=+/usr/bin/suifleet --record-main-process /run/suifleet-signer/daemon.main
+Restart=on-failure
+RestartSec=5
+# Stop SIGTERMs only the daemon, which stops supervised components itself
+# (their shutdown commands, dependents first); systemd then SIGKILLs anything
+# left in the cgroup, also after a crash, so nothing outlives the unit.
+KillMode=mixed
+WatchdogSec=60
+NotifyAccess=main
+EnvironmentFile=-/etc/suifleet/env
+
+# Filesystem: everything read-only except the state directory; /etc/suifleet
+# (config, key) is read-only so the daemon cannot change its own policy.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# Privileges: no capabilities, no setuid escalation, no new namespaces.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RemoveIPC=yes
+# Netlink is needed for address-family selection during DNS resolution.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Not set: MemoryDenyWriteExecute, which would also break JIT-based recipe
+# install commands that inherit this sandbox.
+
+# Resources for the daemon and every recipe/updater child.
+MemoryMax=256M
+TasksMax=64
+LimitCORE=0
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

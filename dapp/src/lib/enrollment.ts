@@ -35,8 +35,12 @@ import { ALIAS_META_KEY, SERIAL_META_KEY, allEvents, fetchDevices, fetchFleetDev
  * return). These are conservative; measured fleet-scale limits are SF-090.
  */
 export const LIMITS = { claimsPerTx: 250, bindsPerTx: 100, revokesPerTx: 250, transfersPerTx: 250 } as const;
-/** Default enrollment gas each claim sponsors (the daemon caps one enrollment at 0.05 SUI). */
-export const DEFAULT_CLAIM_FUND_MIST = BigInt(20_000_000);
+/**
+ * Default enrollment gas each claim sponsors (the daemon caps one enrollment at 0.05 SUI).
+ * Measured on testnet 2026-11-25: enrollment needed a 0.028 SUI gas budget (0.025 SUI net),
+ * so 0.02 SUI claims could not enroll. 0.04 SUI leaves headroom for gas-price changes.
+ */
+export const DEFAULT_CLAIM_FUND_MIST = BigInt(40_000_000);
 /** Larger batches: generate credentials offline with scripts/claims.py and import its roster. */
 export const BROWSER_CREDENTIAL_LIMIT = 5_000;
 export const MAX_JOB_ENTRIES = 100_000;
@@ -292,9 +296,9 @@ export function enrollToml(c: Pick<ClaimCredential, "serial" | "alias">, policyI
 
 /**
  * A POSIX ustar archive: `enrollment/<serial>/{enroll.toml,claim.key,deployment.json}`
- * per device, with private (0600/0700) modes.
+ * per device, with an optional operator config.template.toml and private modes.
  */
-export function credentialArchive(credentials: ClaimCredential[], policyId: string, manifestJson: string, keypairPath?: string, fleet?: NamedFleet): Uint8Array {
+export function credentialArchive(credentials: ClaimCredential[], policyId: string, manifestJson: string, keypairPath?: string, fleet?: NamedFleet, configTemplate?: string): Uint8Array {
   const encoder = new TextEncoder(), blocks: Uint8Array[] = [];
   const mtime = Math.floor(Date.now() / 1000);
   const octal = (value: number, width: number) => value.toString(8).padStart(width - 1, "0") + "\0";
@@ -311,11 +315,13 @@ export function credentialArchive(credentials: ClaimCredential[], policyId: stri
   }
   entry("enrollment/", null, 0o700);
   const manifest = encoder.encode(manifestJson.endsWith("\n") ? manifestJson : manifestJson + "\n");
+  const template = configTemplate === undefined ? undefined : encoder.encode(configTemplate);
   for (const c of credentials) {
     entry(`enrollment/${c.serial}/`, null, 0o700);
     entry(`enrollment/${c.serial}/enroll.toml`, encoder.encode(enrollToml(c, policyId, keypairPath, fleet)), 0o600);
     entry(`enrollment/${c.serial}/claim.key`, encoder.encode(c.seedHex + "\n"), 0o600);
     entry(`enrollment/${c.serial}/deployment.json`, manifest, 0o644);
+    if (template) entry(`enrollment/${c.serial}/config.template.toml`, template, 0o600);
   }
   blocks.push(new Uint8Array(1024));
   const out = new Uint8Array(blocks.reduce((n, b) => n + b.length, 0));

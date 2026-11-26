@@ -5464,6 +5464,335 @@
         "Responsive browser navigation, playback/captions/retry, site tests/build/links pass; record comparison screenshots."
       ],
       "validation": "Run scoped regression tests and real browser checks at320/390px and desktop. Preserve existing review/CI and deferred human/Pi/mainnet acceptance."
+    },
+    {
+      "key": "SF-314",
+      "title": "Decouple review dispatch, CI recovery and integration scheduling",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Independent scheduling lanes prevent slow CI recovery and integration from delaying source reviews and feedback handoffs.",
+      "evidence": "Four integration candidates occupy capacity while sequential scans delay otherwise eligible source and final reviews.",
+      "acceptance": [
+        "Independent source, completion, CI recovery and integration scheduling; one main publisher and existing claims/security gates retained.",
+        "Meaningful offline concurrency and regression tests; install verified committed-main runtime and verify lane activity."
+      ],
+      "validation": "Focused scheduling/concurrency and coordinator regression tests; no unrelated application builds."
+    },
+    {
+      "key": "SF-315",
+      "title": "Fit How it works into a single desktop and mobile viewport",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site"
+      ],
+      "resources": [],
+      "description": "Viewport-sized How it works with accessible topic/text navigation and the existing overview video.",
+      "evidence": "User reports How it works requires page scrolling while the guide fits within the viewport.",
+      "acceptance": [
+        "No document or text overflow across desktop, narrow phone and short landscape viewports.",
+        "All explanatory content remains reachable and existing playback/captions and product guide work."
+      ],
+      "validation": "Static site build/tests and real browser layout, navigation and media checks."
+    },
+    {
+      "key": "SF-316",
+      "title": "Collect exited PR workers across coordinator lanes",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Use runnable PID/start identities when a completion lane observes workers launched by another lane, and reap exited launch children.",
+      "evidence": "Six worker wrappers with durable exits were zombies yet remained running in the review ledger, delaying source reviews, candidate review and repair.",
+      "acceptance": [
+        "Collect durable review and repair exits across lanes without treating zombies as live.",
+        "Retain same-session helper and ownership fences, and test the cross-lane regression."
+      ],
+      "validation": "Focused offline coordinator regressions and diff check. Install only through reviewed merged-main activation."
+    },
+    {
+      "key": "SF-317",
+      "title": "Make website and guide commercially ready",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "scripts/site_pricing.py"
+      ],
+      "resources": [],
+      "description": "Customer-perspective review and commercial copy cleanup across the website and guide.",
+      "evidence": "User identified confusing demo-wallet wording and requested a commercial-ready website.",
+      "acceptance": [
+        "Public website copy is clear and professional without internal verification notes.",
+        "Guide narration and captions match updated instructions; preserve honest security and capture provenance.",
+        "Desktop/mobile navigation, layout and media pass browser checks."
+      ],
+      "validation": "Static site build/regressions; Chromium desktop/mobile media checks; changed-media decode and provenance."
+    },
+    {
+      "key": "SF-318",
+      "title": "Reduce GitHub quota waste and isolate rate-limit recovery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "docs/PR_COORDINATION.md",
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Reduce shared GitHub discovery churn and isolate primary resource exhaustion across the ticket engine and coordinator.",
+      "evidence": "Routine writes evict all discovery metadata and cooldowns block unrelated API resources, stalling ownership and review work.",
+      "acceptance": [
+        "Keep stable Project metadata cached across routine updates while preserving fresh authority checks.",
+        "Isolate primary resource exhaustion, honor shared secondary pauses and coalesce discovery across processes.",
+        "Test offline and install verified merged runtimes with recorded provenance."
+      ],
+      "validation": "Shared cache/transport regressions, coordinator rate handling tests and installed runtime verification."
+    },
+    {
+      "key": "SF-320",
+      "title": "Preserve collecting batch members during integration discovery",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests/test_discovery_budget.py"
+      ],
+      "resources": [],
+      "description": "Integration discovery currently excludes all reserved members, including collecting/building batches that still require source snapshots. The next scan invalidates the batch as empty, repeatedly delaying reviewed PRs. Preserve fresh reads for these phases while keeping candidate-stage traffic filtering and authority checks.",
+      "evidence": "On 2026-11-25 reviewed PRs repeatedly entered collecting then invalidated with no eligible members remain during collection; current discovery_needed returns false for every reserved member.",
+      "acceptance": [
+        "Collecting and building batches retain fresh member snapshots across scans and progress to a candidate.",
+        "Published candidates retain low-cost source discovery filtering and fresh candidate/authority/CI checks.",
+        "An offline regression reproduces the lost-member failure before the fix and passes afterward; local combined-candidate tests pass.",
+        "Integrate and activate the verified merged runtime using the user-authorized local-infrastructure policy, then verify live batch advancement."
+      ],
+      "validation": "Focused discovery/batch regressions, full local coordinator suite and tracking/bootstrap checks; verify actual installed generation and live candidate creation."
+    },
+    {
+      "key": "SF-321",
+      "title": "Add a proportional fast lane for cosmetic website and documentation work",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/SMALL_CHANGES.md",
+        "docs/PR_COORDINATION.md",
+        ".github/workflows",
+        "scripts/content_scope.py",
+        "scripts/tests/test_content_scope.py"
+      ],
+      "resources": [],
+      "description": "Stop routing small direct user-requested cosmetic marketing/docs edits through tickets, batch review, full app/platform builds and testnet. Record a narrow fast lane, scope hosted checks to changed content, preserve security scanning and all risky-code/release authorization boundaries.",
+      "evidence": "User reports unacceptable throughput after small landing-page changes triggered full workflows and tracking failures blocked visual fixes.",
+      "acceptance": [
+        "Small direct user-requested cosmetic/docs edits do not require a new issue or multi-model review loop; use focused checks once and existing deployment authorization.",
+        "Only narrow static HTML/CSS/Markdown edits use content-only CI; mixed, unknown, code, config, dependencies, auth, wallet, Move and edge changes keep normal CI.",
+        "Content-only changes retain static/docs and credential/security scanning without runtime-platform or testnet jobs; preserve protected workflow/manual release controls.",
+        "Offline classifier and workflow-structure regressions cover mixed changes, deletes/renames and unknown/invalid event ranges."
+      ],
+      "validation": "Focused classifier/workflow/security tests, workflow syntax checks, and component build/check smoke; no unrelated application or coordinator suite repetition."
+    },
+    {
+      "key": "SF-322",
+      "title": "Enroll devices automatically at first boot from provisioning media",
+      "priority": "P0",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src/linux_main.rs",
+        "suifleet-edge/src/config.rs",
+        "suifleet-edge/meta-suifleet/recipes-edge/suifleet",
+        "suifleet-edge/packaging",
+        "dapp/src/app/enrollment",
+        "docs/ENROLLMENT.md",
+        "docs/CUSTOMER_ENROLLMENT.md",
+        "docs/INSTALL_DEVICE_CLIENT.md"
+      ],
+      "resources": [],
+      "description": "Make claim enrollment zero-touch for fleets of many units. Today `suifleet --enroll` only prints the Device and DeviceCap IDs; nothing runs it at first boot, and an operator must hand-copy the IDs into signer.toml and config.toml on every device in a fixed order. Add a packaged first-boot enrollment service that consumes the dApp's per-serial credential folder from provisioning media, enrolls, installs the manifest, signer and daemon configuration itself, erases the claim and starts the client.",
+      "evidence": "2026-11-25 hands-on Pi 3 B+ session (Claude claude-opus-5-5): linux_main.rs enroll() prints IDs and an example [device] block only; meta-suifleet ships no enrollment unit; CUSTOMER_ENROLLMENT.md step 6 requires manual per-device config editing. User direction: make device setup extensible for customers with many units.",
+      "acceptance": [
+        "A packaged oneshot unit runs after identity provisioning only while no config.toml exists, discovers exactly one credential folder from configurable locations (default: the boot partition, optionally removable media), and validates manifest chain identity, policy and client range before signing.",
+        "Enrollment is crash-safe and idempotent: before submitting it checks the chain for an existing enrollment of this device address under the policy, so a reboot between submission and configuration writing neither burns a second claim nor wedges the device; network unavailability retries with bounded backoff.",
+        "On success it installs deployment.json, signer.toml (root:suifleet-signer 0640) and config.toml (root:suifleet 0640) in that order from an operator template in the credential folder (apply command, reporting/logs/archive settings), never overwrites existing configuration, securely removes the claim key from media, then starts the signer and daemon.",
+        "Failures are visible without SSH: a secret-free machine-readable status/error is written to the journal and a status file on the provisioning media, and the dApp Enrollment roster distinguishes funded-unused, consumed and bound claims.",
+        "The dApp credential archive includes the optional per-batch configuration template in the folder layout the service consumes; device keys never leave the device and claim keys exist only in the archive and on that unit's media.",
+        "Tests: localnet harness with the real daemon for fresh enrollment, reboot after submit, offline start, revoked/expired/used/foreign claims, tampered manifest/template and pre-existing configuration; Yocto recipe build plus deb/rpm unit installation where those packages exist. Physical Pi acceptance stays in SF-031."
+      ],
+      "validation": "Rust unit tests, enrollment localnet harness with the real daemon, dApp typecheck/build for the archive change, Yocto package build; automated testnet enrollment run under the standing grant."
+    },
+    {
+      "key": "SF-323",
+      "title": "Write per-device enrollment credentials onto media flashed from one image",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-322"
+      ],
+      "paths": [
+        "scripts",
+        "docs/CUSTOMER_ENROLLMENT.md",
+        "docs/ENROLLMENT.md"
+      ],
+      "resources": [],
+      "description": "Customers flash one golden image to many SD cards or eMMC units; each unit must receive only its own credential folder. Provide a host tool that takes the downloaded credential archive and writes one serial's folder (or the next unassigned one) onto an explicitly selected, already-flashed card or USB stick in the layout SF-322 consumes, verifies it and records the serial-to-media assignment.",
+      "evidence": "2026-11-25 hands-on Pi session: CUSTOMER_ENROLLMENT.md says to give each device its own folder on private provisioning media, but no tooling exists, so operators must mount and copy files per card by hand.",
+      "acceptance": [
+        "Writes only to an explicitly selected removable target's boot (FAT) partition or USB filesystem, refuses non-removable or ambiguous disks, and never re-partitions or reflashes.",
+        "Prevents assigning one claim to two media, keeps an assignment log with no claim key material, and can securely remove leftover claims from returned media.",
+        "Supports Linux and macOS hosts (Windows documented or supported), and a non-interactive batch mode for production lines.",
+        "Offline tests use loopback/disk images for success, wrong-disk refusal, duplicate assignment and interrupted writes; no physical media is written in CI."
+      ],
+      "validation": "Script unit tests and loopback-image integration tests; documentation consistency checks."
+    },
+    {
+      "key": "SF-324",
+      "title": "Publish a signed downloadable Raspberry Pi starter image with a current client",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-039",
+        "SF-322"
+      ],
+      "paths": [
+        "kas",
+        "suifleet-edge/meta-suifleet",
+        ".github/workflows",
+        "docs/CUSTOMER_PI_IMAGE.md",
+        "docs/INSTALL_DEVICE_CLIENT.md"
+      ],
+      "resources": [],
+      "description": "Evaluating customers currently must run a multi-hour Yocto build before they can connect a Pi; no prebuilt image is published, and the newest locally built image (SF-120, crate 0.2.1) is incompatible with the live testnet manifest's edge range (>=0.2.3). Publish a reproducible, signed Pi 3/4-class starter image built from the public meta-suifleet layer and public BSP, including SF-322 first-boot enrollment, so a customer can flash one image to many units. Coordinate with the standalone-layer work in SF-295.",
+      "evidence": "2026-11-25: INSTALL_DEVICE_CLIENT.md states no prebuilt download is published; the lab Pi image runs client 0.2.1 at 795de747 while app.suifleet.io's manifest requires edge >=0.2.3 <0.3.0.",
+      "acceptance": [
+        "Image is built from public sources only (public meta-suifleet, pinned BSP/toolchain) with recorded revisions, and a build-time check fails if the client is outside the target network manifest's supported edge range.",
+        "Image, checksums, SBOM and provenance are signed with the SF-039 release signing scheme and published at a stable customer download location; docs link only the actually published artifact.",
+        "Image contains no device keys, enrollment credentials, journals or SSH private keys; operator SSH access is opt-in through the documented access mechanism.",
+        "Physical boot/network acceptance remains in SF-031; the release records which checks ran."
+      ],
+      "validation": "Reproducible image build twice with matching digests, signature verification, filesystem inspection for secrets, QEMU boot smoke where available."
+    },
+    {
+      "key": "SF-325",
+      "title": "Migrate deployed devices to the signer layout and a new deployment in place",
+      "priority": "P2",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-322"
+      ],
+      "paths": [
+        "suifleet-edge/meta-suifleet/recipes-edge/suifleet",
+        "suifleet-edge/packaging",
+        "docs/DAEMON_UPDATE.md",
+        "docs/INSTALL_DEVICE_CLIENT.md"
+      ],
+      "resources": [],
+      "description": "Devices running pre-signer clients (0.2.1) or enrolled against a retired deployment lineage cannot be moved to the current client and app without manual surgery: creating the suifleet-signer account, enabling new units, parking the old configuration and re-enrolling. Provide a supported migration that preserves the device key (identity) and journal, so pilot fleets are not reflashed when the client or deployment changes.",
+      "evidence": "2026-11-25 lab Pi: client 0.2.1 enrolled in registry 0x4431790c\u2026 (package 0x99ade699\u2026) while app.suifleet.io uses registry 0x5f99cc84\u2026 (package 0x5b26264a\u2026, edge >=0.2.3); the in-place upgrade required a hand-written script. Daemon self-update (SF-026) cannot bridge the signer-layout change.",
+      "acceptance": [
+        "Package upgrade paths (Yocto/deb/rpm) create the signer account, preserve and re-own the existing device key, keep journals, and leave the daemon stopped rather than running against an incompatible manifest.",
+        "Moving a device to a new deployment lineage is an explicit operator action that archives the old configuration and re-enrolls through the SF-322 path without generating a new identity.",
+        "Tests start from a recorded 0.2.1 filesystem state (container or QEMU) and verify identity preservation, journal retention, refusal of mismatched manifests and successful re-enrollment on localnet."
+      ],
+      "validation": "Package upgrade tests from recorded 0.2.1 state, localnet re-enrollment harness; physical acceptance in SF-031."
+    },
+    {
+      "key": "SF-326",
+      "title": "Recognize verified fast-lane workflow applicability in merge gates",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests/test_optional_skips.py"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-326 -->\n## Problem\nThe locally tested SF-321 content fast lane added intentional content-job skips and changed the static-site workflow blob. The coordinator still recognizes only earlier deployment workflow hashes and treats the new content skips as mandatory failures. Candidate #965 has successful CI and protected Testnet but cannot receive final evidence review.\n## Implementation\nRecognize only the exact reviewed workflow and scope-script blobs, with fresh GitHub run/job/check provenance and successful scope/build prerequisites. Preserve every mandatory/security/testnet gate and reject unknown or tampered skips. No blanket acceptance of SKIPPED.\n## Acceptance\n- Reproduce blocking skips from #965.\n- Positive and negative regressions for reviewed content and deployment applicability.\n- Local-test infrastructure integration, installed-runtime provenance, and actual candidate review launch verification.\nPriority: P0. Area: infra. User authorized queue recovery and locally tested infrastructure merges.\n",
+      "acceptance": [
+        "Recognize only exact reviewed content/deployment workflow and scope script blobs with fresh provenance.",
+        "Unknown, tampered, stale, required and live skips stay blocking.",
+        "Scoped positive/negative tests and actual live candidate proof."
+      ],
+      "validation": "Focused coordinator applicability and gate regressions; meaningful local combined-main checks; verified activation."
+    },
+    {
+      "key": "SF-330",
+      "title": "Preserve activation proof across unchanged carry-forward merges",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Verify identical installed runtime trees carried forward through a second parent without relaxing receipt checks for later runtime changes.",
+      "acceptance": [
+        "Exact runtime-tree equality and installed ancestry are required at a carry-forward checkpoint.",
+        "Verify subsequently merged runtime changes through the existing authorization paths."
+      ],
+      "validation": "Offline activation and supervisor upgrade regressions."
+    },
+    {
+      "key": "SF-333",
+      "title": "Deduplicate repeated workflow evidence reads within each PR snapshot",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests/test_optional_skips.py"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-333 -->\n## Problem\nThe coordinator repeatedly exhausts its 5000/hour REST quota while GraphQL capacity remains. annotate_optional_skips re-fetches the same run metadata and attempt job list once per optional skipped job, then rechecks the same run again per job. A five-skip PR can use about twenty mutable REST reads just for applicability. Repeated scans stall review/repair publication and candidate integration.\n## Scope\nDeduplicate applicability reads within a single fresh PR snapshot only. Share run/job evidence among skipped jobs from the same run; revalidate each run once after collecting candidate proofs before attaching any proof. Never cache mutable approval data across snapshots or weaken exact head/base/app/workflow/scope/run-attempt checks.\n## Acceptance\n- Counted multi-job regression demonstrates fewer calls and one final fresh read per run.\n- Changed/rerun/unavailable final run drops every staged proof for that run.\n- Independent runs, malformed data, unreviewed workflows, required skips, protected Testnet and existing positive/negative provenance cases retain behavior.\n- Meaningful local combined-main checks, local-test infrastructure publication, verified installed-runtime provenance and live snapshot comparison.\nPriority P0; existing user authorization: fix throughput and merge locally tested reviewer/dispatcher/CI infrastructure without peer/hosted-CI waits. No wallet, hardware, credentials or application changes.\n",
+      "acceptance": [
+        "Counted multi-job regressions prove fewer reads, no cross-snapshot cache and one final fresh run read.",
+        "Changed, rerun or unavailable final run removes all staged applicability proof for that run.",
+        "Keep current exact-head/base/app/workflow/scope/run/attempt and required CI/Testnet gates.",
+        "Meaningful combined-main local tests, user-authorized infrastructure integration and verified runtime activation."
+      ],
+      "validation": "Focused optional-skip/provenance regressions, full local infrastructure integration evidence and live snapshot comparison."
     }
   ]
 }

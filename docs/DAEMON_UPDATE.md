@@ -15,7 +15,84 @@ preflight_timeout_seconds = 60
 
 The shipped `suifleet.service` starts `ExecStart=/usr/bin/suifleet --launch`. Without `[daemon_update]`, or with it disabled, the launcher simply continues as the base binary, so this changes nothing until enabled. Keep the unit's `Type=notify`, `Restart=on-failure`, start timeout and watchdog: they are the recovery path.
 
-Self-update cannot be combined with the device signing service (`[device.signer] kind = "service"`, [KEY_ISOLATION.md](KEY_ISOLATION.md)); the daemon refuses that configuration. The install directory belongs to the daemon user, which components share, so components could choose the binary the signing service trusts.
+The settings above use the legacy launcher and a daemon-writable install directory. With a service signer, use the managed portable profile below.
+
+## Managed updates with the portable signer
+
+Use the [portable signer and service manager](PORTABLE_LINUX_SERVICE.md).
+Keep the base executable and launcher installed by the platform. The base
+executable continues to run the signer, including while a candidate is on
+trial. Both binaries must support the installed signer protocol, configuration,
+manifest and journal format. Start from a fully settled legacy installation
+before switching profiles.
+
+In the daemon configuration, enable the managed profile:
+
+```toml
+[daemon_update]
+enabled = true
+managed = true
+component = "suifleet-daemon"
+```
+
+Create a dedicated persistent directory such as
+`/var/lib/suifleet-client-update` with owner root, mode 0700 and root-owned
+ancestors. In the service manager, pass
+`--client-update-dir /var/lib/suifleet-client-update` to the portable launcher.
+The managed profile uses one trial per deployment with a 60-second daemon
+startup deadline after signer startup. Its executable directory and trial
+policy are owned by the launcher. Keep both the service manager configuration
+and package update access under platform control.
+
+1. The platform operator verifies the target's [signed release bundle](RELEASES.md)
+   with the trusted installed verifier and target triple. Extract
+   `suifleet/bin/suifleet` from the archive listed in that verified manifest.
+   Install those bytes as a root-owned 0755 regular file named `candidate`
+   in the managed directory. Use an atomic rename in that directory to publish
+   the file.
+2. Deploy the exact binary as the configured daemon component with no
+   lifecycle commands or dependencies. The daemon verifies the recipe,
+   artifact and current admission, then requests a replacement over the
+   private inherited supervisor channel. It journals the pending deployment
+   and stops its components before exiting for the update.
+3. The supervisor accepts the request only from that daemon and only on its
+   update exit. It checks the platform-approved binary's ELF ABI and SHA-256
+   against the authenticated deployment digest. It starts the verified copy
+   with a new gated process and binds the signer to that exact task. A component
+   cannot replace the executable or write to the supervisor channel or state.
+4. The supervisor marks the candidate current after receiving its startup
+   acknowledgement. On startup failure, the supervisor restarts the previous
+   confirmed binary, or the base binary on the first update. If the supervisor
+   is interrupted during a trial, the next service start rolls back the
+   persisted trial. The resulting daemon uses the same signer key and
+   deployment journal and reports the update outcome.
+
+Stop the paired service before replacing the platform-installed executable and
+restart it afterward. The launcher checks the installed executable's SHA-256 at
+startup. A change clears the managed selection and any interrupted trial, so the
+replacement platform executable runs both the daemon and the signer. The device
+key and deployment journal stay in place.
+
+The native systemd signer profile still requires the platform-installed
+executable. Use its package manager for updates, or switch to the managed
+portable signer profile before deploying a daemon component. Client binary
+replacement is separate from application recipes and system-image installation.
+Platform tooling owns OS reboot, boot confirmation and firmware recovery.
+
+Run the managed runtime regression inside a disposable Linux guest using the
+same [test fixture setup as the portable signer](KEY_ISOLATION.md#portable-linux-signer):
+
+```sh
+python3 scripts/test_key_isolation_systemd.py --inside --portable --managed-update
+```
+
+The test exercises update deployment, signer rebinding, tamper rejection and
+rollback and platform executable replacement against a loopback simulator.
+Run this guest check locally because the hosted workflows do not currently run
+it. Set `SUIFLEET_TEST_UPDATE_CANDIDATE` to a separately built compatible
+executable inside the guest to exercise two build profiles.
+
+Use the [package migration procedure](INSTALL_DEVICE_CLIENT.md#migrate-an-enrolled-linux-device-in-place) to move a legacy device to the isolated signer and enroll against a new deployment while retaining its identity and journal.
 
 ## Publishing an update
 

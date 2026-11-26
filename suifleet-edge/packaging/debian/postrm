@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 if [ "$1" = purge ]; then
-    for unit in suifleet.service suifleet-enrollment.path suifleet-signer.socket suifleet-signer.service suifleet-provision.service; do
+    for unit in suifleet.service suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-signer.socket suifleet-signer.service suifleet-provision.service; do
         if command -v deb-systemd-helper >/dev/null 2>&1; then
             deb-systemd-helper purge "$unit" >/dev/null
         fi

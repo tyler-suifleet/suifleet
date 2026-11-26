@@ -1,7 +1,9 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -74,6 +76,86 @@ class NeverStartedReview(unittest.TestCase):
                 if variant=='backoff':
                     store.db.execute('INSERT OR REPLACE INTO quarantine_backoff VALUES(?,?,?,?)',('Claude','review',1,c.time.time()+600))
                 self.assertIsNone(store.reserve('project',pr,family,'fix' if variant=='repair' else 'review',directory))
+
+
+class NeverStartedCIRepair(unittest.TestCase):
+    def reserve_failed(self, root, diagnostic='GitHub rate limited'):
+        store = c.Store(root / 'jobs.sqlite3')
+        directory = root / 'receipt'
+        directory.mkdir()
+        pr = {**fixture()[0], '_ci_repair': [
+            {'name': 'Security CodeQL (python)', 'conclusion': 'FAILURE',
+             'detailsUrl': 'https://github.com/owner/repo/actions/runs/12/job/34'}
+        ]}
+        job = store.reserve('project', pr, 'Codex', 'fix', directory)
+        store.db.execute("UPDATE jobs SET status='failed',error=?,retry_after=? WHERE id=?",
+                         (diagnostic, 200, job))
+        return store, directory, pr, job
+
+    def test_reuses_the_original_reservation_once_after_backoff(self):
+        for diagnostic in ('GitHub rate limited', str(subprocess.CalledProcessError(1, ['gh']))):
+            with self.subTest(diagnostic=diagnostic), tempfile.TemporaryDirectory() as temporary:
+                store, directory, pr, job = self.reserve_failed(Path(temporary), diagnostic)
+                with patch.object(c.time, 'time', return_value=199):
+                    self.assertIsNotNone(store.ci_repair_blocker('project', pr))
+                    self.assertIsNone(store.reserve('project', pr, 'Codex', 'fix', directory))
+                with patch.object(c.time, 'time', return_value=201):
+                    self.assertIsNone(store.ci_repair_blocker('project', pr))
+                    self.assertIsNone(store.reserve('project', pr, 'Claude', 'fix', directory))
+                    self.assertEqual(store.reserve('project', pr, 'Codex', 'fix', directory), job)
+                    self.assertIsNone(store.reserve('project', pr, 'Codex', 'fix', directory))
+                    store.db.execute("UPDATE jobs SET status='failed' WHERE id=?", (job,))
+                    self.assertIsNotNone(store.ci_repair_blocker('project', pr))
+                self.assertEqual(store.db.execute('SELECT attempts FROM ci_repair_budget').fetchone()[0], 1)
+                self.assertEqual(store.db.execute('SELECT COUNT(*) FROM ci_repairs').fetchone()[0], 1)
+
+    def test_rate_limited_preflight_persists_retryable_receipt_without_resuming_owner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            coordinator = object.__new__(c.Coordinator)
+            coordinator.state = root
+            coordinator.store = c.Store(root / 'jobs.sqlite3')
+            owner = {**fixture()[1], 'agent': 'Codex', 'key': 'SF-325', 'token': 'fixture',
+                     'branch': 'work/sf-325', 'worktree': str(root), 'model': 'test',
+                     'session': 'fixture'}
+            coordinator.authentication_ready = Mock(return_value=True)
+            coordinator.ticket = Mock(return_value=json.dumps(owner))
+            coordinator.pr = Mock(side_effect=subprocess.CalledProcessError(
+                1, ['gh'], stderr='GitHub rate limit in API response'))
+            pr = {**fixture()[0], '_ci_repair': [{'name': 'Security CodeQL (python)'}]}
+            project = {'id': 'project'}
+            with self.assertRaises(subprocess.CalledProcessError), patch.object(
+                    c.time, 'time', return_value=100):
+                coordinator.launch(project, pr, owner, 'fix')
+            coordinator.ticket.assert_called_once_with(project, 'show', 'SF-325')
+            receipt = coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
+            self.assertEqual(receipt['error'], 'GitHub rate limited')
+            self.assertEqual(receipt['retry_after'], 400)
+            with patch.object(c.time, 'time', return_value=401):
+                self.assertTrue(coordinator.store.unstarted_ci_repair(receipt))
+
+    def test_refuses_ambiguous_or_different_launch_evidence(self):
+        cases = ('file', 'intent', 'process', 'diagnostic', 'head', 'base', 'job_url', 'directory')
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                store, directory, pr, job = self.reserve_failed(Path(temporary))
+                if case == 'file':
+                    (directory / 'snapshot.json').touch()
+                elif case == 'intent':
+                    store.db.execute("UPDATE jobs SET launch_intent='{}' WHERE id=?", (job,))
+                elif case == 'process':
+                    store.db.execute('UPDATE jobs SET pid=123 WHERE id=?', (job,))
+                elif case == 'diagnostic':
+                    store.db.execute("UPDATE jobs SET error='authentication failed' WHERE id=?", (job,))
+                elif case == 'head':
+                    pr['headRefOid'] = 'c' * 40
+                elif case == 'base':
+                    pr['baseRefOid'] = 'c' * 40
+                elif case == 'job_url':
+                    pr['_ci_repair'][0]['detailsUrl'] += '5'
+                elif case == 'directory':
+                    directory = directory.with_name('other')
+                self.assertIsNone(store.reserve('project', pr, 'Codex', 'fix', directory))
 
 
 class Gates(unittest.TestCase):
@@ -566,7 +648,7 @@ class FullCycleTests(unittest.TestCase):
             pr=fixture()[0];job=coordinator.store.reserve('test',pr,'Claude','review',directory)
             coordinator.store.db.execute("UPDATE jobs SET status='running',pid=999999,started='missing' WHERE id=?",(job,))
             (directory/'exit.json').write_text('{"returncode":0}')
-            with patch.object(c,'process_identity',return_value=None):
+            with patch.object(c,'runnable_identity',return_value=None):
                 coordinator.collect({'id':'test'},[])
                 deadline=coordinator.store.db.execute('SELECT retry_after FROM jobs').fetchone()[0]
                 with patch.object(c.time,'time',return_value=deadline+1):
@@ -716,7 +798,7 @@ class PublicationTests(unittest.TestCase):
                     reviews.append(body)
                     if len(reviews)<=failures:raise RuntimeError('formal review unavailable')
                     return json.dumps({'node_id':'review','body':body,'state':'APPROVED','commit_id':pr['headRefOid']})
-                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'process_identity',return_value=None),patch.object(c,'worker_stopped',return_value=True):
+                with patch.object(coordinator,'pr',return_value=pr),patch.object(coordinator,'gh',side_effect=gh),patch.object(c,'runnable_identity',return_value=None),patch.object(c,'worker_stopped',return_value=True):
                     coordinator.collect(project,[])
                     for attempt in range(failures):
                         row=coordinator.store.db.execute('SELECT * FROM jobs').fetchone()
@@ -761,8 +843,32 @@ class PublicationTests(unittest.TestCase):
             job=coordinator.store.reserve('test',fixture()[0],'Claude','review',directory)
             coordinator.store.db.execute("UPDATE jobs SET status='running',pid=123,started='old' WHERE id=?",(job,))
             (directory/'exit.json').write_text('{"returncode":1}')
-            with patch.object(c,'process_identity',return_value='reused'),patch.object(c,'worker_stopped',return_value=True):coordinator.collect({'id':'test'},[])
+            with patch.object(c,'runnable_identity',return_value='reused'),patch.object(c,'worker_stopped',return_value=True):coordinator.collect({'id':'test'},[])
             self.assertEqual(coordinator.store.db.execute('SELECT status FROM jobs').fetchone()[0],'retry')
+
+    def test_collects_zombie_owned_by_another_lane(self):
+        with tempfile.TemporaryDirectory() as d:
+            directory = Path(d)
+            config = {'workers': {'Codex': ['true'], 'Claude': ['true']}, 'projects': []}
+            launcher = c.Coordinator(config, directory)
+            collector = c.Coordinator(config, directory)
+            job = launcher.store.reserve('test', fixture()[0], 'Claude', 'review', directory)
+            with subprocess.Popen(['/bin/false'], start_new_session=True) as child:
+                os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+                started = c.process_identity(child.pid)
+                self.assertIsNotNone(started)
+                launcher.children[job] = child
+                collector.store.db.execute(
+                    "UPDATE jobs SET status='running',pid=?,started=? WHERE id=?",
+                    (child.pid, started, job))
+                (directory / 'exit.json').write_text('{"returncode":1}')
+                collector.collect({'id': 'test'}, [])
+                status = collector.store.db.execute('SELECT status FROM jobs WHERE id=?', (job,))
+                self.assertEqual(status.fetchone()[0], 'retry')
+                self.assertIsNotNone(c.process_identity(child.pid))
+                launcher.tick()
+                self.assertNotIn(job, launcher.children)
+                self.assertIsNone(c.process_identity(child.pid))
 
     def test_external_old_merge_does_not_complete_reused_branch(self):
         with tempfile.TemporaryDirectory() as d:

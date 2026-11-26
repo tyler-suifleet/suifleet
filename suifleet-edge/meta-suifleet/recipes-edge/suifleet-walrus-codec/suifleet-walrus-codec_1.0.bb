@@ -11,19 +11,9 @@ HOMEPAGE = "https://github.com/tyler-suifleet/suifleet"
 LICENSE = "Apache-2.0 & BSD-3-Clause & CC0-1.0 & MIT & Unicode-3.0"
 LIC_FILES_CHKSUM = "file://THIRD_PARTY_LICENSES.txt;md5=58ddbd6c47a43049d41c1e1c60972c43"
 
-# Produced outside BitBake from the daemon source at SUIFLEET_CODEC_SOURCE_REV
-# with its frozen pnpm lockfile by scripts/package_walrus_codec.py; see
-# docs/YOCTO_PACKAGING.md. Every file is pinned below and verified before
-# install, so a missing, stale or modified artifact stops the build.
-SUIFLEET_WALRUS_CODEC_DIR ??= "${TOPDIR}/suifleet-walrus-codec/${SUIFLEET_CODEC_SOURCE_REV}"
-FILESEXTRAPATHS:prepend := "${SUIFLEET_WALRUS_CODEC_DIR}:"
-SRC_URI = " \
-    file://walrus-device-codec.cjs;subdir=codec \
-    file://walrus_wasm_bg.wasm;subdir=codec \
-    file://manifest.json;subdir=codec \
-    file://THIRD_PARTY_LICENSES.txt;subdir=codec \
-    file://provenance.json;subdir=codec \
-"
+# Generated with the pinned daemon source and frozen pnpm lockfile.
+SRC_URI = "https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/b86509a1768aed3025ef68562735e70d1f1fa5ae/suifleet-walrus-codec-${SUIFLEET_CODEC_SOURCE_REV}.tar.gz;subdir=codec"
+SRC_URI[sha256sum] = "fae67d9cd6a6c501b4afa62c06d8ac7b85d395a7cadbc771d96ee063966bbd9b"
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
 S = "${SUIFLEET_UNPACKDIR}/codec"
 

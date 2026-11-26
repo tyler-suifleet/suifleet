@@ -357,7 +357,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
       return buildSwapAndDepositWalTx(config!, exchangeId, storage!.id, budget!.id, budget!.capId, mist, minWal,
         alsoBuy ? refill : undefined);
     }
-    throw new Error("No pinned Testnet exchange holds enough WAL for this swap; buy WAL directly and deposit it.");
+    throw new Error("The pinned exchange does not hold enough WAL for this swap; buy WAL directly and deposit it.");
   }
   const alerts = storage ? storageAlerts(storage, walrusState.data?.epoch) : [];
   return <div className="space-y-3 text-xs">

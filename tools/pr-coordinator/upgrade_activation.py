@@ -183,6 +183,34 @@ def rollback(module, engine, supervisor, receipt, journal):
     module.atomic(engine.journal, {**failed, 'action': 'Inspect supervisor upgrade before retrying this revision'})
 
 
+def runtime_checkpoint(engine, installed, target):
+    """Find an exact carry-forward of the runtime already authenticated at install."""
+    engine.git('merge-base', '--is-ancestor', installed, target)
+
+    def ancestor(parent):
+        try:
+            engine.git('merge-base', '--is-ancestor', installed, parent)
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1:
+                return False
+            raise
+        return True
+
+    merges = engine.git('rev-list', '--first-parent', '--reverse', '--merges',
+                        '--parents', installed + '..' + target)
+    for line in merges.splitlines():
+        commit, first, *other = line.split()
+        if ancestor(first):
+            break
+        if len(other) != 1 or not ancestor(other[0]):
+            continue
+        installed_tree = engine.git('rev-parse', installed + ':' + PREFIX.rstrip('/'))
+        if engine.git('rev-parse', commit + ':' + PREFIX.rstrip('/')) != installed_tree:
+            break
+        return commit
+    return installed
+
+
 def verify_policy_upgrade(old_engine, new_engine, old_revision, target, old_helpers=None):
     """Explicit operator bootstrap: preserve old proof for every nonlocal step."""
     old_engine.git('merge-base', '--is-ancestor', old_revision, target)
@@ -236,9 +264,10 @@ def upgrade(project_id, source, home, local_policy=False):
         verified = verify_source(source, target, old_engine)
         # This is the decisive authorization boundary: new code cannot authorize
         # its own installation. The installed supervisor must accept all changes.
+        checkpoint = runtime_checkpoint(old_engine, old_revision, target)
         if not local_policy:
             with helper_scope(previous):
-                old_engine.verify(old_revision, target)
+                old_engine.verify(checkpoint, target)
         with tempfile.TemporaryDirectory(prefix='verified-supervisor-', dir=state) as temporary:
             verified_source = Path(temporary)
             for relative, data in verified.items():
@@ -249,8 +278,8 @@ def upgrade(project_id, source, home, local_policy=False):
             new_engine = new_module.Activator(settings, library, state, services=old_engine.services)
             with helper_scope(verified_source):
                 if local_policy:
-                    verify_policy_upgrade(old_engine, new_engine, old_revision, target, old_helpers=previous)
-                new_engine.verify(old_revision, target)
+                    verify_policy_upgrade(old_engine, new_engine, checkpoint, target, old_helpers=previous)
+                new_engine.verify(checkpoint, target)
             new_engine.validate(target)
             generation = new_engine.stage(target)
             if old_engine.tip() != target:

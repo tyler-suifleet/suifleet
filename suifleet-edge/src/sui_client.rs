@@ -352,8 +352,24 @@ fn builder_status(error: sui_transaction_builder::Error) -> tonic::Status {
     tonic::Status::failed_precondition(format!("transaction simulation failed: {error}"))
 }
 
+/// An RPC failure that can be retried without treating the payload as invalid.
+#[derive(Debug)]
+pub struct RetryableRpcError(String);
+
+impl std::fmt::Display for RetryableRpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RetryableRpcError {}
+
 fn status(error: tonic::Status) -> anyhow::Error {
-    anyhow::anyhow!("{}: {}", error.code(), error.message())
+    let message = format!("{}: {}", error.code(), error.message());
+    if retryable(&error) {
+        return RetryableRpcError(message).into();
+    }
+    anyhow::Error::msg(message)
 }
 
 fn mask(paths: &[&str]) -> FieldMask {
@@ -1161,6 +1177,10 @@ impl SuiClient {
     /// "deployment_manager::DeploymentCreated"), each with the cursor to
     /// resume after it.
     async fn event_page(&self, start: Start, event_type: &str) -> anyhow::Result<RawPage> {
+        self.filtered_event_page(start, event_type, None).await
+    }
+
+    async fn filtered_event_page(&self, start: Start, event_type: &str, sender: Option<&str>) -> anyhow::Result<RawPage> {
         let mut request = proto::ListEventsRequest::default();
         request.read_mask = Some(mask(&[
             "event_type",
@@ -1184,6 +1204,13 @@ impl SuiClient {
                 literal.predicate = Some(proto::event_literal::Predicate::EventType(by_type));
                 let mut term = proto::EventTerm::default();
                 term.literals = vec![literal];
+                if let Some(address) = sender {
+                    let mut filter = proto::SenderFilter::default();
+                    filter.address = Some(address.to_owned());
+                    let mut sender_literal = proto::EventLiteral::default();
+                    sender_literal.predicate = Some(proto::event_literal::Predicate::Sender(filter));
+                    term.literals.push(sender_literal);
+                }
                 term
             })
             .collect();
@@ -2347,6 +2374,108 @@ impl SuiClient {
             .await?;
         check_transaction(&transaction, call, package, sender)?;
         Ok(transaction)
+    }
+
+    /// Read the device's enrollment under this policy before spending a claim.
+    /// The trusted lower bound must precede the policy's creation.
+    #[cfg(target_os = "linux")]
+    pub async fn previous_enrollment(&self, policy: &str, operator: &str, from: u64) -> anyhow::Result<Option<(Enrolled, String)>> {
+        let info = self.service_info().await.map_err(status)?.into_inner();
+        let tip = info.checkpoint_height.ok_or_else(|| anyhow::anyhow!("missing enrollment checkpoint"))?;
+        anyhow::ensure!(from <= tip, "enrollment history starts after the node tip");
+        self.ensure_retained(Some(from)).await?;
+        self.set_event_limit(Some(tip.checked_add(1).ok_or_else(|| anyhow::anyhow!("invalid enrollment checkpoint"))?));
+        let result = self.scan_enrollments(policy, operator, from).await;
+        self.set_event_limit(None);
+        result
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn scan_enrollments(&self, policy: &str, operator: &str, from: u64) -> anyhow::Result<Option<(Enrolled, String)>> {
+        let address = self.address();
+        let mut start = Start::Checkpoint(from);
+        let mut found = None;
+        loop {
+            let page = self.filtered_event_page(start, protocol::enrollment::DeviceEnrolled::MOVE_TYPE, Some(&address)).await?;
+            for (event, _) in page.events {
+                let fields = event.json.as_deref().map(to_json).ok_or_else(|| anyhow::anyhow!("missing enrollment event fields"))?;
+                if !same_id(fields["policy_id"].as_str().unwrap_or_default(), policy) {
+                    continue;
+                }
+                anyhow::ensure!(
+                    same_id(fields["device_address"].as_str().unwrap_or_default(), &address)
+                        && same_id(fields["operator"].as_str().unwrap_or_default(), operator)
+                        && found.is_none(),
+                    "ambiguous or foreign device enrollment"
+                );
+                let field = |name: &str| -> anyhow::Result<String> {
+                    Ok(Address::from_str(fields[name].as_str().unwrap_or_default())?.to_string())
+                };
+                found = Some((Enrolled {
+                    digest: event.transaction_digest.ok_or_else(|| anyhow::anyhow!("missing enrollment digest"))?,
+                    device_object_id: field("device_id")?,
+                    device_cap_id: field("device_cap")?,
+                    device_address: address.clone(),
+                    owner_cap_id: field("owner_cap")?,
+                }, field("claim")?));
+            }
+            if !page.has_more {
+                return Ok(found);
+            }
+            match Cursor::parse(&Some(page.end))? {
+                Cursor::After(bytes, _) => start = Start::After(bytes),
+                _ => anyhow::bail!("invalid enrollment cursor"),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn validate_enrollment_policy(&self, policy: &str, operator: &str) -> anyhow::Result<Object> {
+        let object = self.object(policy).await?;
+        anyhow::ensure!(
+            same_type(&object.object_type, &self.move_type(protocol::enrollment::EnrollmentPolicy::MOVE_TYPE))
+                && matches!(object.owner, Owner::Shared { .. })
+                && same_id(object.fields["registry"].as_str().unwrap_or_default(), &self.manifest().shared_objects.registry.id)
+                && same_id(object.fields["operator"].as_str().unwrap_or_default(), operator),
+            "foreign enrollment policy"
+        );
+        Ok(object)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn check_enrollment_limits(&self, policy_id: &str, policy: &Object, managed: bool) -> anyhow::Result<bool> {
+        let open = if managed {
+            self.dynamic_field(policy_id, protocol::enrollment::ManagedKey::MOVE_TYPE).await? == Some(Value::Bool(true))
+        } else {
+            policy.fields["open"] == Value::Bool(true)
+        };
+        let remaining = number(&policy.fields["remaining"]).ok_or_else(|| anyhow::anyhow!("missing enrollment quota"))?;
+        let expires = number(&policy.fields["expires_at_ms"]).ok_or_else(|| anyhow::anyhow!("missing enrollment expiry"))?;
+        if !open || remaining == 0 {
+            return Ok(false);
+        }
+        if expires == 0 {
+            return Ok(true);
+        }
+        let clock = self.object(CLOCK).await?;
+        let now = number(&clock.fields["timestamp_ms"]).ok_or_else(|| anyhow::anyhow!("missing chain clock"))?;
+        Ok(now <= expires)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn check_unused_claim(&self, policy: &Object, claim: &str) -> anyhow::Result<()> {
+        let table = Address::from_str(policy.fields["claims"]["id"].as_str().unwrap_or_default())?;
+        let key = Address::from_str(claim)?;
+        let id = table.derive_dynamic_child_id(&TypeTag::Address, key.inner());
+        let field = self.object(&id.to_string()).await?;
+        anyhow::ensure!(
+            same_type(&field.object_type, "0x2::dynamic_field::Field<address,bool>")
+                && matches!(&field.owner, Owner::Object(owner) if same_id(owner, &table.to_string()))
+                && same_id(field.fields["name"].as_str().unwrap_or_default(), claim)
+                && field.fields["value"] == Value::Bool(true),
+            "claim is not registered under the enrollment policy"
+        );
+        Ok(())
     }
 
     /// Enroll this device's key under an enrollment policy (SF-021): one

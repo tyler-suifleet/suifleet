@@ -1,4 +1,5 @@
 """Offline SF-120 checks: codec packaging and the Yocto Node/codec/daemon pins."""
+from configparser import ConfigParser
 import contextlib
 import hashlib
 import importlib.util
@@ -49,6 +50,20 @@ def fake_package(modules, store, name, version, license=None, files=()):
     for f in files:
         (root/f).write_text(f'{name} {f} text\n')
     return f'// dapp/node_modules/.pnpm/{store}/node_modules/{name}/dist/index.js\n'
+
+
+class FirstBootEnrollmentServiceTests(unittest.TestCase):
+    def test_network_ordering_and_bounded_restart(self):
+        units = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files"
+        unit = ConfigParser(interpolation=None, strict=False)
+        unit.read(units / "suifleet-first-boot-enrollment.service")
+        self.assertIn("network-online.target", unit["Unit"]["Wants"].split())
+        self.assertIn("network-online.target", unit["Unit"]["After"].split())
+        self.assertIn("suifleet-provision.service", unit["Unit"]["After"].split())
+        self.assertEqual(unit["Unit"]["StartLimitIntervalSec"], "30min")
+        self.assertEqual(unit["Unit"]["StartLimitBurst"], "4")
+        self.assertEqual(unit["Service"]["Restart"], "on-failure")
+        self.assertEqual(unit["Service"]["RestartSec"], "60s")
 
 
 class ProfileCompatibilityTests(unittest.TestCase):
@@ -316,9 +331,10 @@ class RecipeTests(unittest.TestCase):
         self.assertIn('RDEPENDS:${PN} = "suifleet-node (= ${SUIFLEET_CODEC_NODE_VERSION})"', CODEC)
         self.assertIn('addtask verify_codec after do_unpack before do_populate_lic do_configure', CODEC)
         self.assertRegex(CODEC, r'LIC_FILES_CHKSUM = "file://THIRD_PARTY_LICENSES\.txt;md5=[0-9a-f]{32}"')
-        self.assertIn('SUIFLEET_WALRUS_CODEC_DIR ??= "${TOPDIR}/suifleet-walrus-codec/${SUIFLEET_CODEC_SOURCE_REV}"', CODEC)
-        source = re.search(r'^SRC_URI = "([^"]*)"', CODEC, re.M | re.S).group(1)
-        self.assertEqual(re.findall(r'file://([^;\s]+)', source), codec.ARTIFACTS)
+        self.assertRegex(CODEC, r'SRC_URI = "https://raw\.githubusercontent\.com/tyler-suifleet/meta-suifleet/[0-9a-f]{40}/suifleet-walrus-codec-\$\{SUIFLEET_CODEC_SOURCE_REV\}\.tar\.gz;subdir=codec"')
+        self.assertRegex(CODEC, r'SRC_URI\[sha256sum\] = "[0-9a-f]{64}"')
+        self.assertNotIn('SUIFLEET_WALRUS_CODEC_DIR', CODEC)
+        self.assertEqual(sorted(codec.recipe_pins(CODEC)[1]), sorted(codec.ARTIFACTS))
 
     def test_installed_paths_match_configuration_examples(self):
         example = (LAYER/'recipes-edge/suifleet/files/config.toml.example').read_text()
@@ -331,12 +347,14 @@ class RecipeTests(unittest.TestCase):
     def test_images_install_the_codec(self):
         image = (ROOT/'suifleet-edge/meta-suifleet-integration/recipes-core/images/suifleet-pi-image.bb').read_text()
         self.assertIn(' suifleet-walrus-codec ', image)
-        for profile in ['packaging-qemu.yml', 'packaging-wrynose-qemu.yml']:
+        for profile in ['packaging-qemu.yml', 'packaging-wrynose-qemu.yml', 'packaging-kirkstone-qemu.yml']:
             self.assertIn(' suifleet-walrus-codec ', (ROOT/'kas'/profile).read_text(), profile)
 
     def test_daemon_pins_are_immutable_and_consistent(self):
         self.assertRegex(var(DAEMON, 'SRCREV'), '^[0-9a-f]{40}$')
         self.assertNotIn('AUTOREV', DAEMON)
+        self.assertRegex(DAEMON, r'https://raw\.githubusercontent\.com/tyler-suifleet/meta-suifleet/[0-9a-f]{40}/suifleet-edge-\$\{SRCREV\}\.tar\.gz;subdir=source;name=edge')
+        self.assertRegex(DAEMON, r'SRC_URI\[edge\.sha256sum\] = "[0-9a-f]{64}"')
         self.assertRegex(var(DAEMON, 'SUIFLEET_LOCK_SHA256'), '^[0-9a-f]{64}$')
         self.assertRegex(var(DAEMON, 'SUIFLEET_CRATE_VERSION'), r'^\d+\.\d+\.\d+$')
         self.assertIn("'${SUIFLEET_CRATE_VERSION}' > ${D}${datadir}/suifleet/build-info", DAEMON)

@@ -4,7 +4,7 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=11afb1fbbd23890e736d2e4025d3e2c9"
 
 SRC_URI = " \
-    git://github.com/tyler-suifleet/suifleet.git;protocol=https;nobranch=1;destsuffix=git \
+    https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/b86509a1768aed3025ef68562735e70d1f1fa5ae/suifleet-edge-${SRCREV}.tar.gz;subdir=source;name=edge;downloadfilename=suifleet-edge-${SRCREV}-workspace.tar.gz \
     file://suifleet.service \
     file://suifleet-firmware.service \
     file://suifleet-firmware.path \
@@ -17,10 +17,12 @@ SRC_URI = " \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
+SRC_URI[edge.sha256sum] = "4627f17b24b18de1eeb6d8254496ecadebf53540459fa76b16739e9fd6df5f30"
+# Original core commit used to produce the checksum-pinned source archive.
 SRCREV = "b9bb2ef6210624d732ab2de2075ea1826e5300c1"
-# Preserve core's unpack root; Scarthgap predates UNPACKDIR.
+# Preserve core's unpack root; older BitBake uses WORKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
-S = "${SUIFLEET_UNPACKDIR}/git"
+S = "${SUIFLEET_UNPACKDIR}/source"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
