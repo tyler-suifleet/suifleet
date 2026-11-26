@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { Socket, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -225,6 +225,31 @@ test('a connect callback delayed past the deadline by an event-loop stall sends 
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(sockets.length, 1, 'the stalled connection was accepted');
   assert.equal(frames.length, 0, 'a request was written after its deadline');
+});
+
+test('a response dispatched after the deadline by an event-loop stall is unknown, never accepted or replayed', async (t) => {
+  let attempts = 0;
+  const fake = await serve(() => { attempts++; return ok({ state: 'running' }); });
+  t.after(fake.close);
+  // Stall this process's event loop for 200 ms immediately before a client-side
+  // 'data' event is dispatched, so the complete response reaches the handler
+  // after the 100 ms deadline while the deadline timer is still queued.
+  const original = Socket.prototype.emit;
+  Socket.prototype.emit = function (event, ...args) {
+    if (event === 'data' && !this.server) {
+      const until = performance.now() + 200;
+      while (performance.now() < until) { /* stall */ }
+    }
+    return original.call(this, event, ...args);
+  };
+  t.after(() => { Socket.prototype.emit = original; });
+  const client = new Client({ socketPath: fake.path, timeoutMs: 100, connectAttempts: 3 });
+  await assert.rejects(client.status(),
+    (e) => e instanceof TransportError && !(e instanceof ProtocolError) && e.outcome === 'unknown' && /timed out after 100 ms/.test(e.message));
+  Socket.prototype.emit = original;
+  assert.equal(attempts, 1, 'an expired sent request was replayed');
+  // Without a stall the same peer still answers within the deadline.
+  assert.deepEqual(await client.status(), { state: 'running' });
 });
 
 test('time spent encoding the payload counts against the deadline: nothing is sent late', async (t) => {

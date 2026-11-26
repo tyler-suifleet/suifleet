@@ -254,6 +254,12 @@ export class Client {
         const newline = chunk.indexOf(0x0a);
         if (newline >= 0) {
           if (length + newline + 1 > MAX_FRAME) return finish(new ProtocolError(operation, 'response exceeds IPC frame limit'));
+          // The data callback can run after an event-loop stall past the deadline
+          // while the timer is still queued: a late response is never accepted.
+          // The request was sent, so its outcome is unknown and it is not replayed.
+          if (performance.now() >= deadline) {
+            return finish(new TransportError(operation, 'unknown', `timed out after ${this.timeoutMs} ms`));
+          }
           chunks.push(chunk.subarray(0, newline));
           return finish(null, Buffer.concat(chunks));
         }
