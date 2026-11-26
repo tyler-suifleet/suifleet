@@ -87,6 +87,10 @@ These static checks always run, on every recipe in the layer:
   after every assignment, even one that comes later in the file. `??=` is a
   weak default, used only when nothing else assigns the variable; each later
   `??=` replaces the previous weak default, while `?=` keeps the first.
+  Flags such as `SRC_URI[name.sha256sum]` follow the same `=`, `:=`, `?=`,
+  `+=`, `=+`, `.=` and `=.` rules, so a later `?=` doesn't replace a
+  checksum and `:=` expands at that line. `??=` on a source flag is rejected,
+  because its meaning differs between the supported BitBake releases.
 - The reader accepts both double- and single-quoted values. An
   assignment-shaped line it can't read is reported if it names a
   source-affecting variable, rather than skipped.

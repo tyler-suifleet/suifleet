@@ -16,6 +16,9 @@ Static checks (always):
     appends/prepends apply after every assignment wherever they appear, and
     ??= is a weak default used only when nothing else assigns the variable
     (the last ??= wins, while ?= keeps the first assignment);
+  * flags (for example SRC_URI[name.sha256sum]) follow the same =, :=, ?=,
+    +=, =+, .= and =. semantics; ??= on a flag is rejected on source-affecting
+    variables because its meaning differs between supported BitBake releases;
   * double- and single-quoted assignments are read; an assignment-shaped line
     the reader cannot interpret is reported when it names a source-affecting
     variable, never silently skipped;
@@ -175,14 +178,31 @@ class Recipe:
                 continue
             name, flag, op, _, value = match.groups()
             base, _, override = name.partition(':')
-            if override not in ('', 'append', 'prepend') or (override and (flag or op in ('?=', '??='))):
+            if (override not in ('', 'append', 'prepend') or (override and (flag or op in ('?=', '??=')))
+                    or (flag and op == '??=')):
                 # Conditional or removing overrides are not evaluated here;
                 # audit_recipe rejects them on source-affecting variables.
                 label = override + (f'[{flag}]' if flag else '') + (f' {op}' if op in ('?=', '??=') else '')
                 self.overrides.append((base, label, path.name))
                 continue
             if flag:
-                self.flags.setdefault(name, {})[flag] = value
+                # BitBake applies the same operators to flags as to variables
+                # (ast.DataNode.eval): ?= keeps an already set flag, := expands
+                # now, and the append/prepend forms join with the current
+                # unexpanded flag. ??= on a flag differs between supported
+                # BitBake releases, so it is rejected above.
+                flags = self.flags.setdefault(name, {})
+                old = flags.get(flag, '')
+                if op == '?=':
+                    flags.setdefault(flag, value)
+                elif op == ':=':
+                    flags[flag] = self.expand(value)
+                elif op in ('+=', '.='):
+                    flags[flag] = old + (' ' if op == '+=' else '') + value
+                elif op in ('=+', '=.'):
+                    flags[flag] = value + (' ' if op == '=+' else '') + old
+                else:
+                    flags[flag] = value
                 continue
             if override:
                 # The operator only joins the text: SRC_URI:append += "x" adds " x";

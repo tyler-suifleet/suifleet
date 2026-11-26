@@ -344,6 +344,32 @@ class LayerAuditTests(unittest.TestCase):
                 self.write_recipe(extra=extra)
                 self.assertTrue(any('conditional override' in e for e in self.errors()), self.errors())
 
+    def test_checksum_flags_use_bitbake_assignment_operators(self):
+        good, other = self.info['sha256'], '0' * 64
+        # ?= keeps the checksum already assigned, so the effective pin is unchanged.
+        self.write_recipe(extra=f'SRC_URI[edge.sha256sum] ?= "{other}"')
+        report = audit.check(self.layer)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(report['recipes']['suifleet']['sources'][0]['sha256'], good)
+        # := expands with the helper value at that point, not a later reassignment.
+        self.write_recipe(extra=f'EDGE_SUM = "{good}"\nSRC_URI[edge.sha256sum] := "${{EDGE_SUM}}"\nEDGE_SUM = "{other}"')
+        report = audit.check(self.layer)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(report['recipes']['suifleet']['sources'][0]['sha256'], good)
+        # A plain = after := still replaces it; the bad digest is reported.
+        self.write_recipe(extra=f'SRC_URI[edge.sha256sum] = "{other}"')
+        report = audit.check(self.layer)
+        self.assertEqual(report['recipes']['suifleet']['sources'][0]['sha256'], other)
+        # Joining operators act on the current flag text, as BitBake does.
+        recipe_path = self.recipe_dir / 'flags_1.0.bb'
+        recipe_path.write_text('A[f] = "b"\nA[f] += "c"\nA[f] =+ "a"\nA[f] .= "d"\nA[f] =. "z"\nA[g] ?= "1"\nA[g] ?= "2"\n')
+        recipe = audit.Recipe(recipe_path, self.layer)
+        self.assertEqual(recipe.flags['A'], {'f': 'za b cd', 'g': '1'})
+        recipe_path.unlink()
+        # ??= on a source flag differs between BitBake releases and is rejected.
+        self.write_recipe(extra=f'SRC_URI[edge.sha256sum] ??= "{other}"')
+        self.assertTrue(any('conditional override' in e and '??=' in e for e in self.errors()), self.errors())
+
     def test_single_quoted_and_unreadable_source_assignments_are_not_dropped(self):
         unpinned = 'https://example.com/unpinned.tar.gz'
         # Single-quoted values are read like double-quoted ones.
