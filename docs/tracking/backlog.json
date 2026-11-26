@@ -5793,6 +5793,29 @@
         "Meaningful combined-main local tests, user-authorized infrastructure integration and verified runtime activation."
       ],
       "validation": "Focused optional-skip/provenance regressions, full local infrastructure integration evidence and live snapshot comparison."
+    },
+    {
+      "key": "SF-335",
+      "title": "Recover stale completed-dependency waits without masking them behind active work",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/dispatcher.py",
+        "tools/pr-coordinator/recovery_watchdog.py",
+        "tools/pr-coordinator/tests"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-335 -->\n## Reproduced gaps\nSF-306 had an explicit valid dependency_wait for SF-295, but automatic resume ignored it because its diagnostic evidence was a JSON object rather than a string. SF-311 and SF-324 used older unstructured blocked receipts; the watchdog did not identify their completed declared dependencies while other workers were active.\n## Implementation\n- Preserve strict structured dependency intent and all existing claim/process/merge/resource checks; tolerate nonempty legacy structured diagnostic evidence for otherwise valid dependency waits.\n- Inspect completed declared prerequisites as offline discovery hints for blocked software tickets, excluding acceptance-only and externally blocked work.\n- Trigger bounded recovery investigation for aged hints even if unrelated workers or ticket completions keep the project busy. Hints never authorize a resume.\n- Keep diagnostic inspection bounded and never expose raw ticket responses or coordination tokens. Do not infer resume authority from free-form prose.\n## Acceptance\nRegression coverage for legacy evidence, missing/invalid wait intent, mixed live/blocked work, unrelated completions, changed hints, unavailable state, qualified/foreign dependencies, final acceptance exclusions and secret-free reports. Existing stopped-worker/ownership/merge and no-hardware/mainnet/credential fences remain intact. Locally test the combined infrastructure candidate, integrate under the user's local-test policy, install both runtime and watchdog from verified merged source and verify active services.\n",
+      "acceptance": [
+        "Legacy structured diagnostics do not silently disable explicit dependency-wait intent.",
+        "Completed-dependency hints trigger bounded investigation while unrelated work progresses; hints grant no authority.",
+        "Offline bounded inspection excludes final acceptance/foreign/external/unfinished prerequisites and never reports raw tokens.",
+        "Regression and local combined-main checks pass; verified merged runtime/watchdog installed with service health checks."
+      ],
+      "validation": "Dispatcher dependency, watchdog and existing recovery/ownership regressions; combined local infrastructure tests and verified installed-source checks."
     }
   ]
 }
