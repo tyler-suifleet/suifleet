@@ -68,8 +68,13 @@ the daemon archive, Cargo.lock and enrollment file digests. A successful local
 build produces an unsigned candidate for validation. It inspects the disk with
 the filesystem tools from the pinned Yocto build.
 
-The release pipeline compares both builds before signing and verifies the
-signed files before publication. See the [release signing and verification
+The release pipeline runs one independent build per parallel job on the
+larger runner selected by `PI_STARTER_BUILD_RUNNER`. Size that runner to
+finish a cold build and upload its candidate within GitHub's six-hour
+job limit. An unprivileged job compares the candidates. A fresh standard
+runner in the protected release environment checks the unsigned bundle
+against the release tag and verifies all sizes and digests before signing.
+The publication job verifies the signed files before uploading them. See the [release signing and verification
 reference](RELEASES.md) for details.
 
 When a signed bundle is available, collect all its assets in one directory

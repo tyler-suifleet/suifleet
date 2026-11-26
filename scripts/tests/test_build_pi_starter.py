@@ -4,9 +4,13 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from build_pi_starter import ENROLLMENT, IMAGE, TARGET, check_compatibility, prepare_bundle, read_recipe
+from build_pi_starter import (
+    ENROLLMENT, IMAGE, OUTPUTS, TARGET, build_candidate, check_compatibility,
+    compare_candidates, prepare_bundle, read_recipe, verify_unsigned,
+)
 
 
 class PiStarterTests(unittest.TestCase):
@@ -75,3 +79,40 @@ class PiStarterTests(unittest.TestCase):
                 content = (out / item['path']).read_bytes()
                 self.assertEqual(len(content), item['size'])
                 self.assertEqual(hashlib.sha256(content).hexdigest(), item['sha256'])
+
+    def test_candidate_handoff_rejects_different_metadata_and_corrupt_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deploy = root / 'deploy'
+            deploy.mkdir()
+            for suffix in OUTPUTS:
+                (deploy / (IMAGE + suffix)).write_text(suffix)
+            manifest_path = root / 'target.json'
+            manifest_path.write_text(json.dumps(self.manifest))
+            first, second, out = (root / name for name in ('first', 'second', 'out'))
+            commit = 'a' * 40
+            build_result = deploy, {}, {'crate_version': '0.2.3'}, {}, {}
+            with (patch('build_pi_starter.build', return_value=build_result),
+                  patch('build_pi_starter.git', return_value=commit),
+                  patch('build_pi_starter.subprocess.check_output', return_value='kas 4.7')):
+                build_candidate(root / 'work-first', manifest_path, first)
+                build_candidate(root / 'work-second', manifest_path, second)
+                second_manifest = second / 'deployment-manifest.json'
+                second_manifest.write_text('{}')
+                with self.assertRaisesRegex(ValueError, 'metadata differs'):
+                    compare_candidates(first, second, out)
+                self.assertFalse(out.exists())
+                second_manifest.write_bytes(manifest_path.read_bytes())
+                compare_candidates(first, second, out)
+            verify_unsigned(out, commit, '0.2.3')
+            for wrong_commit, wrong_version in (('b' * 40, '0.2.3'), (commit, '0.2.4')):
+                with self.assertRaisesRegex(ValueError, 'identity'):
+                    verify_unsigned(out, wrong_commit, wrong_version)
+            asset = out / OUTPUTS['.wic.bz2']
+            asset.write_bytes(b'x' * asset.stat().st_size)
+            with self.assertRaisesRegex(ValueError, 'file verification failed'):
+                verify_unsigned(out, commit, '0.2.3')
+            asset.unlink()
+            asset.symlink_to(deploy / (IMAGE + '.wic.bz2'))
+            with self.assertRaisesRegex(ValueError, 'unexpected unsigned bundle contents'):
+                verify_unsigned(out, commit, '0.2.3')
