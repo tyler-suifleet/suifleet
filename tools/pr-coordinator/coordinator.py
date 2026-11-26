@@ -2898,7 +2898,10 @@ def run_lane(config, args):
             fcntl.flock(startup, fcntl.LOCK_EX)
             coordinator = Coordinator(config, args.state)
         coordinator.lane = args.lane
-        interval = dict(completion=15, ci=120, integration=30).get(args.lane, args.interval)
+        # Integration reads complete live approval evidence. Poll once a minute
+        # rather than consuming the shared REST allowance twice as fast; the
+        # independent completion lane still publishes finished work every 15s.
+        interval = dict(completion=15, ci=120, integration=60).get(args.lane, args.interval)
         while os.getppid() == args.parent_pid:
             started = time.monotonic()
             from activation import atomic
