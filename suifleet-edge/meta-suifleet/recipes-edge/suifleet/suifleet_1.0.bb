@@ -4,8 +4,7 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=11afb1fbbd23890e736d2e4025d3e2c9"
 
 SRC_URI = " \
-    git://github.com/tyler-suifleet/suifleet.git;protocol=https;nobranch=1;destsuffix=git \
-    file://first-boot-enrollment.patch \
+    https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/b86509a1768aed3025ef68562735e70d1f1fa5ae/suifleet-edge-${SRCREV}.tar.gz;subdir=source;name=edge;downloadfilename=suifleet-edge-${SRCREV}-workspace.tar.gz \
     file://suifleet.service \
     file://suifleet-firmware.service \
     file://suifleet-firmware.path \
@@ -13,16 +12,17 @@ SRC_URI = " \
     file://firmware.toml.example \
     file://suifleet-provision.service \
     file://suifleet-provision \
-    file://suifleet-first-boot-enrollment.service \
     file://suifleet-enrollment.path \
     file://suifleet-signer.service \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
+SRC_URI[edge.sha256sum] = "4627f17b24b18de1eeb6d8254496ecadebf53540459fa76b16739e9fd6df5f30"
+# Original core commit used to produce the checksum-pinned source archive.
 SRCREV = "b9bb2ef6210624d732ab2de2075ea1826e5300c1"
-# Preserve core's unpack root; Scarthgap predates UNPACKDIR.
+# Preserve core's unpack root; older BitBake uses WORKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
-S = "${SUIFLEET_UNPACKDIR}/git"
+S = "${SUIFLEET_UNPACKDIR}/source"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
@@ -77,7 +77,7 @@ USERADD_PACKAGES = "${PN}"
 USERADD_PARAM:${PN} = "--system --no-create-home --home-dir /var/lib/suifleet --shell /sbin/nologin --user-group suifleet; \
     --system --no-create-home --home-dir /nonexistent --shell /sbin/nologin --user-group suifleet-signer"
 
-SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
+SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
@@ -86,7 +86,6 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${SUIFLEET_UNPACKDIR}/suifleet.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.path \
         ${SUIFLEET_UNPACKDIR}/suifleet-provision.service ${SUIFLEET_UNPACKDIR}/suifleet-enrollment.path \
-        ${SUIFLEET_UNPACKDIR}/suifleet-first-boot-enrollment.service \
         ${SUIFLEET_UNPACKDIR}/suifleet-signer.service ${SUIFLEET_UNPACKDIR}/suifleet-signer.socket \
         ${D}${systemd_system_unitdir}/
     install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-provision ${D}${libexecdir}/suifleet-provision

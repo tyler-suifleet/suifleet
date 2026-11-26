@@ -362,11 +362,10 @@ claimed. Existing physical/real-wallet/provider acceptance stays in
 The metadata split preserves existing recipe bodies and Pi kas selection;
 historical image/boot receipts retain their original revisions and scope.
 
-No standalone repository, independent public source/codec artifacts, release
-branches or Layer Index listing were published. The release operator must finish
-[the source and submission checklist](../suifleet-edge/meta-suifleet/RELEASE.md)
-with explicit authorization, anonymous downloads and verified remote IDs before
-advertising those distribution channels. Existing core Git source access is
-public; the independent distribution publication step remains outstanding.
+These runs predate the public [meta-suifleet repository](https://github.com/tyler-suifleet/meta-suifleet)
+and its independent archive distribution. See [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820)
+for the public source fetch and standalone package receipts. Layer Index
+submission remains deferred.
+
 Hosted exact-head/base CI, normal automatic testnet gates and independent review
 are pending coordinator acceptance, not claimed by these local results.
