@@ -45,7 +45,10 @@ share the host's initial namespaces in which the kernel runs it, while a
 test-only copy that assumes the host view accepts those; nothing is
 crashed), a claim transfer interrupted after staging with no swap
 and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
-storage, in sudo I/O logs or controller files), install + on-device identity + claim enrollment +
+storage, in sudo I/O logs or controller files), an enrollment stopped after its
+transaction and receipt but before the record is promoted (truncated or
+other-key receipts refused before staging; the real receipt restored without
+the batch or a second submission), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
 (changed=0), claim staging left by an enrollment interrupted after its record
 was written (check mode reports it; retry without the batch erases it without
@@ -186,6 +189,12 @@ INTERRUPTED_PLAY = """- hosts: suifleet_devices
     - ansible.builtin.include_role: {name: suifleet, tasks_from: enroll.yml}
     - ansible.builtin.include_role: {name: suifleet, tasks_from: configure.yml}
 """
+# Stops the role's enrollment command right after the enrollment transaction
+# succeeded and its receipt reached the partial file, before the record is
+# promoted (test-only copy; used with INTERRUPTED_PLAY).
+ENROLL_CLI_LINE = '"$STAGING/enroll.toml" > "$partial"\n'
+ENROLL_STOP = "                echo SF304-STOPPED-BEFORE-PROMOTION >&2; exit 75\n"
+ENROLL_TASK = "TASK [suifleet : Enroll and record the public IDs]"
 # Stages each host's claim exactly as enrollment does, then stops before the
 # enrollment and its cleanup run: an interrupted claim transfer.
 CLAIM_INTERRUPT_PLAY = """- hosts: suifleet_devices
@@ -402,10 +411,10 @@ class Harness:
         # passing, so crash cases run with a /proc/swaps fixture (see crash_fixture).
         self.crash_committed = self.variant_examples("examples-crash-committed", {"swap_policy.sh": self.SWAP_SOURCE_STUBS})
 
-    def variant_examples(self, name, edits, folder="files"):
-        """A test-only copy of the examples with each named text in edits replaced (each must occur once)."""
+    def variant_examples(self, name, edits, folder="files", source=EXAMPLES):
+        """A test-only copy of the examples (or source) with each named text in edits replaced (each must occur once)."""
         copy = self.work / name
-        shutil.copytree(EXAMPLES, copy)
+        shutil.copytree(source, copy)
         for script, changes in edits.items():
             path = copy / "roles/suifleet" / folder / script
             text = path.read_text()
@@ -1244,6 +1253,78 @@ class Harness:
         print("PASS interrupted claim transfer left the claim only in tmpfs staging: none on host persistent storage"
               " (including Ansible remote temp) or in controller files (including Vault decryption)")
 
+    def interrupted_enrollment_record(self, vault, name="deb-ubuntu2404"):
+        """Enrollment succeeded on chain and printed its receipt; the host stopped before the record was promoted.
+
+        The claim is spent, so a retry must keep the receipt, refuse output it
+        cannot verify, and restore the record from a valid receipt without a
+        second submission, even with the credential batch gone."""
+        container = self.hosts[name]["container"]
+        partial, record = "/etc/suifleet/.enrollment.json.partial", "/etc/suifleet/enrollment.json"
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        # Built from the copy in use, whose classifiers accept the swap and crash fixtures.
+        committed = self.examples
+        self.examples = self.variant_examples("examples-enroll-interrupt",
+                                              {"enroll.yml": [(ENROLL_CLI_LINE, ENROLL_CLI_LINE + ENROLL_STOP)]}, folder="tasks",
+                                              source=committed)
+        (self.work / "ctl/interrupted.yml").write_text(INTERRUPTED_PLAY)
+        try:
+            output, _ = self.ansible("enrollment interrupted after its receipt, before the record", "/work/interrupted.yml",
+                                     "--limit", name, *vault, expect_rc="nonzero")
+        finally:
+            self.examples = committed
+        assert "SF304-STOPPED-BEFORE-PROMOTION" in output, ("the play stopped elsewhere", output[-8000:])
+        receipt = sh(f"cat {partial}")
+        enrolled = json.loads(receipt)
+        address = sh("cat /etc/suifleet/device.address").strip()
+        key_sha256 = hashlib.sha256(sh("cat /etc/suifleet/device.key").strip().encode()).hexdigest()  # as host_state
+        assert enrolled["device_address"] == address, (name, "receipt for another key", enrolled)
+        assert sh(f"stat -c '%U:%G %a' {partial}").strip() == "root:root 600", name
+        assert absent(record) and absent("/etc/suifleet/config.toml"), (name, "record or configuration written")
+        assert absent("/run/suifleet-enroll"), (name, "claim staging left by the interrupted enrollment")
+        print("PASS enrollment interrupted after the transaction: receipt in the partial file, no record or configuration")
+
+        # With the claim batch present, output the role cannot verify stops the run
+        # before anything is staged or submitted, and is kept for manual recovery.
+        other = dict(enrolled, device_address="0x" + "ab" * 32)
+        for label, text in (("truncated receipt", receipt[:40]), ("receipt for another key", json.dumps(other, separators=(",", ":")) + "\n")):
+            sh(f"umask 077 && cat > {partial}", input=text)
+            output, _ = self.ansible(f"retry refuses a {label}", "site.yml", "--limit", name, *vault, expect_rc="nonzero")
+            assert "not a complete receipt" in output, (name, label, "not refused by the receipt check")
+            assert ENROLL_TASK not in output, (name, label, "the enrollment command was reached")
+            assert sh(f"cat {partial}") == text, (name, label, "the earlier output was changed")
+            assert absent(record) and absent("/run/suifleet-enroll"), (name, label, "record written or claim staged")
+            print(f"PASS retry with a {label} stopped before staging or submitting and kept the file")
+
+        self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", partial, input=receipt)
+        hidden = self.work / "chain/batch-hidden-for-recovery"
+        self.batch.rename(hidden)
+        try:
+            _, recap = self.ansible("check mode with an unpromoted receipt", "site.yml", "--check", "--diff", "--limit", name, *vault)
+            assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
+            assert sh(f"cat {partial}") == receipt and absent(record), (name, "check mode promoted the receipt")
+            # No credential batch: a second submission is impossible, and must not be needed.
+            output, recap = self.ansible("retry restores the record from the receipt", "site.yml", "--limit", name, *vault)
+        finally:
+            hidden.rename(self.batch)
+        statuses = {s for block in output.split(ENROLL_TASK)[1:]
+                    for s, h in TASK_RESULT.findall(block.split("\nTASK [", 1)[0]) if h == name}
+        assert statuses <= {"skipping"}, (name, "the enrollment command ran again", statuses)
+        state, _ = self.host_state(name)
+        self.assert_converged(name, state)
+        assert sh(f"cat {record}") == receipt, (name, "the record differs from the receipt")
+        assert state["enrollment"] == enrolled and state["address"] == address and state["key_sha256"] == key_sha256, \
+            (name, "identity or enrollment changed by the recovery")
+        assert absent(partial), (name, "receipt not promoted")
+        print("PASS retry restored the record from the receipt without the credential batch or a second submission;"
+              " key, address and enrollment preserved (the record is verified on chain with the other enrollments)")
+
     def staging_after_record(self, vault, previous):
         """Enrollment stopped after the record's rename, before its cleanup: the staged claim is left behind."""
         marker = uuid.uuid4().hex + uuid.uuid4().hex  # a disposable stand-in for the consumed claim
@@ -1623,6 +1704,7 @@ class Harness:
         assert all(v == {"swap": "ok", "crash": "ok"} for v in verdicts.values()), ("enrollment fixtures not accepted", verdicts)
         self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 
+        self.interrupted_enrollment_record(vault)
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
         batches = output.count("PLAY [SuiFleet device client]")
         assert batches == 3, f"expected three rollout batches, saw {batches}"

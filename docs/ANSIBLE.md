@@ -368,17 +368,28 @@ allows it). The role does not check the controller.
 - **A failed batch stops the rollout.** Fix the cause, then run `site.yml`
   again. Completed hosts report no changes; hosts whose services still run
   replaced inputs are restarted.
-- **Interrupted enrollment.** If enrollment ran on chain but the record was
-  not written, `/etc/suifleet/.enrollment.json.partial` may hold its public
-  output. The Enrollment page also shows the device as *Enrolled*, with its IDs
-  under *Technical details*. Restore the record as root, then run the play:
+- **Interrupted enrollment.** The enrollment command prints its receipt
+  (public IDs) only after the transaction succeeded, and the claim is then
+  spent. If a run stopped after that but before the record was renamed into
+  place, `/etc/suifleet/.enrollment.json.partial` holds the receipt. The next
+  run never submits again or overwrites it: it restores the record from a
+  complete receipt for the device's own key, without needing the credential
+  batch. Any other non-empty content (for example a truncated file, or a
+  receipt for another key) stops the run before the claim is staged. Then use
+  the Enrollment page, which shows the device as *Enrolled* with its IDs under
+  *Technical details*; restore the record as root and run the play:
 
   ```sh
   install -m 0640 -o root -g suifleet /dev/stdin /etc/suifleet/enrollment.json <<'EOF'
   {"device_address":"0x…","device_cap_id":"0x…","device_object_id":"0x…","digest":"…","owner_cap_id":"0x…"}
   EOF
+  rm /etc/suifleet/.enrollment.json.partial
   ```
 
+  An empty partial file means the command printed nothing, so the run
+  enrolls again. If the host stopped between the transaction and its output,
+  that attempt cannot reuse the spent claim and fails; recover from the
+  Enrollment page as above.
   Never issue an enrolled device a new claim, and never replace its key.
 - **Swap refusal.** See [claim storage](#claim-storage): enroll with all
   swap off, including zram and encrypted swap. Nothing was sent.
@@ -489,8 +500,18 @@ The harness checks these phases:
    or in the controller's files and Ansible home, and no transfer copy may
    remain in `/dev/shm`. No claim may appear in the sudo I/O logs, after this
    phase or after enrollment.
-4. Install, on-device identity, enrollment, configuration and start, in three
-   rollout batches.
+4. On one host, a test-only copy of the role stops the enrollment right after
+   the transaction succeeded and its receipt reached
+   `.enrollment.json.partial`, before the record is promoted. With the
+   credential batch present, retries with a truncated receipt and with a
+   receipt for another key stop before any claim is staged or the enrollment
+   command runs, and keep the file unchanged. With the real receipt restored
+   and the batch removed, check mode reports the pending recovery without
+   promoting it, and the run restores the record byte for byte without
+   running the enrollment command again; key, address and enrollment are
+   preserved, and the record is verified on chain with the others.
+   Then install, on-device identity, enrollment, configuration and start run on
+   all hosts in three rollout batches.
 5. A rerun with the credential batch deleted reports `changed=0`, and so does
    check mode. Then staging is planted as if enrollment stopped after writing
    its record but before its cleanup, together with an abandoned transfer
