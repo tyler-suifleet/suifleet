@@ -448,7 +448,7 @@ td.num, th.num { text-align:right;
   --lead: clamp(1.0625rem, 1rem + .3vw, 1.25rem);
   color: var(--ink);
 }
-body { background: #fff; -webkit-font-smoothing: antialiased; }
+body { background: #fff; -webkit-font-smoothing: antialiased; letter-spacing: -0.011em; }
 .wrap { max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter); }
 .skip:focus { border-radius: 8px; }
 a:focus-visible, summary:focus-visible, .button:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
@@ -668,7 +668,21 @@ a:focus-visible, summary:focus-visible, .button:focus-visible { outline: 3px sol
   .guide-page .site-header .wrap { padding: 0 var(--gutter); }
 }
 @media (max-width: 600px) {
+  .home h1 { font-size: 2.75rem; line-height: 1.02; }
+  .home h2, .secure h2 { font-size: 2.125rem; }
+  .copy .lead { margin-top: 14px; }
+  .home .lead { font-size: 1.0625rem; }
+  .tile { padding: 12px; border-radius: 26px; }
+  .ui-card { padding: 18px; border-radius: 18px; box-shadow: 0 16px 32px -18px rgba(4,20,60,.4); }
+  .ui-stack { gap: 10px; }
+  .ui-node { padding: 14px; border-radius: 16px; }
+  .platforms { padding: 24px 0; }
+  .platforms ul { gap: 8px; font-size: .9375rem; font-weight: 550; }
+  .platforms li { padding: 6px 14px; border-radius: 999px; background: var(--soft); }
   .section { padding: 64px 0; }
+  .section.hero { padding-top: 28px; }
+  .lead { text-wrap: pretty; }
+  .home .hero .lead { max-width: none; }
   .row + .row { margin-top: 80px; }
   .row { gap: 28px; }
   .row .cta-row { margin-top: 24px; }
@@ -687,13 +701,12 @@ a:focus-visible, summary:focus-visible, .button:focus-visible { outline: 3px sol
   .summary-table .min-mark { display: block; width: max-content; margin: 4px 0 0; }
 }
 @media (max-width: 480px) {
-  .header-row { gap: 10px; height: 64px; }
+  .header-row { gap: 10px; height: 60px; }
   .brand { gap: 8px; font-size: 1.2rem; }
   .brand img { width: 34px; }
-  .header-cta { padding: 0 16px; font-size: .875rem; }
+  .header-cta.button { padding: 0 16px; font-size: .875rem; }
   .hero .cta-row .button, .closing .cta-row .button, .pricing .cta-row .button { flex: 1 1 100%; }
-  .tile { min-height: 0; padding: 20px; }
-  .ui-card { padding: 18px; border-radius: 20px; }
+  .tile { min-height: 0; }
   .ui-stages { gap: 6px; }
   .ui-stage { padding: 10px; }
 }
