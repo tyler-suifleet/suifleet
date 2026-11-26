@@ -13,10 +13,28 @@ from test_batch_integration import Fixture
 
 
 class BatchReviewRepairs(unittest.TestCase):
-    def fixture(self, singleton=True):
+    def fixture(self, singleton=True, three=False):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);f=Fixture(Path(temp.name))
         if singleton:
             f.source_prs.pop(2);f.receipts.pop(2);f.owners=f.owners[:1]
+        if three:
+            f.project['integration_batch']['max_members'] = 3
+            f.git('checkout', '-qb', 'work/3', f.base)
+            (f.repo / 'feature-3').write_text('feature 3')
+            f.git('add', 'feature-3')
+            f.git('commit', '-qm', 'feature 3')
+            third = f.git('rev-parse', 'HEAD')
+            f.git('push', '-q', 'origin', 'work/3')
+            f.git('checkout', '-q', 'main')
+            f.source_prs[3] = {**f.make_pr(3, third, 'work/3'), '_review_mode': 'source'}
+            f.receipts[3] = {**f.receipts[2], 'job': 3, 'head': third,
+                             'source_feedback': c.source_feedback(f.source_prs[3])}
+            f.owners.append({**f.owners[1], 'key': 'T-3', 'branch': 'work/3',
+                             'session': 'third', 'token': 'third'})
+            for old, new in [(1, 845), (2, 853), (3, 850)]:
+                f.source_prs[new] = {**f.source_prs.pop(old), 'number': new}
+                f.receipts[new] = f.receipts.pop(old)
+                f.formal_reviews[new] = f.formal_reviews.pop(old, [])
         f.tick();f.green();batch=f.row();candidate=f.controller.candidate(f.project,batch)
         review=dict(id=888,kind='review',status='done',publication_done=1,publication_pending=False,
                     family='Claude',head=candidate['headRefOid'],feedback=c.feedback(candidate),
@@ -24,6 +42,85 @@ class BatchReviewRepairs(unittest.TestCase):
                                 evidence='Reproduced enrollment regression. Add credential/policy/claim regressions.'))
         f.approvals[batch['pr']]=review
         return f,candidate,review
+
+    def publish_attribution(self, f, candidate, review, ids, login=None):
+        batch = f.row()
+        review.update(project=f.project['id'], pr=batch['pr'], directory=str(f.root),
+                      review_id='published-review')
+        review['result']['affected_source_prs'] = ids
+        (f.root / 'snapshot.json').write_text(json.dumps(candidate))
+        published = dict(id='published-review', state='CHANGES_REQUESTED',
+                         author={'login': login or f.project['review_github_account']},
+                         commit={'oid': batch['head']},
+                         body=c.review_result_body(review, review['result']))
+        f.candidate_prs[batch['pr']].update(
+            reviews=[published], _receipts={published['id']: c.publication_hash(published)})
+        return published
+
+    def test_three_member_attribution_launches_only_same_claim_and_keeps_siblings_ready(self):
+        f, candidate, review = self.fixture(singleton=False, three=True)
+        self.publish_attribution(f, candidate, review, [853])
+        engine = c.Coordinator({'workers': {'Codex': ['true'], 'Claude': ['true']}, 'projects': []}, f.root / 'engine')
+        engine.batches = f.controller
+        engine.owners = Mock(return_value=f.owners)
+        engine.collect = Mock()
+        engine.discover_merged = Mock()
+        engine.prs = Mock(side_effect=lambda *args: [f.pr(f.project, n) for n in f.source_prs])
+        engine.ensure_closing_reference = Mock()
+        engine.launch = Mock()
+        engine.tick_project(f.project, True)
+        fixes = [call.args for call in engine.launch.call_args_list if call.args[3] == 'fix']
+        self.assertEqual([source['number'] for _, source, _, _ in fixes], [853])
+        _, source, owner, _ = fixes[0]
+        self.assertEqual(owner, f.owners[1])
+        self.assertTrue(c.matches_repair_claim(source, owner))
+        self.assertFalse(c.matches_repair_claim(source, {**owner, 'token': 'replacement'}))
+        self.assertEqual(source['_batch_review_failure']['source_head'], f.source_prs[853]['headRefOid'])
+        self.assertFalse(f.controller.repair_context(f.project, {**source, 'headRefOid': 'e' * 40}))
+        f.tick()
+        self.assertEqual({m['pr'] for m in json.loads(f.row()['members'])}, {845, 850})
+
+    def test_composition_attribution_routes_multiple_members(self):
+        f, candidate, review = self.fixture(singleton=False, three=True)
+        self.publish_attribution(f, candidate, review, [853, 850],
+                                 login=f.project['review_github_account'].swapcase())
+        f.tick()
+        self.assertEqual({n for n, pr in f.source_prs.items()
+                          if '_batch_review_failure' in f.controller.repair_context(f.project, pr)}, {853, 850})
+
+    def test_invalid_attribution_retains_failure_without_owner_routing(self):
+        cases = [
+            ([], {}),
+            ([1, 1], {}),
+            ([1, 999], {}),
+            ([True], {}),
+            (['1'], {}),
+            ({'pr': 1}, {}),
+            ([1], {'baseRefOid': 'e' * 40}),
+            ([1], {'_integration_batch': {'manifest_digest': 'e' * 64}}),
+            ([1], {'body': 'changed reviewed feedback'}),
+        ]
+        for ids, snapshot_changes in cases:
+            with self.subTest(ids=ids, snapshot_changes=snapshot_changes):
+                f, candidate, review = self.fixture(singleton=False)
+                self.publish_attribution(f, candidate, review, ids)
+                (f.root / 'snapshot.json').write_text(json.dumps({**candidate, **snapshot_changes}))
+                f.tick()
+                error = json.loads(f.row()['error'])
+                self.assertTrue(error['attribution_required'])
+                self.assertNotIn('affected_source_prs', error)
+                for pr in f.source_prs.values():
+                    self.assertEqual(f.controller.repair_context(f.project, pr), {})
+
+    def test_modified_publication_cannot_route_attribution(self):
+        f, candidate, review = self.fixture(singleton=False)
+        self.publish_attribution(f, candidate, review, [1])
+        # The durable job result and the publication must carry the same IDs.
+        review['result']['affected_source_prs'] = [2]
+        f.tick()
+        self.assertTrue(json.loads(f.row()['error'])['attribution_required'])
+        for pr in f.source_prs.values():
+            self.assertEqual(f.controller.repair_context(f.project, pr), {})
 
     def test_singleton_finding_retires_candidate_and_binds_original_source_context(self):
         f,candidate,review=self.fixture();f.tick();batch=f.row()
@@ -38,6 +135,25 @@ class BatchReviewRepairs(unittest.TestCase):
         self.assertNotEqual(c.source_feedback(source),c.source_feedback({**source,'_batch_review_failure':context}))
         advanced={**source,'baseRefOid':'d'*40};self.assertEqual(f.controller.repair_context(f.project,advanced)['_batch_review_failure'],context)
         self.assertEqual(f.controller.repair_context(f.project,{**source,'headRefOid':'e'*40}),{})
+
+    def test_singleton_routes_with_unverifiable_attribution_including_persisted_failure(self):
+        f, candidate, review = self.fixture()
+        self.publish_attribution(f, candidate, review, [1])
+        (f.root / 'snapshot.json').unlink()
+        f.tick()
+        batch = f.row()
+        self.assertEqual(batch['status'], 'failed')
+        self.assertEqual(f.candidate_prs[batch['pr']]['state'], 'CLOSED')
+        error = json.loads(batch['error'])
+        self.assertNotIn('attribution_required', error)
+        self.assertNotIn('affected_source_prs', error)
+        source = f.source_prs[1]
+        context = f.controller.repair_context(f.project, source)['_batch_review_failure']
+        self.assertEqual(context['review_id'], review['id'])
+        self.assertEqual(context['source_head'], source['headRefOid'])
+        self.assertTrue(c.matches_repair_claim({**source, '_batch_review_failure': context}, f.owners[0]))
+        f.controller.update(batch, error=canonical({**error, 'attribution_required': True}))
+        self.assertEqual(f.controller.repair_context(f.project, source)['_batch_review_failure'], context)
 
     def test_same_scan_source_snapshots_receive_the_genuine_repair_context(self):
         f,_,_=self.fixture();sources=[f.pr(f.project,1)]
@@ -91,6 +207,10 @@ class BatchReviewRepairs(unittest.TestCase):
         for source in f.source_prs.values():self.assertEqual(f.controller.repair_context(f.project,source),{})
         selected=f.controller.select(f.project,members,failed['base'],2)
         self.assertEqual(len(selected),1)
+        self.assertEqual(len(f.controller.select(f.project,list(reversed(members)),failed['base'],2)),1)
+        requests = f.controller.attribution_requests(f.project, {'_integration_batch': {'members': selected}})
+        self.assertEqual(requests, [dict(candidate_pr=failed['pr'], review_id=888,
+                                         source_prs=[selected[0]['pr']])])
         # Selection now verifies real ancestry; advance a real base rather than
         # supplying an object ID that cannot exist in this fixture repository.
         f.git('checkout', '-q', 'main')
