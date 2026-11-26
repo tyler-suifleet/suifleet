@@ -491,9 +491,15 @@ The harness checks these phases:
    binary-profile host, interrupted after the unit files and daemon-reload:
    the retry must recreate the socket with the new mode and restart the
    signer and the daemon, then a rerun reports `changed=0`.
-11. A rolling-restart preview in check mode succeeds without restarting the
+11. Check mode on configured hosts with their SuiFleet units stopped, as an
+   interrupted upgrade leaves them, one host with only the signing socket
+   still active and one host's journal not yet initialized: the preview
+   succeeds, starts no unit (no socket-activated signer) and leaves the identity,
+   enrollment, journal and applied record untouched. The real run then starts
+   and verifies the hosts, and a rerun reports `changed=0`.
+12. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
-12. Rolling restart.
+13. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that

@@ -57,7 +57,12 @@ inputs, rerun (changed=0), a configuration-only change timestamped within a
 second of the daemon's start (detected; retry restarts; rerun changed=0), an
 interrupted signing-socket unit-only update on the binary host (retry
 recreates the socket with its new mode and restarts signer and daemon; rerun
-changed=0), rolling-restart preview in check mode (succeeds; no process or
+changed=0), check mode on configured hosts with their SuiFleet units stopped
+(one with only the signing socket active, so a socket-activated signer would
+show) and one journal not yet initialized, as an interrupted upgrade leaves them
+(succeeds; starts nothing; identity, journal and units untouched) followed by
+a real run that starts and verifies them (rerun changed=0),
+rolling-restart preview in check mode (succeeds; no process or
 identity changes), rolling restart. It checks preserved identity and
 enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
 cap owners), claim erasure, and that no device or claim key appears in
@@ -1317,6 +1322,61 @@ class Harness:
         previous = dict(previous, **{name: state})
         return previous, rollout
 
+    def stopped_host_preview(self, vault, rollout, previous):
+        """Check mode on configured hosts whose units are stopped, one with its journal not yet initialized.
+
+        This is the state an interrupted upgrade leaves (the package stopped the
+        units, then the run ended). On a second host only the signing socket stays
+        active, so a preview that connected to it would start the signing service.
+        The preview must succeed, start nothing and leave identity and journal
+        untouched; the real run then starts and verifies."""
+        all_units = ["suifleet-enrollment.path", "suifleet.service", "suifleet-signer.service", "suifleet-signer.socket"]
+        pending, socket_only = list(self.hosts)[:2]
+        units = {name: all_units[:3] if name == socket_only else all_units for name in self.hosts}
+        stopped = {}
+        for name, host in self.hosts.items():
+            container = host["container"]
+            self.exec(container, "systemctl", "stop", *units[name])
+            if name == pending:
+                self.exec(container, "mv", "/var/lib/suifleet/state.json", "/var/lib/suifleet/state.json.sf304-pending")
+            state, _ = self.host_state(name)
+            assert state["active"] != "active" and state["main_pid"] == "0" and state["signer_pid"] == "0", (name, "units not stopped")
+            stopped[name] = state
+        _, recap = self.ansible("check mode on configured hosts with stopped services", "site.yml", "--check", "--diff",
+                                *vault, *rollout)
+        for name, host in self.hosts.items():
+            assert recap[name]["failed"] == 0 and recap[name]["unreachable"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
+            state, _ = self.host_state(name)
+            for field in ("active", "main_pid", "signer_pid", "invocations", "key_sha256", "address", "enrollment_sha256",
+                          "binary_sha256", "package", "applied", "initialized", "socket_mode"):
+                assert state[field] == stopped[name][field], (name, field, "changed by the stopped-host preview")
+            for unit in units[name]:
+                active = self.exec(host["container"], "systemctl", "is-active", unit, check=False).stdout.strip()
+                assert active != "active", (name, unit, "started by the preview")
+            if name == socket_only:
+                active = self.exec(host["container"], "systemctl", "is-active", "suifleet-signer.socket", check=False).stdout.strip()
+                assert active == "active", (name, "the signing socket was stopped by the preview")
+            journal = self.exec(host["container"], "test", "-e", "/var/lib/suifleet/state.json", check=False).returncode == 0
+            assert journal == (name != pending), (name, "the preview created or removed the journal")
+        print("PASS check mode on stopped configured hosts (one journal pending, one with only the signing socket"
+              " active) succeeded and started nothing")
+        self.exec(self.hosts[pending]["container"], "mv", "/var/lib/suifleet/state.json.sf304-pending",
+                  "/var/lib/suifleet/state.json")
+        _, recap = self.ansible("start the stopped hosts", "site.yml", *vault, *rollout)
+        after = {}
+        for name in self.hosts:
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert recap[name]["changed"] > 0, (name, "nothing started")
+            assert state["main_pid"] != "0" and state["main_pid"] != previous[name]["main_pid"], (name, "daemon not started")
+            for field in ("key_sha256", "address", "enrollment_sha256"):
+                assert state[field] == previous[name][field], (name, field)
+            after[name] = state
+        print("PASS the real run started and verified the stopped hosts with identity preserved")
+        _, recap = self.ansible("rerun after starting the stopped hosts", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after starting the stopped hosts")
+        return after
+
     def main(self):
         self.packages()
         self.start()
@@ -1409,6 +1469,7 @@ class Harness:
         after, rollout = self.interrupted_rollout(vault, upgrade, after)
         after, rollout = self.rapid_config_rollout(vault, rollout, after)
         after, rollout = self.socket_unit_update(vault, rollout, after)
+        after = self.stopped_host_preview(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")
         for name in self.hosts:
