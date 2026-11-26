@@ -29,7 +29,12 @@ The file set is the daemon build closure, computed from that commit's tree:
 
 - the root `LICENSE` and `suifleet-edge/{Cargo.toml,Cargo.lock,config.example.toml}`;
 - `suifleet-edge/src/` and `examples/`;
-- every `[workspace] members` directory (currently `windows-runtime`);
+- every `[workspace] members` directory (currently `windows-runtime`). The
+  container's Python 3.10 has no `tomllib`, so the reader accepts one form: a
+  single `[workspace]` table with a bare `members` array of unescaped basic or
+  literal strings. Any other spelling (dotted or inline `workspace`, quoted
+  keys, escapes, multi-line strings) stops the build rather than dropping a
+  member;
 - each file named by a literal `include_str!`/`include_bytes!` or a `#[path]`
   module attribute, followed transitively.
 
@@ -82,6 +87,11 @@ These static checks always run, on every recipe in the layer:
   file that contains it; a deferred `${THISDIR}` is rejected. An explicit
   `FILESPATH` assignment is rejected, because it can replace that search
   order with directories outside the layer.
+  BitBake tries every `FILESOVERRIDES` subdirectory (machine, distro,
+  architecture) of each search directory before the unqualified ones, so a
+  same-named file such as `files/qemuarm64/suifleet.service` replaces
+  `files/suifleet.service` on that machine. The audit does not model
+  per-configuration overrides, so any such candidate is rejected.
 - Source-affecting variables take no conditional overrides. These are
   `SRC_URI` (and its flags), `SRCREV*`, `PV`, `PE`, `S`, `LICENSE`,
   `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, every `SUIFLEET_*`
