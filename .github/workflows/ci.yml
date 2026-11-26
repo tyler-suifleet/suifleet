@@ -83,6 +83,9 @@ jobs:
       - name: Offline subscription pricing tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_subscription_pricing.py -v
 
+      - name: Offline Ansible role running-inputs tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_ansible_running_inputs.py -v
+
       - name: suifleet.io site build, reproducibility and link checks
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s site/tests -v

@@ -1,0 +1,67 @@
+---
+# A crash dump of a process holding the claim (Ansible's module, cat,
+# runuser, suifleet --enroll) is a copy of its memory. Before any claim is
+# read, /proc/sys/kernel/core_pattern must be served by the kernel's procfs
+# sysctl (not a file or other entry bind-mounted over it) and the host must
+# not be able to store one:
+#
+#   - kernel.core_pattern pipes to systemd-coredump and the SSH session's
+#     core dump size limit is 0 with the pattern's arguments starting
+#     "%P %u %g %s %t %c" (systemd-coredump honors the crashing process's
+#     RLIMIT_CORE, which it reads only from that %c) or coredump.conf sets
+#     both Storage=none and
+#     ProcessSizeMax=0 (with Storage=none alone it may still write the dump
+#     to disk while processing it). Only assignments in a [Coredump]
+#     section count, each file starts outside any section and the last
+#     assignment wins, as in systemd; a configuration that cannot be read,
+#     uses line continuations or uses syntax the check does not reproduce
+#     exactly (non-ASCII bytes such as a byte order mark, unusual section
+#     headers, lines that are not Key=value) is refused;
+#   - kernel.core_pattern pipes to false/true (nothing is kept); or
+#   - kernel.core_pattern names a file and the SSH session's limit is 0 (the
+#     kernel writes nothing).
+#
+# Socket collectors (@path, @@path) receive the dump whatever the limit and
+# are refused.
+#
+# Handlers are identified by full path, not name: systemd-coredump must be
+# /usr/lib/systemd/systemd-coredump or /lib/systemd/systemd-coredump and
+# false/true must be in /usr/bin or /bin, resolving to one of those paths, as
+# an existing root-owned executable only root can modify. A same-name
+# collector elsewhere and any other piped handler (apport, abrt, a vendor or
+# WSL handler) are refused: the kernel runs it whatever the limit and it may
+# keep the dump.
+#
+# The kernel runs a piped handler, which reads its own configuration, in the
+# host's initial namespaces, so a piped handler is accepted only when the SSH
+# session provably shares that view: the initial PID and user namespaces and
+# exactly init's mount table (no container, separate mount namespace or
+# chroot). Otherwise disable dumps with a session core limit of 0 and a file
+# kernel.core_pattern, which the kernel applies in the crashing process's own
+# namespace. The probe
+# runs unescalated, like the claim transfer, so it reads the limit that the
+# module receiving the claim inherits. The root-run staging and enrollment
+# commands additionally set their own limit to 0 before the claim reaches
+# them, since sudo's and runuser's PAM limits could raise it.
+- name: Read the host's crash dump policy
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "{{ lookup('ansible.builtin.file', 'crash_policy.sh') }}"
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_crash
+  changed_when: false
+  check_mode: false
+
+- name: Refuse claims on a host that can store a crash dump of them
+  ansible.builtin.assert:
+    that: suifleet_crash.stdout_lines | last | default('') == 'VERDICT ok'
+    quiet: true
+    fail_msg: >-
+      {{ inventory_hostname }} could store a crash dump containing the claim:
+      {{ (suifleet_crash.stdout_lines | last | default('') | regex_replace('^VERDICT unsafe ', ''))
+      or 'its crash dump policy could not be read' }}.
+      Enroll with core dumps disabled (docs/ANSIBLE.md#claim-storage).
