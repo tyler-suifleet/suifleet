@@ -853,7 +853,12 @@ class Store:
             'SELECT * FROM ci_repairs WHERE project=? AND pr=? AND head=? AND base=? ORDER BY created DESC',
             (project, pr['number'], pr['headRefOid'], pr['baseRefOid'])).fetchall()
         evidence = repair_feedback(pr)
-        if any(row['evidence'] == evidence for row in rows):
+        for row in rows:
+            if row['evidence'] != evidence:
+                continue
+            job = self.db.execute('SELECT * FROM jobs WHERE id=?', (row['job'],)).fetchone()
+            if job and self.unstarted_ci_repair(job):
+                return None
             return 'CI failure already reserved; inspect existing repair receipt (no automatic replay)'
         for key in ['*', *ci_check_keys(pr)]:
             budget = self.db.execute('SELECT attempts,retry_after FROM ci_check_budget '
@@ -880,6 +885,25 @@ class Store:
                        ('pid', 'started', 'launch_intent', 'retry_after', 'result',
                         'comment_id', 'review_id')) or row['publication_done']):
             return False
+        return Store.empty_launch_directory(row)
+
+    @staticmethod
+    def unstarted_ci_repair(row):
+        # Older runtimes persisted the shared transport's sanitized gh error.
+        # No launch intent means ownership was never transitioned.
+        return (row['kind'] == 'fix' and row['status'] == 'failed'
+                and row['attempts'] == 0 and row['retry_after'] is not None
+                and row['retry_after'] <= time.time()
+                and row['error'] in ('GitHub rate limited',
+                                     "Command '['gh']' returned non-zero exit status 1.")
+                and not row['publication_done']
+                and all(row[key] is None for key in
+                        ('pid', 'started', 'launch_intent', 'repair_claim', 'result',
+                         'comment_id', 'review_id'))
+                and Store.empty_launch_directory(row))
+
+    @staticmethod
+    def empty_launch_directory(row):
         path = Path(row['directory'])
         try:
             return not path.is_symlink() and path.is_dir() and next(path.iterdir(), None) is None
@@ -901,7 +925,10 @@ class Store:
             if ci_repair and self.ci_repair_blocker(project, pr):
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],fingerprint)).fetchone()
-            if previous and self.never_started_review(previous, family, directory):
+            retry_ci_repair = (ci_repair and previous and previous['family'] == family
+                               and previous['directory'] == str(directory)
+                               and self.unstarted_ci_repair(previous))
+            if retry_ci_repair or (previous and self.never_started_review(previous, family, directory)):
                 self.db.execute("UPDATE jobs SET status='reserved',created=?,attempts=attempts+1 WHERE id=?",
                                 (time.time(), previous['id']))
                 self.db.execute('COMMIT'); return previous['id']
@@ -1886,7 +1913,9 @@ class Coordinator:
         except BaseException as error:
             pending = self.store.db.execute('SELECT launch_intent FROM jobs WHERE id=?',(job,)).fetchone()[0]
             status = 'retry' if kind == 'review' else ('reserved' if pending else ('orphaned' if spawning else 'failed'))
-            self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+300,job))
+            diagnostic = publication_failure(error) if rate_limit_error(error) else str(error)
+            self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?",
+                                  (status, diagnostic, time.time()+300, job))
             raise
 
     def prompt(self, project, pr, owner, kind, family, directory, result_path):
