@@ -41,7 +41,8 @@ suifleet_manifest_src: ""
 # Each host needs suifleet_serial; its folder is
 # {{ suifleet_enrollment_root }}/enrollment/{{ suifleet_serial }}/ with
 # claim.key, enroll.toml and deployment.json. Hosts that are already enrolled
-# never read it, so delete the batch after enrollment.
+# never read it, so delete the batch after enrollment. Use an absolute path
+# without $ (Ansible expands environment references in paths).
 suifleet_enrollment_root: ""
 suifleet_serial: ""
 # Private, memory-backed staging directory for the claim during enrollment.

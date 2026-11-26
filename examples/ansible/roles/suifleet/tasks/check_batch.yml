@@ -8,6 +8,22 @@
 # Device and DeviceCap belong to suifleet_manifest_src, which configure.yml
 # installs beside them. Inputs: batch (the folder) and suifleet_batch_claim
 # (whether the claim key is needed: the lookup never reads it).
+# Ansible expands environment references (and a leading ~) in path arguments
+# such as stat's path, and in command arguments, while the claim's file lookup
+# and relative paths resolve differently again. The batch path must therefore
+# be absolute and free of $, so every task reads the folder the inventory
+# names and no other (suifleet_serial is already a plain name).
+- name: Require a literal, absolute batch folder path
+  ansible.builtin.assert:
+    that:
+      - batch is match('^/')
+      - "'$' not in batch"
+    quiet: true
+    fail_msg: >-
+      suifleet_enrollment_root must be an absolute controller path without $
+      (Ansible would expand it to another folder), not {{ batch | to_json }}.
+      This run changed nothing on chain.
+
 - name: Read the batch folder on the controller
   delegate_to: localhost
   become: false
@@ -45,6 +61,7 @@
       - -I
       - "{{ role_path }}/files/enroll_config.py"
       - "{{ batch }}/enroll.toml"
+    expand_argument_vars: false
   register: suifleet_enroll_config
   changed_when: false
   failed_when: false

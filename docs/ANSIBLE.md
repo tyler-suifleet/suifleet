@@ -74,7 +74,7 @@ source control. The inventory holds no secrets and no device addresses.
 |---|---|---|
 | `suifleet_serial` | host | The host's serial: its folder in the credential batch. |
 | `suifleet_manifest_src` | group | The fleet's `deployment.json` on the controller. |
-| `suifleet_enrollment_root` | group | The extracted credential batch on the controller. |
+| `suifleet_enrollment_root` | group | The extracted credential batch on the controller: an absolute path without `$`, which Ansible would expand to another folder. |
 | `suifleet_deb_src`, `suifleet_deb_sha256` | group | The verified package and its SHA-256 (`deb`). |
 | `suifleet_binary_src`, `suifleet_binary_sha256`, `suifleet_units_src` | group | The verified binary, its SHA-256 and the unit files (`systemd-binary`). |
 | `suifleet_profile` | any | `auto`, `deb` or `systemd-binary`. |
