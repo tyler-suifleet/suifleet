@@ -1189,10 +1189,6 @@ def run(args):
                     evidence['daemon_progress'] = daemon_progress(journal, root / 'daemon.log')
                     raise
 
-            def history():
-                path = components / component.DEFAULT_COMPONENT / "history.jsonl"
-                return [json.loads(line)["version"] for line in path.read_text().splitlines()] if path.exists() else []
-
             # Each case completes and is independently read before the next
             # transaction can delete it. Only head entry points share a PTB;
             # calling two versions of one package would be InvalidLinkage.
@@ -1215,7 +1211,16 @@ def run(args):
             check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)" if old != new
                   else "deployment through the base package (no upgrade in this run): applied and receipted")
             check("injected health failure reported Failed on chain")
-            assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
+            # The updater appends history before exiting. A Failed receipt
+            # emitted before apply cannot satisfy the injected health case.
+            path = components / component.DEFAULT_COMPONENT / "history.jsonl"
+            records = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+            expected = [(version, "succeeded", "failed" if options.get("fail") == "health" else "passed")
+                        for _, version, options, _ in cases]
+            observed = [(record["version"], record["install"], record["health"]) for record in records]
+            assert observed == expected, f"component history after receipt settlement: expected {expected}, observed {observed}"
+            assert all(record["runId"] == run_id for record in records), "component history belongs to another run"
+            check("component history confirms the three healthy installs and the injected health failure")
             if inboxes:
                 # A head keeps the latest deployment per component; all of
                 # these share one component, announced in PTB order. Receipts
