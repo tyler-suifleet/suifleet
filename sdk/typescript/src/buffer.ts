@@ -172,9 +172,14 @@ export class OutboundBuffer {
   /**
    * After UncertainDeliveryError: `retry` resends the head (may duplicate it),
    * `discard` drops it (may lose it). Inspect the destination first when possible.
+   * Any other value (including an omitted argument from plain JavaScript) throws
+   * a TypeError and leaves the buffer blocked with its queue unchanged.
    */
   resolveUncertain(decision: 'retry' | 'discard'): void {
     if (!this.uncertain) throw new Error('no uncertain delivery');
+    if (decision !== 'retry' && decision !== 'discard') {
+      throw new TypeError("resolveUncertain requires an explicit 'retry' or 'discard' decision");
+    }
     if (decision === 'discard') this.shift();
     this.uncertain = false;
   }

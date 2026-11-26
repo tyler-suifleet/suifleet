@@ -165,7 +165,9 @@ in order and never drops or reorders:
 - an `unknown` outcome, or a `stream_append` `request_failed` (which may follow
   a stored record), stops the buffer with `UncertainDeliveryError`; the caller
   checks the destination and chooses `resolveUncertain('retry')` (may
-  duplicate) or `'discard'` (may lose).
+  duplicate) or `'discard'` (may lose). Any other value, including an omitted
+  argument from plain JavaScript, throws `TypeError` and leaves the buffer
+  blocked with its queue unchanged.
 
 Each payload is serialized and copied (frozen) when it is queued, so changing
 the caller's object afterwards changes neither the queued message nor the byte

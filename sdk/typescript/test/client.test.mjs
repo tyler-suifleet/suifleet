@@ -747,6 +747,38 @@ test('OutboundBuffer keeps uncertain-head discard behind resolveUncertain', asyn
   await server.close();
 });
 
+test('OutboundBuffer resolveUncertain refuses an omitted or invalid decision and stays blocked', async () => {
+  let drop = true;
+  const server = await serve((r, socket) => {
+    if (drop) { drop = false; socket.destroy(); return undefined; }
+    return ok({ sequence: 0 });
+  });
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.append('s', 'a');
+  buffer.append('s', 'b');
+  await assert.rejects(buffer.flush({ retryDelayMs: 1 }), UncertainDeliveryError);
+  assert.equal(buffer.blocked, true);
+  const bytes = buffer.pendingBytes;
+  for (const invalid of [undefined, null, '', 'Retry', 'DISCARD', 'retry ', 1, true, {}, ['retry'],
+    new String('retry'), { toString: () => 'discard' }]) {
+    assert.throws(() => buffer.resolveUncertain(invalid), (e) => e instanceof TypeError && /explicit 'retry' or 'discard'/.test(e.message));
+    assert.throws(() => buffer.resolveUncertain(), TypeError);
+    assert.equal(buffer.blocked, true, `blocked after ${String(invalid)}`);
+    assert.equal(buffer.pending, 2);
+    assert.equal(buffer.pendingBytes, bytes);
+    assert.equal(buffer.head.payload, 'a');
+    await assert.rejects(buffer.flush(), /resolveUncertain/);
+    assert.throws(() => buffer.discardHead(), /resolveUncertain/);
+  }
+  // Nothing was resent by any refused decision.
+  assert.deepEqual(server.requests.map((r) => r.payload), ['a']);
+  buffer.resolveUncertain('retry');
+  assert.equal(buffer.blocked, false);
+  assert.deepEqual(await buffer.flush(), { sent: 2, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => r.payload), ['a', 'a', 'b']);
+  await server.close();
+});
+
 test('OutboundBuffer flush stops promptly when its signal aborts a nested client retry', async () => {
   const path = join(directory, `late${counter++}.sock`);
   const buffer = new OutboundBuffer(new Client({ socketPath: path, connectAttempts: 2, connectRetryDelayMs: 1000 }));
