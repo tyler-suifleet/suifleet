@@ -5,9 +5,9 @@ source archive rather than the core monorepo, so that a clean host can build
 without private access, developer caches or a neighboring checkout.
 [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) owns the recipe
 pin lines, the public `tyler-suifleet/meta-suifleet` repository and Layer Index
-submission. This page covers the tools for producing and auditing those inputs.
-This is source/fetch evidence, not a BitBake build, physical-target or mainnet
-acceptance.
+submission. This page covers the tools for producing and auditing those inputs,
+and records the BitBake build of the published layout. None of this is
+physical-target, Layer Index or mainnet acceptance.
 
 ## Building the daemon source archive
 
@@ -40,7 +40,10 @@ build. Contents are not pattern-scanned for keys, because the redaction test
 vectors deliberately contain fake ones. Build only from reviewed main, which
 the [security CI](SECURITY_CI.md) secret scanning already covers.
 `--paths-from FILE` rebuilds an archive from an existing file list, with the
-same audit. Use it to reproduce a previously published archive.
+same audit. Use it to reproduce a previously published archive, or to keep the
+broader published file set. The SF-295 archives also carry packaging inputs,
+shared interfaces, test fixtures and docs (see the layer's `RELEASE.md`); the
+default closure is the smaller set the recipe build needs.
 
 The codec artifact is still produced by `scripts/package_walrus_codec.py`; see
 [Yocto packaging](YOCTO_PACKAGING.md).
@@ -97,8 +100,7 @@ build on that series is recorded.
 
 `make test-yocto-packaging` runs the offline tests
 (`scripts/tests/test_layer_sources.py`). They include a regression check that
-the repository layer has no source findings beyond the codec local-artifact
-entries SF-295 is replacing.
+the repository layer has no source findings at all.
 
 ## Updating pins
 
@@ -115,39 +117,67 @@ entries SF-295 is replacing.
 5. Run the BitBake fetch/unpack/compile/package checks on each advertised
    series. Record the results separately from this audit.
 
-## Validation record (2026-11-24)
+## Validation record (2026-11-26, published SF-295 pins)
 
-Run on the WSL host by Claude (claude-opus-5-5), with git 2.34.1, GNU gzip
-1.10, Python 3.10.12 and Rust 1.94.0.
+Run on the WSL host by Claude (claude-opus-5-5) against merged main `e5c46c00`
+plus this branch, with git 2.34.1, GNU gzip 1.10, Python 3.10.12 and Rust 1.94.0.
+The layer pins the daemon and codec archives at
+`tyler-suifleet/meta-suifleet` commit `b86509a1…`, both built from core commit
+`b9bb2ef6210624d732ab2de2075ea1826e5300c1`.
 
-- `package_edge_source.py --revision 212d989a --paths-from <published list>`
-  reproduced the published SF-295 daemon archive byte for byte:
-  `suifleet-edge-212d989af09f847e7f60941a6814b7e6715e997b.tar.gz`, SHA-256
-  `0ec75c6b56b7e4a0fa40705ef3a28547a675b50aef6550f40a0d4a7957d7257d`, 132 files.
-- **That published archive can't build.** It leaves out the workspace member
-  `suifleet-edge/windows-runtime`. In a fresh unpack, `cargo metadata --offline`
-  fails with `failed to load manifest for workspace member`. The cargo class
-  `do_compile` loads the same workspace. This was reported in
-  [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820); the archive
-  needs republishing under a new filename.
-- The closure archive for 212d989a has 101 files, SHA-256
-  `31a5e30c6e74a53111c6617fa132371de9a5d1ce36163eb042e754bb5ef41b4d`, and was
-  identical across two builds. It includes `windows-runtime`, and `cargo
-  metadata --offline --locked --no-deps` loads both workspace packages. It is
-  not published.
-- `check_layer_sources.py --fetch --cargo "cargo +1.94.0"` on a scratch copy of
-  the SF-295 layer anonymously verified all three archives:
-  - daemon `0ec75c6b…`;
-  - codec `208d4b8f…`, whose five files, provenance, licenses and md5 match;
-  - Node `e9e1930f…`.
-  It reported only the missing workspace member and the PV mismatch (fixed
-  here).
-- On this branch's layer, anonymous Git fetch of the daemon at `b9bb2ef6…`
-  passed every check: lock, 350 crates, LICENSE md5, workspace and includes,
-  and cargo metadata. The static audit reports only the codec `${TOPDIR}`
-  local-artifact findings, which SF-295 replaces.
+- **Reproduction.** `package_edge_source.py --revision b9bb2ef6… --paths-from
+  <published file list>` reproduced the published daemon archive byte for byte:
+  144 files, SHA-256
+  `4627f17b24b18de1eeb6d8254496ecadebf53540459fa76b16739e9fd6df5f30`. It
+  includes `suifleet-edge/windows-runtime`. The default build closure for the
+  same commit has 100 files, SHA-256 `6f8a587e…`; it is not published.
+- **Anonymous source audit.** `check_layer_sources.py --repo . --fetch --cargo
+  <rustup 1.94.0 cargo>`, run with an empty `HOME`, no GitHub tokens and no
+  `.netrc`, reported `ok` with no findings. It verified:
+  - daemon `4627f17b…` (792,958 bytes): Cargo.lock `c2dcebe1…`, crate version
+    0.2.3, 350 crates matching `suifleet-crates.inc`, LICENSE md5
+    `11afb1fb…`, the workspace members and include targets, and `cargo metadata
+    --offline --locked --no-deps`;
+  - codec `fae67d9c…`: its exact five pinned files, provenance revision
+    `b9bb2ef6…`, licenses and Node version;
+  - Node `e9e1930f…` (22.22.2, linux-arm64).
+- **BitBake build of the published layout (Wrynose).** OE-Core `0f03c732`,
+  BitBake 2.18.0, meta-oe `f28a144a`, `MACHINE = "qemuarm64"`, `DISTRO =
+  "nodistro"` with systemd and usrmerge, `INHERIT += "suifleet-core-fixes"`,
+  and this branch's layer, without the integration layer. The build directory
+  was new. `DL_DIR` started empty, and `PREMIRRORS`/`MIRRORS` were cleared for
+  `suifleet`, `suifleet-walrus-codec` and `suifleet-node`, so BitBake fetched
+  their sources (the daemon archive from `raw.githubusercontent.com`, 350 crates
+  from `static.crates.io`, the codec archive and Node) with wget and no
+  credentials. Other recipes used existing sstate and downloads as read-only
+  mirrors.
+  - `bitbake -c unpack suifleet suifleet-walrus-codec suifleet-node`: exit 0.
+  - `bitbake -c package_qa suifleet suifleet-walrus-codec suifleet-node`:
+    exit 0, 1817 tasks attempted (1132 restored), all succeeded.
+  - `suifleet` (`PKGE` 1, `PKGV` 0.2.3) ran `do_verify_lock`,
+    `do_verify_toolchain` (rustc 1.94.1), `do_configure`, `do_compile` (the Cargo
+    build), `do_install`, `do_package` and `do_package_qa`, with no QA warnings.
+    The package holds an AArch64 `/usr/bin/suifleet`, the systemd units, the
+    provisioning helper, `*.example` configuration files and `build-info`
+    (`source_revision=b9bb2ef6…`, `lock_sha256=c2dcebe1…`,
+    `crate_version=0.2.3`). It contains no device key, enrollment
+    configuration or journal.
+  - `suifleet-walrus-codec` ran `do_verify_codec`, `do_install`, `do_package`
+    and `do_package_qa`. `suifleet-node` ran `do_install`, `do_package` and
+    `do_package_qa`.
 
-No BitBake task execution was run for SF-306. The host had about 3 GB of free
-memory, and three other Yocto builds were holding locks. The SF-295 standalone
-builds reached `do_unpack` but not compilation. Compiling the recipe from a
-corrected published archive remains outstanding.
+Not run for SF-306: a Scarthgap or Kirkstone build of these published pins
+(SF-295 recorded Scarthgap/Wrynose builds from an earlier Git-sourced export),
+an image build, executing the packaged daemon, physical-target acceptance,
+Layer Index submission and mainnet acceptance. Physical and mainnet acceptance
+remain in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## Earlier record (2026-11-24, superseded archive)
+
+The first published daemon archive (`suifleet-edge-212d989a….tar.gz`, SHA-256
+`0ec75c6b…`, 132 files) left out the workspace member
+`suifleet-edge/windows-runtime`, so `cargo metadata --offline` failed in a fresh
+unpack. The builder reproduced it byte for byte, and the gap was reported in
+[SF-295](https://github.com/tyler-suifleet/suifleet/issues/820). SF-295 then
+published the corrected archive above under a new filename and merged its pins.
