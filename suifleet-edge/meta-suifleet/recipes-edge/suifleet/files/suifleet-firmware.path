@@ -1,4 +1,5 @@
 [Unit]
+ConditionPathExists=!/etc/suifleet/migration.pending
 Description=Watch for SuiFleet firmware requests
 
 [Path]

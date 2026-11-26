@@ -76,7 +76,8 @@ package-only builds.
 
 The recipe now pins client 0.2.3, compatible with the committed Seal testnet
 profile. Older evaluation images contain client 0.2.1 and cannot use a manifest
-requiring 0.2.3; rebuild from the updated recipe. Do not lower the manifest's
+requiring 0.2.3. Upgrade the package in place on enrolled devices or rebuild from
+the updated recipe for new installations. Do not lower the manifest's
 client range to use an old image. See [Yocto software build evidence](YOCTO_PACKAGING.md)
 for rebuilt package scope; a new bootable SD image and physical Pi acceptance
 must be recorded separately. `make test-yocto-packaging` checks profile/version
@@ -89,6 +90,61 @@ networking, and prints the address (see
 templates. The signing service stays stopped until `/etc/suifleet/signer.toml`
 exists, and the daemon `suifleet.service` until `/etc/suifleet/config.toml`
 exists.
+
+## Migrate an enrolled Linux device in place
+
+Use the migration-capable Yocto, Debian or RPM package to upgrade a device
+with a file-backed identity at `/etc/suifleet/device.key`. The upgrade creates
+the signer account, moves access to the key to that account, and parks a device
+whose configuration still gives the daemon direct access to the key. Package
+installation leaves the enrolled configuration and journal in place and
+performs no enrollment transactions. Systemd activation stays gated across
+reboots until migration succeeds.
+
+Set aside a maintenance window and back up the configuration and state
+securely. Complete any in-progress platform firmware operation before upgrading
+or migrating. Use the distribution's package manager to install the verified
+migration-capable package. On Yocto, this is recipe revision `1.0-r1` or later.
+For a device that already uses the signer and needs to change deployments,
+install the migration-capable package and begin with the same `prepare` step.
+
+```sh
+sudo /usr/sbin/suifleet-migrate prepare
+```
+
+This stops SuiFleet and archives the old configuration, including the manifest,
+signer policy, local environment and firmware settings when present. It moves the
+standard `/var/lib/suifleet` state tree to a root-only archive beside it and
+creates an empty active state tree. The archived journal remains bound to the
+old deployment. If you used a custom state path outside that tree, keep that
+path as part of the old deployment's archive and use the default state path in
+the new enrollment template. A mounted state directory must be unmounted or
+relocated by the operator before this command can archive it. Review any
+custom systemd units or drop-ins before migration so that they cannot start a
+legacy process or redirect the packaged client to the retired manifest.
+
+Use the [first-boot enrollment workflow](CUSTOMER_ENROLLMENT.md) for the
+**destination** deployment. Install its trusted `first-boot.toml` and attach
+the private writable media containing the new claim, verified manifest and
+optional configuration template. Review the template and updater settings for
+the destination. Then run:
+
+```sh
+sudo /usr/sbin/suifleet-migrate enroll
+sudo systemctl enable --now suifleet-signer.socket suifleet-enrollment.path
+sudo systemctl start suifleet.service
+```
+
+If you configured the Yocto firmware helper for the destination deployment,
+restart its trigger with `sudo systemctl start suifleet-firmware.path`.
+
+Enrollment reuses the original signing key and installs new Device and
+DeviceCap IDs after verifying the destination deployment and claim. If it fails,
+the device remains parked. Correct the reported issue and retry with the same
+media, especially after an interrupted submission. On success the command
+prints both archive locations. Check `systemctl status suifleet.service` and
+confirm the original device address appears with the new IDs in the destination
+fleet. Retire the old registration separately through the old fleet operator.
 
 ## macOS package
 

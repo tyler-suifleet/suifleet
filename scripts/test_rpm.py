@@ -141,7 +141,7 @@ metadata_expire=0
     run("systemctl", "is-active", "suifleet-signer.service")
 
     config = CONFIG / "config.toml"
-    config.write_text("# operator config\n")
+    config.write_text('# operator config\n[device.signer]\nkind = "service"\n')
     journal = STATE / "state.json"
     journal.write_text('{"operator-sentinel":true}\n')
     os.chown(journal, daemon.pw_uid, daemon.pw_gid)
