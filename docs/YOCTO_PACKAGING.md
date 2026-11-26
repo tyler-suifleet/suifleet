@@ -256,7 +256,12 @@ the codec at local `file://` inputs that are absent, parsing still succeeds
 (SF-307): the recipe's parse-time guard skips it and names the missing files, so
 the core client and other targets still parse and build. An image or command
 that asks for `suifleet-walrus-codec` then fails with "was skipped: optional
-Walrus codec inputs not found: …". Both `suifleet-node` and the codec are also
+Walrus codec inputs not found: …". Every searched `FILESPATH` candidate is
+recorded as a parse dependency, so staging the files makes the recipe eligible on
+the next parse in the same build directory, without changing metadata or
+clearing the cache. `scripts/tests/test_yocto_codec_bitbake_cache.py` checks this
+with real BitBake: set `SUIFLEET_BITBAKE_DIRS` to colon-separated BitBake checkouts
+(it is skipped otherwise). Both `suifleet-node` and the codec are also
 skipped, with a reason, for any target other than AArch64 with
 `TCLIBC = "glibc"`. `COMPATIBLE_HOST` alone would accept `aarch64-*-linux-musl`.
 There is no fallback to another libc, architecture or source.

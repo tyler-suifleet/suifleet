@@ -385,21 +385,28 @@ class FakeData:
         return self.values.get(name)
 
 
-def which(path, item):
-    """bb.utils.which: first existing item under a colon-separated search path."""
+def which(path, item, history=False):
+    """bb.utils.which: first existing item under a colon-separated search path,
+    with the searched candidates when history is requested."""
+    searched = []
     for base in (path or '').split(':'):
         candidate = os.path.join(base, item)
-        if base and os.path.exists(candidate):
-            return candidate
-    return ''
+        searched.append(candidate)
+        if os.path.exists(candidate):
+            return (candidate, searched) if history else candidate
+    return ('', searched) if history else ''
 
 
-def run_anonymous(text, **values):
-    """Evaluate a recipe's parse-time guard; returns the skip reason or None."""
+def run_anonymous(text, depends=None, **values):
+    """Evaluate a recipe's parse-time guard; returns the skip reason or None.
+    Paths passed to bb.parse.mark_dependency are appended to depends."""
     data = dict(HOST_ARCH='aarch64', HOST_SYS='aarch64-poky-linux', TCLIBC='glibc', FILESPATH='', SRC_URI='')
     data.update(values)
-    fake_bb = types.SimpleNamespace(parse=types.SimpleNamespace(SkipRecipe=SkipRecipe),
-                                    utils=types.SimpleNamespace(which=which))
+    depends = [] if depends is None else depends
+    fake_bb = types.SimpleNamespace(
+        parse=types.SimpleNamespace(SkipRecipe=SkipRecipe,
+                                    mark_dependency=lambda d, path: depends.append(path)),
+        utils=types.SimpleNamespace(which=which))
     try:
         exec(anonymous_python(text), {'d': FakeData(**data), 'bb': fake_bb})
     except SkipRecipe as skipped:
@@ -427,6 +434,21 @@ class OptionalRuntimeParseTests(unittest.TestCase):
         for name in codec.ARTIFACTS[1:]:
             self.assertIn(name, reason)
         self.assertIn('scripts/package_walrus_codec.py', reason)
+
+    # A cached skip must be invalidated when a missing input appears: BitBake
+    # keeps only __depends for a skipped recipe, so every searched candidate,
+    # absent ones included, must be a parse dependency.
+    def test_missing_local_codec_inputs_are_parse_dependencies(self):
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
+            Path(second, codec.ARTIFACTS[0]).write_text('x')
+            depends = []
+            reason = run_anonymous(CODEC, depends=depends, SRC_URI=self.LOCAL,
+                                   FILESPATH=first + ':' + second)
+            self.assertIn('optional Walrus codec inputs not found', reason)
+            expected = [os.path.join(first, codec.ARTIFACTS[0]), os.path.join(second, codec.ARTIFACTS[0])]
+            for name in codec.ARTIFACTS[1:]:
+                expected += [os.path.join(first, name), os.path.join(second, name)]
+            self.assertEqual(depends, expected)
 
     def test_remote_codec_inputs_are_left_to_the_fetcher(self):
         remote = 'https://example.invalid/codec.tar.gz;subdir=codec'

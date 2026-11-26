@@ -31,7 +31,8 @@ packages are `suifleet-node` and `suifleet-walrus-codec`; the codec fetches its
 pinned archive when built. They are not needed to parse the layer or build
 `suifleet`. If a bbappend replaces the codec input with local `file://` files
 that are absent, the codec recipe is skipped with a reason naming them, and
-requesting it fails with that reason. Both recipes are skipped, with a reason,
+requesting it fails with that reason. Staging those files makes the recipe
+eligible on the next parse; the parse cache does not need to be cleared. Both recipes are skipped, with a reason,
 on any target other than Linux AArch64 glibc. There is no musl, 32-bit or x86
 fallback.
 

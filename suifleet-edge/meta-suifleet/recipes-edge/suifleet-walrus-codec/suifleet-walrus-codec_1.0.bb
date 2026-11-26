@@ -75,7 +75,16 @@ python () {
         raise bb.parse.SkipRecipe('the Walrus codec runs only on the glibc suifleet-node runtime; TCLIBC=%s is unsupported' % d.getVar('TCLIBC'))
     local = [entry[len('file://'):].split(';')[0]
              for entry in (d.getVar('SRC_URI') or '').split() if entry.startswith('file://')]
-    missing = [name for name in local if not bb.utils.which(d.getVar('FILESPATH'), name)]
+    # Record every searched path as a parse dependency, including absent ones
+    # (mtime 0). BitBake caches a skipped recipe with only these __depends, so
+    # without them a cached skip would survive after the files are staged.
+    missing = []
+    for name in local:
+        found, searched = bb.utils.which(d.getVar('FILESPATH'), name, history=True)
+        for path in searched:
+            bb.parse.mark_dependency(d, path)
+        if not found:
+            missing.append(name)
     if missing:
         raise bb.parse.SkipRecipe('optional Walrus codec inputs not found: %s. Build them with scripts/package_walrus_codec.py at SUIFLEET_CODEC_SOURCE_REV (docs/YOCTO_PACKAGING.md) or leave suifleet-walrus-codec out of the image' % ', '.join(missing))
 }
