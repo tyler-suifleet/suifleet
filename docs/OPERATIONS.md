@@ -739,6 +739,8 @@ audited pause/abort and schema-3 manifest/upgrade requirements.
 
 OCI container components use the existing component supervisor with a pinned-image descriptor; see [OCI_COMPONENTS.md](OCI_COMPONENTS.md) for engine provisioning, boundaries and offline recovery.
 
+An optional prototype publishes authenticated workload bundles into one administrator-delegated namespace of a customer-owned Kubernetes/k3s cluster with a narrow ServiceAccount; see [KUBERNETES_EDGE.md](KUBERNETES_EDGE.md) for the ownership/security model and unsupported cases. It is not required for Linux/Yocto pilots.
+
 The opt-in secure tunnel destination companion, its separate service identity,
 installation, revocation controls and offline real-proxy tests are documented in
 [SECURE_TUNNELING.md](SECURE_TUNNELING.md). AWS account/service and physical
