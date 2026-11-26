@@ -1,5 +1,4 @@
 [Unit]
-ConditionPathExists=!/etc/suifleet/migration.pending
 Description=SuiFleet Edge Deployment Client
 After=network-online.target suifleet-provision.service
 Wants=network-online.target

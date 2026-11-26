@@ -4,7 +4,7 @@ Use Enrollment to reserve device names and give each target a single-use bootstr
 
 ## Prerequisites
 
-Connect the fleet operator account on the intended network. Install a client with the first-boot enrollment unit and prepare the root filesystem with the public batch settings. The client provisions its own unique key at boot. Have funds for claim enrollment sponsorship and separately for ongoing device reports. Treat credential archives as secrets.
+Connect the fleet operator account on the intended network. For custom Yocto images, add the [enrollment companion layer](CUSTOMER_YOCTO.md) alongside the pinned public layer. Then install a client with the first-boot enrollment unit and prepare the root filesystem with the public batch settings. The client provisions its own unique key at boot. Have funds for claim enrollment sponsorship and separately for ongoing device reports. Treat credential archives as secrets.
 
 For already-flashed cards and USB volumes, see [Write one claim per medium](#write-one-claim-per-medium).
 
