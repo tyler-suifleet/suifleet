@@ -166,6 +166,31 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing file suifleet-edge/src/missing.txt'):
             packager.plan(self.repo.root, 'HEAD')
 
+    def test_workspace_members_in_every_supported_string_form_are_packaged(self):
+        # A literal-string member was silently dropped by the old reader: the
+        # archive declared windows-runtime but carried none of its files.
+        for members in ("['windows-runtime']", '[\n  "windows-runtime", # the runtime\n]'):
+            with self.subTest(members):
+                self.repo.write('suifleet-edge/Cargo.toml',
+                                CARGO_TOML.replace('members = ["windows-runtime"]', f'members = {members}'))
+                self.repo.commit()
+                paths = packager.plan(self.repo.root, 'HEAD')['paths']
+                self.assertIn('suifleet-edge/windows-runtime/Cargo.toml', paths)
+                self.assertIn('suifleet-edge/windows-runtime/src/lib.rs', paths)
+        # Forms the strict reader does not model are refused, never skipped.
+        for workspace in ('[workspace]\nmembers = ["windows\\u002druntime"]',
+                          '[workspace]\nmembers = ["""windows-runtime"""]',
+                          '[workspace]\n"members" = ["windows-runtime"]',
+                          '[workspace]\nmembers = "windows-runtime"',
+                          'workspace.members = ["windows-runtime"]',
+                          'workspace = { members = ["windows-runtime"] }'):
+            with self.subTest(workspace):
+                self.repo.write('suifleet-edge/Cargo.toml',
+                                CARGO_TOML.replace('[workspace]\nmembers = ["windows-runtime"]', workspace))
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, 'unsupported'):
+                    packager.plan(self.repo.root, 'HEAD')
+
     def test_runtime_state_symlinks_and_escapes_are_refused(self):
         cases = [
             ('config.toml', 'const C: &str = include_str!("../config.toml");\n', 'runtime identity/state'),
@@ -330,6 +355,45 @@ class LayerAuditTests(unittest.TestCase):
         (self.recipe_dir / 'beside.conf').write_text('x\n')
         self.write_recipe(extra='SRC_URI += "file://beside.conf"')
         self.assertTrue(any('not in the layer: beside.conf' in e for e in self.errors()), self.errors())
+
+    def test_override_specific_local_files_are_rejected(self):
+        # BitBake tries every FILESOVERRIDES subdirectory of every search
+        # directory before the unqualified ones, so files/qemuarm64/x replaces
+        # files/x on qemuarm64. The audit must not report the generic file.
+        machine = self.recipe_dir / 'files/qemuarm64'
+        machine.mkdir()
+        (machine / 'suifleet.service').write_text('[Unit]\nDescription=machine-specific\n')
+        errors = self.errors(repo=self.repo.root)
+        self.assertTrue(any('override-specific candidate' in e and 'qemuarm64' in e for e in errors), errors)
+        parsed = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        with self.assertRaisesRegex(ValueError, 'override-specific'):
+            audit.file_source(parsed, 'suifleet.service')
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        if report.get('fetch_dir'):
+            self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        self.assertFalse((Path(report.get('fetch_dir') or self.tmp.name) / 'suifleet/suifleet.service').exists())
+        # The same applies under the BPN directory and an in-layer extra path.
+        shutil.rmtree(machine)
+        bpn = self.recipe_dir / 'suifleet/raspberrypi3'
+        bpn.mkdir(parents=True)
+        (bpn / 'suifleet.service').write_text('[Unit]\n')
+        self.assertTrue(any('override-specific candidate' in e for e in self.errors()), self.errors())
+        shutil.rmtree(self.recipe_dir / 'suifleet')
+        (self.recipe_dir / 'extra/poky').mkdir(parents=True)
+        (self.recipe_dir / 'extra/poky/suifleet.service').write_text('[Unit]\n')
+        self.write_recipe(extra='FILESEXTRAPATHS:prepend := "${THISDIR}/extra:"')
+        self.assertTrue(any('override-specific candidate' in e for e in self.errors()), self.errors())
+        # Unrelated override subdirectories, and in-layer search directories
+        # nested under files/, are not candidates.
+        shutil.rmtree(self.recipe_dir / 'extra')
+        (machine / 'other.conf').parent.mkdir()
+        (machine / 'other.conf').write_text('x\n')
+        (self.recipe_dir / 'files/extra').mkdir()
+        (self.recipe_dir / 'files/extra/suifleet.service').write_text('[Unit]\n')
+        self.write_recipe(extra='FILESEXTRAPATHS:prepend := "${THISDIR}/files/extra:"')
+        self.assertEqual(self.errors(repo=self.repo.root), [])
 
     def test_conditional_source_overrides_are_rejected(self):
         cases = (

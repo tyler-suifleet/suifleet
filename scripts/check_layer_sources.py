@@ -338,9 +338,27 @@ def search_path(recipe):
 def file_source(recipe, name):
     """Return the layer file BitBake would use for file://name, or None.
 
-    Raises ValueError when the match (after following symlinks) leaves the layer."""
+    Raises ValueError when the match (after following symlinks) leaves the layer,
+    or when any search directory has an override subdirectory holding the same
+    name. BitBake's base_set_filespath tries every FILESOVERRIDES subdirectory
+    of every search directory before the unqualified directories, so such a
+    file replaces this one for some MACHINE/DISTRO/arch. The audit does not
+    model per-configuration overrides, so it rejects these candidates."""
     layer = recipe.layer.resolve()
-    for directory in search_path(recipe):
+    directories = search_path(recipe)
+    searched = {directory.resolve() for directory in directories}
+    for directory in directories:
+        if not directory.is_dir():
+            continue
+        for sub in sorted(directory.iterdir()):
+            if not sub.is_dir() or sub.resolve() in searched:
+                continue
+            candidate = sub / name
+            if candidate.is_file() or candidate.is_symlink():
+                raise ValueError(f'file:// source {name} has an override-specific candidate {candidate} '
+                                 f'that BitBake selects when FILESOVERRIDES contains {sub.name!r}; '
+                                 'machine/distro-specific local files are not supported')
+    for directory in directories:
         candidate = directory / name
         if candidate.is_file() or candidate.is_symlink():
             resolved = candidate.resolve()

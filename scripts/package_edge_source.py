@@ -71,15 +71,82 @@ def tree(repo, revision):
     return entries
 
 
+# A TOML basic string without escapes, or a literal string, on one line.
+MEMBER_STRING = re.compile(r'"([^"\\\n]*)"|\'([^\'\n]*)\'')
+WORKSPACE_HEADER = re.compile(r'^[ \t]*\[[ \t]*workspace[ \t]*\][ \t]*(?:#[^\n]*)?$', re.M)
+TABLE_HEADER = re.compile(r'^[ \t]*\[', re.M)
+# Other spellings of the workspace table: dotted/inline keys or a quoted header.
+OTHER_WORKSPACE = re.compile(r'^[ \t]*(?:["\']?workspace["\']?[ \t]*[.=]|\[[ \t]*["\']workspace["\'][ \t]*\])', re.M)
+TABLE_KEY = re.compile(r'^[ \t]*([^\s=#\[][^=\n]*?)[ \t]*=', re.M)
+
+
+def member_array(text, pos):
+    """Parse a TOML array of strings starting at text[pos].
+
+    Accepts unescaped basic strings and literal strings, separated by commas,
+    with comments, newlines and a trailing comma. Anything else raises
+    ValueError instead of silently dropping a member."""
+    def skip(i):
+        while i < len(text):
+            if text[i] in ' \t\r\n':
+                i += 1
+            elif text[i] == '#':
+                end = text.find('\n', i)
+                i = len(text) if end < 0 else end
+            else:
+                break
+        return i
+
+    def unsupported(i):
+        return ValueError(f'unsupported [workspace] members syntax near: {text[i:i + 40]!r}')
+
+    i = skip(pos)
+    if i >= len(text) or text[i] != '[':
+        raise unsupported(i)
+    members, i = [], skip(i + 1)
+    while i >= len(text) or text[i] != ']':
+        match = MEMBER_STRING.match(text, i)
+        if not match or text.startswith(('"""', "'''"), i):
+            raise unsupported(i)
+        member = match.group(1) if match.group(1) is not None else match.group(2)
+        if not member:
+            raise ValueError('empty [workspace] member')
+        members.append(member)
+        i = skip(match.end())
+        if i < len(text) and text[i] == ',':
+            i = skip(i + 1)
+        elif i >= len(text) or text[i] != ']':
+            raise unsupported(i)
+    return members
+
+
 def workspace_members(manifest):
-    """Return `[workspace] members` from a Cargo manifest (literal paths only)."""
-    section = re.search(r'^\[workspace\]\s*$(.*?)(?=^\[|\Z)', manifest, re.M | re.S)
-    if not section:
+    """Return `[workspace] members` from a Cargo manifest (literal paths only).
+
+    Python 3.10 (the dev container) has no tomllib, so this reads the one
+    supported form strictly: a single `[workspace]` table with a bare `members`
+    key whose value is an array of unescaped basic or literal strings. Other
+    spellings (dotted keys, inline tables, quoted keys or headers, escapes,
+    multi-line strings) raise ValueError, so a member is never silently
+    omitted from the archive or the fetched-layout check."""
+    other = OTHER_WORKSPACE.search(manifest)
+    if other:
+        raise ValueError(f'unsupported workspace declaration: {other.group(0).strip()}')
+    headers = list(WORKSPACE_HEADER.finditer(manifest))
+    if len(headers) > 1:
+        raise ValueError('duplicate [workspace] table')
+    if not headers:
         return []
-    match = re.search(r'^members\s*=\s*\[(.*?)\]', section.group(1), re.M | re.S)
-    if not match:
-        return []
-    members = re.findall(r'"([^"]+)"', match.group(1))
+    following = TABLE_HEADER.search(manifest, headers[0].end())
+    body = manifest[headers[0].end():following.start() if following else len(manifest)]
+    members = None
+    for key in TABLE_KEY.finditer(body):
+        name = key.group(1)
+        if name.split('.')[0].strip().strip('"\'') == 'members':
+            if name != 'members' or members is not None:
+                raise ValueError(f'unsupported [workspace] members key: {name}')
+            members = member_array(body, key.end())
+    members = members or []
     for member in members:
         if any(c in member for c in '*?[') or '..' in PurePosixPath(member).parts or member.startswith('/'):
             raise ValueError(f'unsupported workspace member pattern: {member}')
