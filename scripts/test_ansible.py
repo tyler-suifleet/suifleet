@@ -614,8 +614,10 @@ class Harness:
             unsupported=dict(vars=common, hosts={"nosystemd": dict(ansible_port=UNSUPPORTED[1], suifleet_serial="SN-0404")}))
         (self.work / "ctl/inventory.yml").write_text(json.dumps(inventory, indent=2))
 
-    def ansible_command(self, playbook, extra, tool="ansible-playbook", inventory=True, examples=None, home="ansible-home"):
+    def ansible_command(self, playbook, extra, tool="ansible-playbook", inventory=True, examples=None, home="ansible-home",
+                        env=()):
         command = ["docker", "run", "--rm", "--network", f"container:{self.chain}",
+                   *(arg for item in env for arg in ("-e", item)),
                    "-v", f"{examples or self.examples}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
                    "-v", f"{self.work / 'artifacts'}:/artifacts:ro", "-v", f"{UNITS}:/units:ro",
                    "-w", "/ansible", "-e", "ANSIBLE_CONFIG=/ansible/ansible.cfg", "-e", "ANSIBLE_FORCE_COLOR=0",
@@ -628,8 +630,8 @@ class Harness:
             command += [playbook]
         return [*command, *extra]
 
-    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True):
-        command = self.ansible_command(playbook, extra, tool=tool, inventory=inventory)
+    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True, env=()):
+        command = self.ansible_command(playbook, extra, tool=tool, inventory=inventory, env=env)
         result = subprocess.run(command, text=True, capture_output=True)
         output = result.stdout + result.stderr
         self.outputs.append(output)
@@ -1513,6 +1515,58 @@ class Harness:
         print("PASS retry restored the record from the receipt without the credential batch or a second submission;"
               " key, address and enrollment preserved (the record is verified on chain with the other enrollments)")
 
+    LITERAL_REFUSAL = "must be an absolute controller path without $"
+
+    @staticmethod
+    def task_statuses(output, task, host):
+        """The results a task reported for a host (each import's header appears even when skipped)."""
+        return {s for block in output.split(task)[1:] for s, h in TASK_RESULT.findall(block.split("\nTASK [", 1)[0])
+                if h.split(" -> ")[0] == host}  # a delegated result reads "host -> localhost"
+
+    def expanded_batch_root(self):
+        """A batch root literally named with $VAR beside the folder the variable would expand to.
+
+        Ansible expands environment references in stat paths and command
+        arguments. The named folder holds invalid TOML; its sibling (the real
+        batch) is valid and matches the manifest. The role must refuse the named
+        path, never read the sibling. Returns (extra vars, environment, cleanup)."""
+        literal = self.batch.parent / "$SF304_BATCH_ALIAS"
+        for source in (self.batch / "enrollment").iterdir():
+            folder = literal / "enrollment" / source.name
+            folder.mkdir(parents=True)
+            shutil.copyfile(source / "deployment.json", folder / "deployment.json")
+            (folder / "claim.key").write_text("not a claim\n")  # the named folder is complete but invalid
+            (folder / "enroll.toml").write_text("this is [not valid TOML\n")
+        extra = ["-e", json.dumps({"suifleet_enrollment_root": "/chain/$SF304_BATCH_ALIAS"})]
+        return extra, [f"SF304_BATCH_ALIAS={self.batch.name}"], lambda: shutil.rmtree(literal)
+
+    def expanded_root_fresh(self, vault, name="deb-ubuntu2404"):
+        """Fresh enrollment with a batch root that Ansible would expand: refused before the claim is read."""
+        container = self.hosts[name]["container"]
+        extra, env, cleanup = self.expanded_batch_root()
+        try:
+            # The real run first: check mode on a host without the client stops
+            # before enrollment, so it reaches the batch check only once the
+            # client is installed and the key provisioned (still unenrolled).
+            for mode in ([], ["--check", "--diff"]):
+                label = "check mode" if mode else "a real run"
+                output, _ = self.ansible(f"{label} refuses an expandable batch root (fresh enrollment)", "site.yml",
+                                         *mode, "--limit", name, *vault, *extra, env=env, expect_rc="nonzero")
+                assert self.LITERAL_REFUSAL in output, (name, label, "not refused by the literal-path check", output[-8000:])
+                assert "Would enroll" not in output, (name, label, "reported a pending enrollment")
+                for task in ("TASK [suifleet : Read the batch folder on the controller]",
+                             "TASK [suifleet : Stage the single-use claim key", ENROLL_TASK):
+                    assert self.task_statuses(output, task, name) <= {"skipping"}, (name, label, "reached", task)
+                for path in ("/etc/suifleet/enrollment.json", "/etc/suifleet/.enrollment.json.partial", "/run/suifleet-enroll",
+                             "/run/suifleet-enroll.lock"):
+                    assert self.exec(container, "test", "-e", path, check=False).returncode != 0, (name, label, path)
+                left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
+                assert left == "0", (name, label, "a claim transfer directory was created")
+        finally:
+            cleanup()
+        print("PASS a batch root naming $SF304_BATCH_ALIAS (invalid TOML there, a valid sibling it would expand to)"
+              " was refused before the batch was read, in check mode and a real run: no claim staged, no attempt")
+
     def mismatched_lookup_batch(self, name, vault, partial, record, staging, abandon_claim_copies):
         """An empty attempt marker with a batch folder bound to another deployment: refused before the lookup."""
         container = self.hosts[name]["container"]
@@ -1593,6 +1647,28 @@ class Harness:
                 assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, label, root, "claim remains")
             print(f"PASS an empty attempt marker with {label} was refused before the on-chain lookup (check mode"
                   " too): marker kept, no record or configuration, nothing staged and abandoned claim copies erased")
+
+        # The batch root names an environment variable that would expand to the
+        # real (valid, matching) batch; the named folder has invalid TOML.
+        extra, env, cleanup = self.expanded_batch_root()
+        sh(f"umask 077 && : > {partial}")
+        try:
+            for mode in (["--check", "--diff"], []):
+                label = "check mode" if mode else "a real run"
+                output, _ = self.ansible(f"{label} refuses a lookup with an expandable batch root", "/work/enroll-only.yml",
+                                         *mode, "--limit", name, *vault, *extra, env=env, expect_rc="nonzero")
+                assert self.LITERAL_REFUSAL in output, (name, label, "not refused by the literal-path check", output[-8000:])
+                assert "Would look up" not in output, (name, label, "reported a pending lookup")
+                for task in ("TASK [suifleet : Read the batch folder on the controller]", LOOKUP_TASK,
+                             "TASK [suifleet : Create the lookup directory]", ENROLL_TASK):
+                    assert self.task_statuses(output, task, name) <= {"skipping"}, (name, label, "reached", task)
+                assert sh(f"stat -c '%s %U:%G %a' {partial}").strip() == "0 root:root 600", (name, label, "marker changed")
+                assert absent(record) and absent("/etc/suifleet/config.toml"), (name, label, "record or configuration written")
+                assert absent(staging) and absent(transfer), (name, label, "lookup staging or claim copies left")
+        finally:
+            cleanup()
+        print("PASS an empty attempt marker with a batch root naming $SF304_BATCH_ALIAS (a valid sibling it would expand"
+              " to) was refused before the batch was read or looked up, in check mode and a real run: marker kept")
 
     def staging_after_record(self, vault, previous):
         """Enrollment stopped after the record's rename, before its cleanup: the staged claim is left behind."""
@@ -1973,6 +2049,7 @@ class Harness:
         assert all(v == {"swap": "ok", "crash": "ok"} for v in verdicts.values()), ("enrollment fixtures not accepted", verdicts)
         self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 
+        self.expanded_root_fresh(vault)
         self.overlapping_enrollment(vault)
         self.interrupted_enrollment_record(vault)
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
