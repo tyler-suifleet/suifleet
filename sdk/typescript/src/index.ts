@@ -26,6 +26,8 @@ export interface ClientOptions {
    * Whole-request deadline, started when `request` or a typed helper is called. It covers
    * reading and encoding the caller's payload, every connection attempt and the backoff between them, so a request is never
    * first sent after it expires. The daemon ends connections after 120 s.
+   * `putData` sends one request per chunk: each chunk gets its own deadline, so a
+   * whole multi-chunk upload can take longer than `timeoutMs`.
    * A finite number in (0, 2147483647] (Node's maximum timer delay); anything
    * else throws RangeError before connecting. Default 120000.
    */
@@ -393,18 +395,22 @@ export class Client {
 
   // Durable streams (SF-034).
   streamCreate(name: string, definition: StreamDefinition): Promise<{ created: string }> {
-    const payload: JsonObject = { max_size: definition.maxSize, strategy_on_full: definition.strategyOnFull ?? 'RejectNewData',
-      persistence: definition.persistence ?? 'File' };
-    if (definition.timeToLiveSeconds !== undefined) payload.time_to_live_seconds = definition.timeToLiveSeconds;
-    return this.request('stream_create', { topic: name, payload });
+    // Caller properties are read once, inside the request deadline.
+    return this.call('stream_create', () => {
+      const ttl = definition.timeToLiveSeconds;
+      const payload: JsonObject = { max_size: definition.maxSize, strategy_on_full: definition.strategyOnFull ?? 'RejectNewData',
+        persistence: definition.persistence ?? 'File' };
+      if (ttl !== undefined) payload.time_to_live_seconds = ttl;
+      return { topic: name, payload };
+    });
   }
   async streamAppend(name: string, value: JsonValue): Promise<number> {
     return (await this.request<{ sequence: number }>('stream_append', { topic: name, payload: value })).sequence;
   }
   /** Nonblocking; fewer than `minMessages` available fails with code `not-enough-messages`. */
   async streamRead(name: string, options: { start?: number; minMessages?: number; maxMessages?: number } = {}): Promise<StreamMessage[]> {
-    return (await this.request<{ messages: StreamMessage[] }>('stream_read', { topic: name,
-      payload: { start: options.start ?? 0, min: options.minMessages ?? 1, max: options.maxMessages ?? 1 } })).messages;
+    return (await this.call<{ messages: StreamMessage[] }>('stream_read', () => ({ topic: name,
+      payload: { start: options.start ?? 0, min: options.minMessages ?? 1, max: options.maxMessages ?? 1 } }))).messages;
   }
   streamDescribe(name: string): Promise<StreamDescription> { return this.request('stream_describe', { topic: name }); }
   streamDelete(name: string): Promise<{ deleted: string }> { return this.request('stream_delete', { topic: name }); }
@@ -425,10 +431,14 @@ export class Client {
   /** `null` values delete keys. `version` makes the update conditional (code `conflict`). */
   shadowUpdate(name: string, state: { desired?: JsonValue; reported?: JsonValue }, options: { version?: number; clientToken?: string } = {}):
     Promise<ShadowDocument> {
-    const payload: JsonObject = { state: state as JsonObject };
-    if (options.version !== undefined) payload.version = options.version;
-    if (options.clientToken !== undefined) payload.clientToken = options.clientToken;
-    return this.request('shadow_update', { topic: name, payload });
+    // Each option is read once, inside the request deadline; `state` is serialized there too.
+    return this.call('shadow_update', () => {
+      const { version, clientToken } = options;
+      const payload: JsonObject = { state: state as JsonObject };
+      if (version !== undefined) payload.version = version;
+      if (clientToken !== undefined) payload.clientToken = clientToken;
+      return { topic: name, payload };
+    });
   }
   shadowDelete(name = '', version?: number): Promise<JsonValue> {
     return this.request('shadow_delete', { topic: name, payload: version === undefined ? null : { version } });
@@ -440,7 +450,9 @@ export class Client {
   /**
    * Queue raw bytes for opaque storage in bounded chunks (SF-139). Returns
    * custody receipts, never a remote storage acknowledgement. On failure the
-   * DataPutError carries the upload ID and chunk to resume from.
+   * DataPutError carries the upload ID and chunk to resume from. Each chunk is a
+   * separate request with its own `timeoutMs` deadline; options and bytes are
+   * read once before the first chunk.
    */
   async putData(stream: string, key: string, data: Uint8Array, options: DataPutOptions = {}): Promise<DataPutResult> {
     const totalSize = data.length;

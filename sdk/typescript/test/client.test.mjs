@@ -278,6 +278,38 @@ test('publish serializes its payload inside the deadline: nothing is sent late',
   assert.equal(frames.length, 0, 'a publish was written after its deadline');
 });
 
+test('typed helpers read caller options inside the deadline: nothing is sent late', async (t) => {
+  const path = join(directory, 'slow-helpers.sock');
+  const frames = [];
+  const sockets = [];
+  const server = createServer((socket) => {
+    sockets.push(socket);
+    socket.on('data', (chunk) => frames.push(chunk));
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(path, resolve));
+  t.after(() => new Promise((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
+  const reads = new Map();
+  // An object whose `key` getter stalls past the 40 ms budget and counts reads.
+  const slow = (label, key, value, base = {}) => Object.defineProperty(base, key, {
+    enumerable: true,
+    get() {
+      reads.set(label, (reads.get(label) ?? 0) + 1);
+      const until = performance.now() + 100; while (performance.now() < until) { /* stall */ }
+      return value;
+    },
+  });
+  const client = new Client({ socketPath: path, component: 'svc', timeoutMs: 40 });
+  const expired = (e) => e instanceof TransportError && e.outcome === 'not_sent' && /timed out after 40 ms/.test(e.message);
+  await assert.rejects(client.streamCreate('s', slow('create', 'maxSize', 1024)), expired);
+  await assert.rejects(client.streamRead('s', slow('read', 'start', 0)), expired);
+  await assert.rejects(client.shadowUpdate('', { reported: { a: 1 } }, slow('update', 'version', 3)), expired);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(Object.fromEntries(reads), { create: 1, read: 1, update: 1 }, 'each slow option is read exactly once');
+  assert.equal(sockets.length, 0, 'a connection was opened after the deadline');
+  assert.equal(frames.length, 0, 'a request was written after its deadline');
+});
+
 test('the response wait uses only the time left after connect backoff', async (t) => {
   const path = join(directory, 'late-silent.sock');
   const client = new Client({ socketPath: path, timeoutMs: 400, connectAttempts: 3, connectRetryDelayMs: 200 });
