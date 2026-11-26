@@ -3,7 +3,10 @@
 Runs the documented shell block as written, with its fixed paths redirected
 to a scratch directory and runuser/suifleet/install replaced by stubs. A
 failed or foreign lookup must install nothing and keep the attempt marker, and
-a record is restored only beside the deployment the lookup ran under.
+a record is restored only beside the deployment the lookup ran under. The
+inputs are validated and looked up only as copies in a fresh workspace that
+the key holder can read but not write, and the receipt is captured there by
+root after the lookup exits.
 
 The procedure runs on the host, which needs Python 3.11+ (tomllib). The CI
 runner's python3 may be older, so a python3 stub runs the procedure's Python
@@ -72,8 +75,13 @@ STUBS = {
     "install": '#!/bin/sh\nargs=""\nwhile [ $# -gt 2 ]; do case "$1" in -o|-g) shift 2;; *) args="$args $1"; shift;; esac; done\n'
                'exec /usr/bin/install $args "$1" "$2"\n',
 }
+# The lookup records the workspace it ran in and its permissions, and can tamper with its
+# inputs afterwards (FAKE_TAMPER) to show that root never reads them again.
 SUIFLEET = ('#!/bin/sh\ncase "$1" in\n--derive-address) echo "$FAKE_ADDRESS";;\n'
-            '--find-enrollment) : > "$FAKE_LOOKED_UP"; printf %s "$FAKE_RECEIPT"; exit "$FAKE_RC";;\n*) exit 64;;\nesac\n')
+            '--find-enrollment) d=$(dirname "$2"); { echo "$2"; stat -c "%a %n" "$d" "$d"/*;'
+            ' test -e "$d/receipt.json" && echo receipt-exists; } > "$FAKE_LOOKED_UP";'
+            ' if [ -n "$FAKE_TAMPER" ]; then cp "$FAKE_TAMPER" "$FAKE_SRC/deployment.json"; fi;'
+            ' printf %s "$FAKE_RECEIPT"; exit "$FAKE_RC";;\n*) exit 64;;\nesac\n')
 
 
 @unittest.skipIf(PYTHON is None, "no Python 3.11+ (tomllib) outside CI")
@@ -82,7 +90,8 @@ class ManualRecovery(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="sf304-recovery-"))
         self.addCleanup(subprocess.run, ["rm", "-rf", str(self.tmp)])
         self.etc, self.lookup, self.bin = self.tmp / "etc", self.tmp / "lookup", self.tmp / "bin"
-        for d in (self.etc, self.lookup, self.bin):
+        self.run_dir = self.tmp / "run"
+        for d in (self.etc, self.lookup, self.bin, self.run_dir):
             d.mkdir()
         (self.etc / "device.key").write_text("k")
         (self.etc / ".enrollment.json.partial").write_text("")
@@ -100,16 +109,22 @@ class ManualRecovery(unittest.TestCase):
         # The procedure's /etc/suifleet paths, including the key path it requires, are redirected.
         (self.lookup / "enroll.toml").write_text(text.replace("/etc/suifleet", str(self.etc)))
 
-    def run_procedure(self, receipt, rc=0):
-        script = (procedure().replace("/etc/suifleet", str(self.etc)).replace("/run/lookup", str(self.lookup))
+    def run_procedure(self, receipt, rc=0, tamper=None):
+        script = procedure()
+        self.assertIn("/root/lookup", script)
+        self.assertIn("/run/suifleet-lookup.", script)
+        script = (script.replace("/etc/suifleet", str(self.etc)).replace("/root/lookup", str(self.lookup))
+                  .replace("/run/suifleet-lookup.", f"{self.run_dir}/suifleet-lookup.")
                   .replace("/usr/bin/suifleet", str(self.bin / "suifleet")))
         env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "FAKE_ADDRESS": ADDRESS,
                "FAKE_RECEIPT": receipt, "FAKE_RC": str(rc),
-               "FAKE_LOOKED_UP": str(self.looked_up)}
+               "FAKE_LOOKED_UP": str(self.looked_up), "FAKE_SRC": str(self.lookup),
+               "FAKE_TAMPER": str(tamper or "")}
         return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True)
 
     def assert_untouched(self, result):
         self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(self.run_dir.iterdir()), [], "the workspace was left behind")
         self.assertFalse((self.etc / "enrollment.json").exists())
         self.assertEqual((self.etc / ".enrollment.json.partial").read_text(), "")
 
@@ -142,7 +157,48 @@ class ManualRecovery(unittest.TestCase):
         self.assertEqual(record.stat().st_mode & 0o777, 0o640)
         self.assertFalse((self.etc / ".enrollment.json.partial").exists())
         self.assertFalse((self.etc / ".enrollment.json.restore").exists())
-        self.assertFalse(self.lookup.exists())
+        self.assertEqual(list(self.run_dir.iterdir()), [], "the workspace was left behind")
+
+    def test_lookup_reads_root_owned_copies_in_a_fresh_workspace(self):
+        result = self.run_procedure(LINE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = self.looked_up.read_text().splitlines()
+        workspace = Path(lines[0]).parent
+        self.assertEqual(workspace.parent, self.run_dir)
+        self.assertTrue(workspace.name.startswith("suifleet-lookup."))
+        modes = dict(reversed(line.split(" ", 1)) for line in lines[1:] if line != "receipt-exists")
+        # Readable and traversable by the key holder's group, writable only by root.
+        self.assertEqual(modes[str(workspace)], "750")
+        for name in ("enroll.toml", "deployment.json", "fleet.json"):
+            self.assertEqual(modes[str(workspace / name)], "640", name)
+        self.assertEqual(len(modes), 4, modes)
+        # Root writes the receipt only after the lookup exited.
+        self.assertNotIn("receipt-exists", lines)
+        self.assertFalse(workspace.exists())
+
+    def test_inputs_changed_during_the_lookup_are_not_used(self):
+        # The lookup and validation used the workspace copies; a later change to the
+        # input folder has no effect on the restored record or the binding.
+        other = self.tmp / "other.json"
+        other.write_text(json.dumps(OTHER))
+        result = self.run_procedure(LINE, tamper=other)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+
+    def test_symlinked_or_special_inputs_are_refused(self):
+        secret = self.tmp / "secret"
+        secret.write_text(json.dumps(FLEET))
+        (self.lookup / "deployment.json").unlink()
+        (self.lookup / "deployment.json").symlink_to(secret)
+        result = self.run_procedure(LINE)
+        self.assert_untouched(result)
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+        (self.lookup / "deployment.json").unlink()
+        os.mkfifo(self.lookup / "deployment.json")
+        result = self.run_procedure(LINE)
+        self.assert_untouched(result)
+        self.assertIn("not a regular file", result.stderr)
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
 
     def test_matching_attempt_binding_is_kept(self):
         # The next run configures the host only under the deployment the attempt enrolled under.

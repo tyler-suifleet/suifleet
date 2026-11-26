@@ -448,20 +448,52 @@ allows it). The role does not check the controller.
 
   To restore a record by hand (for example after a truncated receipt, or a
   configured host with no record), first make sure no play targets the host.
-  Copy the host's `enroll.toml` and `deployment.json`, but not `claim.key`,
-  into `/run/lookup`, a directory the key holder can read, together with a
-  copy of the manifest `suifleet_manifest_src` names, as `fleet.json`, and run
-  this as root. It needs Python 3.11 or later (for `tomllib`) on the host;
-  Debian 12 and Ubuntu 24.04 have it. The restored IDs are used with
-  `fleet.json`, so the lookup's `deployment.json` must describe the same deployment (only its node URLs,
-  `rpc_url` and `rpc_urls`, may differ, as below), and `enroll.toml` must use
-  it and the device's own key.
+  As root, copy the host's `enroll.toml` and `deployment.json`, but not
+  `claim.key`, into `/root/lookup`, together with a copy of the manifest
+  `suifleet_manifest_src` names, as `fleet.json`. `/root/lookup` must be a
+  directory that only root can write (root's home is 0700 by default); do not
+  put the inputs anywhere the key holder can write. Then run the block below as
+  root. It needs Python 3.11 or later (for `tomllib`) on the host; Debian 12 and
+  Ubuntu 24.04 have it. The restored IDs are used with `fleet.json`, so the
+  lookup's `deployment.json` must describe the same deployment (only its node
+  URLs, `rpc_url` and `rpc_urls`, may differ, as below), and `enroll.toml` must
+  use it and the device's own key.
+
+  The block does not read the inputs in place. It copies them, as regular
+  files that are not symlinks, into a fresh workspace that root creates under
+  `/run` (`mktemp`, owned by root, mode 0750 with the key holder's group). The
+  copied files are root-owned with mode 0640, so the key holder can read them
+  but cannot replace or change them. It then validates those copies, and the
+  lookup reads the same bytes. The lookup's output is captured by root after
+  the command exits and written into that workspace, which the key holder
+  cannot write, before it is validated and installed. The workspace is removed
+  on exit; remove `/root/lookup` yourself afterwards.
 
   ```sh
   sh -eu <<'EOF'
-  dir=/run/lookup
+  src=/root/lookup
   binding=/etc/suifleet/.enrollment.json.partial.deployment
   test ! -e /etc/suifleet/enrollment.json
+  holder=$(stat -c %U /etc/suifleet/device.key)
+  dir=$(mktemp -d /run/suifleet-lookup.XXXXXX)
+  trap 'rm -rf "$dir"' EXIT
+  chgrp "$(id -gn "$holder")" "$dir"
+  chmod 0750 "$dir"
+  python3 -I -c 'import os, stat, sys
+  src, dst = sys.argv[1:3]
+  for name in ("enroll.toml", "deployment.json", "fleet.json"):
+      fd = os.open(os.path.join(src, name), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+      with os.fdopen(fd, "rb") as f:
+          if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+              sys.exit(name + " is not a regular file")
+          data = f.read()
+      out = os.open(os.path.join(dst, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+      with os.fdopen(out, "wb") as f:
+          f.write(data)' "$src" "$dir"
+  for name in enroll.toml deployment.json fleet.json; do
+    chgrp "$(id -gn "$holder")" "$dir/$name"
+    chmod 0640 "$dir/$name"
+  done
   want=$(sha256sum < "$dir/fleet.json" | cut -c1-64)
   if test -e "$binding" && test "$(cat "$binding")" != "$want"; then
     echo "the attempt enrolled under another deployment: use its manifest as fleet.json" >&2
@@ -484,10 +516,10 @@ allows it). The role does not check the controller.
   if (c.get("manifest_path") != "deployment.json" or "signer" in c
           or c.get("keypair_path") != "/etc/suifleet/device.key"):
       sys.exit("enroll.toml must use deployment.json and /etc/suifleet/device.key")' "$dir"
-  holder=$(stat -c %U /etc/suifleet/device.key)
   address=$(runuser -u "$holder" -- /usr/bin/suifleet --derive-address /etc/suifleet/device.key)
-  runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment "$dir/enroll.toml" > "$dir/receipt.json"
-  python3 -c 'import json, re, sys
+  receipt=$(runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment "$dir/enroll.toml")
+  (umask 077 && printf '%s\n' "$receipt" > "$dir/receipt.json")
+  python3 -I -c 'import json, re, sys
   text = open(sys.argv[1]).read()
   r = json.loads(text) if re.fullmatch(r"\{[^\n]*\}\n?", text) else {}
   ids = [r.get(k, "") for k in ("device_object_id", "device_cap_id", "owner_cap_id")]
@@ -504,11 +536,11 @@ allows it). The role does not check the controller.
   sync -f /etc/suifleet/.enrollment.json.restore
   ln /etc/suifleet/.enrollment.json.restore /etc/suifleet/enrollment.json
   rm -f /etc/suifleet/.enrollment.json.restore /etc/suifleet/.enrollment.json.partial
-  rm -r "$dir"
   EOF
   ```
 
-  Before it changes anything it refuses an attempt binding for another
+  Before it changes anything it refuses an input in `/root/lookup` that is a
+  symlink or not a regular file, an attempt binding for another
   deployment than `fleet.json`, a lookup `deployment.json` that differs from
   `fleet.json` in more than its node URLs, and an `enroll.toml` that names
   another manifest or key or has a `[signer]` table. It then installs the
@@ -541,8 +573,8 @@ allows it). The role does not check the controller.
      keep the file. Reload the page: if the serial now shows *Consumed,
      pending binding* or *Bound*, the attempt used the claim. A node that pruned the event still cannot
      find it, so run the lookup against a trusted full node of the same
-     network that retains it: set `rpc_url` (and `rpc_urls`) in the lookup
-     copy of `deployment.json` to that node (the lookup checks the chain
+     network that retains it: set `rpc_url` (and `rpc_urls`) in
+     `/root/lookup/deployment.json` to that node (the lookup checks the chain
      identifier) and restore the record by hand as above. If no trusted node
      retains the event, keep the file and escalate; never remove it, issue a
      new claim or enroll again. If the serial still shows *Funded, unused*,
