@@ -62,6 +62,11 @@ MONITOR_TOKEN = re.compile(TOKEN_PREFIX + r"[A-Za-z0-9_-]{43}")
 NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
 DEVICE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
+# The console lists at most CONSOLE_MAX_REASONS health reasons and, when there
+# are more, appends exactly one "N more problems" summary
+# (suifleet-edge/src/console.rs MAX_REASONS and the health operation).
+CONSOLE_MAX_REASONS = 32
+REASON_SUMMARY = re.compile(r"([1-9][0-9]{0,9}) more problems")
 PHASES = ("starting", "running", "backoff", "stopping", "stopped", "exited", "broken", "installed", "unconfirmed")
 FORBIDDEN_HEADERS = {"host", "content-length", "content-type", "transfer-encoding", "connection"}
 
@@ -739,6 +744,24 @@ def _paged(console, operation, key, max_pages, consume):
             return True
 
 
+def reason_count(reasons):
+    """(total current reasons, whether that total is only a lower bound).
+
+    The console's list is capped: past CONSOLE_MAX_REASONS it ends with one
+    "N more problems" summary standing for N further reasons, so the list
+    length alone would stop rising as health worsens. Recognise the summary
+    only in the exact position the console emits it; any other over-limit
+    list is counted as observed and flagged as a lower bound.
+    """
+    if len(reasons) <= CONSOLE_MAX_REASONS:
+        return len(reasons), False
+    if len(reasons) == CONSOLE_MAX_REASONS + 1 and isinstance(reasons[-1], str):
+        summary = REASON_SUMMARY.fullmatch(reasons[-1])
+        if summary:
+            return CONSOLE_MAX_REASONS + int(summary.group(1)), False
+    return len(reasons), True
+
+
 def collect(console):
     """One bounded console read: current health, inventory and journal outcomes."""
     health = console.call("health")
@@ -750,7 +773,8 @@ def collect(console):
     if last_success is not None and not _count(last_success):
         raise ConsoleError("malformed")
     version = health.get("daemon_version")
-    snapshot = dict(healthy=health["health"] == "healthy", reasons=len(health["reasons"]),
+    reasons, reasons_truncated = reason_count(health["reasons"])
+    snapshot = dict(healthy=health["health"] == "healthy", reasons=reasons, reasons_truncated=reasons_truncated,
                     uptime=health["uptime_ms"] / 1000, pending=health["pending_receipts"],
                     sync_failures=health["sync"]["consecutive_failures"],
                     sync_success=None if last_success is None else last_success / 1000,
@@ -898,7 +922,8 @@ class Exporter:
             return out
         m("suifleet_daemon_info", "gauge", "Daemon version reported by the local console.").add(1, version=s["version"])
         m("suifleet_device_healthy", "gauge", "Current: 1 when the daemon judges the device healthy, 0 when degraded.").add(int(s["healthy"]))
-        m("suifleet_device_health_reasons", "gauge", "Current: number of degraded reasons (texts are not exported).").add(s["reasons"])
+        m("suifleet_device_health_reasons", "gauge", "Current: number of degraded reasons, including those the console summarizes as \"N more problems\" (texts are not exported).").add(s["reasons"])
+        m("suifleet_device_health_reasons_truncated", "gauge", "Current: 1 when the console's reason list exceeded its limit without a recognizable summary, so suifleet_device_health_reasons is a lower bound.").add(int(s["reasons_truncated"]))
         m("suifleet_device_uptime_seconds", "gauge", "Current: daemon uptime.", "s").add(s["uptime"])
         m("suifleet_device_pending_receipts", "gauge", "Current: deployment outcomes not yet reported on chain.").add(s["pending"])
         m("suifleet_device_sync_consecutive_failures", "gauge", "Current: consecutive failed chain synchronizations.").add(s["sync_failures"])

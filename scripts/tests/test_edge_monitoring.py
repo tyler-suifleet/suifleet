@@ -572,6 +572,46 @@ class AdapterTests(Base):
         cfg = em.Config(raw)
         return cfg, em.Exporter(cfg), em.Console(cfg.console_url, cfg.console_token)
 
+    def reason_metrics(self, reasons):
+        self.console.health["reasons"] = reasons
+        cfg, exporter, console = self.make()
+        self.assertTrue(exporter.poll(console))
+        text = exporter.render_prometheus().decode()
+        count = truncated = None
+        for line in text.splitlines():
+            if line.startswith("suifleet_device_health_reasons{"):
+                count = int(line.rsplit(" ", 1)[1])
+            elif line.startswith("suifleet_device_health_reasons_truncated{"):
+                truncated = int(line.rsplit(" ", 1)[1])
+        samples = "\n".join(line for line in text.splitlines() if not line.startswith("#"))
+        self.assertNotIn("more problems", samples)   # reason texts are never exported
+        self.assertNotIn("problem 0", samples)
+        return count, truncated
+
+    def test_summarized_health_reasons_keep_the_authoritative_total(self):
+        # The console caps the list at 32 and appends one "N more problems"
+        # summary (suifleet-edge/src/console.rs). The metric must keep rising
+        # as health worsens instead of sticking at the list length (33).
+        listed = [f"problem {i}" for i in range(em.CONSOLE_MAX_REASONS)]
+        self.assertEqual(self.reason_metrics(listed + ["68 more problems"]), (100, 0))
+        self.assertEqual(self.reason_metrics(listed + ["118 more problems"]), (150, 0))
+        self.assertEqual(self.reason_metrics(listed + ["1 more problems"]), (33, 0))
+        self.assertEqual(self.reason_metrics(listed), (32, 0))
+        self.assertEqual(self.reason_metrics(listed[:3]), (3, 0))
+        self.assertEqual(self.reason_metrics([]), (0, 0))
+
+    def test_unrecognized_over_limit_reasons_are_a_flagged_lower_bound(self):
+        listed = [f"problem {i}" for i in range(em.CONSOLE_MAX_REASONS)]
+        # Not the console's summary shape or position: counted as observed and
+        # flagged, never trusted as a total.
+        for extra in (["problem x"], ["0 more problems"], ["-5 more problems"], ["12345678901 more problems"],
+                      [" 7 more problems"], ["7 more problems", "8 more problems"]):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.reason_metrics(listed + extra), (len(listed) + len(extra), 1))
+        # A summary-looking text inside an unsummarized list is an ordinary reason.
+        self.assertEqual(self.reason_metrics(["9 more problems"]), (1, 0))
+        self.assertEqual(em.reason_count(listed + [7]), (33, True))
+
     def test_metrics_distinguish_current_historical_and_evidence(self):
         cfg, exporter, console = self.make()
         self.assertTrue(exporter.poll(console))
@@ -2061,6 +2101,12 @@ class DocumentedAlertTests(unittest.TestCase):
         after = rules[rules.index("- alert: SuiFleetDeploymentFailed"):]
         nxt = after.find("- alert:", 1)
         return after if nxt < 0 else after[:nxt]
+
+    def test_reason_summary_matches_the_console_source(self):
+        console = (Path(__file__).resolve().parents[2] / "suifleet-edge/src/console.rs").read_text()
+        self.assertIn(f"const MAX_REASONS: usize = {em.CONSOLE_MAX_REASONS};", console)
+        self.assertIn('reasons.push(format!("{more} more problems"))', console)
+        self.assertIn("reasons.iter().take(MAX_REASONS)", console)
 
     def test_outcomes_are_exported_as_a_gauge(self):
         # A gauge can fall; counter functions would read a fall as a reset.
