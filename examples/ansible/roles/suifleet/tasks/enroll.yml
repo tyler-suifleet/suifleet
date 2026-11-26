@@ -94,7 +94,7 @@
             fail_msg: >-
               {{ inventory_hostname }} has /etc/suifleet/config.toml but no
               /etc/suifleet/enrollment.json. It is already enrolled or was configured
-              by hand. Restore the record from its existing IDs (docs/ANSIBLE.md#recovery);
+              by hand. Restore the record with suifleet --find-enrollment (docs/ANSIBLE.md#recovery);
               never issue it a new claim.
 
         # The enrollment command prints its receipt only after the transaction
@@ -112,23 +112,108 @@
         # An empty file means the attempt printed nothing. The command prints only
         # after its transaction committed and was processed, so the response may
         # have been lost (or the host stopped) after the chain committed: the
-        # outcome is unknown, and only the chain can settle it.
-        - name: Stop on an enrollment attempt with an unknown outcome
-          ansible.builtin.assert:
-            that: suifleet_enrollment_partial.stat.size > 0
-            quiet: true
-            fail_msg: >-
-              {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
-              an earlier enrollment attempt printed no receipt, and it may still have
-              enrolled the device on chain. The role will not stage a claim or submit
-              again. Settle it on chain (docs/ANSIBLE.md#recovery): restore the record
-              if the device is enrolled; otherwise revoke the claim, and remove the file
-              only after the revocation succeeded. An unused label on the Enrollment
-              page alone is not enough: the attempt may still commit.
-          when: suifleet_enrollment_partial.stat.exists
+        # outcome is unknown, and only the chain can settle it. A read-only
+        # lookup (no claim, nothing submitted) finds this key's enrollment under
+        # the batch's policy and prints the same receipt, which the checks below
+        # verify and promote. Finding none settles nothing: the node's history
+        # may be pruned, and an attempt still pending may commit later.
+        - name: Look up an attempt that printed no receipt on chain
+          when:
+            - suifleet_enrollment_partial.stat.exists
+            - suifleet_enrollment_partial.stat.size == 0
+          block:
+            - name: Report the pending on-chain lookup
+              ansible.builtin.debug:
+                msg: >-
+                  Would look up {{ inventory_hostname }}'s enrollment on chain, after an
+                  attempt that printed no receipt, and restore the record if it enrolled.
+              changed_when: true
+              when: ansible_check_mode
+
+            - name: Look up the device's enrollment
+              when: not ansible_check_mode
+              block:
+                - name: Require the batch folder for the lookup
+                  ansible.builtin.assert:
+                    that:
+                      - suifleet_enrollment_root | length > 0
+                      - suifleet_serial is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+                    quiet: true
+                    fail_msg: >-
+                      {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
+                      an earlier enrollment attempt printed no receipt. Set
+                      suifleet_enrollment_root and suifleet_serial so the role can look its
+                      enrollment up on chain (enroll.toml and deployment.json; the claim is
+                      not used), or settle it as in docs/ANSIBLE.md#recovery.
+
+                - name: Create the lookup directory
+                  ansible.builtin.file:
+                    path: "{{ suifleet_enroll_staging }}"
+                    state: directory
+                    owner: "{{ suifleet_key.stat.pw_name }}"
+                    group: "{{ suifleet_key.stat.gr_name }}"
+                    mode: "0700"
+
+                - name: Stage the enrollment configuration and manifest for the lookup
+                  ansible.builtin.copy:
+                    src: "{{ batch }}/{{ item }}"
+                    dest: "{{ suifleet_enroll_staging }}/{{ item }}"
+                    owner: "{{ suifleet_key.stat.pw_name }}"
+                    group: "{{ suifleet_key.stat.gr_name }}"
+                    mode: "0600"
+                  loop: [enroll.toml, deployment.json]
+
+                # Read-only: the current key holder signs nothing and the claim
+                # file is never read. Exit 3: no enrollment in retained history.
+                - name: Find this key's enrollment on chain
+                  ansible.builtin.command:
+                    argv:
+                      - runuser
+                      - -u
+                      - "{{ suifleet_key.stat.pw_name }}"
+                      - --
+                      - /usr/bin/suifleet
+                      - --find-enrollment
+                      - "{{ suifleet_enroll_staging }}/enroll.toml"
+                  register: suifleet_enrollment_lookup
+                  changed_when: false
+                  failed_when: false
+              always:
+                - name: Erase the lookup directory
+                  ansible.builtin.file:
+                    path: "{{ suifleet_enroll_staging }}"
+                    state: absent
+
+            - name: Stop on an enrollment attempt with an unknown outcome
+              ansible.builtin.assert:
+                that: suifleet_enrollment_lookup.rc == 0
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
+                  an earlier enrollment attempt printed no receipt, and it may still enroll
+                  the device on chain. The on-chain lookup found no enrollment for this
+                  device's key ({{ suifleet_enrollment_lookup.stderr | default('') | trim }}).
+                  The role will not stage a claim or submit again. Settle it on chain
+                  (docs/ANSIBLE.md#recovery): revoke the claim, and remove the file only
+                  after the revocation succeeded. An unused label on the Enrollment page
+                  alone is not enough: the attempt may still commit.
+              when: not ansible_check_mode
+
+            # The checks below verify it like any receipt; the file stays the
+            # attempt marker until the record is promoted.
+            - name: Keep the receipt the lookup found in the attempt marker
+              ansible.builtin.copy:
+                content: "{{ suifleet_enrollment_lookup.stdout }}\n"
+                dest: /etc/suifleet/.enrollment.json.partial
+                owner: root
+                group: root
+                mode: "0600"
+              when: not ansible_check_mode
 
         - name: Recover the record from an interrupted enrollment
-          when: suifleet_enrollment_partial.stat.exists
+          when:
+            - suifleet_enrollment_partial.stat.exists
+            - not (ansible_check_mode and suifleet_enrollment_partial.stat.size == 0)
           block:
             - name: Read the interrupted enrollment output
               ansible.builtin.slurp:
@@ -155,7 +240,7 @@
                   from an earlier enrollment attempt, but it is not a complete receipt
                   for this device's key. That enrollment may already have used the
                   claim on chain, so the role will not submit again or overwrite the
-                  file. Restore the record from the Enrollment page's IDs
+                  file. Restore the record from suifleet --find-enrollment
                   (docs/ANSIBLE.md#recovery); never issue it a new claim.
 
             - name: Report the pending record recovery

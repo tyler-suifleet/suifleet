@@ -379,37 +379,50 @@ allows it). The role does not check the controller.
   run never submits again or overwrites it: it restores the record from a
   complete receipt for the device's own key, without needing the credential
   batch. Any other non-empty content (for example a truncated file, or a
-  receipt for another key) stops the run before the claim is staged. Then use
-  the Enrollment page, which shows the device as *Enrolled* with its IDs under
-  *Technical details*; restore the record as root and run the play:
-
-  ```sh
-  install -m 0640 -o root -g suifleet /dev/stdin /etc/suifleet/enrollment.json <<'EOF'
-  {"device_address":"0x…","device_cap_id":"0x…","device_object_id":"0x…","digest":"…","owner_cap_id":"0x…"}
-  EOF
-  rm /etc/suifleet/.enrollment.json.partial
-  ```
+  receipt for another key) stops the run before the claim is staged.
 
   The role creates the partial file exclusively, and flushes it to disk,
   before it runs the enrollment command, so every attempt leaves it. An empty
   partial file means the attempt printed nothing, and its outcome is unknown:
   the command prints only after its transaction committed, so a lost response
   or a host stopped at the wrong moment leaves an enrolled device with no
-  receipt. The enrollment transaction has no expiration, so an attempt that
-  has not committed yet (for example one still pending at the node) may still
-  commit later. The run stops before staging a claim or submitting again, and
-  keeps the file until the chain settles the outcome:
+  receipt. The next run then looks the enrollment up on chain with
+  `suifleet --find-enrollment`, a read-only command that never reads the claim
+  or submits anything. It uses the host's folder in the credential batch
+  (`enroll.toml` and `deployment.json`; `claim.key` is not used), runs as the
+  device key's holder, and finds the `DeviceEnrolled` event that this device
+  key sent under the batch's policy, checks that the DeviceCap is owned by and
+  bound to the key and that the registry still trusts it, and prints the same
+  receipt as the enrollment command. The role verifies that receipt like any
+  other and restores the record from it, keeping the device's key and
+  identity. It never enrolls again.
 
-  1. Reload the Enrollment page and look up the host's claim (its serial). If
-     it shows *Enrolled* (*Consumed, pending binding* or *Bound*), restore the
-     record from its IDs as above.
-  2. Otherwise revoke the claim (*Lost a credential file?*, then *Revoke lost
-     claims* for that serial). Revocation removes the claim from the policy in
-     a transaction ordered with the enrollment, so it either succeeds, and the
-     earlier attempt can then never commit, or fails because that attempt
-     already used the claim. If it fails, reload the page and go back to
-     step 1.
-  3. Only after the revocation succeeded and the page shows *Revoked*, remove
+  To restore a record by hand (for example after a truncated receipt), copy
+  the host's `enroll.toml` and `deployment.json`, but not `claim.key`, into a
+  directory the key holder can read, run the lookup as that user, and install
+  its output as the record:
+
+  ```sh
+  holder=$(stat -c %U /etc/suifleet/device.key)
+  runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment /run/lookup/enroll.toml > /run/lookup/receipt.json
+  install -m 0640 -o root -g suifleet /run/lookup/receipt.json /etc/suifleet/enrollment.json
+  rm -r /run/lookup /etc/suifleet/.enrollment.json.partial
+  ```
+
+  The lookup exits with status 3 when the node's retained history holds no
+  enrollment by this key. That does not settle an attempt: the history may be
+  pruned, and the enrollment transaction has no expiration, so an attempt that
+  has not committed yet (for example one still pending at the node) may still
+  commit later. The run then stops before staging a claim or submitting again,
+  and keeps the file until the chain settles the outcome:
+
+  1. Revoke the claim on the Enrollment page (*Lost a credential file?*, then
+     *Revoke lost claims* for the host's serial). Revocation removes the claim
+     from the policy in a transaction ordered with the enrollment, so it
+     either succeeds, and the earlier attempt can then never commit, or fails
+     because that attempt already used the claim. If it fails, run the play
+     again: the lookup now finds the enrollment and restores the record.
+  2. Only after the revocation succeeded and the page shows *Revoked*, remove
      the empty file as root, reissue the serial (*Remove reservations to
      reissue*, reserve it again and download its new folder into the
      credential batch) and run the play again:
@@ -418,11 +431,12 @@ allows it). The role does not check the controller.
      rm /etc/suifleet/.enrollment.json.partial
      ```
 
-  Never remove the file because the page shows *Funded, unused*: that label
-  describes the chain as last read (an open page refreshes it only once a
-  minute), not an attempt that may still commit. Never re-register the
-  revoked claim (*Re-register withdrawn claims*): registering it again would
-  let that attempt commit.
+  Never remove the file because the page shows *Funded, unused*, or because
+  the lookup found nothing: the page describes the chain as last read (an
+  open page refreshes it only once a minute), and neither describes an
+  attempt that may still commit. Never re-register the revoked claim
+  (*Re-register withdrawn claims*): registering it again would let that
+  attempt commit.
   Never issue an enrolled device a new claim, and never replace its key.
 - **Enrollment lock.** One play at a time enrolls a host: it holds
   `/run/suifleet-enroll.lock` from the cleanup of an interrupted run's claim
