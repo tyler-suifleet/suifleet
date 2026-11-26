@@ -1,3 +1,4 @@
 # Pi BSP's FAT boot and ext4 root layout with stable filesystem identifiers.
-part /boot --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 4096 --size 100 --fsuuid 0x5355464C
+# Invariant formatting fixes the FAT root volume label timestamps.
+part /boot --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 4096 --size 100 --fsuuid 0x5355464C --mkfs-extraopts="--invariant -S 512"
 part / --source rootfs --ondisk mmcblk0 --fstype=ext4 --label root --align 4096 --fsuuid 3f739816-2f8f-4d7a-9433-131e18dd365c
