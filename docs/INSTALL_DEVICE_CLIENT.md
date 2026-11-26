@@ -37,7 +37,7 @@ Do not install unverified binaries.
 
 | Platform | How to get it | Status |
 |---|---|---|
-| Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
+| Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) and [starter image build and verification](CUSTOMER_PI_IMAGE.md#reusable-testnet-starter-image) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
 | Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
 | Rocky Linux 10 (x86_64, systemd, Linux ≥6.5) | [RPM packaging](RPM_PACKAGING.md) | Buildable RPM and signed repository staging; public repository pending |
