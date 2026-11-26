@@ -102,8 +102,13 @@ the committed result matches.
 checks every `subdir=`/`destsuffix=` destination and `S`. Each must be a plain
 relative path that stays inside the recipe's unpack directory after following
 symlinks. A failure stops that recipe before anything is downloaded or
-written. Each destination is checked again just before writing, in case an
-earlier source unpacked a symlink on the path.
+written. The recipe's unpack directory itself must be a new, plain `PN` name
+directly inside the scratch directory (no separators, `..`, or existing entry).
+Each destination is checked again just before writing, in case an earlier
+source unpacked a symlink on the path. A loose file (a `file://` entry, or an
+https source that is not unpacked) is created exclusively without following
+links: an existing file or link at the final name is reported, not written
+through.
 
 It then downloads each non-crate source into a new directory. Downloads send
 no Authorization header and don't read `.netrc`. Git uses an empty credential

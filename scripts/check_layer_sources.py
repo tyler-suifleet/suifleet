@@ -25,12 +25,14 @@ Static checks (always):
 --repo checks SRCREV in a Git checkout: Cargo.lock digest, crate version,
 LICENSE md5 and the generated crate include (names, versions and checksums).
 
---fetch skips recipes with static findings. For the rest it first confines
-every subdir=/destsuffix= destination and S to the recipe's unpack directory
-(plain relative paths, resolved through symlinks), then downloads every
+--fetch skips recipes with static findings. For the rest it first requires
+the unpack directory to be a new plain PN name inside the scratch directory and
+confines every subdir=/destsuffix= destination and S to it (plain relative
+paths, resolved through symlinks), then downloads every
 non-crate source with no credentials into a new directory, verifies its
 SHA-256 before unpacking, re-checks each destination before writing, unpacks
-it as BitBake would, copies layer file:// entries and checks the resulting
+it as BitBake would, creates loose files exclusively without following links
+(file:// entries and unpack=0 downloads) and checks the resulting
 S: license checksums, the daemon lockfile/version/crate include/workspace
 members/include targets, and the codec's exact pinned file set and provenance.
 --cargo additionally runs `cargo metadata --offline --locked --no-deps`.
@@ -485,6 +487,41 @@ def confined(root, rel, what):
     return path
 
 
+def write_new(root, rel, source):
+    """Copy source to a new file root/rel: the parent must resolve inside root and
+    the final name must not exist, so nothing is written through a link."""
+    parent = confined(root, PurePosixPath(rel).parent.as_posix(), 'unpack destination')
+    name = PurePosixPath(rel).name
+    if name in ('', '.', '..'):
+        raise ValueError(f'unpack destination {rel!r} has no file name')
+    parent.mkdir(parents=True, exist_ok=True)
+    directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        except FileExistsError:
+            raise ValueError(f'unpack destination {rel!r} already exists; refusing to write through or over it') from None
+    finally:
+        os.close(directory)
+    with os.fdopen(fd, 'wb') as out, open(source, 'rb') as data:
+        shutil.copyfileobj(data, out)
+
+
+RESERVED_WORKDIR_NAMES = ('downloads', 'cargo-home')
+
+
+def unpack_root(workdir, pn):
+    """The recipe's new unpack directory: a single plain name directly inside workdir."""
+    workdir = Path(workdir).resolve()
+    if (pn in ('', '.', '..', *RESERVED_WORKDIR_NAMES) or '/' in pn or '\\' in pn or '${' in pn
+            or pn != pn.strip() or '\0' in pn):
+        raise ValueError(f'PN {pn!r} is not a usable unpack directory name')
+    unpack = workdir / pn
+    if unpack.is_symlink() or unpack.exists():
+        raise ValueError(f'unpack directory for PN {pn!r} already exists')
+    return unpack
+
+
 def unpack_plan(recipe, unpack):
     """Validate every metadata-derived destination before anything is written."""
     plan = []
@@ -494,7 +531,8 @@ def unpack_plan(recipe, unpack):
             continue
         if scheme == 'file':
             source = file_source(recipe, recipe.expand(url[len('file://'):]))
-            plan.append((url, params, scheme, source and confined(unpack, PurePosixPath(params.get('subdir', ''), source.name).as_posix(), 'file:// subdir')))
+            rel = PurePosixPath(params.get('subdir', ''), source.name).as_posix() if source else None
+            plan.append((url, params, scheme, rel and (confined(unpack, rel, 'file:// subdir'), rel)))
         elif scheme in ('git', 'gitsm'):
             plan.append((url, params, scheme, confined(unpack, params.get('destsuffix', 'git'), 'destsuffix')))
         else:
@@ -510,21 +548,22 @@ def unpack_plan(recipe, unpack):
 
 def fetch_recipe(recipe, workdir, cargo=None):
     errors, fetched = [], []
-    unpack = Path(workdir) / recipe.get('PN')
-    downloads = Path(workdir) / 'downloads'
-    recipe.vars.update(UNPACKDIR=str(unpack), WORKDIR=str(unpack))
+    downloads = Path(workdir).resolve() / 'downloads'
     try:
+        unpack = unpack_root(workdir, recipe.get('PN'))
+        recipe.vars.update(UNPACKDIR=str(unpack), WORKDIR=str(unpack))
         plan, s_dir = unpack_plan(recipe, unpack)
     except ValueError as error:
         return [f'{recipe.path.name}: {error}; nothing fetched'], fetched
-    unpack.mkdir(parents=True)
+    unpack.mkdir()
     downloads.mkdir(exist_ok=True)
     for url, params, scheme, destination in plan:
         if scheme == 'file':
             if destination:
-                destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'file:// subdir')
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(file_source(recipe, recipe.expand(url[len('file://'):])), destination)
+                try:
+                    write_new(unpack, destination[1], file_source(recipe, recipe.expand(url[len('file://'):])))
+                except ValueError as error:
+                    errors.append(f'{recipe.path.name}: {error}')
             continue
         # Re-resolve: an earlier archive may have created a symlink on the path.
         destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
@@ -552,7 +591,10 @@ def fetch_recipe(recipe, workdir, cargo=None):
         if TARBALL.search(name) and params.get('unpack', '1') == '1':
             safe_extract(target, destination)
         else:
-            shutil.copyfile(target, destination / name)
+            try:
+                write_new(unpack, os.path.relpath(destination / name, unpack.resolve()), target)
+            except ValueError as error:
+                errors.append(f'{recipe.path.name}: {error}')
     errors += fetched_state_errors(recipe, unpack)
     try:
         s_dir = confined(unpack, os.path.relpath(s_dir, unpack.resolve()), 'S')

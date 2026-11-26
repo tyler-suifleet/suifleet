@@ -484,6 +484,73 @@ class LayerAuditTests(unittest.TestCase):
             (root / 'pn/hop').symlink_to(outside.parent)
             audit.confined(root / 'pn', 'hop/escaped', 'subdir')
 
+    def test_unpack_root_must_be_a_new_plain_name_in_the_scratch_directory(self):
+        outside = Path(self.tmp.name) / 'escaped'
+        for pn in ('../escaped', f'{outside}', 'a/b', '..', 'downloads'):
+            with self.subTest(pn=pn):
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                recipe.vars['PN'] = pn
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('fetched')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertTrue(any('not a usable unpack directory name' in e and 'nothing fetched' in e for e in errors), errors)
+                self.assertEqual((fetched, list(workdir.iterdir())), ([], []))
+                self.assertFalse(outside.exists())
+        # An existing entry (here a symlink leaving the scratch directory) is never reused.
+        workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        (workdir / 'suifleet').symlink_to(outside)
+        recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        with mock.patch.object(audit, 'download', side_effect=AssertionError('fetched')):
+            errors, _ = audit.fetch_recipe(recipe, workdir)
+        self.assertTrue(any('already exists' in e and 'nothing fetched' in e for e in errors), errors)
+        self.assertFalse(outside.exists())
+
+    def test_final_file_writes_never_follow_links(self):
+        root = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        outside = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        victim = outside / 'victim'
+        victim.write_text('original')
+        source = Path(self.tmp.name) / 'payload'
+        source.write_text('payload')
+        (root / 'link').symlink_to(victim)
+        (root / 'dangling').symlink_to(outside / 'created')
+        (root / 'inside').symlink_to('kept')
+        (root / 'kept').write_text('kept')
+        (root / 'dir').symlink_to(outside)
+        for rel, message in (('link', 'already exists'), ('dangling', 'already exists'), ('inside', 'already exists'),
+                             ('kept', 'already exists'), ('dir/new', 'outside the unpack directory')):
+            with self.subTest(rel):
+                with self.assertRaisesRegex(ValueError, message):
+                    audit.write_new(root, rel, source)
+        self.assertEqual((victim.read_text(), (root / 'kept').read_text()), ('original', 'kept'))
+        self.assertEqual(sorted(p.name for p in outside.iterdir()), ['victim'])
+        audit.write_new(root, 'sub/new', source)
+        self.assertEqual((root / 'sub/new').read_text(), 'payload')
+        # Through fetch: an archive plants a link where a later loose (unpack=0) source would be copied.
+        planted = self.archive.with_name('planted.tar.gz')
+        with tarfile.open(self.archive) as original, tarfile.open(planted, 'w:gz') as tar:
+            for member in original.getmembers():
+                tar.addfile(member, original.extractfile(member) if member.isfile() else None)
+            info = tarfile.TarInfo('loose.bin')
+            info.type, info.linkname = tarfile.SYMTYPE, 'LICENSE'
+            tar.addfile(info)
+        loose = b'loose payload'
+        loose_url = f'https://raw.githubusercontent.com/example/meta-suifleet/{"c" * 40}/loose.bin'
+        contents = {self.url: planted.read_bytes(), loose_url: loose}
+
+        def download(url, target):
+            Path(target).write_bytes(contents[url])
+            return sha256(contents[url])
+        self.write_recipe(sha=sha256(contents[self.url]),
+                          extra=f'SRC_URI += "{loose_url};subdir=source;name=loose"\n'
+                                f'SRC_URI[loose.sha256sum] = "{sha256(loose)}"\n')
+        with mock.patch.object(audit, 'download', download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertTrue(any("unpack destination 'source/loose.bin' already exists" in e for e in report['errors']),
+                        report['errors'])
+        self.assertEqual((Path(report['fetch_dir']) / 'suifleet/source/LICENSE').read_text(), LICENSE)
+
     def test_fetch_is_skipped_for_recipes_with_static_findings(self):
         self.write_recipe(url=f'http://example.com/{self.archive.name}')
         with mock.patch.object(audit, 'download', side_effect=AssertionError('fetched')):
