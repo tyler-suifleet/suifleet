@@ -18,13 +18,18 @@ roles and a PKCS#11 (SoftHSM2) device signer, with the real daemon.
 Needs a disposable localnet (as for the other localnet tests), the daemon
 built with `--features pkcs11`, and softhsm2 + opensc (pkcs11-tool) for the
 PKCS#11 case (make test-enrollment-localnet).
+
+The --migration-only case requires BusyBox and util-linux flock to exercise the
+migration helper with the command set available on a minimal Yocto image.
 """
 import argparse
+import configparser
 import hashlib
 import grp
 import json
 import os
 from pathlib import Path
+import pwd
 import shutil
 import socket
 import socketserver
@@ -60,7 +65,10 @@ def wait_for(condition, message, process=None, timeout=90):
     raise AssertionError(message)
 
 
-def run(rpc_url, faucet_url, first_boot_only=False):
+def run(rpc_url, faucet_url, first_boot_only=False, migration_only=False):
+    if migration_only:
+        from test_device_migration import require_disposable
+        require_disposable()
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
@@ -167,6 +175,22 @@ def run(rpc_url, faucet_url, first_boot_only=False):
                     funding += ["--transfer-objects", f"[fees.{index}]", f"@{address}"]
                 transaction("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector{addresses}", *funding)
                 print("PASS: policy created; 4 claim keys added and funded in one transaction")
+
+                if migration_only:
+                    old = client("test-publish", contracts, "--build-env", "testnet",
+                                 "--pubfile-path", root / "Pub.retired.toml", "--gas-budget", "900000000",
+                                 "--silence-warnings")
+                    assert old["effects"]["status"]["status"] == "success"
+                    old_package = next(c["packageId"] for c in old["objectChanges"] if c["type"] == "published")
+                    old_registry = created(old, "::device_registry::DeviceRegistry")[0]
+                    assert old_package != package and old_registry != registry
+                    old_manifest = dm.resolve(SimpleNamespace(
+                        chain_identifier=chain_id, rpc=rpc_url, package=old_package,
+                        upgrade_cap=created(old, "::package::UpgradeCap")[0], registry=old_registry,
+                        network="localnet", publisher=aggregator, aggregator=aggregator))
+                    check_migration(root, old_manifest, policy, operator, claims["c1"],
+                                    client, transaction, created)
+                    return
 
                 if first_boot_only:
                     check_first_boot(root, manifest, policy, operator, claims, client, transaction, created, package, registry)
@@ -358,6 +382,97 @@ def run(rpc_url, faucet_url, first_boot_only=False):
         walrus.server_close()
 
 
+def check_migration(root, old, policy, operator, claim, client, transaction, created):
+    from test_device_migration import CONFIG, KEY, MIGRATE, PENDING, STATE
+    from test_device_migration import check_parked, create_legacy_key, legacy_files
+
+    busybox = shutil.which("busybox")
+    flock = shutil.which("flock")
+    assert busybox and flock, "Install BusyBox and util-linux flock for migration testing"
+    tools = root / "migration-bin"
+    tools.mkdir()
+    # Match the Poky BusyBox applets used by the helper. In particular its
+    # defconfig omits install. flock is an explicit recipe runtime dependency.
+    for applet in ("cat", "chmod", "chown", "id", "mkdir", "mktemp", "mv", "stat", "sync", "touch"):
+        (tools / applet).symlink_to(busybox)
+    (tools / "flock").symlink_to(flock)
+    migration_env = {**os.environ, "PATH": str(tools)}
+
+    def migrate(action, **kwargs):
+        return subprocess.run([busybox, "sh", MIGRATE, action], env=migration_env, **kwargs)
+
+    address = create_legacy_key(DAEMON)
+    key_bytes = KEY.read_bytes()
+    package = old["call_package_id"]
+    registry = old["shared_objects"]["registry"]["id"]
+    registered = transaction(
+        "--move-call", f"{package}::device_registry::register_device", f"@{registry}",
+        '"legacy-device"', f"@{address}", '"aarch64"', CLOCK, "--assign", "device",
+        "--move-call", f"{package}::device_cap::issue_cap", "device",
+        "--move-call", f"{package}::device_registry::activate_device", f"@{registry}",
+        "device", "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
+    old_device = created(registered, "::device_registry::Device")[0]
+    old_cap = created(registered, "::device_cap::DeviceCap")[0]
+    files = legacy_files(old, old_device, old_cap, address)
+    migrate("package-upgrade", check=True)
+    check_parked(files, address, key_bytes)
+    migrate("prepare", check=True)
+    migrate("prepare", check=True)
+    assert stat.S_IMODE(STATE.stat().st_mode) == 0o700
+    assert STATE.stat().st_uid == pwd.getpwnam("suifleet").pw_uid
+    assert STATE.stat().st_gid == grp.getgrnam("suifleet").gr_gid
+    archive = Path((PENDING / "archive").read_text().strip())
+
+    media = root / "enrollment"
+    folder = media / "legacy-device"
+    folder.mkdir(parents=True)
+    shutil.copyfile(claim[0], folder / "claim.key")
+    (folder / "enroll.toml").write_text(
+        f'manifest_path = "deployment.json"\nclaim_key_path = "claim.key"\n'
+        f'policy_id = "{policy}"\nname = "legacy-device"\nkeypair_path = "{KEY}"\n'
+    )
+    trusted_manifest = root / "deployment.json"
+    trusted = trusted_manifest.read_bytes()
+    (CONFIG / "first-boot.toml").write_text(
+        f'policy_id = "{policy}"\noperator = "{operator}"\n'
+        f'history_start_checkpoint = 0\nlocations = ["{media}"]\n'
+        f'manifest_sha256 = "{hashlib.sha256(trusted).hexdigest()}"\n'
+    )
+    config = CONFIG / "config.toml"
+    config.write_text('[device.signer]\nkind = "service"\n')
+    preinstalled = migrate("enroll", capture_output=True, text=True, timeout=30)
+    assert preinstalled.returncode != 0 and "Use first-boot media" in preinstalled.stderr
+    assert config.exists() and PENDING.is_dir()
+    config.unlink()
+
+    deployment = folder / "deployment.json"
+    deployment.write_bytes(json.dumps(old).encode())
+    rejected = migrate("enroll", capture_output=True, text=True, timeout=30)
+    assert rejected.returncode != 0 and PENDING.is_dir() and not (CONFIG / "config.toml").exists()
+    assert not (CONFIG / "signer.toml").exists() and not (CONFIG / "deployment.json").exists()
+    assert json.loads((folder / "enrollment-status.json").read_text())["enrollment"] == "invalid-enrollment-media-or-config"
+    assert (folder / "claim.key").read_bytes() == claim[0].read_bytes()
+
+    shutil.copyfile(trusted_manifest, deployment)
+    migrate("enroll", check=True, timeout=220)
+    assert not PENDING.exists() and not (folder / "claim.key").exists()
+    enrolled = configparser.ConfigParser()
+    enrolled.read(CONFIG / "config.toml")
+    device = enrolled["device"]
+    assert enrolled["device.signer"]["kind"] == '"service"'
+    assert json.loads(device["device_object_id"]) != old_device
+    cap = json.loads(device["device_cap_id"])
+    assert cap != old_cap
+    assert client("object", cap)["owner"] == {"AddressOwner": address}
+    assert (CONFIG / "deployment.json").read_bytes() == trusted
+    assert KEY.read_bytes() == key_bytes and not (STATE / "state.json").exists()
+    assert (archive / "state/state.json").read_bytes() == files[STATE / "state.json"]
+    (archived_config,) = CONFIG.glob("migration.previous.*/config")
+    assert (archived_config / "config.toml").read_bytes() == files[CONFIG / "config.toml"]
+    assert (archived_config / "deployment.json").read_bytes() == files[CONFIG / "deployment.json"]
+    print("PASS: retired-manifest refusal and same-key SF-322 enrollment into a second localnet registry")
+
+
 def check_first_boot(root, manifest, policy, operator, claims, client, transaction, created, package, registry):
     assert os.geteuid() == 0, "use a disposable root container for service file ownership checks"
     gids = {name: grp.getgrnam(name).gr_gid for name in ("suifleet", "suifleet-signer")}
@@ -401,7 +516,6 @@ def check_first_boot(root, manifest, policy, operator, claims, client, transacti
         return process
 
     def check_install(directory, folder):
-        import configparser
         for file, group in (("deployment.json", "suifleet"), ("signer.toml", "suifleet-signer"), ("config.toml", "suifleet")):
             info = (directory / file).stat()
             assert (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, gids[group], 0o640)
@@ -533,6 +647,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rpc", default="http://127.0.0.1:9000")
     parser.add_argument("--faucet", default="http://127.0.0.1:9123/v2/gas")
-    parser.add_argument("--first-boot-only", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--first-boot-only", action="store_true")
+    modes.add_argument("--migration-only", action="store_true")
     args = parser.parse_args()
-    run(args.rpc, args.faucet, args.first_boot_only)
+    run(args.rpc, args.faucet, args.first_boot_only, args.migration_only)

@@ -2,6 +2,10 @@
 # Runs at boot, never at image build time. Only the public address is printed.
 set -eu
 directory=/etc/suifleet
+if [ -e "$directory/migration.pending" ]; then
+    echo 'SuiFleet is parked for migration' >&2
+    exit 1
+fi
 umask 077
 address=$(/usr/bin/suifleet --provision "$directory/device.key")
 printf '%s\n' "$address" | grep -Eq '^0x[0-9a-f]{64}$'
