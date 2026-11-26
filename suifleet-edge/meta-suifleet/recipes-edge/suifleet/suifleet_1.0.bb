@@ -4,8 +4,7 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=11afb1fbbd23890e736d2e4025d3e2c9"
 
 SRC_URI = " \
-    git://github.com/tyler-suifleet/suifleet.git;protocol=https;nobranch=1;destsuffix=git \
-    file://first-boot-enrollment.patch \
+    https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/b86509a1768aed3025ef68562735e70d1f1fa5ae/suifleet-edge-${SRCREV}.tar.gz;subdir=source;name=edge;downloadfilename=suifleet-edge-${SRCREV}-workspace.tar.gz \
     file://suifleet.service \
     file://suifleet-firmware.service \
     file://suifleet-firmware.path \
@@ -13,18 +12,17 @@ SRC_URI = " \
     file://firmware.toml.example \
     file://suifleet-provision.service \
     file://suifleet-provision \
-    file://suifleet-migrate \
-    file://suifleet-first-boot-enrollment.service \
     file://suifleet-enrollment.path \
     file://suifleet-signer.service \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
-PR = "r1"
+SRC_URI[edge.sha256sum] = "4627f17b24b18de1eeb6d8254496ecadebf53540459fa76b16739e9fd6df5f30"
+# Original core commit used to produce the checksum-pinned source archive.
 SRCREV = "b9bb2ef6210624d732ab2de2075ea1826e5300c1"
-# Preserve core's unpack root; Scarthgap predates UNPACKDIR.
+# Preserve core's unpack root; older BitBake uses WORKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
-S = "${SUIFLEET_UNPACKDIR}/git"
+S = "${SUIFLEET_UNPACKDIR}/source"
 
 inherit cargo cargo-update-recipe-crates systemd pkgconfig useradd
 require suifleet-crates.inc
@@ -41,7 +39,7 @@ export CARGO_PROFILE_RELEASE_STRIP = "false"
 CFLAGS:append = " -fdebug-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor -fmacro-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor"
 
 DEPENDS += "systemd"
-RDEPENDS:${PN} += "ca-certificates util-linux-flock"
+RDEPENDS:${PN} += "ca-certificates"
 
 CARGO_SRC_DIR = "suifleet-edge"
 
@@ -79,7 +77,7 @@ USERADD_PACKAGES = "${PN}"
 USERADD_PARAM:${PN} = "--system --no-create-home --home-dir /var/lib/suifleet --shell /sbin/nologin --user-group suifleet; \
     --system --no-create-home --home-dir /nonexistent --shell /sbin/nologin --user-group suifleet-signer"
 
-SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
+SYSTEMD_SERVICE:${PN} = "suifleet.service suifleet-provision.service suifleet-enrollment.path suifleet-firmware.path suifleet-signer.socket suifleet-signer.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
@@ -88,11 +86,9 @@ do_install:append() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${SUIFLEET_UNPACKDIR}/suifleet.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.service ${SUIFLEET_UNPACKDIR}/suifleet-firmware.path \
         ${SUIFLEET_UNPACKDIR}/suifleet-provision.service ${SUIFLEET_UNPACKDIR}/suifleet-enrollment.path \
-        ${SUIFLEET_UNPACKDIR}/suifleet-first-boot-enrollment.service \
         ${SUIFLEET_UNPACKDIR}/suifleet-signer.service ${SUIFLEET_UNPACKDIR}/suifleet-signer.socket \
         ${D}${systemd_system_unitdir}/
     install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-provision ${D}${libexecdir}/suifleet-provision
-    install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-migrate ${D}${sbindir}/suifleet-migrate
     # /etc/suifleet is read-only to the daemon; config.toml must be root:suifleet 0640.
     install -d -m 0750 -g suifleet ${D}${sysconfdir}/suifleet
     install -m 0640 -g suifleet ${SUIFLEET_UNPACKDIR}/config.toml.example ${D}${sysconfdir}/suifleet/config.toml.example
@@ -100,14 +96,6 @@ do_install:append() {
     install -m 0600 ${SUIFLEET_UNPACKDIR}/firmware.toml.example ${D}${sysconfdir}/suifleet/firmware.toml.example
     # Readable by the signing service only (it names the key or PKCS#11 PIN file).
     install -m 0640 -g suifleet-signer ${SUIFLEET_UNPACKDIR}/signer.toml.example ${D}${sysconfdir}/suifleet/signer.toml.example
-}
-
-# Run before the systemd class reloads/restarts units on an online upgrade.
-# Never inspect or modify identities during image construction.
-pkg_postinst:${PN}() {
-    if [ -z "$D" ]; then
-        ${sbindir}/suifleet-migrate package-upgrade || exit 1
-    fi
 }
 
 FILES:${PN} += "${sysconfdir}/suifleet ${systemd_system_unitdir}/suifleet*.service ${systemd_system_unitdir}/suifleet*.path ${systemd_system_unitdir}/suifleet*.socket"

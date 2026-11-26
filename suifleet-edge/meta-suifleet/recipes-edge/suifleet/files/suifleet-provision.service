@@ -1,5 +1,4 @@
 [Unit]
-ConditionPathExists=!/etc/suifleet/migration.pending
 Description=Provision the unique SuiFleet device identity
 Before=suifleet.service
 

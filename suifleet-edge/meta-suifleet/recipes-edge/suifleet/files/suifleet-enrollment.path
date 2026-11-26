@@ -1,5 +1,4 @@
 [Unit]
-ConditionPathExists=!/etc/suifleet/migration.pending
 Description=Start SuiFleet when enrollment configuration is installed
 # Path units start before basic.target; the triggered service orders provisioning.
 
