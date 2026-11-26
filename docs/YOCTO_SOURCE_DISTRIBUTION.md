@@ -61,7 +61,11 @@ The file set is the daemon build closure, computed from that commit's tree:
   and a `path` inside `cfg_attr(..)` is recognized. An include or `#[path]`
   whose argument is not one string literal without escapes (for example
   `include!(concat!(env!("OUT_DIR"), ..))`) stops the build instead of being
-  skipped. The scan is lexical, so comments and strings count too.
+  skipped. The scan is lexical, so comments and strings count too. Rust
+  compiles an `include!` or `#[path]` target as code whatever its file name,
+  so that target is scanned for further includes too (`src/main.rs` →
+  `tools/entry.inc` → `tools/helper.rs`). `include_str!`/`include_bytes!`
+  targets are data and are not scanned unless named `.rs`.
 
 `src/`, `examples/` and each local crate directory are packaged whole, so Rust
 module files there are always present. Outside them only the declared files,
@@ -198,7 +202,8 @@ check then verifies the resulting `S`:
 - for every recipe, the license file checksums;
 - for the daemon, the lockfile digest, crate version, crate include, workspace
   members, transitive local path-dependency crates, manifest-declared target
-  files, every include target and the same implicit-module refusal outside the
+  files, every include target (followed through non-`.rs` code targets) and
+  the same implicit-module refusal outside the
   directories packaged whole, plus `cargo metadata --offline --locked
   --no-deps` when `--cargo` is set;
 - for the codec, the exact five pinned files, their digests, provenance
