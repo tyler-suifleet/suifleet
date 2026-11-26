@@ -252,6 +252,9 @@ JOURNAL_SCAN = ("import subprocess, sys; secrets = sys.stdin.read().split(); "
                 "print(sum(s in data for s in secrets))")
 APPLIED_RECORD = "/var/lib/suifleet-ansible/applied.json"
 RECAP = re.compile(r"^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)", re.M)
+# The role's self-check connects to the signing socket; a preview must never dispatch it.
+SELF_CHECK_TASK = "TASK [suifleet : Check configuration, identity and journal binding as the daemon user]"
+TASK_RESULT = re.compile(r"^(ok|changed|skipping|fatal|failed): \[([^\]]+)\]", re.M)
 
 
 def run(*args, **kwargs):
@@ -592,6 +595,23 @@ class Harness:
         self.evidence["phases"].append(dict(phase=phase, rc=result.returncode, recap=recap))
         print(f"PASS {phase}: rc={result.returncode} recap={json.dumps(recap, sort_keys=True)}")
         return output, recap
+
+    def preview_skipped_self_check(self, output, phase, hosts=None):
+        """In check mode, the socket-connecting self-check must be skipped on every host.
+
+        It is skipped by check mode itself, not by a service state read earlier in
+        the preview, so even a signing service that was active when the preview
+        read it (and could stop before the check) is never socket-activated."""
+        results = {}
+        for block in output.split(SELF_CHECK_TASK)[1:]:
+            block = block.split("\nTASK [", 1)[0].split("\nPLAY ", 1)[0]
+            for status, host in TASK_RESULT.findall(block):
+                results.setdefault(host, set()).add(status)
+        expected = set(hosts or self.hosts)
+        assert set(results) == expected, (phase, "self-check task not reported for every host", results)
+        for host, statuses in results.items():
+            assert statuses == {"skipping"}, (phase, host, "the preview dispatched the self-check", statuses)
+        print(f"PASS {phase}: the preview dispatched no self-check (no signing-socket connection)")
 
     def unchanged(self, recap, phase, hosts=None):
         assert set(recap) == set(hosts or self.hosts), (phase, recap)
@@ -1342,8 +1362,9 @@ class Harness:
             state, _ = self.host_state(name)
             assert state["active"] != "active" and state["main_pid"] == "0" and state["signer_pid"] == "0", (name, "units not stopped")
             stopped[name] = state
-        _, recap = self.ansible("check mode on configured hosts with stopped services", "site.yml", "--check", "--diff",
-                                *vault, *rollout)
+        output, recap = self.ansible("check mode on configured hosts with stopped services", "site.yml", "--check", "--diff",
+                                     *vault, *rollout)
+        self.preview_skipped_self_check(output, "check mode on configured hosts with stopped services")
         for name, host in self.hosts.items():
             assert recap[name]["failed"] == 0 and recap[name]["unreachable"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
             state, _ = self.host_state(name)
@@ -1437,13 +1458,20 @@ class Harness:
         self.batch.rename(hidden)
         _, recap = self.ansible("rerun without the claim batch", "site.yml", *vault)
         self.unchanged(recap, "rerun")
-        _, recap = self.ansible("check mode after convergence", "site.yml", "--check", "--diff", *vault)
+        signers = {name: self.host_state(name)[0]["invocations"]["suifleet-signer.service"] for name in self.hosts}
+        assert all(before[name]["signer_pid"] != "0" for name in self.hosts), ("signers not active before the preview", before)
+        output, recap = self.ansible("check mode after convergence", "site.yml", "--check", "--diff", *vault)
         self.unchanged(recap, "check")
+        # Every signing service was active when the preview read it.
+        self.preview_skipped_self_check(output, "check mode after convergence")
+        for name in self.hosts:
+            assert self.host_state(name)[0]["invocations"]["suifleet-signer.service"] == signers[name], (name, "signer restarted")
         self.staging_after_record(vault, before)
 
         upgrade = ["-e", f"suifleet_deb_src=/artifacts/2/{self.debs['2'].name}", "-e", f"suifleet_deb_sha256={sha256(self.debs['2'])}",
                    "-e", "suifleet_binary_src=/artifacts/suifleet-2", "-e", f"suifleet_binary_sha256={sha256(self.binaries['2'])}"]
-        _, recap = self.ansible("upgrade preview in check mode", "site.yml", "--check", "--diff", *vault, *upgrade)
+        output, recap = self.ansible("upgrade preview in check mode", "site.yml", "--check", "--diff", *vault, *upgrade)
+        self.preview_skipped_self_check(output, "upgrade preview in check mode")
         for name in self.hosts:
             assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
             state, _ = self.host_state(name)
