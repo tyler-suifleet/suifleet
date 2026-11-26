@@ -100,6 +100,11 @@ These static checks always run, on every recipe in the layer:
   its recipe as one set of metadata, as BitBake does. So a variable assigned in
   the append affects the recipe's sources. A `.bbappend` that matches no
   recipe in the layer is rejected, because the audit can't see its target.
+- Each PN comes from one recipe file. BitBake can select any of several
+  versions of a PN (`PREFERRED_VERSION`), but the report, the pin cross-checks
+  and the fetch directory are keyed by PN. A second recipe for the same PN,
+  another version or an explicit `PN`, is therefore rejected and nothing is
+  fetched for that PN.
 - The layer and `export-files.json` contain no runtime identity/state files.
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit
