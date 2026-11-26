@@ -218,10 +218,48 @@ The layer pins the daemon and codec archives at
     and `do_package_qa`. `suifleet-node` ran `do_install`, `do_package` and
     `do_package_qa`.
 
-Not run for SF-306: a Scarthgap or Kirkstone build of these published pins
-(SF-295 recorded Scarthgap/Wrynose builds from an earlier Git-sourced export),
-an image build, executing the packaged daemon, physical-target acceptance,
-Layer Index submission and mainnet acceptance. Physical and mainnet acceptance
+- **BitBake builds of the published layout (Scarthgap and Kirkstone).** Same
+  method as Wrynose: a new build directory per series, an empty `DL_DIR`,
+  `PREMIRRORS`/`MIRRORS` cleared for the three recipes, other recipes reading
+  existing sstate and downloads as read-only mirrors. `MACHINE = "qemuarm64"`,
+  `DISTRO = "poky"` with systemd and usrmerge, `INHERIT +=
+  "suifleet-core-fixes"`, and this branch's layer without the integration
+  layer. Every layer is at the full revision pinned in the series' kas profile.
+  - Scarthgap (`kas/packaging.yml`): poky `a53cae3d`, BitBake 2.8.1, meta-oe
+    `ae7dfb12`, meta-lts-mixins `scarthgap/rust` `eedcdc74`
+    (rustc 1.98.1).
+  - Kirkstone (`kas/packaging-kirkstone.yml`): poky `445a6223`, BitBake 2.0.0,
+    meta-oe `ce8539c9`, meta-lts-mixins `kirkstone/rust` `6baa9afe`
+    (rustc 1.92.0).
+  - On both series, BitBake fetched the daemon archive from
+    `raw.githubusercontent.com` (SHA-256 `4627f17b…`), 350 crates from
+    `static.crates.io`, the codec archive (`fae67d9c…`) and Node
+    (`e9e1930f…`), with wget and no credentials.
+  - `bitbake -c unpack suifleet suifleet-walrus-codec suifleet-node`: exit 0 on
+    both.
+  - `bitbake -c package_qa suifleet suifleet-walrus-codec suifleet-node`: exit 0
+    on both. Kirkstone attempted 1490 tasks (927 restored), all succeeded.
+    The first Scarthgap attempt failed when the host's OOM killer stopped the
+    daemon's LTO `rustc` while other agents were building. The rerun, with
+    nothing changed, resumed at `do_compile` and succeeded (1733 tasks, 1728
+    already done).
+  - `suifleet` (`PKGV` 0.2.3) ran `do_verify_lock`, `do_verify_toolchain`,
+    `do_compile`, `do_install`, `do_package` and `do_package_qa` on both, with
+    no QA issues. Each package holds an AArch64 `/usr/bin/suifleet`, the same
+    systemd units, provisioning helper and `*.example` files as Wrynose, and
+    `build-info` with `source_revision=b9bb2ef6…`, `lock_sha256=c2dcebe1…` and
+    `crate_version=0.2.3`. No device key, enrollment configuration or journal.
+  - `suifleet-walrus-codec` ran `do_verify_codec` and `do_package_qa`, and
+    `suifleet-node` ran `do_package_qa`, on both.
+
+These are package builds, not image builds. Kirkstone's runtime limits (no
+`SO_PEERPIDFD`, weaker signer binding) are unchanged and recorded in
+`docs/YOCTO_LEGACY_SERIES.md`. Any other Kirkstone standalone claims in
+[YOCTO_STANDALONE_VALIDATION.md](YOCTO_STANDALONE_VALIDATION.md) (for example,
+the task-signature comparison) are separate and still unrun.
+
+Not run for SF-306: an image build, executing the packaged daemon,
+physical-target acceptance, Layer Index submission and mainnet acceptance. Physical and mainnet acceptance
 remain in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 
