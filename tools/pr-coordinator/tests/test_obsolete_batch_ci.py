@@ -53,12 +53,15 @@ class ObsoleteBatchCITests(unittest.TestCase):
                  ('path','.github/workflows/release.yml'),('path','unknown.yml'),('event','push'),
                  ('head_sha','b'*40),('head_branch','main'),('repository',dict(full_name='fork/repo')),
                  ('head_repository',dict(full_name='fork/repo')),('status','completed'),('id','42')]
+        changes.append(('event', 'workflow_dispatch'))
+        self.batch['status'] = 'failed'
         for field,value in changes:
             with self.subTest(field=field,value=value):
                 self.db.execute('delete from obsolete_batch_ci');self.calls=[];self.run=copy.deepcopy(original);self.run[field]=value
                 self.tick();self.assertFalse(self.canceled())
 
     def test_open_merged_changed_or_foreign_candidate_untouched(self):
+        self.batch['status'] = 'failed'
         original=copy.deepcopy(self.pr)
         for change in ['open','merged','head','branch','fork','base','number']:
             with self.subTest(change=change):
@@ -71,8 +74,10 @@ class ObsoleteBatchCITests(unittest.TestCase):
                 elif change=='base':self.pr['base']['repo']['full_name']='fork/repo'
                 else:self.pr['number']=99
                 self.tick();self.assertFalse(self.canceled())
+                self.assertEqual(self.state(), 'retained')
 
     def test_reopen_race_and_fresh_run_identity_change_are_retained(self):
+        self.batch['status'] = 'failed'
         old=self.engine.c.gh
         def reopen(project,args):
             if '/actions/runs/42' in args[1]:self.pr['state']='open'
@@ -99,8 +104,42 @@ class ObsoleteBatchCITests(unittest.TestCase):
         self.tick();self.assertEqual(self.state(),'retry')
         self.run['status']='queued';self.now+=61;self.tick();self.assertEqual(len(self.canceled()),1)
 
-    def test_failed_active_and_other_repositories_never_canceled(self):
-        for status in ['failed','awaiting_ci','done','published']:
+    def test_review_rejected_retired_candidate_cancels_and_confirms_on_later_scan(self):
+        self.batch.update(status='failed', error=json.dumps(dict(
+            kind='candidate_review_changes', candidate_retired=True, findings=['source defect'])))
+        self.run['path'] = '.github/workflows/move-security.yml'
+        self.tick()
+        self.assertEqual(len(self.canceled()), 1)
+        self.assertEqual(self.state(), 'retry')
+
+        self.now += 61
+        self.run.update(status='completed', conclusion='cancelled')
+        self.tick()
+        self.assertEqual(len(self.canceled()), 1)
+        self.assertEqual(self.state(), 'settled')
+
+    def test_failed_checks_candidate_waits_for_confirmed_closure(self):
+        self.batch.update(status='failed', error=json.dumps(dict(
+            kind='candidate_checks_failed', checks=['ordinary CI'])))
+        self.pr['state'] = 'open'
+        self.tick()
+        self.assertFalse(self.canceled())
+        self.assertEqual(self.state(), 'retained')
+
+        self.now += 61
+        self.pr['state'] = 'closed'
+        self.cancel_error = True
+        self.tick()
+        self.assertEqual(self.state(), 'retry')
+
+        self.now += 61
+        self.cancel_error = False
+        self.tick()
+        self.assertEqual(len(self.canceled()), 2)
+        self.assertEqual(self.state(), 'retry')
+
+    def test_active_and_other_repositories_never_canceled(self):
+        for status in ['awaiting_ci','done','published']:
             self.batch['status']=status;self.tick()
         self.batch['status']='invalidated';self.project['repository']='another/repo';self.tick();self.assertFalse(self.calls)
 
