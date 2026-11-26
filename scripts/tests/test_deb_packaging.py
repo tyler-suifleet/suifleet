@@ -32,6 +32,8 @@ class PackagingTests(unittest.TestCase):
             second = deb.build(binary, root / "second", "0.2.2-1", "amd64", 1793606400)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             subprocess.run(["dpkg-deb", "-x", str(first), str(root / "extract")], check=True)
+            unit = root / "extract/lib/systemd/system/suifleet-first-boot-enrollment.service"
+            self.assertTrue(unit.is_file())
             etc = root / "extract/etc/suifleet"
             self.assertEqual([p.name for p in etc.iterdir()], ["release-trust.toml"])
             self.assertFalse((root / "extract/var/lib/suifleet").exists())
