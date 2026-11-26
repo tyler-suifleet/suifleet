@@ -1434,6 +1434,13 @@ class Harness:
             print(f"PASS retry with a {label} stopped before staging or submitting, kept the file and erased the"
                   " abandoned staged claim and transfer copy")
 
+        # The same key can hold a valid enrollment under another deployment. A
+        # stale or misselected batch folder (its deployment.json is not the
+        # inventory manifest, or its enroll.toml points the lookup elsewhere)
+        # stops the run before the lookup: the empty marker stays, no record is
+        # written, and nothing is staged on the host.
+        self.mismatched_lookup_batch(name, vault, partial, record, staging, abandon_claim_copies)
+
         # The enrollment above committed on chain. An empty file is that same
         # attempt with its response lost before anything was printed: the local
         # receipt is unavailable. The retry looks the enrollment up on chain
@@ -1489,6 +1496,79 @@ class Harness:
         assert absent(partial), (name, "receipt not promoted")
         print("PASS retry restored the record from the receipt without the credential batch or a second submission;"
               " key, address and enrollment preserved (the record is verified on chain with the other enrollments)")
+
+    def mismatched_lookup_batch(self, name, vault, partial, record, staging, abandon_claim_copies):
+        """An empty attempt marker with a batch folder bound to another deployment: refused before the lookup."""
+        container = self.hosts[name]["container"]
+        folder = self.batch / "enrollment" / self.hosts[name]["serial"]
+        transfer = "/dev/shm/suifleet-claim.RefusedRun"
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        def other_deployment(text):
+            # A well-formed manifest naming different objects: flip the first object ID.
+            manifest = json.loads(text)
+
+            def flip(value):
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        changed = flip(item)
+                        if changed is not None:
+                            value[key] = changed
+                            return value
+                elif isinstance(value, list):
+                    for index, item in enumerate(value):
+                        changed = flip(item)
+                        if changed is not None:
+                            value[index] = changed
+                            return value
+                elif isinstance(value, str) and re.fullmatch("0x[0-9a-f]{64}", value):
+                    return "0x" + format(int(value, 16) ^ 1, "064x")
+                return None
+
+            assert flip(manifest) is not None, "the manifest names no object ID"
+            return json.dumps(manifest, indent=2) + "\n"
+
+        manifest_refusal = "the same deployment.json as suifleet_manifest_src"
+        paths_refusal = "must use the batch-relative deployment.json"
+        cases = (
+            ("a batch deployment.json for another deployment", "deployment.json", other_deployment, manifest_refusal),
+            ("an enroll.toml naming another manifest", "enroll.toml",
+             lambda t: t.replace('manifest_path = "deployment.json"', 'manifest_path = "other/deployment.json"'), paths_refusal),
+            ("an enroll.toml with a [signer] table", "enroll.toml",
+             lambda t: t.rstrip("\n") + '\n\n[signer]\nkind = "service"\nsocket = "/run/suifleet/other.sock"\n', paths_refusal),
+        )
+        (self.work / "ctl/enroll-only.yml").write_text(ENROLL_ONLY_PLAY)
+        for label, file, edit, refusal in cases:
+            original = (folder / file).read_text()
+            edited = edit(original)
+            assert edited != original, (label, "the edit changed nothing")
+            sh(f"umask 077 && : > {partial}")
+            try:
+                (folder / file).write_text(edited)
+                output, _ = self.ansible(f"check mode refuses a lookup with {label}", "/work/enroll-only.yml",
+                                         "--check", "--diff", "--limit", name, *vault, expect_rc="nonzero")
+                assert refusal in output and "Would look up" not in output, (name, label, "check mode not refused", output[-8000:])
+                assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, label, "check mode changed state")
+                marker = abandon_claim_copies()
+                output, _ = self.ansible(f"retry refuses a lookup with {label}", "/work/enroll-only.yml",
+                                         "--limit", name, *vault, expect_rc="nonzero")
+            finally:
+                (folder / file).write_text(original)
+            assert refusal in output, (name, label, "not refused by the batch check", output[-8000:])
+            for task in (LOOKUP_TASK, "TASK [suifleet : Create the lookup directory]", ENROLL_TASK):
+                assert task not in output, (name, label, "reached", task)
+            assert sh(f"stat -c '%s %U:%G %a' {partial}").strip() == "0 root:root 600", (name, label, "attempt marker changed")
+            assert absent(record) and absent("/etc/suifleet/config.toml"), (name, label, "record or configuration written")
+            assert absent(staging) and absent(transfer), (name, label, "lookup staging or claim copies left")
+            for root in ("/run", "/dev/shm"):
+                assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, label, root, "claim remains")
+            print(f"PASS an empty attempt marker with {label} was refused before the on-chain lookup (check mode"
+                  " too): marker kept, no record or configuration, nothing staged and abandoned claim copies erased")
 
     def staging_after_record(self, vault, previous):
         """Enrollment stopped after the record's rename, before its cleanup: the staged claim is left behind."""
