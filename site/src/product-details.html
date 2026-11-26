@@ -1,0 +1,129 @@
+<section class="platforms" aria-label="Supported platforms">
+<div class="wrap">
+<p>Fits the device image and installer you already use</p>
+<ul>
+<li>Linux</li>
+<li>Yocto</li>
+<li>Debian-based</li>
+<li>SWUpdate</li>
+<li>RAUC</li>
+<li>Your own scripts</li>
+</ul>
+</div>
+</section>
+
+<section class="section">
+<div class="wrap">
+
+<div class="row flip">
+<div class="tile night" role="img" aria-label="Example: a release with an encrypted package and its install command">
+<div class="ui-card dark" aria-hidden="true">
+<div class="ui-head">
+<div><div class="ui-title">New release</div><div class="ui-sub">Gateway app</div></div>
+<span class="pill ok">Ready</span>
+</div>
+<div class="ui-rows">
+<div><span class="ui-sub">Version</span><b>2.4.0</b></div>
+<div><span class="ui-sub">Package</span><b class="mono">gateway-2.4.0.tar.zst</b></div>
+<div><span class="ui-sub">Files</span><b>Encrypted</b></div>
+<div><span class="ui-sub">Install step</span><b class="mono">swupdate -i …</b></div>
+</div>
+</div>
+</div>
+<div class="copy">
+<h2>Publish once.<br>Deliver anywhere.</h2>
+<p class="lead">Upload your build and the command that installs it. Proprietary files are encrypted before they leave your machine.</p>
+<div class="cta-row"><a class="button dark" href="/how-it-works/">See how releases work</a></div>
+</div>
+</div>
+
+<div class="row">
+<div class="tile blue" role="img" aria-label="Example: a three-stage rollout waiting for approval after the pilot group">
+<div class="ui-card" aria-hidden="true">
+<div class="ui-head"><div class="ui-title">Rollout plan</div><span class="pill info">Stage 2 of 3</span></div>
+<div class="ui-stages">
+<div class="ui-stage done"><strong>1</strong><span>Test device</span></div>
+<div class="ui-stage now"><strong>24</strong><span>Pilot group</span></div>
+<div class="ui-stage"><strong>1,180</strong><span>All devices</span></div>
+</div>
+<div class="ui-rows">
+<div><span class="ui-sub">Pilot results</span><b>23 applied · 1 updating</b></div>
+<div><span class="ui-sub">Next stage</span><b>Waiting for your approval</b></div>
+</div>
+</div>
+</div>
+<div class="copy">
+<h2>Roll out in stages.</h2>
+<p class="lead">Start with one device, then a pilot group. Review the results before the rest of the fleet sees the update.</p>
+<div class="cta-row"><a class="button dark" href="/guide/">Follow the guide</a></div>
+</div>
+</div>
+
+<div class="row flip">
+<div class="tile soft" role="img" aria-label="Example: signed reports from three devices">
+<div class="ui-card" aria-hidden="true">
+<div class="ui-head"><div class="ui-title">Device reports</div><span class="ui-sub">Last hour</span></div>
+<div class="ui-rows">
+<div><span><b>gateway-north-01</b><br><span class="ui-sub">2.4.0 installed</span></span><span class="pill ok">Signed</span></div>
+<div><span><b>gateway-north-02</b><br><span class="ui-sub">2.4.0 installed</span></span><span class="pill ok">Signed</span></div>
+<div><span><b>gateway-west-07</b><br><span class="ui-sub">Installer exit 0 · health check pending</span></span><span class="pill ok">Signed</span></div>
+</div>
+</div>
+</div>
+<div class="copy">
+<h2>Know what really happened.</h2>
+<p class="lead">Every device signs its own report, so you can check which device sent it and that nobody changed it afterwards.</p>
+<div class="cta-row"><a class="button dark" href="/security/">How we protect your fleet</a></div>
+</div>
+</div>
+
+<div class="row">
+<div class="tile night" role="img" aria-label="Your console and devices connect through a shared public network, with no fleet server">
+<div class="ui-stack" aria-hidden="true">
+<div class="ui-node"><span class="icon">▤</span><span><b>Your console</b><small>Publish, deploy, approve</small></span></div>
+<div class="ui-link"></div>
+<div class="ui-node"><span class="icon">◇</span><span><b>Shared public network</b><small>Releases, approvals and reports</small></span></div>
+<div class="ui-link"></div>
+<div class="ui-node"><span class="icon">▣</span><span><b>Your devices</b><small>Verify, install, report back</small></span></div>
+<div class="ui-node removed"><span class="icon">✕</span><span><b>Fleet server</b><small>Nothing to host, patch or scale</small></span></div>
+</div>
+</div>
+<div class="copy">
+<h2>No fleet server to run.</h2>
+<p class="lead">Your console and devices talk through Sui and Walrus, a shared public network. There’s no backend for you to host, patch or keep online.</p>
+<div class="cta-row"><a class="button dark" href="{{docs_url}}">Read the docs</a></div>
+</div>
+</div>
+
+</div>
+</section>
+
+<section class="section flush-top">
+<div class="wrap">
+<div class="price-band">
+<div>
+<p class="price-kicker">Simple, per-device pricing</p>
+<div class="price">{{platform_rate}} <small>per device / month</small></div>
+</div>
+<div>
+<ul class="checks">
+<li>Network fees included</li>
+<li>Volume pricing for larger fleets</li>
+<li>Pilots for select teams</li>
+</ul>
+<div class="cta-row"><a class="button dark" href="/pricing/">See pricing</a></div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="section flush-top closing">
+<div class="wrap">
+<h2>Start with one device.</h2>
+<p class="lead">The guide walks you through your first update, step by step.</p>
+<div class="cta-row">
+<a class="button primary" href="/guide/">Open the guide</a>
+<a class="button" href="/contact/">Talk to us</a>
+</div>
+</div>
+</section>

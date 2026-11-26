@@ -209,22 +209,31 @@ OPTIONAL_DEPLOYMENT_BLOBS = frozenset((
     '9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0',
     # SF-284 adds the DNS download to the offline artifact build.
     '639a9fdfe76247089caf70f2fbf754bb6c3046ad',
+    # SF-321 changes server-side presentation path filters only.
+    'f86e2c737f1891f9aba0ad6e86050bae6fe3e84b',
 ))
+OPTIONAL_CONTENT_WORKFLOW = '.github/workflows/content.yml'
+OPTIONAL_CONTENT_BLOB = '77cf80ebe4cab6a6d6730b37ed199cd388178663'
+OPTIONAL_CONTENT_SCOPE_BLOB = '2e2537400eda8b86af0386476f38d5c6a11d551f'
+OPTIONAL_CONTENT_JOBS = frozenset(('check', 'Security dependencies, secrets and configuration'))
 OPTIONAL_DEPLOYMENT_JOBS = frozenset(('preview', 'production-preflight', 'production'))
 
 
 def verified_optional_skip(pr, check):
     proof = check.get('_optional_skip') or {}
-    return (check.get('conclusion') == 'SKIPPED' and check.get('name') in OPTIONAL_DEPLOYMENT_JOBS
+    return (check.get('conclusion') == 'SKIPPED' and ((check.get('name') in OPTIONAL_DEPLOYMENT_JOBS
+                  and proof.get('workflow_blob') in OPTIONAL_DEPLOYMENT_BLOBS)
+                 or (check.get('name') in OPTIONAL_CONTENT_JOBS
+                     and proof.get('workflow_blob') == OPTIONAL_CONTENT_BLOB
+                     and proof.get('scope_blob') == OPTIONAL_CONTENT_SCOPE_BLOB))
             and proof.get('head') == pr.get('headRefOid') and bool(pr.get('headRefOid'))
             and proof.get('base') == pr.get('baseRefOid') and bool(pr.get('baseRefOid'))
             and proof.get('url') == check.get('detailsUrl')
-            and proof.get('workflow_blob') in OPTIONAL_DEPLOYMENT_BLOBS
             and all(type(proof.get(key)) is int and proof[key] > 0 for key in ('run', 'job', 'attempt')))
 
 
 def annotate_optional_skips(pr, repository, read, immutable_read):
-    """Prove only the pinned deployment jobs are inapplicable to a PR run.
+    """Prove pinned deployment/content jobs are inapplicable to a PR run.
 
     Do not rewrite conclusions or accept skips on push/manual/live workflows.
     Mutable run/job/check evidence is fetched anew for every approval snapshot.
@@ -237,7 +246,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
     for check in pr.get('statusCheckRollup', []):
         check.pop('_optional_skip', None)
         if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
-                or check.get('conclusion') != 'SKIPPED' or check.get('name') not in OPTIONAL_DEPLOYMENT_JOBS
+                or check.get('conclusion') != 'SKIPPED' or check.get('name') not in OPTIONAL_DEPLOYMENT_JOBS | OPTIONAL_CONTENT_JOBS
                 or pr.get('isCrossRepository')
                 or (not included and (pr.get('baseRefName') != 'main' or not pr.get('baseIncluded')))):
             continue
@@ -245,20 +254,29 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                              + r'/actions/runs/([0-9]+)/job/([0-9]+)', check.get('detailsUrl') or '')
         if not match:
             continue
+        content = check.get('name') in OPTIONAL_CONTENT_JOBS
+        workflow = OPTIONAL_CONTENT_WORKFLOW if content else OPTIONAL_DEPLOYMENT_WORKFLOW
+        trusted_blobs = {OPTIONAL_CONTENT_BLOB} if content else OPTIONAL_DEPLOYMENT_BLOBS
+        prerequisite = 'scope' if content else 'build'
         run_id, job_id = map(int, match.groups())
         prefix = f'repos/{repository}'
         try:
             tree = immutable_read(f"{prefix}/git/trees/{pr['headRefOid']}?recursive=1")
-            blobs = [r for r in tree['tree'] if r['path'] == OPTIONAL_DEPLOYMENT_WORKFLOW]
+            blobs = [r for r in tree['tree'] if r['path'] == workflow]
             if (tree.get('truncated') or len(blobs) != 1 or blobs[0].get('type') != 'blob'
-                    or blobs[0].get('sha') not in OPTIONAL_DEPLOYMENT_BLOBS):
+                    or blobs[0].get('sha') not in trusted_blobs):
                 continue
+            if content:
+                scope = [r for r in tree['tree'] if r['path'] == 'scripts/content_scope.py']
+                if (len(scope) != 1 or scope[0].get('type') != 'blob'
+                        or scope[0].get('sha') != OPTIONAL_CONTENT_SCOPE_BLOB):
+                    continue
             path = f'{prefix}/actions/runs/{run_id}'
             run = read(path)
             attempt = run['run_attempt']
             if (run['id'] != run_id or run['head_sha'] != pr['headRefOid']
                     or run['head_repository']['full_name'] != repository
-                    or run['path'] != OPTIONAL_DEPLOYMENT_WORKFLOW or run['event'] != 'pull_request'
+                    or run['path'] != workflow or run['event'] != 'pull_request'
                     or run['status'] != 'completed' or run['conclusion'] != 'success'
                     or type(attempt) is not int or attempt < 1
                     or not any(p['number'] == pr['number'] and p['head']['sha'] == pr['headRefOid']
@@ -268,7 +286,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
             jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
             matches = [j for j in jobs['jobs'] if j['id'] == job_id]
             if (jobs['total_count'] != len(jobs['jobs']) or jobs['total_count'] > 100 or len(matches) != 1
-                    or not any(j['name'] == 'build' and j['status'] == 'completed' and j['conclusion'] == 'success'
+                    or not any(j['name'] == prerequisite and j['status'] == 'completed' and j['conclusion'] == 'success'
                                for j in jobs['jobs'])):
                 continue
             job = matches[0]
@@ -285,6 +303,8 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                 continue
             check['_optional_skip'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'], url=check['detailsUrl'],
                                            workflow_blob=blobs[0]['sha'], run=run_id, job=job_id, attempt=attempt)
+            if content:
+                check['_optional_skip']['scope_blob'] = OPTIONAL_CONTENT_SCOPE_BLOB
         except Exception:
             # Unknown/unavailable evidence stays blocking; do not leak API errors.
             continue
@@ -1479,7 +1499,12 @@ class Coordinator:
             if candidate:
                 return True
             if number in self.batches.reserved_members(project):
-                return False
+                # Unpublished batches still select/validate their sources on
+                # each scan. Filtering these members makes the next advance
+                # see no eligible PRs and repeatedly discard a partial batch.
+                return any(batch['status'] in ('collecting', 'building')
+                    and any(member['pr'] == number for member in json.loads(batch['members']))
+                    for batch in self.batches.rows(project))
             if not owner:
                 return True  # Preserve discovery of untracked infrastructure PRs.
             if (owner.get('status') != 'review' or owner.get('publish_pending') or owner.get('expired')):

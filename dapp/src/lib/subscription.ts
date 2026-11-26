@@ -111,7 +111,7 @@ export function warnings(a: Account, now = Date.now()) {
   else {
     if (BigInt(a.balance.value) < BigInt(a.fee) * BigInt(a.remaining)) result.push('Low subscription balance: remaining periods are not fully funded.');
     if (Number(a.term_end_ms) - now <= 7 * 86400000) result.push(Number(a.term_end_ms) <= now ? 'Subscription term expired. Choose a renewal offer.' : 'Subscription term ends within seven days. Review a renewal offer before expiry.');
-    if (BigInt(a.remaining) > BigInt(0) && now >= Number(a.next_due_ms)) result.push('A prepaid payment is due. Apply it here to activate or extend device capacity using your existing subscription balance; approval costs a network fee.');
+    if (BigInt(a.remaining) > BigInt(0) && now >= Number(a.next_due_ms)) result.push('A paid plan period is ready to start. Activate it in Plans and billing to use your device slots; this costs only a small network fee.');
   }
   return result;
 }
@@ -132,6 +132,8 @@ export async function preparePrepay(client: SuiGrpcClient, q: Quote, customerId:
   if (existing) {
     if (amount > BigInt(0)) tx.moveCall({ target: `${m.call_package_id}::subscription::deposit`, typeArguments: [coin(q.symbol).coin_type], arguments: [tx.object(existing.account.id), payment()] });
     tx.moveCall({ target: `${m.call_package_id}::subscription::renew`, typeArguments: [coin(q.symbol).coin_type], arguments: [tx.object(existing.account.id), tx.object(customerId), tx.object(offer.id), tx.object('0x6')] });
+    // Start the renewed term's first period in the same approval (collect is permissionless and due immediately after renew).
+    tx.moveCall({ target: `${m.call_package_id}::subscription::collect`, typeArguments: [coin(q.symbol).coin_type], arguments: [tx.object(existing.account.id), tx.object(customerId), tx.object('0x6')] });
   } else tx.moveCall({ target: `${m.call_package_id}::subscription::open`, typeArguments: [coin(q.symbol).coin_type], arguments: [tx.object(customerId), tx.object(m.shared_objects.registry.id), tx.object(offer.id), payment(), tx.object('0x6')] });
   return tx;
 }

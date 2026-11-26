@@ -24,8 +24,11 @@ mod funding;
 mod fleet_data;
 mod fleet_settings;
 mod fleet_archive;
+#[cfg(target_os = "linux")]
+mod first_boot;
 mod opaque;
 mod handoff;
+mod managed_update;
 mod heads;
 mod identity;
 mod iotcore;
@@ -78,9 +81,12 @@ fn main() -> anyhow::Result<()> {
                 init_tracing();
                 return signer_service::serve_portable(Path::new(&args[2]), args[3].parse()?, args[4].parse()?, args[5].parse()?);
             }
-            Some("--portable-daemon-child") if args.len() == 6 => {
+            Some("--portable-daemon-child") if matches!(args.len(), 6 | 7) => {
                 signer_service::enter_portable_daemon(args[2].parse()?, args[3].parse()?)?;
                 signer_service::bind_portable_lifetime(args[5].parse()?)?;
+                if let Some(fd) = args.get(6) {
+                    managed_update::attach(fd.parse()?)?;
+                }
                 let socket = PathBuf::from(&args[4]);
                 args.truncate(1);
                 return run(args, Some(socket));
@@ -118,6 +124,10 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     if args.len() == 3 && args[1] == "--provision" {
         println!("{}", identity::provision(Path::new(&args[2]))?);
         return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    if args.len() == 3 && args[1] == "--first-boot-enroll" {
+        return first_boot::run(Path::new(&args[2])).await;
     }
     if args.len() == 3 && args[1] == "--enroll" {
         return enroll(Path::new(&args[2])).await;
@@ -157,7 +167,8 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     if args.len() == 2 && args[1] == "--launch" {
         let path = std::env::var("EDGE_CONFIG").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"));
         match Config::load(&path) {
-            Ok(cfg) => handoff::launch(&cfg.daemon_update, &cfg.runtime.state_dir)?,
+            Ok(cfg) if !cfg.daemon_update.managed => handoff::launch(&cfg.daemon_update, &cfg.runtime.state_dir)?,
+            Ok(_) => anyhow::bail!("managed daemon_update requires the portable signer launcher"),
             Err(error) => eprintln!("suifleet launcher: configuration unreadable ({error:#}); starting this daemon"),
         }
     }
@@ -170,7 +181,7 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     init_tracing();
     if signer_service {
@@ -204,6 +215,10 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
             .unwrap_or_else(|_| PathBuf::from("/etc/suifleet/config.toml"))
     };
     let mut cfg = Config::load(&path)?;
+    anyhow::ensure!(
+        check_config || cfg.daemon_update.managed == managed_update::attached(),
+        "managed daemon_update and the platform launcher must both be enabled"
+    );
     if let Some(socket) = portable_socket {
         anyhow::ensure!(
             cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service" && signer.socket == socket),
@@ -278,7 +293,7 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     // this process is its candidate) confirmed once startup completes.
     let handoff_dir = handoff::install_dir(&cfg.daemon_update, &cfg.runtime.state_dir);
     let mut confirm_after_startup = None;
-    if cfg.daemon_update.enabled {
+    if cfg.daemon_update.enabled && !cfg.daemon_update.managed {
         let candidate = std::env::var(handoff::CANDIDATE_ENV).ok();
         match handoff::resolve(&handoff_dir, candidate.as_deref())? {
             handoff::Resolution::None => {}
@@ -506,6 +521,18 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
         handoff::confirm(&handoff_dir, &update)?;
         info!(deployment = update.deployment, version = update.version, "Daemon update confirmed");
         settle_handoff(&mut journal, &handoff_dir, &update, Ok(()))?;
+    }
+    if cfg.daemon_update.managed {
+        let result = managed_update::ready()?;
+        for (id, outcome) in &mut journal.state.deployments {
+            if outcome.daemon_handoff.take().is_some() && outcome.status.is_none() {
+                let applied = result.as_ref().is_some_and(|result| result.deployment == *id && result.applied);
+                record_result(outcome, if applied { Ok(()) } else {
+                    Err(anyhow::anyhow!("managed daemon update was rejected, interrupted, or rolled back"))
+                });
+            }
+        }
+        journal.save()?;
     }
     let mut restart_for_handoff = false;
     let mut restart_for_services = false;
@@ -1504,7 +1531,11 @@ async fn stage_daemon_update(
                 return Err(control::NotAdmitted.into());
             }
         }
-        handoff::stage(&cfg.daemon_update, &cfg.runtime.state_dir, &cfg.path, &event.deployment_id, &event.version, &artifact).await
+        if cfg.daemon_update.managed {
+            Ok(())
+        } else {
+            handoff::stage(&cfg.daemon_update, &cfg.runtime.state_dir, &cfg.path, &event.deployment_id, &event.version, &artifact).await
+        }
     }
     .await;
     let _ = std::fs::remove_dir_all(&directory);
@@ -1519,6 +1550,16 @@ async fn stage_daemon_update(
         Ok(()) => {
             outcome.daemon_handoff = Some(event.version.clone());
             journal.save()?;
+            if cfg.daemon_update.managed {
+                if let Err(error) = managed_update::request(&event.deployment_id, &event.artifact_sha256) {
+                    let outcome = journal.state.deployments.get_mut(&event.deployment_id).unwrap();
+                    outcome.daemon_handoff = None;
+                    record_result(outcome, Err(error));
+                    let status = outcome.status;
+                    journal.save()?;
+                    return Ok(status);
+                }
+            }
             info!(deployment = event.deployment_id, version = event.version, "Daemon update staged");
             Err(handoff::Requested.into())
         }

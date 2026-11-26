@@ -97,7 +97,8 @@ const commands = (tx) => tx.getData().commands;
     assert.ok(!JSON.stringify(entries[i]).includes(c.seedHex), "a job entry carries key material");
   }
   assert.throws(() => e.generateCredentials(Array.from({ length: e.BROWSER_CREDENTIAL_LIMIT + 1 }, (_, i) => ({ serial: `S${i}`, alias: `A${i}` }))), /claims\.py/);
-  const archive = e.credentialArchive(credentials, policyId, JSON.stringify(m));
+  const configTemplate = '[apply]\ncommand = "true"\n';
+  const archive = e.credentialArchive(credentials, policyId, JSON.stringify(m), undefined, undefined, configTemplate);
   const files = new Map();
   for (let offset = 0; offset + 512 <= archive.length;) {
     const header = archive.subarray(offset, offset + 512);
@@ -119,7 +120,13 @@ const commands = (tx) => tx.getData().commands;
   for (const line of [`policy_id = "${policyId}"`, `name = "${c0.alias}"`, 'claim_key_path = "claim.key"', 'manifest_path = "deployment.json"', 'keypair_path = "/etc/suifleet/device.key"']) {
     assert.ok(toml.body.split("\n").includes(line), `enroll.toml lacks ${line}`);
   }
-  assert.equal(files.size, 1 + credentials.length * 4);
+  for (const credential of credentials) {
+    const path = `enrollment/${credential.serial}/config.template.toml`;
+    assert.deepEqual(files.get(path), { mode: 0o600, type: "0", body: configTemplate });
+  }
+  assert.equal(files.size, 1 + credentials.length * 5);
+  const withoutTemplate = e.credentialArchive(credentials, policyId, JSON.stringify(m));
+  assert.ok(!Buffer.from(withoutTemplate).includes("config.template.toml"));
   assert.ok(!toml.body.includes(c0.seedHex));
 
   // ── Job files: public data only, bound to operator/policy/fleet/network ──

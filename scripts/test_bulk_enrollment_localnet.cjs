@@ -328,8 +328,13 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
 
     stage = "browser: policy";
     await connect();
+    // The CLI policy above already exists, so the page offers it and keeps creation one click away.
+    await page.locator("#policy option:checked", { hasText: "250 left" }).waitFor({ state: "attached" });
+    const preselected = await page.locator("#policy").inputValue();
+    await page.getByText("Create another batch", { exact: true }).click();
     await page.getByLabel(/^Quota/).fill("10");
-    await page.getByRole("button", { name: "Create policy" }).click();
+    await page.getByRole("button", { name: "Create batch" }).click();
+    for (let i = 0; i < 60 && [preselected, ""].includes(await page.locator("#policy").inputValue()); i++) await page.waitForTimeout(500);
     await page.getByText("Accepting enrollments.").waitFor();
     const uiPolicy = await page.locator("#policy").inputValue();
     assert.match(uiPolicy, /^0x[0-9a-f]{64}$/);
@@ -338,9 +343,9 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     assert.equal(normalizeSuiAddress((await e.readPolicy(client, uiPolicy)).operator), op);
 
     stage = "browser: CSV with template and conflicts";
+    await page.getByRole("tab", { name: "Import CSV" }).click();
     await page.getByLabel("Roster CSV", { exact: true }).fill("serial,alias,group\nSN-001,,Lab\nSN-002,,Lab\nSN-003,kitchen,\nSN-001,,\nSN-004,bad name,\nSN-005,bulk-0003,\n");
     await page.getByLabel("Naming template").fill("pi-{n:3}");
-    await page.getByRole("button", { name: "Check", exact: true }).click();
     const checkText = await page.getByTestId("reservation-check").innerText();
     assert.match(checkText, /3 ready, 3 rejected/);
     assert.match(checkText, /serial SN-001 is already used/);
@@ -353,10 +358,9 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
 
     stage = "browser: guided pairing";
     await page.getByRole("tab", { name: "Pair one device" }).click();
-    await page.getByLabel("Alias").fill("pi-solo");
+    await page.getByLabel("Name", { exact: true }).fill("pi-solo");
     await page.getByLabel("Serial number").fill("SN-100");
     await page.getByLabel("Default group").selectOption({ label: "Lab" });
-    await page.getByRole("button", { name: "Check", exact: true }).click();
     const soloCreds = credentialsOf(untar(await downloadFrom(page.getByRole("button", { name: "Download credentials for 1 device" }))));
     assert.deepEqual(soloCreds.map((c) => [c.serial, c.alias]), [["SN-100", "pi-solo"]]);
     const allSeeds = [...csvCreds, ...soloCreds].map((c) => c.seedHex);
@@ -425,6 +429,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     }
 
     stage = "browser: revoke unused, fund device gas separately";
+    await page.getByText("More actions", { exact: true }).click();
     await page.getByRole("button", { name: "Revoke unused claims" }).click();
     await waitCounts(["Revoked: 1", "Enrolled: 3"]);
     await refused("revoked pairing credential", () => enroll(uiPolicy, byAlias["pi-solo"].seedHex, "pi-solo"));
@@ -440,15 +445,15 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     assert.ok(allSeeds.every((s) => !exported.includes(s)));
 
     stage = "browser: duplicate serials in an imported roster";
+    await page.getByText("Create another batch", { exact: true }).click();
     await page.getByLabel(/^Quota/).fill("5");
-    await page.getByRole("button", { name: "Create policy" }).click();
+    await page.getByRole("button", { name: "Create batch" }).click();
     for (let i = 0; i < 60 && [uiPolicy, ""].includes(await page.locator("#policy").inputValue()); i++) await page.waitForTimeout(500);
     const closingPolicy = await page.locator("#policy").inputValue();
     assert.notEqual(closingPolicy, uiPolicy);
     await page.getByRole("tab", { name: "Pair one device" }).click();
-    await page.getByLabel("Alias").fill("pi-late");
+    // The name is optional: a blank name defaults to the serial.
     await page.getByLabel("Serial number").fill("SN-200");
-    await page.getByRole("button", { name: "Check", exact: true }).click();
     const lateCreds = credentialsOf(untar(await downloadFrom(page.getByRole("button", { name: "Download credentials for 1 device" }))));
     await page.getByRole("button", { name: "Run 1 pending transaction" }).click();
     await waitCounts(["Waiting for device: 1"]);
@@ -467,7 +472,8 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
 
     stage = "browser: closed policy still binds enrolled devices";
     await page.getByRole("button", { name: "Run 2 pending transactions" }).waitFor();
-    await page.getByRole("button", { name: "Close policy" }).click();
+    await page.getByText("Change limits or close this batch", { exact: true }).click();
+    await page.getByRole("button", { name: "Close batch" }).click();
     await page.getByText("Not accepting enrollments: closed.").waitFor();
     const runClosed = page.getByRole("button", { name: "Run 1 pending transaction", exact: true });
     await runClosed.waitFor();
@@ -476,7 +482,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     await runClosed.click();
     await waitCounts(["Reserved: 1", "Enrolled: 1"]);
     assert.equal(await page.evaluate(() => window.enrollment.calls()), callsClosed + 1, "a claim registration was attempted under a closed policy");
-    const late = (await sui.fetchDevices(client, op)).find((d) => d.name === "pi-late");
+    const late = (await sui.fetchDevices(client, op)).find((d) => d.name === "SN-200");
     assert.equal(late?.serial, "SN-200");
     await page.getByRole("button", { name: "Nothing pending" }).waitFor();
     const storedLate = await page.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join("\n"));

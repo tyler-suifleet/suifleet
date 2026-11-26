@@ -303,6 +303,16 @@ def expand(text, config, source):
             return config["app_url"] + arg.lstrip("/")
         if name == "repo" and arg is not None:
             return repo_url(config, arg)
+        if name == "platform_rate" and arg is None:
+            # The published Essentials rate: list price, raised only by the SUI-cost floor (same as the pricing page).
+            import sys
+            sys.path.insert(0, str(ROOT / "scripts"))
+            import site_pricing
+            from cost_indexed_pricing import load as load_costs
+            prices = load_json(ROOT / "dapp/src/lib/fleet-price-table.json")
+            policy = load_json(ROOT / "docs/business/subscription-policy.json")
+            rate = site_pricing.configuration_rate(prices, site_pricing.CONFIGURATIONS[0], load_costs(), policy)
+            return f"${rate:.2f}"
         if name == "guide_count" and arg is None:
             return str(len(load_json(GUIDE / "steps.json")["steps"]))
         if name == "guide_options" and arg is None:
@@ -315,9 +325,8 @@ def expand(text, config, source):
         if name == "overview_player" and arg is None:
             return overview_player()
         if name == "product_details" and arg is None:
-            homepage = (SRC / "pages/index.html").read_text(encoding="utf-8")
-            details = homepage[homepage.index('<section class="use-cases"'):]
-            return expand(details, config, "index.html product details")
+            details = (SRC / "product-details.html").read_text(encoding="utf-8")
+            return expand(details, config, "product-details.html")
         if name == "guide_steps" and arg is None:
             return render_guide(config)
         raise BuildError(f"{source}: unknown token {match.group(0)}")
@@ -342,8 +351,9 @@ def build(out, config=None):
         source = SRC / "pages" / page["source"]
         content = expand(source.read_text(encoding="utf-8"), config, page["source"])
         current = ' aria-current="page"'
+        secondary = ' class="nav-secondary"'
         nav = "\n".join(
-            f'<li><a href="{config["docs_url"] if item["path"] == "/docs/" else item["path"]}"{current if item["path"] == page["path"] else ""}>{html.escape(item["label"])}</a></li>'
+            f'<li{secondary if item.get("secondary") else ""}><a href="{config["docs_url"] if item["path"] == "/docs/" else item["path"]}"{current if item["path"] == page["path"] else ""}>{html.escape(item["label"])}</a></li>'
             for item in config["nav"])
         title = page["title"] if page["path"] == "/" else f'{page["title"]} · {config["name"]}'
         # The error page is served for many paths, so it names no canonical URL.
@@ -358,8 +368,8 @@ def build(out, config=None):
             rendered=rendered.replace("</head>", '<meta name="robots" content="noindex, nofollow">\n</head>')
         style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
         rendered = rendered.replace('href="/assets/style.css"', f'href="/assets/style.css?v={style_version}"')
-        if page["path"] == "/product/":
-            rendered = rendered.replace("<body>", '<body class="landing-page product-details-page">')
+        if page["path"] == "/":
+            rendered = rendered.replace("<body>", '<body class="landing-page">')
         if page["path"] in ("/guide/", "/how-it-works/"):
             integrity = guide_integrity()
             if page['path'] == '/guide/': rendered = rendered.replace("<body>", '<body class="guide-page">')

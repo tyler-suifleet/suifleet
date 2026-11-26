@@ -1,4 +1,5 @@
 """Offline SF-120 checks: codec packaging and the Yocto Node/codec/daemon pins."""
+from configparser import ConfigParser
 import contextlib
 import hashlib
 import importlib.util
@@ -46,6 +47,20 @@ def fake_package(modules, store, name, version, license=None, files=()):
     for f in files:
         (root/f).write_text(f'{name} {f} text\n')
     return f'// dapp/node_modules/.pnpm/{store}/node_modules/{name}/dist/index.js\n'
+
+
+class FirstBootEnrollmentServiceTests(unittest.TestCase):
+    def test_network_ordering_and_bounded_restart(self):
+        units = LAYER / "recipes-edge/suifleet/files"
+        unit = ConfigParser(interpolation=None, strict=False)
+        unit.read(units / "suifleet-first-boot-enrollment.service")
+        self.assertIn("network-online.target", unit["Unit"]["Wants"].split())
+        self.assertIn("network-online.target", unit["Unit"]["After"].split())
+        self.assertIn("suifleet-provision.service", unit["Unit"]["After"].split())
+        self.assertEqual(unit["Unit"]["StartLimitIntervalSec"], "30min")
+        self.assertEqual(unit["Unit"]["StartLimitBurst"], "4")
+        self.assertEqual(unit["Service"]["Restart"], "on-failure")
+        self.assertEqual(unit["Service"]["RestartSec"], "60s")
 
 
 class ProfileCompatibilityTests(unittest.TestCase):
