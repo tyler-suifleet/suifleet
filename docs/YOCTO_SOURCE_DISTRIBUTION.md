@@ -47,10 +47,18 @@ The file set is the daemon build closure, computed from that commit's tree:
   and `[replace]`. A path that leaves `suifleet-edge/`, an absolute path, a
   non-string `path` or a local crate without a `Cargo.toml` stops the build.
   Currently the only one is `windows-runtime`, which is also a member;
+- every file a manifest (the root crate's or a local crate's) declares
+  explicitly: a string `package.build` and the `path` of each `[lib]`,
+  `[[bin]]`, `[[example]]`, `[[test]]` and `[[bench]]` target, wherever it
+  lives under `suifleet-edge/`. Cargo refuses a manifest whose declared target
+  file is absent. A declared file that is missing, absolute or outside
+  `suifleet-edge/`, a non-string target `path` and a `package.build` that is
+  neither a string nor a boolean stop the build. Today the only declaration is
+  `[[bin]] path = "src/main.rs"`, already under `src/`;
 - each file named by a literal `include_str!`/`include_bytes!` or a `#[path]`
   module attribute, followed transitively.
 
-A missing workspace member or local path dependency, a missing include target, a path outside the
+A missing workspace member, local path dependency, declared target file or include target, a path outside the
 repository, a symlink or submodule, or a runtime identity/state file name
 (`device.key`, `config.toml`, `*.key`, journals, databases and so on) stops the
 build. Contents are not pattern-scanned for keys, because the redaction test
@@ -172,7 +180,8 @@ check then verifies the resulting `S`:
   and unpacked sources;
 - for every recipe, the license file checksums;
 - for the daemon, the lockfile digest, crate version, crate include, workspace
-  members, transitive local path-dependency crates and every include target, plus `cargo metadata --offline --locked
+  members, transitive local path-dependency crates, manifest-declared target
+  files and every include target, plus `cargo metadata --offline --locked
   --no-deps` when `--cargo` is set;
 - for the codec, the exact five pinned files, their digests, provenance
   revision, licenses and Node version.
