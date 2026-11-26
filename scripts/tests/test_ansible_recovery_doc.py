@@ -4,12 +4,21 @@ Runs the documented shell block as written, with its fixed paths redirected
 to a scratch directory and runuser/suifleet/install replaced by stubs. A
 failed or foreign lookup must install nothing and keep the attempt marker, and
 a record is restored only beside the deployment the lookup ran under.
+
+The procedure runs on the host, which needs Python 3.11+ (tomllib). The CI
+runner's python3 may be older, so a python3 stub runs the procedure's Python
+under a 3.11+ interpreter: this one, one on PATH, or one in the hosted
+runner's tool cache. Otherwise every refusal would pass only because tomllib
+is missing. Without one, the tests fail in CI and are skipped elsewhere.
 """
+import glob
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +38,19 @@ OTHER = {**FLEET, "call_package_id": "0x" + "6" * 64}
 ENROLL = ('manifest_path = "deployment.json"\npolicy_id = "0x7"\nclaim_key_path = "claim.key"\n'
           'name = "pi-1"\nkeypair_path = "/etc/suifleet/device.key"\n')
 LINE = json.dumps(RECEIPT, separators=(",", ":")) + "\n"
+
+
+def modern_python():
+    if sys.version_info >= (3, 11):
+        return sys.executable
+    candidates = [shutil.which(f"python3.{minor}") for minor in range(14, 10, -1)]
+    candidates += sorted(glob.glob("/opt/hostedtoolcache/Python/3.1[1-9]*/x64/bin/python3"), reverse=True)
+    return next((c for c in candidates if c), None)
+
+
+PYTHON = modern_python()
+if PYTHON is None and os.environ.get("CI"):
+    raise RuntimeError("no Python 3.11+ (tomllib) for the manual recovery procedure tests")
 
 
 def digest(manifest):
@@ -54,6 +76,7 @@ SUIFLEET = ('#!/bin/sh\ncase "$1" in\n--derive-address) echo "$FAKE_ADDRESS";;\n
             '--find-enrollment) : > "$FAKE_LOOKED_UP"; printf %s "$FAKE_RECEIPT"; exit "$FAKE_RC";;\n*) exit 64;;\nesac\n')
 
 
+@unittest.skipIf(PYTHON is None, "no Python 3.11+ (tomllib) outside CI")
 class ManualRecovery(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="sf304-recovery-"))
@@ -68,7 +91,8 @@ class ManualRecovery(unittest.TestCase):
         (self.lookup / "deployment.json").write_text(json.dumps(FLEET))
         self.binding = self.etc / ".enrollment.json.partial.deployment"
         self.looked_up = self.tmp / "looked-up"
-        for name, body in {**STUBS, "suifleet": SUIFLEET}.items():
+        python = f'#!/bin/sh\nexec "{PYTHON}" "$@"\n'
+        for name, body in {**STUBS, "suifleet": SUIFLEET, "python3": python}.items():
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
 
