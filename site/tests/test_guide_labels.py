@@ -74,10 +74,13 @@ class GuideLabelsTest(unittest.TestCase):
     def test_recorded_snapshot_remains_digest_checked(self):
         manifest = build.load_json(ROOT / 'site/media/guide/videos.json')
         original = build.sha256
-        snapshot = ROOT / 'site/guide/recorded/lessons.json'
-        with mock.patch.object(build, 'sha256', side_effect=lambda path: '0' * 64 if path == snapshot else original(path)):
-            with self.assertRaisesRegex(build.BuildError, 'source/artwork'):
-                build.videos_by_step()
+        for name in ('lessons.json', 'video-test.Dockerfile'):
+            snapshot = ROOT / 'site/guide/recorded' / name
+            with self.subTest(name=name), mock.patch.object(
+                build, 'sha256', side_effect=lambda path: '0' * 64 if path == snapshot else original(path)
+            ):
+                with self.assertRaisesRegex(build.BuildError, 'source/artwork'):
+                    build.videos_by_step()
         with self.assertRaisesRegex(build.BuildError, 'Invalid guide script snapshot'):
             build.recorded_guide_source({'script_snapshot': '../untrusted'}, 'site/guide/lessons.json')
         self.assertEqual(manifest['tutorial_production']['script_snapshot'], 'site/guide/recorded')
