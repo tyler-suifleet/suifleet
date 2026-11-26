@@ -266,3 +266,9 @@ unchanged source review. See the low-latency workflow in docs/PR_COORDINATION.md
 ## Local-test infrastructure integration — user direction, 2026-11-01
 
 Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.
+
+## Immediate CI repair integration — user direction, 2026-11-26
+
+All CI-related fixes use immediate serial integration after the smallest meaningful local checks. This includes workflows, runners, caches, test harnesses and reviewer/dispatcher/recovery services. Do not send these fixes through model review, feature integration batches or hosted-CI approval waits. Record exact checks and any failures or unrun checks honestly; do not manufacture approvals or passing CI.
+
+After merging, install the verified merged revision in every affected local service, restart the affected services while preserving active worker processes and claims, and verify the running revision and service health before reporting completion. Do not stop at opening a PR or committing a fix. Use the user's commit identity, preserve ownership and serialize publication. Separate unrelated application features from CI repairs; those features keep their normal gates. Wallet/spending, protected credentials, hardware, release and mainnet authorization limits still apply.

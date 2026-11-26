@@ -35,3 +35,7 @@ acceptance no longer block implementation merges; preserve them explicitly in
 SF-087/#159 and SF-031/#32 under the shared policy. Do not waive actionable code or
 security findings, software tests, applicable automated testnet or independent
 review. Do not provision production credentials or claim deferred checks passed.
+
+## CI fixes: immediate integration
+
+Follow AGENTS.md's 2026-11-26 user direction for every CI-related fix: focused local checks, immediate serial merge without model review or hosted-CI approval waits, then install the verified merged revision and restart/verify affected local services. A PR is an audit trail, not a review queue for these fixes. Preserve active workers, claims, user authorship and actual credential/release/hardware/mainnet limits.
