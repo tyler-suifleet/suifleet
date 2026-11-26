@@ -42,6 +42,11 @@
         suifleet_restart_daemon: >-
           {{ signer_inputs_changed | bool or suifleet_config_file is changed
              or running | dict2items | selectattr('value.stale') | list | length > 0 }}
+        # Any unit, active or stopped, whose changed unit files systemd has not
+        # loaded: an earlier run may have stopped after installing them and
+        # before its daemon-reload, and starting it would use the cached copy.
+        suifleet_reload_pending: >-
+          {{ running | dict2items | selectattr('value.reload_needed') | list | length > 0 }}
 
     - name: Report units still using replaced inputs
       ansible.builtin.debug:
@@ -51,10 +56,12 @@
         label: "{{ item.key }}"
       when: item.value.stale
 
-    - name: Load unit changes before restarting
+    - name: Load unit changes before starting or restarting
       ansible.builtin.systemd_service:
         daemon_reload: true
-      when: suifleet_restart_signer | bool or suifleet_restart_daemon | bool or suifleet_restart_path | bool
+      when: >-
+        suifleet_reload_pending | bool or suifleet_restart_signer | bool
+        or suifleet_restart_daemon | bool or suifleet_restart_path | bool
 
     # A running signing service keeps the listening socket it inherited, so it
     # stops before its socket is recreated with the new unit settings and

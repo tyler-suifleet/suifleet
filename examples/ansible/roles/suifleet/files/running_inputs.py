@@ -16,12 +16,25 @@ With --since, an earlier report of the same units is read from stdin and each
 unit also reports "changed_since" (its digest differs from that report) and
 "not_restarted" (it was active and stale then and still runs the same
 invocation), which the role's verification requires to be false.
+
+"reload_needed" is reported for every unit, active or not: a stopped unit with
+unloaded changes would otherwise start from systemd's cached definition, so
+the role reloads systemd before starting or restarting anything.
+
+A service's main process may exit between systemd's sample and the read of
+its executable. The unit is then sampled again (a bounded number of times), and
+a sample is used only if systemd still reports the same main process and
+invocation after the executable was read.
 """
 import hashlib
 import json
 import os
 import subprocess
 import sys
+import time
+
+SAMPLE_ATTEMPTS = 10
+SAMPLE_DELAY = 0.2
 
 
 def show(unit):
@@ -43,9 +56,27 @@ def digest(paths):
     return hasher.hexdigest()
 
 
+def sample(unit):
+    """Return (props, pid, exe_replaced) from a consistent sample of the unit."""
+    for _ in range(SAMPLE_ATTEMPTS):
+        props = show(unit)
+        pid = int(props.get("MainPID") or 0)
+        if not pid:
+            return props, 0, False
+        try:
+            exe = os.readlink(f"/proc/{pid}/exe")
+        except (FileNotFoundError, ProcessLookupError):
+            exe = None  # it exited after systemd's sample
+        if exe is not None:
+            again = show(unit)
+            if (again.get("MainPID"), again.get("InvocationID")) == (props.get("MainPID"), props.get("InvocationID")):
+                return props, pid, exe.endswith(" (deleted)")
+        time.sleep(SAMPLE_DELAY)
+    sys.exit(f"{unit}: its main process kept changing while it was inspected; rerun when it is stable")
+
+
 def check(unit, inputs, applied):
-    props = show(unit)
-    pid = int(props.get("MainPID") or 0)
+    props, pid, exe_replaced = sample(unit)
     # A service is current only while its main process runs; a socket or path
     # unit while it is active (it holds the socket or watch it was started with).
     active = pid != 0 if unit.endswith(".service") else props.get("ActiveState") in ("active", "reloading")
@@ -53,7 +84,7 @@ def check(unit, inputs, applied):
                   digest=digest([*inputs, props.get("FragmentPath", ""), *props.get("DropInPaths", "").split()]),
                   applied=applied.get(unit), stale=False, reason="current",
                   reload_needed=props.get("NeedDaemonReload") == "yes",
-                  exe_replaced=bool(pid) and os.readlink(f"/proc/{pid}/exe").endswith(" (deleted)"))
+                  exe_replaced=exe_replaced)
     if not active:
         report["reason"] = "not active"
     elif report["reload_needed"]:

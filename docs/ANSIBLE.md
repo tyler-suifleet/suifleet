@@ -166,7 +166,13 @@ an active unit whose inputs differ from that record (or that has no record),
 that waits for a daemon-reload, or whose process runs a replaced executable is
 restarted. No timestamps are compared, so a change made just after a restart
 is still detected. A rollout that stopped after its files landed but before
-the restarts therefore converges on the next run.
+the restarts therefore converges on the next run. Systemd is also reloaded
+before any unit starts whenever a unit, active or stopped, has unit-file
+changes it has not loaded, so a run that stopped between installing unit
+files and its daemon-reload never starts a unit from the cached definition.
+A service whose main process exits while it is inspected is sampled again
+(bounded), and a sample is used only if the main process and invocation are
+unchanged after its executable was read.
 
 A changed signing socket unit is applied in dependency order: the signing
 service stops, the socket is recreated with the new settings (for example
@@ -492,7 +498,13 @@ The harness checks these phases:
    binary-profile host, interrupted after the unit files and daemon-reload:
    the retry must recreate the socket with the new mode and restart the
    signer and the daemon, then a rerun reports `changed=0`.
-11. Check mode on configured hosts with their SuiFleet units stopped, as an
+11. A unit-only update (`SocketMode` back to 0660) on the binary-profile host
+   whose SuiFleet units are stopped but still enabled, interrupted after the
+   unit files are installed and before the daemon-reload: the stopped units
+   report a pending reload without being stale, and the retry must reload
+   systemd before starting them (the socket comes up with the new mode and no
+   unit waits for a reload), then a rerun reports `changed=0`.
+12. Check mode on configured hosts with their SuiFleet units stopped, as an
    interrupted upgrade leaves them, one host with only the signing socket
    still active and one host's journal not yet initialized: the preview
    succeeds, starts no unit (no socket-activated signer), dispatches no
@@ -500,9 +512,9 @@ The harness checks these phases:
    untouched. The converged and upgrade previews, where every signing service
    is active when the preview reads it, also dispatch no self-check. The real run then starts
    and verifies the hosts, and a rerun reports `changed=0`.
-12. A rolling-restart preview in check mode succeeds without restarting the
+13. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
-13. Rolling restart.
+14. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that
