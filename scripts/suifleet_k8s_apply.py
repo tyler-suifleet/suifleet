@@ -365,7 +365,11 @@ def _resource(index, resource):
 
 def load_bundle(path):
     """Read and validate a bundle file; returns (parsed bundle, sha256 hex)."""
-    data = Path(path).read_bytes()
+    # Read at most one byte past the cap: a downloaded artifact may be far
+    # larger (the daemon's artifact ceiling is 1 GiB), and allocating all of it
+    # before rejecting could OOM a memory-constrained edge host.
+    with open(path, "rb") as handle:
+        data = handle.read(MAX_BUNDLE_BYTES + 1)
     _require(len(data) <= MAX_BUNDLE_BYTES, f"bundle exceeds {MAX_BUNDLE_BYTES} bytes")
     try:
         bundle = json.loads(data)

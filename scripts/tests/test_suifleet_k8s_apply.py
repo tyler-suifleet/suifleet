@@ -171,6 +171,51 @@ class ValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(k8s.Rejected, "not JSON"):
                 k8s.load_bundle(path)
 
+    def test_oversized_bundle_read_is_bounded(self):
+        """Combined review 4924: an oversized bundle is rejected after reading
+        at most MAX_BUNDLE_BYTES + 1 bytes, never by loading the whole file."""
+        import builtins
+        real_open = builtins.open
+        reads = []
+
+        class Counting:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.handle.close()
+
+            def read(self, size=-1):
+                data = self.handle.read(size)
+                reads.append((size, len(data)))
+                return data
+
+        def counting_open(file, mode="r", *args, **kwargs):
+            handle = real_open(file, mode, *args, **kwargs)
+            return Counting(handle) if str(file) == str(path) else handle
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "big.json"
+            path.write_bytes(b"{" + b" " * (2 * k8s.MAX_BUNDLE_BYTES) + b"}")
+            with mock.patch("builtins.open", counting_open):
+                with self.assertRaisesRegex(k8s.Rejected, "exceeds"):
+                    k8s.load_bundle(path)
+        self.assertTrue(reads, "load_bundle must read through open()")
+        self.assertTrue(all(0 <= size <= k8s.MAX_BUNDLE_BYTES + 1 for size, _ in reads), reads)
+        self.assertLessEqual(sum(n for _, n in reads), k8s.MAX_BUNDLE_BYTES + 1)
+
+    def test_bundle_at_cap_is_read_completely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "b.json"
+            body = json.dumps(json.loads(EXAMPLE.read_text())).encode()
+            padded = body + b" " * (k8s.MAX_BUNDLE_BYTES - len(body))
+            path.write_bytes(padded)
+            bundle, digest = k8s.load_bundle(path)
+            self.assertEqual(digest, hashlib.sha256(padded).hexdigest())
+
 
 class ConfigBindingTest(unittest.TestCase):
     """Combined reviews 4602/4605/4609: the configuration a Pod reads must be
