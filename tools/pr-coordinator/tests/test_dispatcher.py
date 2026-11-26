@@ -783,6 +783,19 @@ class DependencyResumeTests(unittest.TestCase):
     def runs(self):
         return {r['session']: r['status'] for r in self.worker.db.execute('SELECT * FROM runs')}
 
+    def test_legacy_object_evidence_resumes_using_the_same_merge_and_owner_fences(self):
+        self.setup_wait()
+        path = self.folder/'result.json'
+        result = json.loads(path.read_text())
+        result['evidence'] = {'blocker':'needs SF-083', 'checks':['offline checks passed']}
+        path.write_text(json.dumps(result))
+        self.assertEqual(self.resume(),1)
+        self.assertEqual(self.record()['state'],'launched')
+        resumed = self.worker.db.execute("SELECT claim FROM runs WHERE session='session-resume'").fetchone()
+        self.assertEqual(json.loads(resumed['claim']),self.claim)
+        self.assertEqual(self.resume(self.restart()),0)
+        self.assertEqual(self.spawn.call_count,1)
+
     def test_merged_dependency_resumes_once_on_unchanged_claim(self):
         self.setup_wait()
         self.assertEqual(self.resume(), 1)
