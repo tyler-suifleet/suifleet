@@ -5,6 +5,7 @@ export type DocsPage = "install" | "enrollment" | "components" | "budget" | "pri
 /** All customer help links use the same configured documentation origin. */
 export function docsUrl(page: DocsPage) { return `${DOCS_BASE}${page}/`; }
 export const GUIDE_FILE = "device-client/";
+export const YOCTO_LAYER_URL = "https://github.com/tyler-suifleet/meta-suifleet";
 
 /** Guide sections, by heading anchor. */
 export const GUIDE_SECTIONS = {
@@ -41,7 +42,7 @@ export const COMMANDS = {
 } as const;
 
 export const PLATFORMS: { section: GuideSection; label: string; note: string }[] = [
-  { section: "yocto", label: "Raspberry Pi / Yocto image", note: "meta-suifleet layer; key generated at first boot" },
+  { section: "yocto", label: "Raspberry Pi / Yocto image", note: "key generated at first boot" },
   { section: "macos", label: "macOS (Apple silicon)", note: "LaunchDaemon installer; prints the address" },
   { section: "debian", label: "Debian / Ubuntu", note: "package availability and Linux installation steps" },
   { section: "linux", label: "Other Linux with systemd", note: "same files as the Yocto recipe, installed by hand" },

@@ -247,6 +247,8 @@ fn default_telemetry_buffer() -> usize {
 #[serde(default, deny_unknown_fields)]
 pub struct DaemonUpdateConfig {
     pub enabled: bool,
+    /// Use a platform-owned launcher and its authenticated control channel.
+    pub managed: bool,
     /// Deployments of this component name carry a new daemon binary.
     pub component: String,
     /// Default: `<state_dir>/daemon`.
@@ -259,6 +261,7 @@ impl Default for DaemonUpdateConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            managed: false,
             component: "suifleet-daemon".into(),
             install_dir: None,
             max_start_attempts: 3,
@@ -297,6 +300,8 @@ pub struct ComponentsConfig {
     /// Run in the previous committed version workspace, never for platform installers.
     #[serde(default)]
     pub recovery_commands: std::collections::BTreeMap<String, String>,
+    /// Device-local grants for version 2 OCI descriptors.
+    pub oci_grants: std::collections::BTreeMap<String, crate::oci::Grant>,
 }
 impl Default for ComponentsConfig {
     fn default() -> Self {
@@ -306,6 +311,7 @@ impl Default for ComponentsConfig {
             configuration_overlay_dir: "/etc/suifleet/component-config".into(),
             configuration_defer_max_seconds: 86_400,
             recovery_commands: Default::default(),
+            oci_grants: Default::default(),
         }
     }
 }
@@ -533,7 +539,7 @@ pub struct EnrollConfig {
     pub signer: Option<SignerConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedEnrollment {
     pub customer_id: String,
@@ -835,6 +841,13 @@ impl FirmwareHelperConfig {
 }
 
 impl Config {
+    pub fn oci_policy(&self) -> crate::oci::Policy {
+        crate::oci::Policy {
+            grants: self.components.oci_grants.clone(),
+            ipc: self.ipc.clone(),
+        }
+    }
+
     /// Walrus archives own the durable log cursor when enabled. HTTP and
     /// on-chain health are mutually exclusive (their signed schema is shared).
     pub fn http_logs_enabled(&self) -> bool {
@@ -843,9 +856,13 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let raw = std::fs::read_to_string(path)?;
-        let mut cfg: Self = toml::from_str(&raw)?;
+        Self::load_text(path, &std::fs::read_to_string(path)?, None)
+    }
+
+    pub(crate) fn load_text(path: &Path, raw: &str, manifest: Option<DeploymentManifest>) -> anyhow::Result<Self> {
+        let mut cfg: Self = toml::from_str(raw)?;
         if let Some(ipc) = &cfg.ipc { ipc.validate()?; }
+        cfg.oci_policy().validate()?;
         if let Some(pubsub) = &cfg.pubsub { pubsub.validate(cfg.aws_iot.is_some())?; }
         if let Some(console) = &cfg.console { console.validate()?; }
         cfg.path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
@@ -861,9 +878,15 @@ impl Config {
         // a component could make itself the unit's main process, which the
         // signing service trusts for status reports (SF-053, KEY_ISOLATION.md).
         anyhow::ensure!(
-            !(cfg.daemon_update.enabled && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            !(cfg.daemon_update.enabled && !cfg.daemon_update.managed && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
             "daemon_update cannot be enabled with the service signer ([device.signer] kind = \"service\"): \
              components could replace the daemon the signing service trusts"
+        );
+        anyhow::ensure!(
+            !cfg.daemon_update.managed || (cfg.daemon_update.enabled
+                && cfg.daemon_update.install_dir.is_none()
+                && cfg.device.signer.as_ref().is_some_and(|signer| signer.kind == "service")),
+            "managed daemon_update requires an enabled update, a service signer, and platform-owned update paths"
         );
         if let Some(reason) = unsupported_on(std::env::consts::OS, &cfg) {
             anyhow::bail!("{reason} (docs/MACOS_RUNTIME.md)");
@@ -888,8 +911,10 @@ impl Config {
                 .unwrap_or(Path::new("."))
                 .join(&cfg.sui.manifest_path)
         };
-        let manifest: DeploymentManifest =
-            serde_json::from_str(&std::fs::read_to_string(manifest_path)?)?;
+        let manifest = match manifest {
+            Some(manifest) => manifest,
+            None => serde_json::from_str(&std::fs::read_to_string(manifest_path)?)?,
+        };
         manifest.validate()?;
         anyhow::ensure!(
             cfg.walrus.aggregator_url.is_empty()
@@ -1099,6 +1124,41 @@ mod tests {
     fn fixture() -> DeploymentManifest {
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap()
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn managed_daemon_update_requires_service_signer_and_platform_paths() {
+        let dir = std::env::temp_dir().join(format!("suifleet-config-managed-update-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            dir.join("deployment.json"),
+            include_bytes!("../../manifests/fixture.localnet.json"),
+        )
+        .unwrap();
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let signer = "[device.signer]\nkind='service'\nsocket='/run/suifleet/signer.sock'\n";
+        for (signer_config, enabled, paths, valid) in [
+            (signer, true, "", true),
+            (signer, false, "", false),
+            ("", true, "", false),
+            (signer, true, "install_dir='/var/lib/suifleet/client'\n", false),
+        ] {
+            std::fs::write(
+                &path,
+                format!("{base}{signer_config}[daemon_update]\nmanaged=true\nenabled={enabled}\n{paths}"),
+            )
+            .unwrap();
+            let result = Config::load(&path);
+            if valid {
+                assert!(result.unwrap().daemon_update.managed);
+            } else {
+                let error = result.err().expect("invalid managed update configuration");
+                assert!(error.to_string().contains("managed daemon_update requires"), "{error}");
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn shadows_need_a_thing_name_and_bounded_limits() {
         for (text, valid) in [

@@ -133,6 +133,12 @@ pub fn response(result: anyhow::Result<Value>) -> Value {
                 None => json!({"version":1,"ok":false,"error":e.code}),
             }
         }
+        // Publish backpressure is raised only when nothing was stored (or every
+        // staged copy was removed again), so clients may resend safely. Any other
+        // publish failure stays generic: it does not promise that nothing was stored.
+        Err(error) if error.downcast_ref::<crate::pubsub::Backpressure>().is_some() => {
+            json!({"version":1,"ok":false,"error":"full"})
+        }
         Err(error) if error.downcast_ref::<crate::shadows::ShadowError>().is_some() => {
             json!({"version":1,"ok":false,"error":error.downcast_ref::<crate::shadows::ShadowError>().unwrap().code})
         }
@@ -235,7 +241,9 @@ impl Messages {
                         && !broker.as_ref().is_some_and(|b| b.has(n, &r.topic))).map(|(n, _)| n.clone()).collect()
                 } else { Vec::new() };
                 // Backpressure is atomic: never partially deliver a publication.
-                anyhow::ensure!(targets.iter().all(|n| self.queues.get(&(n.clone(), r.topic.clone())).map_or(0, VecDeque::len) < 32), "inbox full");
+                if targets.iter().any(|n| self.queues.get(&(n.clone(), r.topic.clone())).map_or(0, VecDeque::len) >= 32) {
+                    return Err(crate::pubsub::Backpressure(format!("inbox {}", r.topic)).into());
+                }
                 // Durable subscribers next (all or nothing), then the volatile inboxes.
                 let stored = match broker.as_mut() {
                     Some(broker) => broker.publish(principal, &r.topic, &r.payload, None)?,
@@ -350,6 +358,23 @@ mod tests {
         let error = crate::shadows::ShadowError { code: "conflict", detail: "private".into() };
         assert_eq!(response(Err(error.into())), json!({"version":1,"ok":false,"error":"conflict"}));
         assert_eq!(response(Err(anyhow::anyhow!("forbidden_shadow"))), json!({"version":1,"ok":false,"error":"request_failed"}));
+    }
+    #[test]
+    fn only_definitive_publish_backpressure_is_coded_full() {
+        let full = |e: anyhow::Error| response(Err(e));
+        // Nothing stored: a client may resend.
+        assert_eq!(full(crate::pubsub::Backpressure("sub a/#".into()).into()), json!({"version":1,"ok":false,"error":"full"}));
+        assert_eq!(full(anyhow::Error::from(crate::pubsub::Backpressure("x".into())).context("publish")),
+            json!({"version":1,"ok":false,"error":"full"}));
+        // Refused-but-not-removed (poisoned store) and other failures promise nothing.
+        assert_eq!(full(anyhow::anyhow!("message 7 was refused (sync) but not removed (unlink)")),
+            json!({"version":1,"ok":false,"error":"request_failed"}));
+        assert_eq!(full(crate::pubsub::Unfittable("sub a/#".into()).into()), json!({"version":1,"ok":false,"error":"request_failed"}));
+        // The volatile inbox refusal is atomic and coded full.
+        let p = policy();
+        let mut messages = Messages::default();
+        for _ in 0..32 { messages.handle(&p, &request("publish"), "a", None).unwrap(); }
+        assert_eq!(response(messages.handle(&p, &request("publish"), "a", None)), json!({"version":1,"ok":false,"error":"full"}));
     }
     #[test]
     fn messaging_backpressure_is_atomic_and_health_is_bounded() {

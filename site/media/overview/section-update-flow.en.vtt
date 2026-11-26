@@ -1,0 +1,31 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:11.465
+Sui saves your approval on a shared network. Walrus stores your
+software files for the period you choose. Private releases are
+encrypted, with access limited to authorized devices.
+
+2
+00:00:12.350 --> 00:00:22.974
+The SuiFleet client on each device checks for approved updates
+on its configured schedule. Connections start from the device,
+so you do not need to open an incoming connection.
+
+3
+00:00:24.350 --> 00:00:35.358
+When an update is available, the device downloads it from Walrus
+and verifies that it matches the approved release. A device that
+reconnects can catch up while the update remains available.
+
+4
+00:00:36.350 --> 00:00:46.995
+SuiFleet then runs your configured installer. Your platform
+handles installation, any reboot, and recovery. This lets you
+use the update process that suits your devices.
+
+5
+00:00:48.350 --> 00:00:58.313
+See which installations succeeded and which failed. Device
+health is reported separately. If an update fails, review the
+available diagnostics before trying again.
