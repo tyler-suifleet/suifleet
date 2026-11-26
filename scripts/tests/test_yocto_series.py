@@ -14,6 +14,7 @@ KAS = ROOT / 'kas'
 LAYERS = {
     'meta-suifleet': ROOT / 'suifleet-edge/meta-suifleet/conf/layer.conf',
     'suifleet-integration': ROOT / 'suifleet-edge/meta-suifleet-integration/conf/layer.conf',
+    'suifleet-enrollment': ROOT / 'suifleet-edge/meta-suifleet-enrollment/conf/layer.conf',
 }
 # Series -> (package profile, QEMU runtime profile).
 PROFILES = {
@@ -50,7 +51,7 @@ def remote_repos(text):
 
 
 class SeriesPolicyTests(unittest.TestCase):
-    def test_both_layers_advertise_exactly_the_profiled_series(self):
+    def test_layers_advertise_exactly_the_profiled_series(self):
         for collection, path in LAYERS.items():
             self.assertEqual(sorted(compat(path, collection)), sorted(PROFILES), collection)
 
@@ -69,6 +70,14 @@ class SeriesPolicyTests(unittest.TestCase):
                 self.assertTrue(url.startswith('https://'), (package, name))
                 self.assertRegex(commit or '', '^[0-9a-f]{40}$', (package, name))
             self.assertIn(f'    - {package}', (KAS / qemu).read_text(), qemu)
+
+    def test_enrollment_layer_is_board_independent_and_in_every_package_profile(self):
+        conf = LAYERS['suifleet-enrollment']
+        self.assertIn('LAYERDEPENDS_suifleet-enrollment = "meta-suifleet"',
+                      conf.read_text().splitlines())
+        for package, _qemu in PROFILES.values():
+            self.assertIn('      suifleet-edge/meta-suifleet-enrollment:',
+                          (KAS / package).read_text().splitlines(), package)
 
     def test_kirkstone_uses_the_rust_mixin_not_core_rust(self):
         repos = {name: (url, commit, branch) for name, url, commit, branch in
