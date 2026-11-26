@@ -34,6 +34,11 @@ It is deliberately narrow:
   Deployment remains visible (terminating) until its ReplicaSets and Pods are
   gone, so readiness does not report a retirement or rollback converged while
   old Pods still run.
+- An in-place rollout or rollback of a same-name Deployment is ready only once
+  no Pod its selector matches is terminating. Deployment status counts only
+  non-terminating Pods (and status.terminatingReplicas is absent before
+  Kubernetes 1.33 or with its feature gate off), so the helper lists the
+  namespace's Pods (read-only `list pods`) instead of trusting status alone.
 - Deployments may consume only ConfigMaps from the same bundle. A ConfigMap
   that a bundle Deployment consumes is published under a content-addressed
   name, `NAME-<first 16 hex digits of the sha256 of its data>`, as an
@@ -934,8 +939,51 @@ def deployment_ready(deployment, digest):
         if status.get(field, 0) < replicas:
             return False, f"{field} {status.get(field, 0)}/{replicas}"
     if status.get("replicas", 0) > replicas:
-        return False, "old replicas still terminating"
+        return False, "old replicas still running"
+    # Only where the API server reports it (Kubernetes >= 1.33 with the
+    # DeploymentReplicaSetTerminatingReplicas gate); terminating_pods covers
+    # every supported version.
+    if status.get("terminatingReplicas", 0):
+        return False, f"terminatingReplicas {status['terminatingReplicas']}"
     return True, "available"
+
+
+def selector_matches(selector, labels):
+    """Whether a LabelSelector (matchLabels/matchExpressions) matches
+    `labels`, as the API server evaluates it. An empty or missing selector
+    matches nothing here (apps/v1 Deployments always carry one)."""
+    if not isinstance(selector, dict) or not (selector.get("matchLabels") or selector.get("matchExpressions")):
+        return False
+    labels = labels or {}
+    for key, value in (selector.get("matchLabels") or {}).items():
+        if labels.get(key) != value:
+            return False
+    for term in selector.get("matchExpressions") or []:
+        key, operator, values = term.get("key"), term.get("operator"), term.get("values") or []
+        if operator == "In" and labels.get(key) not in values:
+            return False
+        if operator == "NotIn" and key in labels and labels[key] in values:
+            return False
+        if operator == "Exists" and key not in labels:
+            return False
+        if operator == "DoesNotExist" and key in labels:
+            return False
+        if operator not in ("In", "NotIn", "Exists", "DoesNotExist"):
+            return False
+    return True
+
+
+def terminating_pods(deployment, pods):
+    """Names of listed Pods the Deployment's selector matches that are still
+    terminating (deletionTimestamp set). Deployment status.replicas and the
+    ReplicaSet counters exclude such Pods, so an in-place rollout or
+    rollback would otherwise look complete while the previous revision's
+    Pod still runs through its termination grace period. A matching Pod of
+    another workload (overlapping selectors) only delays readiness."""
+    selector = (deployment.get("spec") or {}).get("selector")
+    return sorted(pod["metadata"]["name"] for pod in pods
+                  if (pod.get("metadata") or {}).get("deletionTimestamp")
+                  and selector_matches(selector, pod["metadata"].get("labels")))
 
 
 # ------------------------------------------------------------------- profile
@@ -1392,11 +1440,14 @@ def ready(kubectl, objects, component):
     an update, rollback or empty retirement bundle is not ready while stale
     workloads still exist or are still terminating. Because pruning uses
     foreground deletion, a pruned Deployment stays listed until its
-    ReplicaSets and Pods are gone; no Pod/ReplicaSet permission is needed.
+    ReplicaSets and Pods are gone. A Deployment kept under the same name
+    (an in-place rollout or rollback) is not deleted, so its previous
+    revision's terminating Pods are found by listing Pods (terminating_pods);
+    that read-only `list pods` is the only Pod permission the helper uses.
     A Deployment's exact template names the content-addressed ConfigMaps its
     Pods read, so a completed rollout of it is a rollout of this bundle's
     configuration."""
-    desired = {}
+    desired, pods = {}, None
     for item in sorted(objects, key=lambda item: item["kind"] != "ConfigMap"):
         resource = ALLOWED_KINDS[(item["apiVersion"], item["kind"])]
         name = item["metadata"]["name"]
@@ -1405,6 +1456,12 @@ def ready(kubectl, objects, component):
         ok, reason = object_ready(current, item, component)
         if not ok:
             return False, reason
+        if item["kind"] == "Deployment":
+            if pods is None:
+                pods = (kubectl.json("get", "pods") or {}).get("items") or []
+            held = terminating_pods(current, pods)
+            if held:
+                return False, f"{item['kind']}/{name}: previous Pod {held[0]} still terminating ({len(held)} remaining)"
     selector = f"{MANAGED_BY}={FIELD_MANAGER},{COMPONENT_LABEL}={component}"
     for resource in ALLOWED_KINDS.values():
         listed = kubectl.json("get", resource, "-l", selector) or {}

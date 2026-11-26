@@ -386,6 +386,45 @@ class ConfigBindingTest(unittest.TestCase):
         cluster.roll_out()
         self.assertEqual(k8s.ready(cluster, v2, "web-app"), (True, "ready"))
 
+    def test_in_place_rollout_and_rollback_wait_for_terminating_pods(self):
+        """Combined review 4833: a same-name Deployment rolls in place, so
+        nothing is pruned. Once the new revision is updated, ready and
+        available, Deployment status (which excludes terminating Pods, and
+        has no terminatingReplicas before Kubernetes 1.33) looks complete
+        while the previous revision's Pod still terminates; ready must wait
+        for that Pod, for the rollout and for the rollback alike."""
+        cluster = ModelCluster()
+        v1, v2 = self.objects("v1"), self.objects("v2")
+        k8s.apply(cluster, v1, "web-app", cluster)
+        cluster.roll_out()
+        cluster.pods = [{"metadata": {"name": "web-v1", "labels": {"app": "web"}}}]
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+        for target, old, new in ((v2, "web-v1", "web-v2"), (v1, "web-v2", "web-v1b")):
+            with self.subTest(target=new):
+                k8s.apply(cluster, target, "web-app", cluster)
+                cluster.roll_out()  # Every active counter at 1, as reported with an old Pod terminating.
+                cluster.pods = [{"metadata": {"name": old, "labels": {"app": "web"},
+                                              "deletionTimestamp": "2026-11-26T00:00:00Z"}},
+                                {"metadata": {"name": new, "labels": {"app": "web"}}}]
+                live = cluster.store["deployments.apps"]["web"]
+                digest = live["metadata"]["annotations"][k8s.BUNDLE_ANNOTATION]
+                self.assertEqual(k8s.deployment_ready(live, digest), (True, "available"),
+                                 "status alone cannot see the terminating Pod")
+                ok, reason = k8s.ready(cluster, target, "web-app")
+                self.assertFalse(ok)
+                self.assertIn(f"previous Pod {old} still terminating", reason)
+                live["status"]["terminatingReplicas"] = 1  # Where the API server reports it (>= 1.33).
+                cluster.pods = cluster.pods[1:]
+                ok, reason = k8s.ready(cluster, target, "web-app")
+                self.assertFalse(ok)
+                self.assertIn("terminatingReplicas 1", reason)
+                del live["status"]["terminatingReplicas"]
+                self.assertEqual(k8s.ready(cluster, target, "web-app"), (True, "ready"))
+        # A terminating Pod of another workload's selector does not hold this one.
+        cluster.pods.append({"metadata": {"name": "api-old", "labels": {"app": "api"},
+                                          "deletionTimestamp": "2026-11-26T00:00:00Z"}})
+        self.assertEqual(k8s.ready(cluster, v1, "web-app"), (True, "ready"))
+
     def test_partial_update_never_changes_the_data_a_template_names(self):
         """Review 4605: v2 writes its ConfigMap, then its Deployment write
         fails. A v1-template Pod that (re)starts in that window must still
@@ -936,6 +975,8 @@ class ModelCluster:
         self.profile = {"namespace": "suifleet-apps"}
         self.component, self.namespace = "web-app", "suifleet-apps"
         self.store = {"configmaps": {}, "deployments.apps": {}}
+        # Pods as the helper lists them (read-only `list pods`); not owned objects.
+        self.pods = []
         self.counter, self.order = 0, []
         self.refuse_deployments = False
         self.tamper = None
@@ -965,6 +1006,8 @@ class ModelCluster:
         return sorted(reads)
 
     def json(self, *args, namespaced=True):
+        if args == ("get", "pods"):
+            return {"items": copy.deepcopy(self.pods)}
         if "-l" in args:
             return {"items": [copy.deepcopy(o) for o in self.store[args[1]].values()]}
         return self.get(args[1], args[2])
@@ -1746,13 +1789,43 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(k8s.deployment_ready(base, digest), (True, "available"))
         self.assertFalse(k8s.deployment_ready(base, "f" * 64)[0], "another bundle's rollout is not this one's readiness")
         for change, reason in [({"observedGeneration": 1}, "not yet observed"), ({"availableReplicas": 1}, "availableReplicas"),
-                               ({"updatedReplicas": 1}, "updatedReplicas"), ({"replicas": 3}, "terminating"),
+                               ({"updatedReplicas": 1}, "updatedReplicas"), ({"replicas": 3}, "still running"),
+                               ({"terminatingReplicas": 1}, "terminatingReplicas"),
                                ({"conditions": [{"type": "Progressing", "reason": "ProgressDeadlineExceeded"}]}, "deadline")]:
             item = copy.deepcopy(base)
             item["status"].update(change)
             ok, why = k8s.deployment_ready(item, digest)
             self.assertFalse(ok)
             self.assertIn(reason, why)
+
+
+    def test_selector_matches(self):
+        labels = {"app": "web", "tier": "front"}
+        self.assertTrue(k8s.selector_matches({"matchLabels": {"app": "web"}}, labels))
+        self.assertFalse(k8s.selector_matches({"matchLabels": {"app": "api"}}, labels))
+        self.assertFalse(k8s.selector_matches({}, labels), "an empty selector selects nothing here")
+        self.assertFalse(k8s.selector_matches(None, labels))
+        for term, expected in [({"key": "tier", "operator": "In", "values": ["front", "back"]}, True),
+                               ({"key": "tier", "operator": "In", "values": ["back"]}, False),
+                               ({"key": "tier", "operator": "NotIn", "values": ["back"]}, True),
+                               ({"key": "tier", "operator": "NotIn", "values": ["front"]}, False),
+                               ({"key": "zone", "operator": "NotIn", "values": ["a"]}, True),
+                               ({"key": "tier", "operator": "Exists"}, True),
+                               ({"key": "zone", "operator": "Exists"}, False),
+                               ({"key": "zone", "operator": "DoesNotExist"}, True),
+                               ({"key": "tier", "operator": "DoesNotExist"}, False),
+                               ({"key": "tier", "operator": "Bogus"}, False)]:
+            self.assertEqual(k8s.selector_matches({"matchLabels": {"app": "web"}, "matchExpressions": [term]}, labels),
+                             expected, term)
+
+    def test_terminating_pods(self):
+        deployment = {"spec": {"selector": {"matchLabels": {"app": "web"}}}}
+        pod = lambda name, labels, deleting: {"metadata": dict(
+            {"name": name, "labels": labels}, **({"deletionTimestamp": "2026-11-26T00:00:00Z"} if deleting else {}))}
+        pods = [pod("web-new", {"app": "web"}, False), pod("web-old-b", {"app": "web"}, True),
+                pod("web-old-a", {"app": "web", "pod-template-hash": "1"}, True), pod("api-old", {"app": "api"}, True)]
+        self.assertEqual(k8s.terminating_pods(deployment, pods), ["web-old-a", "web-old-b"])
+        self.assertEqual(k8s.terminating_pods(deployment, pods[:1]), [])
 
 
 class ProfileTest(unittest.TestCase):

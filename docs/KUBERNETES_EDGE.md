@@ -71,7 +71,7 @@ How the helper keeps two controllers from fighting:
    cascading deletion: a pruned Deployment stays visible, terminating and
    still labelled, until the garbage collector has removed its ReplicaSets and
    their Pods. Readiness therefore sees old Pods that still run, without the
-   publisher needing any Pod or ReplicaSet permission. Updates and rollbacks
+   publisher needing any ReplicaSet permission. Updates and rollbacks
    remove the other version's extra objects.
    Customer objects, other components and other namespaces are never deleted.
 4. **Autoscalers.** If a `HorizontalPodAutoscaler` (created by the administrator)
@@ -265,8 +265,10 @@ waits again and reports the current state.
   and kubectl runs with a private temporary cache.
 - **Authorization.** [`scripts/kubernetes/cluster-setup.yaml`](../scripts/kubernetes/cluster-setup.yaml)
   grants a namespaced Role with `get, list, create, patch, delete` on
-  `configmaps` and `apps/deployments`. Nothing else is granted: no Services or
-  other networking objects, Secrets, Pods, `exec`/`attach`/logs,
+  `configmaps` and `apps/deployments`, plus read-only `list` on `pods` so
+  readiness can see Pods still terminating (see `ready`). Nothing else is
+  granted: no Services or other networking objects, Secrets, Pod
+  get/create/update/delete, `exec`/`attach`/logs,
   ServiceAccounts or tokens, RBAC, quotas, namespaces, nodes, CRDs or
   cluster-scoped objects. Services stay administrator-owned, so the publisher
   credential cannot create Services, Ingresses or NetworkPolicies, or change
@@ -479,6 +481,16 @@ yet pruned. This applies to updates, rollbacks and empty retirement bundles.
 Because pruning is foreground, a pruned Deployment counts as remaining until
 its ReplicaSets and Pods are gone, so a retirement is not ready while the old
 workload can still serve through an administrator-owned Service.
+An in-place rollout or rollback keeps the Deployment's name, so nothing is
+pruned and the previous revision's Pods terminate through their grace period
+while the Deployment's status already counts only the new ones
+(`status.replicas` and the ReplicaSet counters exclude terminating Pods, and
+`status.terminatingReplicas` exists only from Kubernetes 1.33 with its feature
+gate). `ready` therefore lists the namespace's Pods and is not ready while any
+Pod the Deployment's selector matches has a deletion timestamp; it also
+honours `status.terminatingReplicas` where the API server reports it. A Pod
+stuck terminating (for example on a lost node) keeps `ready` failing until
+the administrator resolves it.
 A replacement that never becomes ready
 fails, and the supervisor restores the previous version. That version's `run`
 re-applies its bundle and prunes the failed version's extra objects.
@@ -642,6 +654,10 @@ It checks the following:
   `remove` exits 0, and at that point no object or Pod of the component
   remains.
 - An update followed by a rollback prunes the extra object.
+- In-place rollout and rollback of a same-name Deployment: while a finalizer
+  holds the previous revision's terminating Pod after the new revision is
+  updated, ready and available, `ready` exits 1 naming that Pod, for both the
+  rollout and the rollback. It exits 0 once the Pod is released and gone.
 - Run mode re-creates a deleted object, stops on SIGTERM and leaves the
   workload running.
 - With `--supervisor`, the real SuiFleet supervisor deploys a bundle, fails
@@ -654,10 +670,10 @@ It checks the following:
 - Removal deletes only this component's objects. A decoy object in another
   namespace is never touched.
 
-Recorded run (2026-11-24, SF-305, after the third review repair):
-`--supervisor` passed all 102 checks in 339 s. It ran on x86-64 WSL2 with
-Docker, k3s v1.31.4+k3s1 and Rust 1.94.0. The offline unit tests passed 35 of
-35. This run is a point-in-time record,
+Recorded run (2026-11-26, SF-305, after the combined review 4833 repair):
+`--supervisor` passed all 276 checks in 1526 s. It ran on x86-64 WSL2 with
+Docker, k3s v1.31.4+k3s1 and Rust 1.94.0. The offline unit tests passed 98 of
+98. This run is a point-in-time record,
 not a substitute for rerunning the tests after changes.
 
 The test node uses absolute 512 MiB kubelet eviction thresholds, which relaxes

@@ -7,9 +7,10 @@ administrator credential, mints a short-lived ServiceAccount token, writes a
 narrow profile and then exercises scripts/suifleet_k8s_apply.py with ONLY that
 ServiceAccount credential:
 
-- RBAC: the publisher can manage Deployments/ConfigMaps in its own namespace
-  and nothing else (Services/networking, Secrets, Pods, exec, RBAC, quotas,
-  namespaces, nodes, other namespaces, cluster-scoped objects).
+- RBAC: the publisher can manage Deployments/ConfigMaps and only list Pods in
+  its own namespace, and nothing else (Services/networking, Secrets, Pod
+  get/create/patch/delete/eviction, exec, logs, RBAC, quotas, namespaces,
+  nodes, other namespaces, cluster-scoped objects).
 - Pod Security Admission rejects a privileged pod, and the administrator's
   ValidatingAdmissionPolicy rejects Secret references, non-default
   ServiceAccounts, token automount, pull Secrets and unpinned images, even
@@ -17,7 +18,9 @@ ServiceAccount credential:
 - Profile/credential hygiene and offline bundle rejection.
 - Apply, ownership-checked readiness (including ConfigMap-only bundles and
   foreign or stale objects), content served through an administrator-owned
-  Service, update, prune and rollback. Readiness includes prune convergence:
+  Service, update, prune and rollback. An in-place same-name Deployment rollout and
+  rollback is not ready while a finalizer holds the previous revision's
+  terminating Pod, even though Deployment status already reports it complete. Readiness includes prune convergence:
   an empty retirement bundle, a remaining same-owner stale object and a
   finalizer-delayed prune are all reported not ready until gone.
   Pruning a Deployment is foreground: while a finalizer holds one of its Pods
@@ -412,10 +415,12 @@ def scenario(cluster, work, supervisor):
     write_profile(cluster, profiles, "race", token, kubectl=race.wrapper)
 
     # RBAC: narrow namespaced Role, no cluster-admin shortcut.
-    allowed = [("patch", "deployments.apps"), ("create", "configmaps"), ("delete", "configmaps"), ("list", "deployments.apps")]
+    allowed = [("patch", "deployments.apps"), ("create", "configmaps"), ("delete", "configmaps"), ("list", "deployments.apps"),
+               ("list", "pods")]
     denied = [("create", "services"), ("patch", "services"), ("delete", "services"),
               ("create", "ingresses.networking.k8s.io"), ("create", "networkpolicies.networking.k8s.io"),
-              ("get", "secrets"), ("create", "pods"), ("create", "pods/exec"), ("get", "pods/log"),
+              ("get", "secrets"), ("create", "pods"), ("get", "pods"), ("delete", "pods"), ("patch", "pods"),
+              ("create", "pods/eviction"), ("create", "pods/exec"), ("get", "pods/log"),
               ("create", "roles.rbac.authorization.k8s.io"), ("create", "rolebindings.rbac.authorization.k8s.io"),
               ("patch", "resourcequotas"), ("patch", "limitranges"), ("create", "serviceaccounts/token"),
               ("patch", "serviceaccounts"), ("create", "daemonsets.apps"), ("create", "persistentvolumeclaims")]
@@ -1134,16 +1139,74 @@ def scenario(cluster, work, supervisor):
     wait_ready(profiles, v1, "1.0.0")
     check("readiness succeeds once the delayed prune completes", True)
 
-    # Update with an extra object, then roll back and prune it.
-    check("helper applies v2", helper("apply", profiles, v2, version="2.0.0").returncode == 0)
-    wait_ready(profiles, v2, "2.0.0")
+    # Update with an extra object, then roll back and prune it. Combined
+    # review 4833: the same-name web Deployment rolls in place, so nothing is
+    # pruned; while a finalizer holds the previous revision's Pod terminating,
+    # Deployment status already reports the new revision complete (status
+    # counts only non-terminating Pods, and k3s v1.31 has no
+    # terminatingReplicas), yet ready must fail until that Pod is gone.
+    def web_pod_names():
+        listed = json.loads(cluster.admin("get", "pods", "-n", NAMESPACE, "-l", "app=web", "-o", "json").stdout)
+        return {item["metadata"]["name"]: item for item in listed["items"]}
+
+    def hold_web_pods():
+        held = [name for name, pod in web_pod_names().items() if not pod["metadata"].get("deletionTimestamp")
+                and cluster.admin("patch", "pod", name, "-n", NAMESPACE, "--type=merge",
+                                  "-p", '{"metadata":{"finalizers":["example.com/hold"]}}', ok=False).returncode == 0]
+        check("a live web Pod of the previous revision is held before the in-place rollout", bool(held), str(held))
+        return held
+
+    def status_complete_while_held(held):
+        live = json.loads(cluster.admin("get", "deployment", "web", "-n", NAMESPACE, "-o", "json").stdout)
+        status, want = live.get("status") or {}, live["spec"].get("replicas", 1)
+        pods = web_pod_names()
+        return (status.get("observedGeneration", 0) >= live["metadata"]["generation"]
+                and all(status.get(f, 0) == want for f in ("replicas", "updatedReplicas", "readyReplicas", "availableReplicas"))
+                and any(pods.get(name, {}).get("metadata", {}).get("deletionTimestamp") for name in held)), live
+
+    def in_place_rollout_waits_for_terminating_pod(bundle, version, label):
+        held = hold_web_pods()
+        check(f"helper applies {label}", helper("apply", profiles, bundle, version=version).returncode == 0)
+        wait(f"{label}: Deployment status complete while the previous Pod terminates",
+             lambda: status_complete_while_held(held)[0], timeout=180, interval=2)
+        live = status_complete_while_held(held)[1]
+        digest = live["metadata"]["annotations"][publisher.BUNDLE_ANNOTATION]
+        check(f"{label}: Deployment status alone reports the rollout available (the review 4833 gap)",
+              publisher.deployment_ready(live, digest) == (True, "available")
+              and not live["status"].get("terminatingReplicas"), json.dumps(live.get("status")))
+        result = helper("ready", profiles, bundle, version=version)
+        check(f"{label}: ready exits 1 while the previous revision's Pod is still terminating",
+              result.returncode == 1 and "still terminating" in result.stderr
+              and any(name in result.stderr for name in held), result.stderr[-500:])
+        for name in held:
+            cluster.admin("patch", "pod", name, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}',
+                          ok=False)
+        wait_ready(profiles, bundle, version)
+        check(f"{label}: ready only once the held Pod is gone", not set(held) & set(web_pod_names()), str(held))
+
+    in_place_rollout_waits_for_terminating_pod(v2, "2.0.0", "in-place rollout to v2")
     wait("v2 content", lambda: "SuiFleet v2" in served(cluster), timeout=90)
     check("administrator-owned service serves v2 content", True)
+    held = hold_web_pods()
     result = helper("apply", profiles, v1)
     check("rollback to v1 prunes the v2-only object",
           result.returncode == 0 and "v2-extra" in result.stderr
           and cluster.admin("get", "configmap", "v2-extra", "-n", NAMESPACE, ok=False).returncode != 0, result.stderr)
+    wait("in-place rollback to v1: Deployment status complete while the previous Pod terminates",
+         lambda: status_complete_while_held(held)[0], timeout=180, interval=2)
+    live = status_complete_while_held(held)[1]
+    check("in-place rollback to v1: Deployment status alone reports the rollout available (the review 4833 gap)",
+          publisher.deployment_ready(live, live["metadata"]["annotations"][publisher.BUNDLE_ANNOTATION])
+          == (True, "available"), json.dumps(live.get("status")))
+    result = helper("ready", profiles, v1)
+    check("in-place rollback to v1: ready exits 1 while the v2 Pod is still terminating",
+          result.returncode == 1 and "still terminating" in result.stderr
+          and any(name in result.stderr for name in held), result.stderr[-500:])
+    for name in held:
+        cluster.admin("patch", "pod", name, "-n", NAMESPACE, "--type=merge", "-p", '{"metadata":{"finalizers":null}}',
+                      ok=False)
     wait_ready(profiles, v1, "1.0.0")
+    check("in-place rollback to v1: ready only once the held Pod is gone", not set(held) & set(web_pod_names()), str(held))
     wait("v1 content after rollback", lambda: "SuiFleet v1" in served(cluster), timeout=90)
     check("service serves v1 content after rollback", True)
 
