@@ -163,14 +163,22 @@
                     group: "{{ suifleet_key.stat.gr_name }}"
                     mode: "0700"
 
+                # check_batch.yml validated both: the canonical configuration
+                # built from enroll.toml's parsed values, and the inventory
+                # manifest (identical to the batch's deployment.json).
                 - name: Stage the enrollment configuration and manifest for the lookup
                   ansible.builtin.copy:
-                    src: "{{ batch }}/{{ item }}"
-                    dest: "{{ suifleet_enroll_staging }}/{{ item }}"
+                    content: "{{ item.content | default(omit) }}"
+                    src: "{{ item.src | default(omit) }}"
+                    dest: "{{ suifleet_enroll_staging }}/{{ item.dest }}"
                     owner: "{{ suifleet_key.stat.pw_name }}"
                     group: "{{ suifleet_key.stat.gr_name }}"
                     mode: "0600"
-                  loop: [enroll.toml, deployment.json]
+                  loop:
+                    - {dest: enroll.toml, content: "{{ suifleet_enroll_toml }}"}
+                    - {dest: deployment.json, src: "{{ suifleet_manifest_src }}"}
+                  loop_control:
+                    label: "{{ item.dest }}"
 
                 # Read-only: the current key holder signs nothing and the claim
                 # file is never read. Exit 3: no enrollment in retained history.
@@ -317,14 +325,22 @@
                     suifleet_claim_owner: "{{ suifleet_key.stat.pw_name }}"
                     suifleet_claim_group: "{{ suifleet_key.stat.gr_name }}"
 
+                # check_batch.yml validated both: the canonical configuration
+                # built from enroll.toml's parsed values, and the inventory
+                # manifest (identical to the batch's deployment.json).
                 - name: Stage the enrollment configuration and manifest
                   ansible.builtin.copy:
-                    src: "{{ batch }}/{{ item }}"
-                    dest: "{{ suifleet_enroll_staging }}/{{ item }}"
+                    content: "{{ item.content | default(omit) }}"
+                    src: "{{ item.src | default(omit) }}"
+                    dest: "{{ suifleet_enroll_staging }}/{{ item.dest }}"
                     owner: "{{ suifleet_key.stat.pw_name }}"
                     group: "{{ suifleet_key.stat.gr_name }}"
                     mode: "0600"
-                  loop: [enroll.toml, deployment.json]
+                  loop:
+                    - {dest: enroll.toml, content: "{{ suifleet_enroll_toml }}"}
+                    - {dest: deployment.json, src: "{{ suifleet_manifest_src }}"}
+                  loop_control:
+                    label: "{{ item.dest }}"
 
                 - name: Enroll and record the public IDs
                   ansible.builtin.shell: |

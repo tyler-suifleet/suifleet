@@ -398,11 +398,13 @@ allows it). The role does not check the controller.
   identity. It never enrolls again. The same key can hold an enrollment under
   another deployment, so before the lookup the role requires the folder's
   `deployment.json` to be identical to `suifleet_manifest_src` (the manifest
-  it installs beside the restored IDs) and its `enroll.toml` to name that
-  batch-relative manifest and `/etc/suifleet/device.key`, with no `[signer]`
-  table, exactly as for a fresh enrollment. A stale or misselected folder stops
-  the run (check mode too) before anything is copied to the host, keeping the
-  empty file and writing no record.
+  it installs beside the restored IDs) and its `enroll.toml`, as parsed TOML,
+  to name that batch-relative manifest and `/etc/suifleet/device.key`, with no
+  `[signer]` table or other unexpected field, exactly as for a fresh
+  enrollment. The role then stages a configuration rebuilt from those checked
+  values and `suifleet_manifest_src`, not the folder's own files. A stale or
+  misselected folder stops the run (check mode too) before anything is copied
+  to the host, keeping the empty file and writing no record.
 
   To restore a record by hand (for example after a truncated receipt, or a
   configured host with no record), first make sure no play targets the host.
