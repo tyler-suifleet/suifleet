@@ -231,7 +231,10 @@ restarted once.
   start of every run, before any enrollment check, so a run that refuses the
   host (for example an unverifiable interrupted receipt) still erases a claim
   left by a killed run, as does a run of an enrolled host. Every run also
-  erases the SSH account's transfer directories left by a killed run. An interrupted
+  erases the SSH account's transfer directories left by a killed run. On a
+  host that is not enrolled, that cleanup and the enrollment run under the
+  host's [enrollment lock](#recovery), so a run never erases the claim of
+  another play that is enrolling the same host. An interrupted
   run leaves the claim only on those tmpfs mounts until the next run or a reboot. Revoke a claim that was exposed before use.
   tmpfs alone is not enough, because its pages and the memory of the
   processes holding the claim can be swapped out or saved in a crash dump; see
@@ -403,6 +406,18 @@ allows it). The role does not check the controller.
   ```
 
   Never issue an enrolled device a new claim, and never replace its key.
+- **Enrollment lock.** One play at a time enrolls a host: it holds
+  `/run/suifleet-enroll.lock` from the cleanup of an interrupted run's claim
+  copies until the receipt is promoted, so overlapping plays never share the
+  claim staging, the attempt marker or a submission. Another play stops
+  without changing anything. A play killed while enrolling leaves the lock;
+  the next run stops on it. Once no play targets the host and no
+  `suifleet --enroll` process runs on it, remove it as root (a reboot also
+  clears it), then follow the steps above for any partial file it left:
+
+  ```sh
+  rm -r /run/suifleet-enroll.lock
+  ```
 - **Swap refusal.** See [claim storage](#claim-storage): enroll with all
   swap off, including zram and encrypted swap. Nothing was sent.
 - **Crash dump refusal.** See [claim storage](#claim-storage): disable core
@@ -512,7 +527,14 @@ The harness checks these phases:
    or in the controller's files and Ansible home, and no transfer copy may
    remain in `/dev/shm`. No claim may appear in the sudo I/O logs, after this
    phase or after enrollment.
-4. On one host, a test-only copy of the role stops the enrollment right after
+4. On one host, a test-only copy of the role runs a stand-in for the
+   enrollment command that waits, then fails without printing or submitting.
+   It must start with the role's empty `.enrollment.json.partial` as its
+   output. While it waits, an overlapping check-mode run and an overlapping
+   run stop on the enrollment lock without changing the first play's staged
+   claim, lock or marker or reaching the enrollment command. After the
+   failure the empty marker remains, the lock and staging are gone, and a
+   retry stops on the marker. Then a test-only copy stops the enrollment right after
    the transaction succeeded and its receipt reached
    `.enrollment.json.partial`, before the record is promoted. With the
    credential batch present, retries with a truncated receipt, with a

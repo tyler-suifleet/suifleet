@@ -4,275 +4,317 @@
 # (public IDs only) and makes this step run once per device. Operators never
 # handle device addresses: the dApp binds each enrolled claim to its serial.
 
-# Erase the role's credential copies left by an interrupted run before any
+# Erase the role's claim copies left by an interrupted run before any
 # enrollment check, so a refusal below (a configured host without a record,
 # an unverifiable partial receipt, a missing batch) cannot leave them behind.
 # A run interrupted after the record was renamed into place, but before the
-# enrollment block's own cleanup, leaves the staged claim; recorded hosts skip
-# that block. This needs no credential batch and never re-enrolls. Check mode
-# reports it without erasing.
-- name: Erase claim staging left by an interrupted enrollment
-  ansible.builtin.file:
-    path: "{{ suifleet_enroll_staging }}"
-    state: absent
-
-# A run killed during the claim transfer (stage_claim.yml) can leave the SSH
-# account's private transfer directory on its tmpfs. These tasks run as the
-# SSH account even if the inventory sets ansible_become (stage_claim.yml).
-- name: Read the SSH account's user ID
-  ansible.builtin.command:
-    argv: [id, -u]
-  become: false
-  vars:
-    ansible_become: false
-  register: suifleet_transfer_uid
-  changed_when: false
-  check_mode: false
-
-- name: Find claim transfer directories left by an interrupted run
-  ansible.builtin.find:
-    paths: "{{ suifleet_claim_transfer_dir }}"
-    patterns: "suifleet-claim.*"
-    file_type: directory
-  become: false
-  vars:
-    ansible_become: false
-  register: suifleet_transfer_left
-  check_mode: false
-
-- name: Erase claim transfer directories left by an interrupted run
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  become: false
-  vars:
-    ansible_become: false
-  loop: "{{ suifleet_transfer_left.files | selectattr('uid', 'equalto', suifleet_transfer_uid.stdout | int) | list }}"
-  loop_control:
-    label: "{{ item.path }}"
+# enrollment block's own cleanup, leaves the staged claim. A recorded host
+# erases it here: no play enrolls a recorded host (the record is renamed into
+# place after the enrollment command ends), so nothing still needs the copies.
+- name: Erase claim copies left on an enrolled host
+  ansible.builtin.import_tasks: claim_cleanup.yml
+  when: suifleet_enrollment_record.stat.exists
 
 - name: Enroll hosts without an enrollment record
   when: not suifleet_enrollment_record.stat.exists
   vars:
     batch: "{{ suifleet_enrollment_root }}/enrollment/{{ suifleet_serial }}"
   block:
-    - name: Refuse a host that is configured but has no enrollment record
-      ansible.builtin.stat:
-        path: /etc/suifleet/config.toml
-      register: suifleet_unrecorded_config
+    # One play at a time enrolls a host. Every step from the cleanup of an
+    # interrupted run's claim copies to the receipt's promotion runs under this
+    # lock, so two overlapping plays never share the staging directory, the
+    # transfer directories or the attempt marker, and never both submit. mkdir
+    # creates it atomically, holding this run's token; only this run removes
+    # it. It lives on /run (tmpfs), so a reboot clears a lock that a killed run
+    # left behind. Check mode only looks for it.
+    - name: Start without the host's enrollment lock
+      ansible.builtin.set_fact:
+        suifleet_enroll_locked: false
+        suifleet_enroll_lock_token: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=32) }}"
 
-    - name: Stop before enrolling a configured device again
-      ansible.builtin.assert:
-        that: not suifleet_unrecorded_config.stat.exists
-        quiet: true
-        fail_msg: >-
-          {{ inventory_hostname }} has /etc/suifleet/config.toml but no
-          /etc/suifleet/enrollment.json. It is already enrolled or was configured
-          by hand. Restore the record from its existing IDs (docs/ANSIBLE.md#recovery);
-          never issue it a new claim.
+    - name: Take the host's enrollment lock
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - umask 077; mkdir "$1" || exit 3; printf '%s\n' "$2" > "$1/owner" || { rm -rf "$1"; exit 1; }
+          - sh
+          - "{{ suifleet_enroll_lock }}"
+          - "{{ suifleet_enroll_lock_token }}"
+      register: suifleet_enroll_lock_taken
+      changed_when: suifleet_enroll_lock_taken.rc == 0
+      failed_when: suifleet_enroll_lock_taken.rc not in [0, 3]
+      when: not ansible_check_mode
 
-    # The enrollment command prints its receipt only after the transaction
-    # succeeded, and the claim is then spent on chain (one use). The partial
-    # file is created, and flushed to disk, before the command starts, so it
-    # marks every attempt. A run stopped before the receipt was renamed into
-    # place leaves it: never submit again or overwrite it. Promote a receipt
-    # for this device's key; stop on any other output for manual recovery.
-    - name: Look for the output of an interrupted enrollment
+    - name: Record that this run holds the enrollment lock
+      ansible.builtin.set_fact:
+        suifleet_enroll_locked: "{{ suifleet_enroll_lock_taken.rc == 0 }}"
+      when: not ansible_check_mode
+
+    - name: Look for another run's enrollment lock
       ansible.builtin.stat:
-        path: /etc/suifleet/.enrollment.json.partial
+        path: "{{ suifleet_enroll_lock }}"
         get_checksum: false
-      register: suifleet_enrollment_partial
+      register: suifleet_enroll_lock_seen
+      when: ansible_check_mode
 
-    # An empty file means the attempt printed nothing. The command prints only
-    # after its transaction committed and was processed, so the response may
-    # have been lost (or the host stopped) after the chain committed: the
-    # outcome is unknown, and only the chain can settle it.
-    - name: Stop on an enrollment attempt with an unknown outcome
+    - name: Stop while another run holds the enrollment lock
       ansible.builtin.assert:
-        that: suifleet_enrollment_partial.stat.size > 0
+        that: suifleet_enroll_locked | bool or (ansible_check_mode and not suifleet_enroll_lock_seen.stat.exists)
         quiet: true
         fail_msg: >-
-          {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
-          an earlier enrollment attempt printed no receipt, and it may still have
-          enrolled the device on chain. The role will not stage a claim or submit
-          again. Check the Enrollment page (docs/ANSIBLE.md#recovery): restore the
-          record if the device is enrolled; remove the file only if its claim is
-          still unused. Never issue it a new claim.
-      when: suifleet_enrollment_partial.stat.exists
+          {{ inventory_hostname }} has the enrollment lock {{ suifleet_enroll_lock }}:
+          another play is enrolling it, or a play stopped while enrolling it. This
+          run changed nothing. Wait for the other play. If none is running (no
+          ansible-playbook targets the host and no suifleet --enroll process runs
+          on it), remove the lock as root and run again (docs/ANSIBLE.md#recovery).
 
-    - name: Recover the record from an interrupted enrollment
-      when: suifleet_enrollment_partial.stat.exists
+    # Another play may have enrolled the host after this play first read it.
+    - name: Read the enrollment record under the lock
+      ansible.builtin.stat:
+        path: /etc/suifleet/enrollment.json
+        get_checksum: false
+      register: suifleet_enrollment_record_locked
+
+    - name: Enroll unless another play enrolled the host first
+      when: not suifleet_enrollment_record_locked.stat.exists
       block:
-        - name: Read the interrupted enrollment output
-          ansible.builtin.slurp:
-            src: /etc/suifleet/.enrollment.json.partial
-          register: suifleet_enrollment_partial_file
+        - name: Erase claim copies left by an interrupted run
+          ansible.builtin.import_tasks: claim_cleanup.yml
 
-        - name: Stop unless the output is this device's enrollment receipt
-          vars:
-            receipt_text: "{{ suifleet_enrollment_partial_file.content | b64decode }}"
-            receipt: "{{ receipt_text | from_json }}"
-          ansible.builtin.assert:
-            that:
-              - receipt_text is match('^\\{[^\\n]*\\}\\n?$')
-              - receipt_text is search('"device_cap_id":"0x[0-9a-f]{64}"')
-              - receipt is mapping
-              - receipt.device_address | default('') == suifleet_device_address
-              - receipt.device_object_id | default('') is match('^0x[0-9a-f]{64}$')
-              - receipt.device_cap_id | default('') is match('^0x[0-9a-f]{64}$')
-              - receipt.owner_cap_id | default('') is match('^0x[0-9a-f]{64}$')
-              - receipt.digest | default('') is match('^[1-9A-HJ-NP-Za-km-z]{32,44}$')
-            quiet: true
-            fail_msg: >-
-              {{ inventory_hostname }} has /etc/suifleet/.enrollment.json.partial
-              from an earlier enrollment attempt, but it is not a complete receipt
-              for this device's key. That enrollment may already have used the
-              claim on chain, so the role will not submit again or overwrite the
-              file. Restore the record from the Enrollment page's IDs
-              (docs/ANSIBLE.md#recovery); never issue it a new claim.
-
-        - name: Report the pending record recovery
-          ansible.builtin.debug:
-            msg: "Would restore {{ inventory_hostname }}'s enrollment record from its interrupted enrollment's receipt."
-          changed_when: true
-          when: ansible_check_mode
-
-        - name: Promote the interrupted enrollment's receipt
-          ansible.builtin.shell: |
-            set -eu
-            partial=/etc/suifleet/.enrollment.json.partial
-            chown root:suifleet "$partial"
-            chmod 0640 "$partial"
-            mv -f "$partial" /etc/suifleet/enrollment.json
-          args:
-            creates: /etc/suifleet/enrollment.json
-
-    - name: Enroll with a claim from the batch
-      when: not suifleet_enrollment_partial.stat.exists
-      block:
-        - name: Require the enrollment batch and serial
-          ansible.builtin.assert:
-            that:
-              - suifleet_enrollment_root | length > 0
-              - suifleet_serial is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
-            quiet: true
-            fail_msg: >-
-              {{ inventory_hostname }} is not enrolled: set suifleet_enrollment_root and
-              a valid suifleet_serial matching its folder in the credential batch.
-
-        - name: Read the batch folder on the controller
-          delegate_to: localhost
-          become: false
+        - name: Refuse a host that is configured but has no enrollment record
           ansible.builtin.stat:
-            path: "{{ batch }}/{{ item }}"
-            get_checksum: "{{ item == 'deployment.json' }}"
-            checksum_algorithm: sha256
-          loop: [claim.key, enroll.toml, deployment.json]
-          register: suifleet_batch_files
-          check_mode: false
+            path: /etc/suifleet/config.toml
+          register: suifleet_unrecorded_config
 
-        - name: Refuse an incomplete batch folder or a different manifest
+        - name: Stop before enrolling a configured device again
           ansible.builtin.assert:
-            that:
-              - suifleet_batch_files.results | map(attribute='stat.exists') | min
-              - suifleet_batch_files.results[2].stat.checksum == suifleet_manifest.stat.checksum
+            that: not suifleet_unrecorded_config.stat.exists
             quiet: true
             fail_msg: >-
-              {{ batch }} must contain claim.key, enroll.toml and the same
-              deployment.json as suifleet_manifest_src.
+              {{ inventory_hostname }} has /etc/suifleet/config.toml but no
+              /etc/suifleet/enrollment.json. It is already enrolled or was configured
+              by hand. Restore the record from its existing IDs (docs/ANSIBLE.md#recovery);
+              never issue it a new claim.
 
-        - name: Check the enrollment configuration paths
-          vars:
-            enroll_toml: "{{ lookup('ansible.builtin.file', batch ~ '/enroll.toml') }}"
+        # The enrollment command prints its receipt only after the transaction
+        # succeeded, and the claim is then spent on chain (one use). The partial
+        # file is created, and flushed to disk, before the command starts, so it
+        # marks every attempt. A run stopped before the receipt was renamed into
+        # place leaves it: never submit again or overwrite it. Promote a receipt
+        # for this device's key; stop on any other output for manual recovery.
+        - name: Look for the output of an interrupted enrollment
+          ansible.builtin.stat:
+            path: /etc/suifleet/.enrollment.json.partial
+            get_checksum: false
+          register: suifleet_enrollment_partial
+
+        # An empty file means the attempt printed nothing. The command prints only
+        # after its transaction committed and was processed, so the response may
+        # have been lost (or the host stopped) after the chain committed: the
+        # outcome is unknown, and only the chain can settle it.
+        - name: Stop on an enrollment attempt with an unknown outcome
           ansible.builtin.assert:
-            that:
-              - enroll_toml is search('(?m)^manifest_path = "deployment.json"$')
-              - enroll_toml is search('(?m)^claim_key_path = "claim.key"$')
-              - enroll_toml is search('(?m)^keypair_path = "/etc/suifleet/device.key"$')
+            that: suifleet_enrollment_partial.stat.size > 0
             quiet: true
             fail_msg: >-
-              {{ batch }}/enroll.toml must use the batch-relative deployment.json and
-              claim.key and the device's own /etc/suifleet/device.key.
+              {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
+              an earlier enrollment attempt printed no receipt, and it may still have
+              enrolled the device on chain. The role will not stage a claim or submit
+              again. Check the Enrollment page (docs/ANSIBLE.md#recovery): restore the
+              record if the device is enrolled; remove the file only if its claim is
+              still unused. Never issue it a new claim.
+          when: suifleet_enrollment_partial.stat.exists
 
-        - name: Read the staging filesystem type
-          ansible.builtin.command:
-            argv: [stat, -f, -c, "%T", "{{ suifleet_enroll_staging | dirname }}"]
-          register: suifleet_staging_fs
-          changed_when: false
-          check_mode: false
-
-        - name: Require memory-backed claim staging
-          ansible.builtin.assert:
-            that: suifleet_staging_fs.stdout == 'tmpfs'
-            quiet: true
-            fail_msg: "{{ suifleet_enroll_staging | dirname }} must be a tmpfs so the claim never reaches persistent storage on the host."
-
-        - name: Report the pending enrollment
-          ansible.builtin.debug:
-            msg: "Would enroll {{ inventory_hostname }} with the claim for serial {{ suifleet_serial }}."
-          changed_when: true
-          when: ansible_check_mode
-
-        - name: Enroll with the device's own key
-          when: not ansible_check_mode
+        - name: Recover the record from an interrupted enrollment
+          when: suifleet_enrollment_partial.stat.exists
           block:
-            # The current key holder (the daemon user before signer.toml exists)
-            # runs the enrollment, not root.
-            - name: Stage the single-use claim key in memory-backed storage
-              ansible.builtin.import_tasks: stage_claim.yml
+            - name: Read the interrupted enrollment output
+              ansible.builtin.slurp:
+                src: /etc/suifleet/.enrollment.json.partial
+              register: suifleet_enrollment_partial_file
+
+            - name: Stop unless the output is this device's enrollment receipt
               vars:
-                suifleet_claim_file: "{{ batch }}/claim.key"
-                suifleet_claim_owner: "{{ suifleet_key.stat.pw_name }}"
-                suifleet_claim_group: "{{ suifleet_key.stat.gr_name }}"
+                receipt_text: "{{ suifleet_enrollment_partial_file.content | b64decode }}"
+                receipt: "{{ receipt_text | from_json }}"
+              ansible.builtin.assert:
+                that:
+                  - receipt_text is match('^\\{[^\\n]*\\}\\n?$')
+                  - receipt_text is search('"device_cap_id":"0x[0-9a-f]{64}"')
+                  - receipt is mapping
+                  - receipt.device_address | default('') == suifleet_device_address
+                  - receipt.device_object_id | default('') is match('^0x[0-9a-f]{64}$')
+                  - receipt.device_cap_id | default('') is match('^0x[0-9a-f]{64}$')
+                  - receipt.owner_cap_id | default('') is match('^0x[0-9a-f]{64}$')
+                  - receipt.digest | default('') is match('^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has /etc/suifleet/.enrollment.json.partial
+                  from an earlier enrollment attempt, but it is not a complete receipt
+                  for this device's key. That enrollment may already have used the
+                  claim on chain, so the role will not submit again or overwrite the
+                  file. Restore the record from the Enrollment page's IDs
+                  (docs/ANSIBLE.md#recovery); never issue it a new claim.
 
-            - name: Stage the enrollment configuration and manifest
-              ansible.builtin.copy:
-                src: "{{ batch }}/{{ item }}"
-                dest: "{{ suifleet_enroll_staging }}/{{ item }}"
-                owner: "{{ suifleet_key.stat.pw_name }}"
-                group: "{{ suifleet_key.stat.gr_name }}"
-                mode: "0600"
-              loop: [enroll.toml, deployment.json]
+            - name: Report the pending record recovery
+              ansible.builtin.debug:
+                msg: "Would restore {{ inventory_hostname }}'s enrollment record from its interrupted enrollment's receipt."
+              changed_when: true
+              when: ansible_check_mode
 
-            - name: Enroll and record the public IDs
+            - name: Promote the interrupted enrollment's receipt
               ansible.builtin.shell: |
                 set -eu
-                umask 077
                 partial=/etc/suifleet/.enrollment.json.partial
-                # Never reuse the file of an earlier attempt (checked above): it
-                # marks an attempt that may have spent the claim, and may hold the
-                # only local copy of its receipt. (Ansible splits the arguments of
-                # this script, so its comments keep single quotes paired.)
-                if [ -e "$partial" ]; then
-                  echo "$partial exists; refusing to enroll again (docs/ANSIBLE.md#recovery)" >&2
-                  exit 1
-                fi
-                # Record the attempt durably before anything can be submitted, so
-                # a retry after a lost response or power loss never submits again.
-                # Nothing was sent if this fails, so the marker is removed.
-                : > "$partial"
-                if ! sync -f "$partial"; then
-                  rm -f "$partial"
-                  echo "could not flush $partial; nothing was sent" >&2
-                  exit 1
-                fi
-                # A core dump size limit of 0, set after the PAM limits of runuser
-                # apply, keeps a crash of the claim holder from being stored.
-                runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && exec /usr/bin/suifleet --enroll "$1"' sh "$STAGING/enroll.toml" > "$partial"
-                grep -Eq '"device_cap_id":"0x[0-9a-f]{64}"' "$partial"
                 chown root:suifleet "$partial"
                 chmod 0640 "$partial"
                 mv -f "$partial" /etc/suifleet/enrollment.json
               args:
                 creates: /etc/suifleet/enrollment.json
-              environment:
-                HOLDER: "{{ suifleet_key.stat.pw_name }}"
-                STAGING: "{{ suifleet_enroll_staging }}"
-          always:
-            - name: Erase the staged claim
-              ansible.builtin.file:
-                path: "{{ suifleet_enroll_staging }}"
-                state: absent
+
+        - name: Enroll with a claim from the batch
+          when: not suifleet_enrollment_partial.stat.exists
+          block:
+            - name: Require the enrollment batch and serial
+              ansible.builtin.assert:
+                that:
+                  - suifleet_enrollment_root | length > 0
+                  - suifleet_serial is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} is not enrolled: set suifleet_enrollment_root and
+                  a valid suifleet_serial matching its folder in the credential batch.
+
+            - name: Read the batch folder on the controller
+              delegate_to: localhost
+              become: false
+              ansible.builtin.stat:
+                path: "{{ batch }}/{{ item }}"
+                get_checksum: "{{ item == 'deployment.json' }}"
+                checksum_algorithm: sha256
+              loop: [claim.key, enroll.toml, deployment.json]
+              register: suifleet_batch_files
+              check_mode: false
+
+            - name: Refuse an incomplete batch folder or a different manifest
+              ansible.builtin.assert:
+                that:
+                  - suifleet_batch_files.results | map(attribute='stat.exists') | min
+                  - suifleet_batch_files.results[2].stat.checksum == suifleet_manifest.stat.checksum
+                quiet: true
+                fail_msg: >-
+                  {{ batch }} must contain claim.key, enroll.toml and the same
+                  deployment.json as suifleet_manifest_src.
+
+            - name: Check the enrollment configuration paths
+              vars:
+                enroll_toml: "{{ lookup('ansible.builtin.file', batch ~ '/enroll.toml') }}"
+              ansible.builtin.assert:
+                that:
+                  - enroll_toml is search('(?m)^manifest_path = "deployment.json"$')
+                  - enroll_toml is search('(?m)^claim_key_path = "claim.key"$')
+                  - enroll_toml is search('(?m)^keypair_path = "/etc/suifleet/device.key"$')
+                quiet: true
+                fail_msg: >-
+                  {{ batch }}/enroll.toml must use the batch-relative deployment.json and
+                  claim.key and the device's own /etc/suifleet/device.key.
+
+            - name: Read the staging filesystem type
+              ansible.builtin.command:
+                argv: [stat, -f, -c, "%T", "{{ suifleet_enroll_staging | dirname }}"]
+              register: suifleet_staging_fs
+              changed_when: false
+              check_mode: false
+
+            - name: Require memory-backed claim staging
+              ansible.builtin.assert:
+                that: suifleet_staging_fs.stdout == 'tmpfs'
+                quiet: true
+                fail_msg: "{{ suifleet_enroll_staging | dirname }} must be a tmpfs so the claim never reaches persistent storage on the host."
+
+            - name: Report the pending enrollment
+              ansible.builtin.debug:
+                msg: "Would enroll {{ inventory_hostname }} with the claim for serial {{ suifleet_serial }}."
+              changed_when: true
+              when: ansible_check_mode
+
+            - name: Enroll with the device's own key
+              when: not ansible_check_mode
+              block:
+                # The current key holder (the daemon user before signer.toml exists)
+                # runs the enrollment, not root.
+                - name: Stage the single-use claim key in memory-backed storage
+                  ansible.builtin.import_tasks: stage_claim.yml
+                  vars:
+                    suifleet_claim_file: "{{ batch }}/claim.key"
+                    suifleet_claim_owner: "{{ suifleet_key.stat.pw_name }}"
+                    suifleet_claim_group: "{{ suifleet_key.stat.gr_name }}"
+
+                - name: Stage the enrollment configuration and manifest
+                  ansible.builtin.copy:
+                    src: "{{ batch }}/{{ item }}"
+                    dest: "{{ suifleet_enroll_staging }}/{{ item }}"
+                    owner: "{{ suifleet_key.stat.pw_name }}"
+                    group: "{{ suifleet_key.stat.gr_name }}"
+                    mode: "0600"
+                  loop: [enroll.toml, deployment.json]
+
+                - name: Enroll and record the public IDs
+                  ansible.builtin.shell: |
+                    set -eu
+                    umask 077
+                    partial=/etc/suifleet/.enrollment.json.partial
+                    # Create the attempt marker exclusively (noclobber opens it with
+                    # O_EXCL), so it is never the file of an earlier attempt: that file
+                    # marks an attempt that may have spent the claim, and may hold the
+                    # only local copy of its receipt. (Ansible splits the arguments of
+                    # this script, so its comments keep single quotes paired.)
+                    set -C
+                    if ! true > "$partial"; then
+                      echo "$partial exists; refusing to enroll again (docs/ANSIBLE.md#recovery)" >&2
+                      exit 1
+                    fi
+                    set +C
+                    # Record the attempt durably before anything can be submitted, so
+                    # a retry after a lost response or power loss never submits again.
+                    # Nothing was sent if this fails, so the marker is removed.
+                    if ! sync -f "$partial"; then
+                      rm -f "$partial"
+                      echo "could not flush $partial; nothing was sent" >&2
+                      exit 1
+                    fi
+                    # The command appends to the empty marker created above, which is
+                    # never truncated. A core dump size limit of 0, set after the PAM
+                    # limits of runuser apply, keeps a crash of the claim holder from
+                    # being stored.
+                    runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && exec /usr/bin/suifleet --enroll "$1"' sh "$STAGING/enroll.toml" >> "$partial"
+                    grep -Eq '"device_cap_id":"0x[0-9a-f]{64}"' "$partial"
+                    chown root:suifleet "$partial"
+                    chmod 0640 "$partial"
+                    mv -f "$partial" /etc/suifleet/enrollment.json
+                  args:
+                    creates: /etc/suifleet/enrollment.json
+                  environment:
+                    HOLDER: "{{ suifleet_key.stat.pw_name }}"
+                    STAGING: "{{ suifleet_enroll_staging }}"
+              always:
+                - name: Erase the staged claim
+                  ansible.builtin.file:
+                    path: "{{ suifleet_enroll_staging }}"
+                    state: absent
+  always:
+    - name: Release the host's enrollment lock
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - test "$(cat "$1/owner")" = "$2" && rm -rf "$1"
+          - sh
+          - "{{ suifleet_enroll_lock }}"
+          - "{{ suifleet_enroll_lock_token }}"
+      changed_when: true
+      when: suifleet_enroll_locked | default(false) | bool
 
 - name: Read the enrollment record
   ansible.builtin.slurp:

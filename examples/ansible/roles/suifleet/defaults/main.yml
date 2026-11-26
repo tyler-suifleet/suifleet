@@ -46,6 +46,9 @@ suifleet_enrollment_root: ""
 suifleet_serial: ""
 # Private, memory-backed staging directory for the claim during enrollment.
 suifleet_enroll_staging: /run/suifleet-enroll
+# Host-wide enrollment lock (a directory on tmpfs /run): one play at a time
+# enrolls a host. A reboot clears a lock left by a killed play.
+suifleet_enroll_lock: /run/suifleet-enroll.lock
 # Memory-backed directory writable by the SSH account (not root). The claim
 # reaches the host here without privilege escalation, because sudo may log a
 # command's standard input; enrollment refuses a directory that is not tmpfs.

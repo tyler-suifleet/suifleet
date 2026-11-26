@@ -45,7 +45,11 @@ share the host's initial namespaces in which the kernel runs it, while a
 test-only copy that assumes the host view accepts those; nothing is
 crashed), a claim transfer interrupted after staging with no swap
 and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
-storage, in sudo I/O logs or controller files), an enrollment stopped after its
+storage, in sudo I/O logs or controller files), two overlapping plays on one
+host (the second, in check mode and for real, stops on the enrollment lock
+without touching the first play's staged claim or attempt marker; the first
+play's command starts with the role's empty marker as its output, fails
+without printing, and leaves only that marker, which a retry refuses), an enrollment stopped after its
 transaction and receipt but before the record is promoted (truncated or
 other-key receipts, and an empty file left by the committed attempt, refused
 before staging or a second submission; the real receipt restored without
@@ -193,9 +197,25 @@ INTERRUPTED_PLAY = """- hosts: suifleet_devices
 # Stops the role's enrollment command right after the enrollment transaction
 # succeeded and its receipt reached the partial file, before the record is
 # promoted (test-only copy; used with INTERRUPTED_PLAY).
-ENROLL_CLI_LINE = '"$STAGING/enroll.toml" > "$partial"\n'
-ENROLL_STOP = "                echo SF304-STOPPED-BEFORE-PROMOTION >&2; exit 75\n"
+ENROLL_CLI_LINE = '"$STAGING/enroll.toml" >> "$partial"\n'
+ENROLL_STOP = "                    echo SF304-STOPPED-BEFORE-PROMOTION >&2; exit 75\n"
 ENROLL_TASK = "TASK [suifleet : Enroll and record the public IDs]"
+# A test-only stand-in for the enrollment command (used through a copy of the
+# role that runs it instead of suifleet --enroll). It records what its standard
+# output is when it starts, waits until the harness releases it, and fails
+# without printing or submitting anything: an attempt whose outcome is unknown
+# to the host, held open so another play can overlap it.
+ENROLL_EXEC = "exec /usr/bin/suifleet --enroll"
+ENROLL_SHIM_PATH = "/usr/local/bin/sf304-enroll-shim"
+ENROLL_SHIM_DIR = "/run/sf304-shim"
+ENROLL_SHIM = f"""#!/bin/sh
+printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
+i=0
+while [ ! -e {ENROLL_SHIM_DIR}/release ] && [ "$i" -lt 900 ]; do sleep 1; i=$((i + 1)); done
+echo SF304-SHIM-FAILED-BEFORE-PRINTING >&2
+exit 1
+"""
+LOCK_REFUSAL = "has the enrollment lock"
 # Stages each host's claim exactly as enrollment does, then stops before the
 # enrollment and its cleanup run: an interrupted claim transfer.
 CLAIM_INTERRUPT_PLAY = """- hosts: suifleet_devices
@@ -589,19 +609,23 @@ class Harness:
             unsupported=dict(vars=common, hosts={"nosystemd": dict(ansible_port=UNSUPPORTED[1], suifleet_serial="SN-0404")}))
         (self.work / "ctl/inventory.yml").write_text(json.dumps(inventory, indent=2))
 
-    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True):
+    def ansible_command(self, playbook, extra, tool="ansible-playbook", inventory=True, examples=None, home="ansible-home"):
         command = ["docker", "run", "--rm", "--network", f"container:{self.chain}",
-                   "-v", f"{self.examples}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
+                   "-v", f"{examples or self.examples}:/ansible:ro", "-v", f"{self.work / 'ctl'}:/work", "-v", f"{self.work / 'chain'}:/chain",
                    "-v", f"{self.work / 'artifacts'}:/artifacts:ro", "-v", f"{UNITS}:/units:ro",
                    "-w", "/ansible", "-e", "ANSIBLE_CONFIG=/ansible/ansible.cfg", "-e", "ANSIBLE_FORCE_COLOR=0",
                    # Ansible's controller temporary files land in the scanned work directory.
-                   "-e", "ANSIBLE_HOME=/work/ansible-home",
+                   "-e", f"ANSIBLE_HOME=/work/{home}",
                    "-e", "ANSIBLE_NOCOLOR=1", self.controller, tool]
         if tool == "ansible-playbook":
             command += [*(["-i", "/work/inventory.yml"] if inventory else []), playbook]
         else:
             command += [playbook]
-        result = subprocess.run([*command, *extra], text=True, capture_output=True)
+        return [*command, *extra]
+
+    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True):
+        command = self.ansible_command(playbook, extra, tool=tool, inventory=inventory)
+        result = subprocess.run(command, text=True, capture_output=True)
         output = result.stdout + result.stderr
         self.outputs.append(output)
         (self.work / f"phase-{len(self.outputs):02d}.log").write_text(output)
@@ -1254,6 +1278,79 @@ class Harness:
         print("PASS interrupted claim transfer left the claim only in tmpfs staging: none on host persistent storage"
               " (including Ansible remote temp) or in controller files (including Vault decryption)")
 
+    def overlapping_enrollment(self, vault, name="deb-ubuntu2404"):
+        """Two plays enroll the same host at once; the first attempt fails without printing a receipt.
+
+        The first play holds the host's enrollment lock while its (stand-in)
+        enrollment command runs. A second play started meanwhile must stop on
+        the lock without erasing the first play's staged claim, touching its
+        attempt marker or reaching the enrollment command. The stand-in proves
+        the role created the empty marker, as its standard output, before
+        invoking the command; after the failure the marker stays and the lock
+        and staging are gone."""
+        container = self.hosts[name]["container"]
+        partial, record = "/etc/suifleet/.enrollment.json.partial", "/etc/suifleet/enrollment.json"
+        lock, staging = "/run/suifleet-enroll.lock", "/run/suifleet-enroll"
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        assert absent(partial) and absent(record) and absent(lock), (name, "host not fresh for the overlap case")
+        self.exec(container, "install", "-m", "0755", "/dev/stdin", ENROLL_SHIM_PATH, input=ENROLL_SHIM)
+        self.exec(container, "install", "-d", "-m", "0777", ENROLL_SHIM_DIR)
+        shimmed = self.variant_examples("examples-enroll-shim",
+                                        {"enroll.yml": [(ENROLL_EXEC, f"exec {ENROLL_SHIM_PATH} --enroll")]},
+                                        folder="tasks", source=self.examples)
+        (self.work / "ctl/interrupted.yml").write_text(INTERRUPTED_PLAY)
+        log = self.work / "overlap-first-play.log"
+        command = self.ansible_command("/work/interrupted.yml", ["--limit", name, *vault], examples=shimmed,
+                                       home="ansible-home-overlap")
+        with open(log, "w") as handle:
+            first = subprocess.Popen(command, text=True, stdout=handle, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 900
+            while absent(f"{ENROLL_SHIM_DIR}/invoked"):
+                assert first.poll() is None, (name, "the first play ended before its enrollment command", log.read_text()[-8000:])
+                assert time.monotonic() < deadline, (name, "the first play never reached its enrollment command")
+                time.sleep(1)
+            invoked = sh(f"cat {ENROLL_SHIM_DIR}/invoked").strip()
+            assert invoked == f"stdout={partial} size=0", (name, "the command did not start with the role's empty marker", invoked)
+            assert not absent(lock) and not absent(f"{staging}/claim.key"), (name, "lock or staged claim missing during the attempt")
+            claim = sh(f"sha256sum {staging}/claim.key")
+            owner = sh(f"cat {lock}/owner")
+            print("PASS the role created the empty attempt marker, as the command's output, before invoking it, under the lock")
+            for label, extra in (("check mode", ["--check", "--diff"]), ("run", [])):
+                output, _ = self.ansible(f"overlapping {label} stops on the enrollment lock", "site.yml", *extra,
+                                         "--limit", name, *vault, expect_rc="nonzero")
+                assert LOCK_REFUSAL in output, (name, label, "not refused by the lock", output[-8000:])
+                assert ENROLL_TASK not in output, (name, label, "the overlapping play reached the enrollment command")
+                assert first.poll() is None, (name, label, "the first play ended early")
+                assert sh(f"sha256sum {staging}/claim.key") == claim, (name, label, "the first play's staged claim changed")
+                assert sh(f"cat {lock}/owner") == owner, (name, label, "the lock changed hands")
+                assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, label, "marker or record changed")
+                print(f"PASS overlapping {label} stopped on the lock: the first play's staged claim, lock and marker untouched")
+        finally:
+            self.exec(container, "touch", f"{ENROLL_SHIM_DIR}/release")
+            first.wait(timeout=900)
+        first_output = log.read_text()
+        self.outputs.append(first_output)
+        assert first.returncode != 0 and "SF304-SHIM-FAILED-BEFORE-PRINTING" in first_output, \
+            (name, "the first play did not fail in its enrollment command", first_output[-8000:])
+        assert sh(f"stat -c '%s %U:%G %a' {partial}").strip() == "0 root:root 600", (name, "attempt marker not kept")
+        assert absent(record) and absent(lock) and absent(staging), (name, "record written, or lock or staging left")
+        print("PASS the failed attempt kept its empty marker and released the lock and staging")
+        output, _ = self.ansible("retry after an attempt that printed nothing", "site.yml", "--limit", name, *vault,
+                                 expect_rc="nonzero")
+        assert "printed no receipt" in output and ENROLL_TASK not in output, (name, "the retry was not refused")
+        assert sh(f"stat -c %s {partial}").strip() == "0" and absent(lock) and absent(staging), (name, "retry left state")
+        print("PASS retry refused the attempt with an unknown outcome and released the lock")
+        # The stand-in submitted nothing, so the claim is unused: the
+        # authoritative settlement the recovery steps require is known here.
+        self.exec(container, "rm", "-rf", partial, ENROLL_SHIM_PATH, ENROLL_SHIM_DIR)
+
     def interrupted_enrollment_record(self, vault, name="deb-ubuntu2404"):
         """Enrollment succeeded on chain and printed its receipt; the host stopped before the record was promoted.
 
@@ -1736,6 +1833,7 @@ class Harness:
         assert all(v == {"swap": "ok", "crash": "ok"} for v in verdicts.values()), ("enrollment fixtures not accepted", verdicts)
         self.assert_no_claim_in_sudo_logs("interrupted claim transfer")
 
+        self.overlapping_enrollment(vault)
         self.interrupted_enrollment_record(vault)
         output, recap = self.ansible("install, provision, enroll, configure and start", "site.yml", *vault)
         batches = output.count("PLAY [SuiFleet device client]")
