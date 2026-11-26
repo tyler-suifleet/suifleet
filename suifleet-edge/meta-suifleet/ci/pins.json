@@ -1,0 +1,44 @@
+{
+  "kirkstone": {
+    "poky": [
+      "https://git.yoctoproject.org/poky",
+      "445a6223929b9a7a62b575093659e3d9e1aba982"
+    ],
+    "meta-openembedded": [
+      "https://github.com/openembedded/meta-openembedded",
+      "ce8539c941f6fcbecaca4d16640ac105c0595589"
+    ],
+    "meta-lts-mixins": [
+      "https://git.yoctoproject.org/meta-lts-mixins",
+      "6baa9afeb88a4a9b4a0e82dd7e3e611438999dbb"
+    ]
+  },
+  "scarthgap": {
+    "poky": [
+      "https://git.yoctoproject.org/poky",
+      "a53cae3de9f45417b97efc4c46c42e4c8ebdb939"
+    ],
+    "meta-openembedded": [
+      "https://github.com/openembedded/meta-openembedded",
+      "ae7dfb12245c7f9b9a353499e2688015bd4e6413"
+    ],
+    "meta-lts-mixins": [
+      "https://git.yoctoproject.org/meta-lts-mixins",
+      "eedcdc7486ff15c3510c2ceff68c87d9db141312"
+    ]
+  },
+  "wrynose": {
+    "openembedded-core": [
+      "https://git.openembedded.org/openembedded-core",
+      "0f03c732a0a2d0506b41b1abe60b3f368b2300dc"
+    ],
+    "bitbake": [
+      "https://git.openembedded.org/bitbake",
+      "51fd94a67fa17650a9ff623492005972bbc7d26f"
+    ],
+    "meta-openembedded": [
+      "https://github.com/openembedded/meta-openembedded",
+      "f28a144aa0a0ae05ca2ee91e1aef6aa05f6a12db"
+    ]
+  }
+}

@@ -1,8 +1,13 @@
 [
+  ".github/workflows/layer.yml",
   "COPYING.MIT",
   "README.md",
   "RELEASE.md",
   "SECURITY.md",
+  "ci/build.sh",
+  "ci/packages.py",
+  "ci/pins.json",
+  "ci/sources.py",
   "classes/suifleet-core-fixes.bbclass",
   "conf/layer.conf",
   "export-files.json",
