@@ -451,8 +451,9 @@ allows it). The role does not check the controller.
   Copy the host's `enroll.toml` and `deployment.json`, but not `claim.key`,
   into `/run/lookup`, a directory the key holder can read, together with a
   copy of the manifest `suifleet_manifest_src` names, as `fleet.json`, and run
-  this as root. The restored IDs are used with `fleet.json`, so the lookup's
-  `deployment.json` must describe the same deployment (only its node URLs,
+  this as root. It needs Python 3.11 or later (for `tomllib`) on the host;
+  Debian 12 and Ubuntu 24.04 have it. The restored IDs are used with
+  `fleet.json`, so the lookup's `deployment.json` must describe the same deployment (only its node URLs,
   `rpc_url` and `rpc_urls`, may differ, as below), and `enroll.toml` must use
   it and the device's own key.
 
