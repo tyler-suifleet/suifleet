@@ -397,17 +397,41 @@ allows it). The role does not check the controller.
   other and restores the record from it, keeping the device's key and
   identity. It never enrolls again.
 
-  To restore a record by hand (for example after a truncated receipt), copy
-  the host's `enroll.toml` and `deployment.json`, but not `claim.key`, into a
-  directory the key holder can read, run the lookup as that user, and install
-  its output as the record:
+  To restore a record by hand (for example after a truncated receipt, or a
+  configured host with no record), first make sure no play targets the host.
+  Copy the host's `enroll.toml` and `deployment.json`, but not `claim.key`,
+  into `/run/lookup`, a directory the key holder can read, and run this as
+  root:
 
   ```sh
+  sh -eu <<'EOF'
+  dir=/run/lookup
+  test ! -e /etc/suifleet/enrollment.json
   holder=$(stat -c %U /etc/suifleet/device.key)
-  runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment /run/lookup/enroll.toml > /run/lookup/receipt.json
-  install -m 0640 -o root -g suifleet /run/lookup/receipt.json /etc/suifleet/enrollment.json
-  rm -r /run/lookup /etc/suifleet/.enrollment.json.partial
+  address=$(runuser -u "$holder" -- /usr/bin/suifleet --derive-address /etc/suifleet/device.key)
+  runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment "$dir/enroll.toml" > "$dir/receipt.json"
+  python3 -c 'import json, re, sys
+  text = open(sys.argv[1]).read()
+  r = json.loads(text) if re.fullmatch(r"\{[^\n]*\}\n?", text) else {}
+  ids = [r.get(k, "") for k in ("device_object_id", "device_cap_id", "owner_cap_id")]
+  ok = (r.get("device_address") == sys.argv[2]
+        and all(re.fullmatch("0x[0-9a-f]{64}", str(i)) for i in ids)
+        and re.fullmatch("[1-9A-HJ-NP-Za-km-z]{32,44}", str(r.get("digest", ""))))
+  sys.exit(0 if ok else "not a complete receipt for " + sys.argv[2])' "$dir/receipt.json" "$address"
+  install -m 0640 -o root -g suifleet "$dir/receipt.json" /etc/suifleet/.enrollment.json.restore
+  sync -f /etc/suifleet/.enrollment.json.restore
+  ln /etc/suifleet/.enrollment.json.restore /etc/suifleet/enrollment.json
+  rm -f /etc/suifleet/.enrollment.json.restore /etc/suifleet/.enrollment.json.partial
+  rm -r "$dir"
+  EOF
   ```
+
+  It installs the record, and only then removes the attempt marker, after the
+  lookup succeeded and printed a complete receipt for the device's own key.
+  Any failure (a lookup that found nothing, a receipt for another key, an
+  existing record) stops it with a non-zero status, installs nothing and
+  keeps `/etc/suifleet/.enrollment.json.partial`. The next run checks the
+  record against the device key again.
 
   The lookup exits with status 3 when the node's retained history holds no
   enrollment by this key. That does not settle an attempt: the history may be
@@ -419,9 +443,18 @@ allows it). The role does not check the controller.
   1. Revoke the claim on the Enrollment page (*Lost a credential file?*, then
      *Revoke lost claims* for the host's serial). Revocation removes the claim
      from the policy in a transaction ordered with the enrollment, so it
-     either succeeds, and the earlier attempt can then never commit, or fails
-     because that attempt already used the claim. If it fails, run the play
-     again: the lookup now finds the enrollment and restores the record.
+     either succeeds, and the earlier attempt can then never commit, or fails.
+     A failure alone does not show that the attempt committed (the
+     transaction may also fail for gas, a network error or a stale page), so
+     keep the file. Reload the page: if the serial now shows *Consumed,
+     pending binding* or *Bound*, the attempt used the claim. A node that pruned the event still cannot
+     find it, so run the lookup against a trusted full node of the same
+     network that retains it: set `rpc_url` (and `rpc_urls`) in the lookup
+     copy of `deployment.json` to that node (the lookup checks the chain
+     identifier) and restore the record by hand as above. If no trusted node
+     retains the event, keep the file and escalate; never remove it, issue a
+     new claim or enroll again. If the serial still shows *Funded, unused*,
+     retry the revocation.
   2. Only after the revocation succeeded and the page shows *Revoked*, remove
      the empty file as root, reissue the serial (*Remove reservations to
      reissue*, reserve it again and download its new folder into the
