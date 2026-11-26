@@ -196,3 +196,79 @@ class OptionalSkips(unittest.TestCase):
         self.assertIn(blob(c.OPTIONAL_DEPLOYMENT_WORKFLOW), c.OPTIONAL_DEPLOYMENT_BLOBS)
         self.assertEqual(blob(c.OPTIONAL_CONTENT_WORKFLOW), c.OPTIONAL_CONTENT_BLOB)
         self.assertEqual(blob('scripts/content_scope.py'), c.OPTIONAL_CONTENT_SCOPE_BLOB)
+
+    def setup_multiple_deployment_jobs(self):
+        self.setup_evidence()
+        template_check, template_job, template_verified = map(copy.deepcopy,
+            (self.check, self.job, self.verified))
+        self.pr['statusCheckRollup'] = []
+        self.jobs['jobs'] = [self.build]
+        for job_id, name in enumerate(sorted(c.OPTIONAL_DEPLOYMENT_JOBS), 10):
+            url = f'https://github.com/owner/repo/actions/runs/1/job/{job_id}'
+            check = dict(template_check, name=name, detailsUrl=url)
+            job = dict(template_job, id=job_id, name=name)
+            verified = dict(template_verified, id=job_id, name=name, details_url=url)
+            self.pr['statusCheckRollup'].append(check)
+            self.jobs['jobs'].append(job)
+            self.data[f'repos/owner/repo/check-runs/{job_id}'] = verified
+        self.jobs['total_count'] = len(self.jobs['jobs'])
+
+    def test_shared_run_reads_are_deduplicated_only_inside_one_snapshot(self):
+        self.setup_multiple_deployment_jobs()
+        calls = []
+        def read(path):
+            calls.append(path)
+            return copy.deepcopy(self.data[path])
+        for iteration in range(2):
+            before = len(calls)
+            self.annotate(read)
+            self.assertIsNone(c.checks_blocker(self.pr))
+            current = calls[before:]
+            self.assertEqual(current.count(self.path), 2)  # initial + fresh final
+            self.assertEqual(current.count(self.path+'/attempts/1/jobs?per_page=100'), 1)
+            self.assertEqual(len(current), 3 + len(c.OPTIONAL_DEPLOYMENT_JOBS))
+            self.assertEqual(current[-1], self.path)
+        self.assertEqual(len(calls), 12)  # original per-job implementation used 24
+
+    def test_changed_or_unavailable_final_run_discards_all_job_proofs(self):
+        for mode in ('changed', 'unavailable'):
+            self.setup_multiple_deployment_jobs()
+            calls = []
+            def read(path):
+                calls.append(path)
+                if path == self.path and calls.count(path) == 2:
+                    if mode == 'unavailable':
+                        raise RuntimeError('private API diagnostic')
+                    return dict(copy.deepcopy(self.run), run_attempt=2)
+                return copy.deepcopy(self.data[path])
+            self.annotate(read)
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+            self.assertTrue(all('_optional_skip' not in x for x in self.pr['statusCheckRollup']))
+            self.assertEqual(calls.count(self.path), 2)
+
+    def test_final_run_failure_does_not_discard_an_independent_run(self):
+        self.setup_multiple_deployment_jobs()
+        checks1 = self.pr['statusCheckRollup']
+        path1, data1, tree1 = self.path, copy.deepcopy(self.data), copy.deepcopy(self.tree)
+        self.setup_content()
+        check2 = self.check
+        check2['detailsUrl'] = 'https://github.com/owner/repo/actions/runs/9/job/99'
+        self.run.update(id=9, check_suite_id=30)
+        self.job.update(id=99, run_id=9)
+        self.verified.update(id=99, details_url=check2['detailsUrl'], check_suite={'id':30})
+        path2 = 'repos/owner/repo/actions/runs/9'
+        data = dict(data1)
+        data.update({path2:self.run, path2+'/attempts/1/jobs?per_page=100':self.jobs,
+                     'repos/owner/repo/check-runs/99':self.verified})
+        tree = dict(truncated=False, tree=tree1['tree']+self.tree['tree'])
+        self.pr['statusCheckRollup'] = checks1+[check2]
+        calls=[]
+        def read(path):
+            calls.append(path)
+            if path == path1 and calls.count(path) == 2:
+                raise RuntimeError('first run unavailable')
+            return copy.deepcopy(data[path])
+        c.annotate_optional_skips(self.pr,'owner/repo',read,lambda _:copy.deepcopy(tree))
+        self.assertTrue(all('_optional_skip' not in x for x in checks1))
+        self.assertIn('_optional_skip',check2)
+        self.assertEqual(calls.count(path2),2)

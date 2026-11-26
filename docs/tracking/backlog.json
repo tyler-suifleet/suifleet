@@ -5771,6 +5771,28 @@
         "Verify subsequently merged runtime changes through the existing authorization paths."
       ],
       "validation": "Offline activation and supervisor upgrade regressions."
+    },
+    {
+      "key": "SF-333",
+      "title": "Deduplicate repeated workflow evidence reads within each PR snapshot",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests/test_optional_skips.py"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-333 -->\n## Problem\nThe coordinator repeatedly exhausts its 5000/hour REST quota while GraphQL capacity remains. annotate_optional_skips re-fetches the same run metadata and attempt job list once per optional skipped job, then rechecks the same run again per job. A five-skip PR can use about twenty mutable REST reads just for applicability. Repeated scans stall review/repair publication and candidate integration.\n## Scope\nDeduplicate applicability reads within a single fresh PR snapshot only. Share run/job evidence among skipped jobs from the same run; revalidate each run once after collecting candidate proofs before attaching any proof. Never cache mutable approval data across snapshots or weaken exact head/base/app/workflow/scope/run-attempt checks.\n## Acceptance\n- Counted multi-job regression demonstrates fewer calls and one final fresh read per run.\n- Changed/rerun/unavailable final run drops every staged proof for that run.\n- Independent runs, malformed data, unreviewed workflows, required skips, protected Testnet and existing positive/negative provenance cases retain behavior.\n- Meaningful local combined-main checks, local-test infrastructure publication, verified installed-runtime provenance and live snapshot comparison.\nPriority P0; existing user authorization: fix throughput and merge locally tested reviewer/dispatcher/CI infrastructure without peer/hosted-CI waits. No wallet, hardware, credentials or application changes.\n",
+      "acceptance": [
+        "Counted multi-job regressions prove fewer reads, no cross-snapshot cache and one final fresh run read.",
+        "Changed, rerun or unavailable final run removes all staged applicability proof for that run.",
+        "Keep current exact-head/base/app/workflow/scope/run/attempt and required CI/Testnet gates.",
+        "Meaningful combined-main local tests, user-authorized infrastructure integration and verified runtime activation."
+      ],
+      "validation": "Focused optional-skip/provenance regressions, full local infrastructure integration evidence and live snapshot comparison."
     }
   ]
 }
