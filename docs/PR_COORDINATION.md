@@ -1399,24 +1399,25 @@ and is retried idempotently; terminal cleanup failures are isolated and do not
 stop independent queue selection. No publication intent may be reclassified this
 way after a push could have occurred.
 
-For a one-member batch, attribution is unambiguous: the original source head gets
-`_batch_review_failure`, and its existing owner receives normal feedback repair
-in the same scan. The worker gets the real published findings and requested
-regression checks. This is distinct from `_ci_repair`; changing CI evidence must
-not veto a genuine source-finding repair. Early read-only review is suppressed
-while that repair context is present. Existing claim, live/uncertain worker,
-capacity, provider and execution fences still apply. Source-complete receipts do
-not erase a later combined finding.
+For a one-member batch, a review without typed attribution still routes to
+the source owner. For a multi-member finding, the independent reviewer supplies
+`affected_source_prs` as a nonempty array of distinct source PR numbers. The
+coordinator verifies those IDs against the immutable manifest, the reviewed
+head/base and feedback snapshot, and the published change request. It attaches
+`_batch_review_failure` to each affected source head and rechecks the retained
+implementation claim before dispatch. Unaffected source-ready PRs remain eligible.
+The repair worker receives the published findings and requested regression checks.
+Early source review is suppressed while repair is pending. The existing capacity,
+provider and execution fences still apply.
 
-The finding remains attached when unrelated main advances, and expires when the
-source head changes. The changed source then needs fresh independent review and
-actual combined CI/testnet. For an unattributed multi-member finding, do not guess
-which owner is responsible or dispatch every owner: record the failed exact group
-and split it deterministically into smaller candidates. The same rejected head
-combination is not resubmitted just because main advanced. Singleton findings
-become owner repairs; unaffected source-ready PRs remain eligible for another
-batch. Never disable batching, fabricate source-head CI failures, blindly rerun
-checks or clear old failed-job/claim receipts to force this transition.
+A finding stays attached when main advances and expires when its source head
+changes. A changed source needs fresh independent review and combined CI/testnet.
+Missing or invalid multi-member attribution preserves the finding and excludes
+the rejected head combination, including reordered or larger groups containing
+it. The coordinator requests bounded attribution review in smaller candidates.
+Reviewers consult the earlier published findings and record whether the defect
+reproduces and which members require repair. The earlier rejection remains on
+record if the subset cannot reproduce a composition defect.
 
 SF-214's operational recovery used the installed controller to retire rejected
 batch #433, attached the independently reproduced enrollment finding to source

@@ -637,6 +637,12 @@ def ci_responsibility(pr, owner, failures, blocker=None):
     return f"{owner.get('agent')} owner is {owner['status']}: explicit recovery required"
 
 
+def matches_repair_claim(pr, owner):
+    expected = (pr.get('_batch_review_failure') or {}).get('owner')
+    return expected is None or (
+        all(owner.get(key) == expected[key] for key in ('key', 'agent', 'model', 'session', 'branch'))
+        and hashlib.sha256((owner.get('token') or '').encode()).hexdigest() == expected['claim_hash'])
+
 def source_feedback(pr):
     """Source/acceptance discussion identity, independent of CI and advancing main.
 
@@ -975,6 +981,14 @@ def normalize_result(result):
     if result.get('acceptance_ready') is True and (result.get('source_complete') is not True or result['verdict'] == 'changes_requested'):
         raise ValueError('acceptance readiness requires complete defect-free source review')
     return result
+
+
+def review_result_body(row, result):
+    body = (f"{MARKER}\n{row['family']}/{result['model']} independent review of `{row['head']}`: "
+            f"**{result['verdict']}**.\n\n{result['evidence']}")
+    if 'affected_source_prs' in result:
+        body += '\n\nAffected source PR IDs: `' + json.dumps(result['affected_source_prs']) + '`'
+    return body
 
 
 def source_only_result(result):
@@ -1839,6 +1853,8 @@ class Coordinator:
                 run(['git', 'worktree', 'add', '--detach', str(worktree), actual], cwd=project['root'])
             else:
                 current = json.loads(self.ticket(project, 'show', owner['key']))
+                if not matches_repair_claim(pr, current):
+                    raise RuntimeError('integration review repair claim changed')
                 intent = {'claim': hashlib.sha256(owner['token'].encode()).hexdigest(),
                           'key': owner['key'], 'branch': owner['branch'],
                           'worktree': owner['worktree'], 'head': pr['headRefOid']}
@@ -1936,6 +1952,16 @@ Do not edit the coordinator database or forge another model's review. Only this 
             common += '\nINCLUDED SOURCE RECONCILIATION: the exact source is already in the pinned main base. This is full independent acceptance, not a source-only receipt. Verify the original source identity in _included_source, the actual contribution and current-main inclusion, required real CI/security/testnet and all software acceptance. Missing evidence requires blocked/acceptance_complete=false with a precise next action. Do not edit branches, merge, close PRs or invent merged provenance.\n'
         if kind == 'review' and pr.get('_integration_batch'):
             common += '\nINTEGRATION BATCH: this is a coordinator-owned integration PR, not an implementation claim. Do not create tickets or edit source branches. Validate the immutable batch manifest in the snapshot, every member source receipt, compatibility of the actual combined diff and all member acceptance requirements. Require current candidate/base CI, protected testnet and feature evidence before approval. Approval binds the batch manifest digest as well as this exact candidate commit.\n'
+            common += ('For changes_requested, include affected_source_prs as a JSON array of distinct positive '
+                       'integer source PR numbers from the snapshot manifest. Include every member that needs '
+                       'a source repair and explain the evidence for each in your findings. If attribution cannot '
+                       'be established, omit the array and explain the uncertainty.\n')
+            requests = self.batches.attribution_requests(project, pr)
+            if requests:
+                common += ('Earlier combined findings lacked verified attribution. Read the cited published candidate '
+                           'reviews, try to reproduce the findings in this smaller candidate, and attribute only '
+                           'independently verified defects in this manifest. Record the reproduction outcome. '
+                           + json.dumps(requests) + '\n')
         if kind == 'review' and pr.get('_review_mode') == 'source':
             return common + '\nBATCH SOURCE REVIEW: independently review this immutable source head and all existing feedback now. Do not wait for CI or rebase the branch. Return typed booleans source_complete and acceptance_ready in result.json, plus the normal fields. source_complete=true only if all source/security/compatibility findings are resolved. acceptance_ready=true only if every remaining requirement is automated CI/testnet evidence that the combined candidate will verify, or is explicitly deferred by the trusted acceptance policy; unresolved manual/external/product requirements keep it false. This is NOT merge approval: return blocked, acceptance_complete=false when source-ready, or changes_requested for actionable defects. The integration reviewer will assess the actual combined code and final evidence. If the snapshot has a classified funding-only testnet failure, disclose the missing funded acceptance in your evidence; it remains required on the exact combined candidate and grants no merge approval or wallet mutation. Never infer readiness from earlier review prose.\n'
         if kind == 'review':
@@ -2348,7 +2374,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         if checks_blocker(pr) is not None:
                             raise RuntimeError('included acceptance publication evidence unavailable')
                 if row['kind'] == 'review' and pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']:
-                    body = f"{MARKER}\n{row['family']}/{result['model']} independent review of `{row['head']}`: **{result['verdict']}**.\n\n{result['evidence']}"
+                    body = review_result_body(row, result)
                     if not row['comment_id']:
                         posted = json.loads(self.gh(project,['api',f"repos/{project['repository']}/issues/{row['pr']}/comments",'--method','POST','-f',f'body={body}']))
                         self.record_publication(project,row,posted,'comment_id',{'body':posted['body']})
@@ -2665,6 +2691,9 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # snapshot has a failure. Pre-publication revalidation must
                     # invalidate the batch before normal repair on a later tick;
                     # publication/reconciliation uncertainty never permits repair.
+                    continue
+                if batching and not matches_repair_claim(pr, owner):
+                    print(f"{project['id']} PR#{pr['number']}: integration review repair claim changed", flush=True)
                     continue
                 if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
