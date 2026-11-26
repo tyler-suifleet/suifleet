@@ -387,10 +387,21 @@ allows it). The role does not check the controller.
   rm /etc/suifleet/.enrollment.json.partial
   ```
 
-  An empty partial file means the command printed nothing, so the run
-  enrolls again. If the host stopped between the transaction and its output,
-  that attempt cannot reuse the spent claim and fails; recover from the
-  Enrollment page as above.
+  The role creates the partial file, and flushes it to disk, before it runs
+  the enrollment command, so every attempt leaves it. An empty partial file
+  means the attempt printed nothing, and its outcome is unknown: the command
+  prints only after its transaction committed, so a lost response or a host
+  stopped at the wrong moment leaves an enrolled device with no receipt. The
+  run then stops before staging a claim or submitting again. Look up the
+  host's claim (its serial) on the Enrollment page. If it shows *Enrolled*,
+  restore the record from its IDs as above. Only if it is still *Funded,
+  unused* (nothing was enrolled; for example the node was unreachable), remove
+  the empty file as root and run the play again:
+
+  ```sh
+  rm /etc/suifleet/.enrollment.json.partial
+  ```
+
   Never issue an enrolled device a new claim, and never replace its key.
 - **Swap refusal.** See [claim storage](#claim-storage): enroll with all
   swap off, including zram and encrypted swap. Nothing was sent.
@@ -504,9 +515,10 @@ The harness checks these phases:
 4. On one host, a test-only copy of the role stops the enrollment right after
    the transaction succeeded and its receipt reached
    `.enrollment.json.partial`, before the record is promoted. With the
-   credential batch present, retries with a truncated receipt and with a
-   receipt for another key stop before any claim is staged or the enrollment
-   command runs, and keep the file unchanged. With the real receipt restored
+   credential batch present, retries with a truncated receipt, with a
+   receipt for another key, and with an empty file (the committed enrollment
+   printed nothing) stop before any claim is staged or the enrollment command
+   runs, and keep the file unchanged. With the real receipt restored
    and the batch removed, check mode reports the pending recovery without
    promoting it, and the run restores the record byte for byte without
    running the enrollment command again; key, address and enrollment are

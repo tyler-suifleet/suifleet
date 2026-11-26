@@ -47,7 +47,8 @@ crashed), a claim transfer interrupted after staging with no swap
 and core files under a pam_limits core limit of 0 (plain and Vault claims only in tmpfs, none on host persistent
 storage, in sudo I/O logs or controller files), an enrollment stopped after its
 transaction and receipt but before the record is promoted (truncated or
-other-key receipts refused before staging; the real receipt restored without
+other-key receipts, and an empty file left by the committed attempt, refused
+before staging or a second submission; the real receipt restored without
 the batch or a second submission), install + on-device identity + claim enrollment +
 configuration + start, rerun without the claim batch (changed=0), check mode
 (changed=0), claim staging left by an enrollment interrupted after its record
@@ -1304,20 +1305,26 @@ class Harness:
                       user="deploy", input=marker + "\n")
             return marker
 
+        # The enrollment above committed on chain. An empty file is that same
+        # attempt with its response lost before anything was printed: its
+        # outcome is unknown locally, so the retry must not submit again.
         other = dict(enrolled, device_address="0x" + "ab" * 32)
-        for label, text in (("truncated receipt", receipt[:40]), ("receipt for another key", json.dumps(other, separators=(",", ":")) + "\n")):
+        incomplete, unknown = "not a complete receipt", "printed no receipt"
+        for label, text, refusal in (("truncated receipt", receipt[:40], incomplete),
+                                     ("receipt for another key", json.dumps(other, separators=(",", ":")) + "\n", incomplete),
+                                     ("committed enrollment with no output (empty file)", "", unknown)):
             sh(f"umask 077 && cat > {partial}", input=text)
             marker = abandon_claim_copies()
-            if label == "truncated receipt":
+            if label != "receipt for another key":
                 output, _ = self.ansible(f"check mode refuses a {label}", "site.yml", "--check", "--diff", "--limit", name,
                                          *vault, expect_rc="nonzero")
-                assert "not a complete receipt" in output, (name, label, "check mode did not refuse")
+                assert refusal in output, (name, label, "check mode did not refuse")
                 assert sh(f"cat {partial}") == text and absent(record), (name, label, "check mode changed the receipt")
                 assert not absent(f"{staging}/claim.key") and not absent(f"{transfer}/claim.key"), \
                     (name, label, "check mode erased the abandoned claim copies")
                 print(f"PASS check mode with a {label} refused and left the abandoned claim copies in place")
             output, _ = self.ansible(f"retry refuses a {label}", "site.yml", "--limit", name, *vault, expect_rc="nonzero")
-            assert "not a complete receipt" in output, (name, label, "not refused by the receipt check")
+            assert refusal in output, (name, label, "not refused by the receipt check")
             assert ENROLL_TASK not in output, (name, label, "the enrollment command was reached")
             assert sh(f"cat {partial}") == text, (name, label, "the earlier output was changed")
             assert absent(record), (name, label, "record written")
