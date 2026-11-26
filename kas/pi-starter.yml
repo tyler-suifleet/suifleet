@@ -2,14 +2,6 @@ header:
   version: 14
   includes:
     - pi-image.yml
-repos:
-  suifleet:
-    layers:
-      suifleet-edge/meta-suifleet: disabled
-  meta-suifleet:
-    url: https://github.com/tyler-suifleet/meta-suifleet
-    branch: scarthgap
-    commit: c78e6297691b38da87989a7ec279734a6669e379
 target: suifleet-pi-image
 local_conf_header:
   starter: |

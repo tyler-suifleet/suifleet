@@ -6,11 +6,12 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import subprocess
 import tempfile
 
 from deployment_manifest import version
-from inspect_pi_image import inspect, recipe_pins, sha
+from inspect_pi_image import inspect, sha
 from release import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,7 @@ TARGET = 'raspberrypi3-64-starter'
 LAYER = 'meta-suifleet'
 REPOS = ('poky', 'meta-openembedded', 'meta-raspberrypi', 'meta-lts-mixins', LAYER)
 RECIPE = Path(LAYER) / 'recipes-edge/suifleet/suifleet_1.0.bb'
+ENROLLMENT = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files"
 IMAGE = f'suifleet-pi-image-{MACHINE}.rootfs'
 
 
@@ -32,19 +34,37 @@ def check_compatibility(manifest, crate_version):
     return bounds
 
 
-def read_pins(work, manifest):
-    recipe = (work / RECIPE).read_text()
-    pins = recipe_pins(recipe)
-    match = re.search(r'^SUIFLEET_CRATE_VERSION = "([^"]+)"$', recipe, re.M)
-    if not match:
-        raise ValueError('public daemon recipe does not pin SUIFLEET_CRATE_VERSION')
-    pins['crate_version'] = match.group(1)
+def read_recipe(environment, recipe, manifest):
+    def value(name):
+        match = re.search(rf'^"{re.escape(name)}"="([^"\n]*)"$', environment, re.M)
+        if not match:
+            match = re.search(rf'^{re.escape(name)}="([^"\n]*)"$', environment, re.M)
+        if not match:
+            raise ValueError(f'effective daemon recipe lacks {name}')
+        return match.group(1)
+
+    pins = {
+        'source_revision': value('SRCREV'),
+        'lock_sha256': value('SUIFLEET_LOCK_SHA256'),
+        'crate_version': value('SUIFLEET_CRATE_VERSION'),
+    }
     check_compatibility(manifest, pins['crate_version'])
-    enrollment_files = ('first-boot-enrollment.patch', 'suifleet-first-boot-enrollment.service')
-    for name in enrollment_files:
-        if f'file://{name}' not in recipe or not (work / RECIPE.parent / 'files' / name).is_file():
-            raise ValueError(f'public meta-suifleet pin lacks SF-322 file {name}')
-    return pins
+    urls = shlex.split(value('SRC_URI'))
+    archive, = (url.split(';', 1)[0] for url in urls if ';name=edge;' in url)
+    checksum = re.search(r'^SRC_URI\[edge\.sha256sum\] = "([0-9a-f]{64})"$', recipe, re.M)
+    if not checksum:
+        raise ValueError('effective daemon archive lacks a SHA-256 pin')
+    service = 'suifleet-first-boot-enrollment.service'
+    if service not in value('SYSTEMD_SERVICE:suifleet').split():
+        raise ValueError('effective daemon recipe does not register first-boot enrollment')
+    files = {}
+    search = [Path(path) for path in value('FILESPATH').split(':') if path]
+    for name in ('first-boot-enrollment.patch', service):
+        selected = next((path / name for path in search if (path / name).is_file()), None)
+        if f'file://{name}' not in urls or selected != ENROLLMENT / name:
+            raise ValueError(f'effective daemon recipe lacks reviewed SF-322 input {name}')
+        files[name] = sha(selected)
+    return pins, {'archive_url': archive, 'archive_sha256': checksum.group(1), 'enrollment_files': files}
 
 
 def git(directory, *args):
@@ -67,16 +87,20 @@ def build(work, manifest, preflight_only):
     args = ['kas', 'build', str(PROFILE)]
     subprocess.run(['kas', 'checkout', str(PROFILE)], env=env, cwd=ROOT, check=True)
     revisions = {repo: git(work / repo, 'rev-parse', 'HEAD') for repo in REPOS}
-    pins = read_pins(work, manifest)
+    recipe = subprocess.check_output(
+        ['kas', 'shell', str(PROFILE), '-c', 'bitbake -e suifleet'],
+        env=env, cwd=ROOT, text=True,
+    )
+    pins, sources = read_recipe(recipe, (work / RECIPE).read_text(), manifest)
     if preflight_only:
         return
     subprocess.run(args, env=env, cwd=ROOT, check=True)
     deploy = work / 'build/tmp/deploy/images' / MACHINE
     with tempfile.TemporaryDirectory(dir=work, prefix='inspect-') as scratch:
-        evidence = inspect(deploy / (IMAGE + '.wic.bz2'), Path(scratch), Path('/usr/bin'),
+        evidence = inspect(deploy / (IMAGE + '.wic.bz2'), Path(scratch), Path(shutil.which('mdir')).parent,
                            e2fsck='e2fsck', pins=pins, starter=True)
     evidence.pop('image')
-    return deploy, revisions, pins, evidence
+    return deploy, revisions, pins, sources, evidence
 
 
 def prepare_bundle(out, deploy, second, commit, pins, manifest_path, provenance):
@@ -128,15 +152,16 @@ def main():
     first = build(work / 'first', manifest, args.preflight_only)
     if args.preflight_only:
         return
-    deploy, revisions, pins, evidence = first
-    second, revisions_b, pins_b, evidence_b = build(work / 'second', manifest, False)
-    if (revisions, pins, evidence) != (revisions_b, pins_b, evidence_b):
+    deploy, revisions, pins, sources, evidence = first
+    second, revisions_b, pins_b, sources_b, evidence_b = build(work / 'second', manifest, False)
+    if (revisions, pins, sources, evidence) != (revisions_b, pins_b, sources_b, evidence_b):
         raise ValueError('independent build provenance or filesystem inspection differs')
     prepare_bundle(args.out, deploy, second, commit, pins, manifest_path, {
         'schema': 1,
         'commit': commit,
         'target': TARGET,
         'repositories': revisions,
+        'daemon_sources': pins | sources,
         'kas': subprocess.check_output(['kas', '--version'], text=True).strip(),
         'edge_compatibility': check_compatibility(manifest, pins['crate_version']),
         'inspection': evidence,

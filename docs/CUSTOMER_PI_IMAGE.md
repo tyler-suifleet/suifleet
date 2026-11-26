@@ -61,11 +61,11 @@ python3 scripts/build_pi_starter.py --manifest /path/to/deployment-manifest.json
 The build uses the public Scarthgap layer and pinned BSP and toolchain. It
 checks that the recipe and installed client versions are supported by the
 Testnet deployment manifest, checks for the automatic first-boot enrollment
-service, and compares the two images and their package inventories. This build
-requires an updated public Scarthgap layer revision that includes the
-enrollment service. The currently pinned revision predates that service, so
-the build stops before producing a bundle. A successful local build produces
-an unsigned candidate for validation.
+service, and compares the two images and their package inventories. The merged first-boot
+companion layer supplies the enrollment patch and systemd service for the pinned
+public daemon recipe. Preflight checks the effective BitBake recipe and records
+the daemon archive, Cargo.lock and enrollment file digests. A successful local
+build produces an unsigned candidate for validation.
 
 The release pipeline compares both builds before signing and verifies the
 signed files before publication. See the [release signing and verification
