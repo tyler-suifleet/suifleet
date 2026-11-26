@@ -121,9 +121,10 @@
               {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
               an earlier enrollment attempt printed no receipt, and it may still have
               enrolled the device on chain. The role will not stage a claim or submit
-              again. Check the Enrollment page (docs/ANSIBLE.md#recovery): restore the
-              record if the device is enrolled; remove the file only if its claim is
-              still unused. Never issue it a new claim.
+              again. Settle it on chain (docs/ANSIBLE.md#recovery): restore the record
+              if the device is enrolled; otherwise revoke the claim, and remove the file
+              only after the revocation succeeded. An unused label on the Enrollment
+              page alone is not enough: the attempt may still commit.
           when: suifleet_enrollment_partial.stat.exists
 
         - name: Recover the record from an interrupted enrollment

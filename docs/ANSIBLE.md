@@ -390,21 +390,39 @@ allows it). The role does not check the controller.
   rm /etc/suifleet/.enrollment.json.partial
   ```
 
-  The role creates the partial file, and flushes it to disk, before it runs
-  the enrollment command, so every attempt leaves it. An empty partial file
-  means the attempt printed nothing, and its outcome is unknown: the command
-  prints only after its transaction committed, so a lost response or a host
-  stopped at the wrong moment leaves an enrolled device with no receipt. The
-  run then stops before staging a claim or submitting again. Look up the
-  host's claim (its serial) on the Enrollment page. If it shows *Enrolled*,
-  restore the record from its IDs as above. Only if it is still *Funded,
-  unused* (nothing was enrolled; for example the node was unreachable), remove
-  the empty file as root and run the play again:
+  The role creates the partial file exclusively, and flushes it to disk,
+  before it runs the enrollment command, so every attempt leaves it. An empty
+  partial file means the attempt printed nothing, and its outcome is unknown:
+  the command prints only after its transaction committed, so a lost response
+  or a host stopped at the wrong moment leaves an enrolled device with no
+  receipt. The enrollment transaction has no expiration, so an attempt that
+  has not committed yet (for example one still pending at the node) may still
+  commit later. The run stops before staging a claim or submitting again, and
+  keeps the file until the chain settles the outcome:
 
-  ```sh
-  rm /etc/suifleet/.enrollment.json.partial
-  ```
+  1. Reload the Enrollment page and look up the host's claim (its serial). If
+     it shows *Enrolled* (*Consumed, pending binding* or *Bound*), restore the
+     record from its IDs as above.
+  2. Otherwise revoke the claim (*Lost a credential file?*, then *Revoke lost
+     claims* for that serial). Revocation removes the claim from the policy in
+     a transaction ordered with the enrollment, so it either succeeds, and the
+     earlier attempt can then never commit, or fails because that attempt
+     already used the claim. If it fails, reload the page and go back to
+     step 1.
+  3. Only after the revocation succeeded and the page shows *Revoked*, remove
+     the empty file as root, reissue the serial (*Remove reservations to
+     reissue*, reserve it again and download its new folder into the
+     credential batch) and run the play again:
 
+     ```sh
+     rm /etc/suifleet/.enrollment.json.partial
+     ```
+
+  Never remove the file because the page shows *Funded, unused*: that label
+  describes the chain as last read (an open page refreshes it only once a
+  minute), not an attempt that may still commit. Never re-register the
+  revoked claim (*Re-register withdrawn claims*): registering it again would
+  let that attempt commit.
   Never issue an enrolled device a new claim, and never replace its key.
 - **Enrollment lock.** One play at a time enrolls a host: it holds
   `/run/suifleet-enroll.lock` from the cleanup of an interrupted run's claim
