@@ -12,21 +12,18 @@ this page records the packaging details and evidence.
 See the [edge platform compatibility matrix](EDGE_PLATFORM_COMPATIBILITY.md)
 for candidate kernels, libc variants and older Yocto series.
 
-## Standalone distribution readiness (SF-230)
+## Standalone software layer
 
-The [software layer README](../suifleet-edge/meta-suifleet/README.md) and
-[release/submission checklist](../suifleet-edge/meta-suifleet/RELEASE.md) describe
-the deterministic export and outstanding authorized public-source/repository/index
-publication. No standalone repository or Layer Index listing is available yet.
-Pi image/access policy, the test component and a cache-hygiene glibc guard live in
-`suifleet-edge/meta-suifleet-integration`; both pinned kas profiles include it.
-Manually maintained BBLAYERS configurations using the Pi image or test component
-must add the companion integration directory too. The generic software layer has
-no core recipe appends or BSP dependency. Its OpenSSL/libcap/xz fixes are an
-opt-in class (`INHERIT += "suifleet-core-fixes"`; SF-308), described in the layer
-README.
-Source, Cargo and codec pins remain unchanged. Current export, recipe build and
-layer-check evidence is in [standalone readiness validation](YOCTO_STANDALONE_VALIDATION.md).
+The public [meta-suifleet repository](https://github.com/tyler-suifleet/meta-suifleet)
+contains the software layer. The core checkout keeps a mirror for packaging tests
+and native Linux installation. The separate integration layer contains Pi image
+and access policy, the test component and a cache-hygiene guard for glibc. Core
+kas profiles use the public software layer and both core companion layers.
+Generic consumers bring their own distro and BSP and can opt into `INHERIT += "suifleet-core-fixes"` for the documented OE-Core
+fixes. See [standalone validation](YOCTO_STANDALONE_VALIDATION.md) for prior
+per-source evidence and [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820)
+for public release validation. [SF-312](https://github.com/tyler-suifleet/suifleet/issues/838)
+tracks human submission and indexing in the OpenEmbedded Layer Index.
 
 ## Pinned build inputs
 
@@ -38,22 +35,18 @@ meta-raspberrypi and the Rust mixin to full Git revisions. The mixin revision
 LLVM backends are limited to AArch64 and X86 for this ARM64 target/x86 build host.
 Other hosts/architectures need a deliberate profile change and validation.
 
-The local SuiFleet layer comes from this checkout. Archive its commit ID and
-any diff alongside the kas configuration and build artifacts. The daemon source
-is fetched independently at the recipe's fixed `SRCREV`
-`b9bb2ef6210624d732ab2de2075ea1826e5300c1`: reviewed merged main, including
-client 0.2.3 required by the current Seal testnet evaluation manifest. The codec
-is rebuilt from that same revision. The daemon recipe applies the first-boot
-enrollment backport as a layer patch. The layer commit identifies the patch
-and service included in the package. `nobranch=1` selects this immutable revision,
-never AUTOREV. Runtime manifest version rejection and signer separation remain
-enabled. The Cargo.lock SHA-256 is
+The recipe and codec use separately checksum-pinned public source tarballs
+from reviewed core commit `b9bb2ef6210624d732ab2de2075ea1826e5300c1` (client 0.2.3).
+The board-independent `meta-suifleet-enrollment` companion layer applies the
+first-boot enrollment backport and installs its systemd service. Custom systemd
+images can add it alongside the pinned public layer. Record the core checkout
+revision alongside the kas configuration to identify the patch and unit used in the build.
+The Cargo.lock SHA-256 is
 `c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6`.
-
-See [SF-278 build evidence](validation/SF278.md) for this pin. Earlier SF-120,
-SF-066 and QEMU/image results below apply only to their recorded older sources;
-updating the recipe does not update an existing SD image or establish physical
-Pi acceptance.
+The archive download and unpack layout are independent of the core checkout.
+Runtime manifest version rejection and signer separation remain enabled.
+Earlier [SF-278 build evidence](validation/SF278.md) and the historical
+SF-120, SF-066 and QEMU/image results below apply to their recorded sources.
 
 `suifleet-crates.inc` declares all 350 registry packages/versions and SHA-256 from
 that revision's Cargo.lock. BitBake fetches/unpacks them before compilation;
@@ -64,13 +57,6 @@ There is no compile-time crate download or `AUTOREV`.
 The bootable SD image profile, access provisioning and flashing instructions are
 in [PI_IMAGE.md](PI_IMAGE.md). Historical validation below remains tied to its
 recorded older sources; use the per-source evidence rather than attributing an older image to the current pin.
-
-To update: select a reviewed source revision, update `SRCREV`, run
-`bitbake -c update_crates suifleet`, and update `SUIFLEET_LOCK_SHA256` from that
-revision's `suifleet-edge/Cargo.lock`. Review the generated include and build
-the package/image again. Yocto documents this workflow in its
-[Cargo classes reference](https://docs.yoctoproject.org/5.0.17/ref-manual/classes.html#cargo-update-recipe-crates).
-Do not merely disable the digest check to accommodate a lockfile change.
 
 The Wrynose profiles are [packaging-wrynose.yml](../kas/packaging-wrynose.yml)
 and [packaging-wrynose-qemu.yml](../kas/packaging-wrynose-qemu.yml). They pin
@@ -84,11 +70,11 @@ Kirkstone has its own pinned profiles and Rust mixin; its measured build,
 emulated runtime, kernel/signer limit and the Dunfell toolchain blocker are
 recorded in [older Yocto series](YOCTO_LEGACY_SERIES.md).
 
-Both recipe variants preserve core's `UNPACKDIR` when present and fall back to
-`WORKDIR` only for Scarthgap. Git explicitly unpacks to `git` on both releases;
+All three profiles preserve core's `UNPACKDIR` when present and fall back to
+`WORKDIR` for older BitBake. The daemon archive unpacks to `source` on all three series;
 local install inputs use `UNPACKDIR`. Before configure, the recipe executes the
 staged compiler's `--version` and rejects Rust below 1.90.0. The mixin dependency
-belongs to the Scarthgap kas profile, rather than the reusable layer.
+is provided by the Kirkstone and Scarthgap kas profiles.
 
 ## Build
 
@@ -124,9 +110,8 @@ Preserve the package feed, source/layer revisions, build configuration,
 `license.manifest`, image/package manifests, binary/image SHA-256 values and
 BitBake logs. `ca-certificates` is an explicit runtime dependency; the daemon uses Rustls and has no direct OpenSSL build dependency. Systemd and
 other image/native dependencies still use OpenSSL, so the observed recursive
-install serialization workaround is in meta-suifleet's opt-in
-`suifleet-core-fixes` class, which the integration layer inherits. Shared-library QA stays
-enabled.
+install serialization workaround is in the opt-in `suifleet-core-fixes` class,
+which the integration layer inherits. Shared-library QA stays enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.
 
@@ -184,19 +169,15 @@ grep linux-arm64.tar.xz SHASUMS256.txt
 
 ### Building the codec artifact
 
-BitBake does not fetch npm packages. Build the codec from the exact daemon
-source revision, using that revision's frozen pnpm lockfile, with Node 22.22.2.
-Put the result where the recipe expects it:
-`${TOPDIR}/suifleet-walrus-codec/<SUIFLEET_CODEC_SOURCE_REV>/`, or set
-`SUIFLEET_WALRUS_CODEC_DIR`. In the dev image (Node 22.22.2, pnpm 11.0.8):
+BitBake fetches a checksum-pinned tarball when you build the codec package.
+To prepare an updated distribution, build the codec outside BitBake from
+the daemon commit using the frozen pnpm lockfile and Node 22.22.2:
 
 ```sh
 git worktree add --detach /tmp/codec-src <SRCREV>
 (cd /tmp/codec-src/dapp && pnpm install --frozen-lockfile)
 python3 scripts/package_walrus_codec.py --source /tmp/codec-src --revision <SRCREV> \
-  --output "$BUILDDIR/suifleet-walrus-codec/<SRCREV>"   # prints the recipe pins
-python3 scripts/package_walrus_codec.py --output "$BUILDDIR/suifleet-walrus-codec/<SRCREV>" \
-  --recipe suifleet-edge/meta-suifleet/recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb
+  --output /tmp/codec-artifact
 ```
 
 The packager runs the reviewed, unmodified `build_walrus_codec.cjs` from that
@@ -269,33 +250,19 @@ The recipe's `do_verify_codec` runs before license population and install. It
 requires exactly the five pinned files, their SHA-256 values, a schema-1
 manifest naming the packaged Node release, recipe pins equal to the manifest's,
 and provenance from `SUIFLEET_CODEC_SOURCE_REV`. A tampered file fails that
-task. A missing artifact directory fails parsing for every target in the build,
-because the `file://` checksums cannot be computed. `inspect_pi_image.py` also
+task. A fetch or checksum failure stops the codec package build. `inspect_pi_image.py` also
 requires the codec's provenance revision to equal the daemon's `build-info`.
 `make test-yocto-packaging` covers these rules offline, including
 `test_codec_and_daemon_share_source_revision`.
 
 ### Updating the source pin
 
-The current pin is reviewed merged main with client 0.2.3. To move it:
-
-1. Select a reviewed main revision, and set `SRCREV` and
-   `SUIFLEET_CRATE_VERSION` (checked against `suifleet-edge/Cargo.toml`).
-2. Run `bitbake -c update_crates suifleet`. Commit the regenerated
-   `suifleet-crates.inc` with `SUIFLEET_LOCK_SHA256` from that revision's
-   `Cargo.lock`.
-3. Rebuild the codec artifact at the same revision and update
-   `SUIFLEET_CODEC_SOURCE_REV`, the five SHA-256 values, `LICENSE` (printed
-   by the packager) and the license `md5`. If `@mysten/walrus-wasm` changed,
-   regenerate and review its license inventory first.
-4. Run `make test-yocto-packaging`. Its `check_yocto_profiles.py` guard checks
-   the recipe's packaged release against every `profiles/*/deployment.json`
-   edge range, including both inclusive minimum and exclusive maximum. New
-   evaluation profiles are picked up automatically. This complements the
-   recipe's source-version/lock verification; it does not replace a rebuild.
-5. Build the image in a build directory whose `bblayers.conf` names this
-   reviewed checkout's `meta-suifleet`. Then run `inspect_pi_image.py`,
-   `test_pi_binary.py`, `test_pi_codec.py` and `test_pi_archive.py`.
+Follow the [layer release procedure](../suifleet-edge/meta-suifleet/RELEASE.md)
+to publish matching daemon/codec archives and regenerate the crate include.
+`make test-yocto-packaging` checks the packaged client version against every
+`profiles/*/deployment.json` edge range. It complements the recipe's own
+source-version and lock verification. Build and inspect a new image separately
+before replacing an existing Pi image.
 
 ### Target codec smoke
 
@@ -382,8 +349,8 @@ prints only the public address. Never run provisioning during image creation.
 unprivileged account in the existing sandbox and starts only when
 `/etc/suifleet/config.toml` exists. `suifleet-enrollment.path` notices that
 file's installation; the service also starts on subsequent enrolled boots.
-For new fleets, `suifleet-first-boot-enrollment.service` consumes a per-device
-claim when the image has the [public batch settings](ENROLLMENT.md#automatic-linux-first-boot)
+With the enrollment companion layer enabled,
+`suifleet-first-boot-enrollment.service` consumes a per-device claim when the image has the [public batch settings](ENROLLMENT.md#automatic-linux-first-boot)
 and the unit's provisioning media is mounted and writable.
 
 Register the address through the current registry flow and obtain the
