@@ -517,7 +517,10 @@ def daemon_errors(recipe, read, exists=None):
             path = f'{src}/{directory}/Cargo.toml'
             return read(path).decode() if exists(path) else None
         try:
-            packager.local_crates(manifest.decode(), read_manifest)
+            for rel in packager.declared_files(manifest.decode(), read_manifest):
+                if not exists(f'{src}/{rel}'):
+                    errors.append(f'{recipe.path.name}: Cargo.toml declares build file {src}/{rel}, '
+                                  'missing from the source layout')
         except packager.MissingCrate as error:
             errors.append(f'{recipe.path.name}: {error.what} {src}/{error.directory} is missing from the source layout')
         except ValueError as error:

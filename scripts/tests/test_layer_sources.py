@@ -201,6 +201,59 @@ class PackageEdgeSourceTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, error):
                     packager.plan(self.repo.root, 'HEAD')
 
+    def test_manifest_declared_target_files_are_packaged(self):
+        # Cargo refuses a manifest whose explicit target file is absent, so a
+        # declared path outside the fixed roots is a build input too.
+        targets = ('\n[lib]\npath = "lib/core.rs"\n'
+                   '\n[[bin]]\nname = "standalone-check"\npath = "tools/standalone.rs"\n'
+                   '\n[[example]]\nname = "demo"\npath = "demos/demo.rs"\n'
+                   '\n[[bench]]\nname = "speed"\npath = "perf/speed.rs"\n')
+        manifest = CARGO_TOML.replace('[package]\n', '[package]\nbuild = "scripts/gen.rs"\n', 1) + targets
+        self.assertIn('build = "scripts/gen.rs"', manifest)
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/lib/core.rs', 'pub const T: &str = include_str!("table.txt");\n')
+        self.repo.write('suifleet-edge/lib/table.txt', 'table')
+        for rel in ('tools/standalone.rs', 'demos/demo.rs', 'perf/speed.rs', 'scripts/gen.rs'):
+            self.repo.write(f'suifleet-edge/{rel}', 'fn main() {}\n')
+        self.repo.write('suifleet-edge/windows-runtime/Cargo.toml',
+                        '[package]\nname = "suifleet-windows"\nversion = "0.1.0"\n\n'
+                        '[[test]]\nname = "shared"\npath = "../shared-tests/win.rs"\n')
+        self.repo.write('suifleet-edge/shared-tests/win.rs', '')
+        self.repo.write('suifleet-edge/tools/unrelated.txt', 'not declared')
+        self.repo.commit()
+        info = packager.build(self.repo.root, 'HEAD', self.out / 'targets.tar.gz')
+        with tarfile.open(self.out / 'targets.tar.gz') as tar:
+            names = {m.name for m in tar.getmembers() if m.isfile()}
+        for rel in ('lib/core.rs', 'lib/table.txt', 'tools/standalone.rs', 'demos/demo.rs', 'perf/speed.rs',
+                    'scripts/gen.rs', 'shared-tests/win.rs'):
+            with self.subTest(rel):
+                self.assertIn(f'suifleet-edge/{rel}', names)
+        self.assertNotIn('suifleet-edge/tools/unrelated.txt', names)
+        self.assertEqual(sorted(names), info['paths'])
+        # Absent, escaping, absolute or unmodelled declarations are refused.
+        for declaration, error in (('[[bin]]\nname = "x"\npath = "tools/absent.rs"\n',
+                                    'declares build file suifleet-edge/tools/absent.rs, absent'),
+                                   ('[[bin]]\nname = "x"\npath = "../interfaces/x.rs"\n',
+                                    'Cargo target file ../interfaces/x.rs is outside'),
+                                   ('[[bin]]\nname = "x"\npath = "/abs/x.rs"\n', 'unsupported Cargo target file path'),
+                                   ('[[bin]]\nname = "x"\npath = 1\n', 'unsupported bin target path'),
+                                   ('test = 1\n', r'unsupported \[\[test\]\] declaration')):
+            with self.subTest(declaration):
+                # A top-level key must precede the first table header.
+                text = declaration + manifest if declaration == 'test = 1\n' else manifest + '\n' + declaration
+                self.repo.write('suifleet-edge/Cargo.toml', text)
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, error):
+                    packager.plan(self.repo.root, 'HEAD')
+        self.repo.write('suifleet-edge/Cargo.toml',
+                        CARGO_TOML.replace('[package]\n', '[package]\nbuild = ["a.rs"]\n', 1))
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, 'unsupported package.build value'):
+            packager.plan(self.repo.root, 'HEAD')
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML.replace('[package]\n', '[package]\nbuild = false\n', 1))
+        self.repo.commit()
+        packager.plan(self.repo.root, 'HEAD')
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -761,6 +814,43 @@ class LayerAuditTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertTrue(any('path dependency suifleet-edge/local-helper is missing from the source layout' in e
                             for e in report['errors']), report['errors'])
+
+    def test_fetch_and_repo_report_missing_declared_target_file(self):
+        # The reviewer's reproduction: an explicit [[bin]] outside the fixed
+        # roots that a published archive lacks must not audit clean.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/standalone.rs"\n'
+        archive = self.archive.with_name('declared-target.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/Cargo.toml':
+                    member.size, data = len(manifest), io.BytesIO(manifest.encode())
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'Cargo.toml declares build file suifleet-edge/tools/standalone.rs, missing from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # --repo: a SRCREV whose manifest declares a target file it never committed.
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        rev = self.repo.commit()
+        self.write_recipe(srcrev=rev)
+        self.assertTrue(any(expected in e for e in audit.check(self.layer, repo=self.repo.root)['errors']))
+        # With the file committed and packaged, both audits are clean.
+        self.repo.write('suifleet-edge/tools/standalone.rs', 'fn main() {}\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/tools/standalone.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
 
     def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
         # A checksum-pinned, otherwise coherent archive that carries runtime state.

@@ -7,7 +7,8 @@ The archive is produced from committed Git objects only (never a working tree):
 
 Paths are the daemon build closure: the root LICENSE, the Cargo manifest and
 lockfile, the crate sources and examples, every Cargo workspace member, every
-local crate reached through `path` dependencies (transitively) and
+local crate reached through `path` dependencies (transitively), every
+file a manifest declares explicitly (`package.build` and each target `path`) and
 each file named by a literal ``include_str!``/``include_bytes!`` in those
 sources, or by a `#[path]` module attribute (resolved transitively). The closure is computed from the revision's
 tree, so a missing workspace member or include target is an error instead of a
@@ -367,6 +368,22 @@ class MissingCrate(ValueError):
         self.what, self.directory = what, directory
 
 
+def normalize(base, raw, what='local dependency'):
+    """`raw` (relative to the crate directory `base`) as a path relative to the
+    root crate; ValueError for absolute paths, backslashes or an escape."""
+    if raw.startswith('/') or '\\' in raw:
+        raise ValueError(f'unsupported {what} path: {raw}')
+    parts = [p for p in PurePosixPath(base).parts if p != '.']
+    for part in PurePosixPath(raw).parts:
+        if part == '..':
+            if not parts:
+                raise ValueError(f'{what} {raw} is outside the {CRATE} source layout')
+            parts.pop()
+        elif part != '.':
+            parts.append(part)
+    return '/'.join(parts)
+
+
 def local_crates(manifest, read_manifest):
     """Return every local crate directory the root manifest's build needs.
 
@@ -376,19 +393,6 @@ def local_crates(manifest, read_manifest):
     returns that directory's Cargo.toml text, or None when it is absent, which
     raises MissingCrate (a ValueError). A path dependency that leaves the root crate directory
     is refused: the archive layout and fetched-layout check cover only it."""
-    def normalize(base, raw):
-        if raw.startswith('/') or '\\' in raw:
-            raise ValueError(f'unsupported local dependency path: {raw}')
-        parts = [p for p in PurePosixPath(base).parts if p != '.']
-        for part in PurePosixPath(raw).parts:
-            if part == '..':
-                if not parts:
-                    raise ValueError(f'local dependency {raw} is outside the {CRATE} source layout')
-                parts.pop()
-            elif part != '.':
-                parts.append(part)
-        return '/'.join(parts)
-
     found = []
     pending = [(member, 'workspace member') for member in workspace_members(manifest)]
     pending += [(normalize('', raw), 'path dependency') for raw in path_dependencies(parse_toml(manifest))]
@@ -404,6 +408,58 @@ def local_crates(manifest, read_manifest):
         found.append(directory)
         pending += [(normalize(directory, raw), 'path dependency') for raw in path_dependencies(parse_toml(text))]
     return found
+
+
+TARGET_TABLES = ('lib', 'bin', 'example', 'test', 'bench')
+
+
+def target_files(document):
+    """Return the files a parsed manifest declares explicitly for its build.
+
+    These are a string `package.build` and the `path` of every [lib], [[bin]],
+    [[example]], [[test]] and [[bench]] target, relative to the manifest's
+    directory. Cargo refuses a manifest whose declared target file is absent,
+    so each one is a build input wherever it lives. Any other spelling of
+    these keys (a non-string path, a build-script list) raises ValueError
+    instead of being skipped."""
+    paths = []
+    package = document.get('package', {})
+    if not isinstance(package, dict):
+        raise ValueError('unsupported [package] declaration: not a table')
+    build = package.get('build')
+    if type(build) is str and build:
+        paths.append(build)
+    elif build is not None and not (isinstance(build, _Scalar) and build in ('true', 'false')):
+        raise ValueError('unsupported package.build value: expected a non-empty string or a boolean')
+    for name in TARGET_TABLES:
+        entries = document.get(name)
+        if entries is None:
+            continue
+        if name == 'lib':
+            entries = [entries]
+        elif type(entries) not in (list, _TableArray):
+            raise ValueError(f'unsupported [[{name}]] declaration: expected an array of tables')
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError(f'unsupported {name} target declaration: not a table')
+            if 'path' in entry:
+                if type(entry['path']) is not str or not entry['path']:
+                    raise ValueError(f'unsupported {name} target path: expected a non-empty string')
+                paths.append(entry['path'])
+    return paths
+
+
+def declared_files(manifest, read_manifest):
+    """Return the manifest-declared build files of the root crate and of every
+    local crate (see local_crates), relative to the root crate directory.
+
+    Raises MissingCrate for an absent local crate and ValueError for a target
+    path that is absolute or leaves the root crate directory."""
+    files = []
+    for directory in ['', *local_crates(manifest, read_manifest)]:
+        text = manifest if directory == '' else read_manifest(directory)
+        files += [normalize(directory, raw, 'Cargo target file') for raw in target_files(parse_toml(text))]
+    return sorted(set(files))
 
 
 def include_targets(source_path, data):
@@ -446,6 +502,10 @@ def closure(files, read):
 
     for directory in local_crates(manifest, read_manifest):
         add_root(f'{CRATE}/{directory}/')
+    for rel in declared_files(manifest, read_manifest):
+        if f'{CRATE}/{rel}' not in files:
+            raise ValueError(f'Cargo.toml declares build file {CRATE}/{rel}, absent at this revision')
+        selected.add(f'{CRATE}/{rel}')
     pending = sorted(p for p in selected if p.endswith('.rs'))
     while pending:
         path = pending.pop()
