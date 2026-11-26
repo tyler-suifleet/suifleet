@@ -480,8 +480,11 @@ def license_md5s(recipe):
         yield url[len('file://'):], options.get('md5', '')
 
 
-def daemon_errors(recipe, read, exists=None):
-    """Check coupled daemon pins with `read(relpath)` returning bytes or None."""
+def daemon_errors(recipe, read, exists=None, listing=None):
+    """Check coupled daemon pins with `read(relpath)` returning bytes or None.
+
+    With `exists`, the layout is also audited; `listing(directory)` must then
+    return every file path under that directory of the source layout."""
     errors = []
     src = recipe.get('CARGO_SRC_DIR', 'suifleet-edge')
     lock = read(f'{src}/Cargo.lock')
@@ -523,7 +526,8 @@ def daemon_errors(recipe, read, exists=None):
                     errors.append(f'{recipe.path.name}: Cargo.toml declares build file {src}/{rel}, '
                                   'missing from the source layout')
             _, loose = packager.loose_sources(manifest.decode(), read_manifest, declared,
-                                              lambda rel: exists(f'{src}/{rel}'), lambda rel: read(f'{src}/{rel}'))
+                                              lambda rel: exists(f'{src}/{rel}'), lambda rel: read(f'{src}/{rel}'),
+                                              [p[len(src) + 1:] for p in listing(src) if p.startswith(f'{src}/')])
             errors += [f'{recipe.path.name}: {error}' for error in loose]
         except packager.MissingCrate as error:
             errors.append(f'{recipe.path.name}: {error.what} {src}/{error.directory} is missing from the source layout')
@@ -737,7 +741,9 @@ def fetch_recipe(recipe, workdir, cargo=None):
         def read(rel):
             path = s_dir / rel
             return path.read_bytes() if path.is_file() else None
-        errors += daemon_errors(recipe, read, lambda rel: (s_dir / rel).is_file())
+        errors += daemon_errors(recipe, read, lambda rel: (s_dir / rel).is_file(),
+                                lambda directory: [p.relative_to(s_dir).as_posix()
+                                                   for p in (s_dir / directory).rglob('*') if p.is_file()])
         packager = load_packager()
         files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if p.is_file()}
         for rs in sorted(p for p in files if p.endswith('.rs')):
@@ -834,7 +840,11 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
                                                        capture_output=True).returncode:
             report['errors'].append(f'SRCREV {rev} is not in {repo}')
         else:
-            report['errors'] += daemon_errors(daemon, read, lambda rel: read(rel) is not None)
+            def listing(directory):
+                result = subprocess.run(['git', '-C', str(repo), 'ls-tree', '-r', '-z', '--name-only', rev, '--',
+                                         f'{directory}/'], capture_output=True, check=True)
+                return [p for p in result.stdout.decode().split('\0') if p]
+            report['errors'] += daemon_errors(daemon, read, lambda rel: read(rel) is not None, listing)
     if fetch:
         workdir = Path(tempfile.mkdtemp(prefix='meta-suifleet-fetch-'))
         report['fetch_dir'] = str(workdir)

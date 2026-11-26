@@ -289,6 +289,31 @@ class PackageEdgeSourceTests(unittest.TestCase):
         for rel in ('tools/standalone.rs', 'tools/helper.rs', 'build.rs', 'src/sub.rs'):
             self.assertIn(f'suifleet-edge/{rel}', paths)
 
+    def test_implicit_modules_reached_from_packaged_directories_are_refused(self):
+        # The reviewer's cross-root reproduction: src/main.rs loads a file
+        # outside the packaged directories through #[path], and that file's
+        # `mod helper;` would resolve to an unpackaged sibling.
+        self.repo.write('suifleet-edge/src/main.rs', '#[path = "../tools/entry.rs"]\nmod entry;\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/entry.rs', 'mod helper;\n')
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'tools/entry.rs declares module\(s\) helper without #\[path\]'):
+            packager.plan(self.repo.root, 'HEAD')
+        # Also through an include from examples/, and transitively.
+        self.repo.write('suifleet-edge/src/main.rs', 'fn main() {}\n')
+        self.repo.write('suifleet-edge/examples/demo.rs', 'include!("../tools/entry.rs");\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/entry.rs', '#[path = "helper.rs"]\nmod helper;\n')
+        self.repo.write('suifleet-edge/tools/helper.rs', 'mod nested;\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'tools/helper.rs declares module\(s\) nested'):
+            packager.plan(self.repo.root, 'HEAD')
+        # With explicit paths the whole closure is packaged.
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        self.repo.commit()
+        paths = packager.plan(self.repo.root, 'HEAD')['paths']
+        for rel in ('examples/demo.rs', 'tools/entry.rs', 'tools/helper.rs'):
+            self.assertIn(f'suifleet-edge/{rel}', paths)
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -911,6 +936,38 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
         self.repo.write('suifleet-edge/Cargo.toml', manifest)
         self.repo.write('suifleet-edge/tools/standalone.rs', entry)
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        self.write_recipe(srcrev=rev)
+        self.assertTrue(any(expected in e for e in audit.check(self.layer, repo=self.repo.root)['errors']))
+
+    def test_fetch_and_repo_refuse_implicit_modules_reached_from_src(self):
+        # The cross-root variant: no manifest change, src/main.rs reaches an
+        # out-of-root file whose sibling module is absent from the archive.
+        main = '#[path = "../tools/entry.rs"]\nmod entry;\nfn main() {}\n'
+        entry = 'mod helper;\n'
+        archive = self.archive.with_name('cross-root-module.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            names = set()
+            for member in source.getmembers():
+                names.add(member.name)
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/src/main.rs':
+                    member.size, data = len(main), io.BytesIO(main.encode())
+                tar.addfile(member, data)
+            self.assertIn('suifleet-edge/src/main.rs', names)
+            added = tarfile.TarInfo('suifleet-edge/tools/entry.rs')
+            added.size = len(entry)
+            tar.addfile(added, io.BytesIO(entry.encode()))
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/tools/entry.rs declares module(s) helper without #[path]'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        self.repo.write('suifleet-edge/src/main.rs', main)
+        self.repo.write('suifleet-edge/tools/entry.rs', entry)
         self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
         rev = self.repo.commit()
         self.write_recipe(srcrev=rev)
