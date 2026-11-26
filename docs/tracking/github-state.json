@@ -1661,6 +1661,13 @@
       "id": 6620233564,
       "node_id": "I_kwDOSXKBE88AAAABipi_XA",
       "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhMAIFo"
+    },
+    "SF-335": {
+      "number": 1079,
+      "url": "https://github.com/tyler-suifleet/suifleet/issues/1079",
+      "id": 6631296873,
+      "node_id": "I_kwDOSXKBE88AAAABi0GPaQ",
+      "project_item_id": "PVTI_lAHOENkcXc4Bm7myzhMKr28"
     }
   }
 }
