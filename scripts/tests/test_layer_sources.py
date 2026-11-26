@@ -270,6 +270,50 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue(any('FILESEXTRAPATHS points outside' in e for e in errors))
         self.assertTrue(any('not in the layer: codec.cjs' in e for e in errors))
 
+    def test_conditional_source_overrides_are_rejected(self):
+        cases = (
+            'SRC_URI:qemuarm64 = "https://example.com/other.tar.gz;sha256sum=%s"' % ('0' * 64),
+            'SRCREV:pn-suifleet = "%s"' % ('0' * 40),
+            'SRC_URI:append:raspberrypi3 = " file://suifleet.service"',
+            'SRC_URI:remove = "file://suifleet.service"',
+            'SRC_URI:mydistro[edge.sha256sum] = "%s"' % ('0' * 64),
+            'PV:class-native = "9.9.9"',
+            'SUIFLEET_LOCK_SHA256:qemux86-64 = "%s"' % ('0' * 64),
+            # An indirect input: a variable SRC_URI expands.
+            'SRC_URI += "https://example.com/${ARCHIVE_NAME};sha256sum=%s"\nARCHIVE_NAME = "x.tar.gz"\nARCHIVE_NAME:arm = "y.tar.gz"' % ('0' * 64),
+        )
+        for extra in cases:
+            with self.subTest(extra):
+                self.write_recipe(extra=extra)
+                errors = self.errors()
+                self.assertTrue(any('conditional override' in e for e in errors), errors)
+        # Package-scoped overrides of non-source variables and plain appends stay accepted.
+        self.write_recipe(extra='RDEPENDS:${PN} += "ca-certificates"\nFILES:${PN} += "/etc/x"\n'
+                                'CARGO_BUILD_FLAGS:append = " --bin suifleet"\nSRC_URI:append = " file://suifleet.service"')
+        self.assertEqual(self.errors(), [])
+
+    def test_file_sources_must_resolve_inside_the_layer(self):
+        outside = Path(self.tmp.name) / 'outside.service'
+        outside.write_text('[Unit]\n')
+        service = self.recipe_dir / 'files/suifleet.service'
+        service.unlink()
+        service.symlink_to(outside)
+        errors = self.errors()
+        self.assertTrue(any('file:// source suifleet.service resolves outside the layer' in e for e in errors), errors)
+        self.assertTrue(any('symlink leaves the layer: recipes-edge/suifleet/files/suifleet.service' in e for e in errors), errors)
+        # A directory symlink leaving the layer is caught the same way.
+        service.unlink()
+        (self.recipe_dir / 'files').rmdir()
+        (self.recipe_dir / 'files').symlink_to(outside.parent)
+        (outside.parent / 'suifleet.service').write_text('[Unit]\n')
+        self.assertTrue(any('resolves outside the layer' in e for e in self.errors()))
+        # An ordinary in-layer symlink is accepted.
+        (self.recipe_dir / 'files').unlink()
+        (self.recipe_dir / 'files').mkdir()
+        (self.recipe_dir / 'files/real.service').write_text('[Unit]\n')
+        (self.recipe_dir / 'files/suifleet.service').symlink_to('real.service')
+        self.assertEqual(self.errors(), [])
+
     def test_crates_need_checksums_and_must_match_the_lock(self):
         (self.recipe_dir / 'suifleet-crates.inc').write_text(CRATES_INC.replace('a' * 64, 'b' * 64))
         errors = self.errors(repo=self.repo.root)
@@ -327,6 +371,25 @@ class LayerAuditTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertTrue(any('workspace member suifleet-edge/windows-runtime is missing' in e for e in report['errors']),
                         report['errors'])
+
+    def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
+        # A checksum-pinned, otherwise coherent archive that carries runtime state.
+        evil = self.archive.with_name('evil.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(evil, 'w:gz') as tar:
+            for member in source.getmembers():
+                tar.addfile(member, source.extractfile(member) if member.isfile() else None)
+            for name in ('suifleet-edge/examples/device.key', 'var/lib/suifleet/journal.sqlite'):
+                info = tarfile.TarInfo(name)
+                info.size = 6
+                tar.addfile(info, io.BytesIO(b'secret'))
+        self.archive = evil
+        self.write_recipe(sha=sha256(evil.read_bytes()))
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        for rel in ('source/suifleet-edge/examples/device.key', 'source/var/lib/suifleet/journal.sqlite'):
+            self.assertIn(f'suifleet_1.0.bb: runtime identity/state-like file in fetched source: {rel}', report['errors'])
+        self.assertFalse(report['ok'])
 
     def test_unpack_refuses_escaping_members_and_links(self):
         for member in ('../escape', '/abs'):

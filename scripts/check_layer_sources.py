@@ -7,8 +7,14 @@ Static checks (always):
     credentials, no branch/tag archives, no raw/codeload URL at a non-commit
     ref, and no expiring release-asset redirect hosts;
   * every crate:// entry has a SHA-256;
-  * file:// sources exist inside the layer (no FILESEXTRAPATHS outside it);
-  * no runtime identity/state files in the layer or its export list;
+  * file:// sources resolve, after symlinks, to regular files inside the layer
+    (no FILESEXTRAPATHS outside it, no symlink leaving the layer);
+  * source-affecting variables (SRC_URI, SRCREV*, PV, S, LIC_FILES_CHKSUM,
+    SUIFLEET_* and everything they reference) take no conditional overrides:
+    only a plain :append/:prepend is accepted, so the audited assignment is the
+    one BitBake uses for every machine, distro and class;
+  * no runtime identity/state files in the layer, its export list or (with
+    --fetch) any fetched and unpacked source;
   * coupled SuiFleet pins agree: PV equals the crate version, the codec source
     revision equals the daemon SRCREV and a commit named in a source archive
     filename equals SRCREV.
@@ -76,6 +82,7 @@ class Recipe:
         pn, _, pv = stem.partition('_')
         self.vars = {'PN': pn, 'BPN': pn, 'PV': pv or '1.0'}
         self.flags = {}
+        self.overrides = []
         self.text = ''
         self.read(self.path)
         self.vars.setdefault('BP', '${BPN}-${PV}')
@@ -108,19 +115,20 @@ class Recipe:
             if not match:
                 continue
             name, flag, op, value = match.groups()
+            base, _, override = name.partition(':')
+            if override not in ('', 'append', 'prepend'):
+                # Conditional or removing overrides are not evaluated here;
+                # audit_recipe rejects them on source-affecting variables.
+                self.overrides.append((base, override, path.name))
+                continue
             if flag:
                 self.flags.setdefault(name, {})[flag] = value
-                continue
-            base, _, override = name.partition(':')
-            if override and override.split(':')[0] not in ('append', 'prepend', 'remove'):
                 continue
             old = self.vars.get(base, '')
             if override.startswith('append') or op in ('+=', '.='):
                 self.vars[base] = old + (' ' if op == '+=' else '') + value
             elif override.startswith('prepend') or op in ('=+', '=.'):
                 self.vars[base] = value + (' ' if op == '=+' else '') + old
-            elif override.startswith('remove'):
-                continue
             elif op in ('?=', '??='):
                 self.vars.setdefault(base, value)
             else:
@@ -157,6 +165,8 @@ def runtime_state_errors(layer):
         rel = path.relative_to(layer).as_posix()
         if path.is_file() and FORBIDDEN_NAME.search(rel):
             errors.append(f'runtime identity/state-like file in layer: {rel}')
+        if path.is_symlink() and Path(layer).resolve() not in path.resolve().parents:
+            errors.append(f'symlink leaves the layer: {rel}')
     export = Path(layer) / 'export-files.json'
     if export.is_file():
         for rel in json.loads(export.read_text()):
@@ -167,13 +177,55 @@ def runtime_state_errors(layer):
     return errors
 
 
+SOURCE_ROOTS = ('SRC_URI', 'SRCREV', 'SRCREV_FORMAT', 'PN', 'BPN', 'BP', 'PV', 'PE', 'S', 'LICENSE', 'LIC_FILES_CHKSUM',
+                'FILESEXTRAPATHS', 'FILESPATH', 'CARGO_SRC_DIR', 'UNPACKDIR', 'WORKDIR')
+
+
+def source_variables(recipe):
+    """Source-affecting variables and every variable they reference."""
+    pending = [v for v in recipe.vars if v in SOURCE_ROOTS or v.startswith(('SRCREV_', 'SUIFLEET_'))]
+    pending += list(SOURCE_ROOTS) + [b for b, _, _ in recipe.overrides if b.startswith(('SRCREV_', 'SUIFLEET_'))]
+    for variable, flags in recipe.flags.items():
+        if variable == 'SRC_URI' or variable.startswith('SUIFLEET_'):
+            for value in flags.values():
+                pending += REF.findall(value)
+    seen = set()
+    while pending:
+        name = pending.pop()
+        if name not in seen:
+            seen.add(name)
+            pending += REF.findall(recipe.vars.get(name, ''))
+    return seen
+
+
+def override_errors(recipe, where):
+    names = source_variables(recipe)
+    return [f'{where}: conditional override {base}:{override} ({file}) on a source-affecting variable is not supported; '
+            'set the source pin unconditionally' for base, override, file in recipe.overrides if base in names]
+
+
 def file_source(recipe, name):
-    base = recipe.path.parent
+    """Return the layer file BitBake would use for file://name, or None.
+
+    Raises ValueError when the match (after following symlinks) leaves the layer."""
+    base, layer = recipe.path.parent, recipe.layer.resolve()
     for directory in (recipe.get('BP'), recipe.get('BPN'), 'files', '.'):
-        candidate = (base / directory / name).resolve()
-        if candidate.is_file():
-            return candidate
+        candidate = base / directory / name
+        if candidate.is_file() or candidate.is_symlink():
+            resolved = candidate.resolve()
+            if layer not in resolved.parents or not resolved.is_file():
+                raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {resolved}')
+            return resolved
     return None
+
+
+def fetched_state_errors(recipe, unpack):
+    errors = []
+    for path in sorted(Path(unpack).rglob('*')):
+        rel = path.relative_to(unpack).as_posix()
+        if '.git' not in PurePosixPath(rel).parts and (path.is_file() or path.is_symlink()) and FORBIDDEN_NAME.search(rel):
+            errors.append(f'{recipe.path.name}: runtime identity/state-like file in fetched source: {rel}')
+    return errors
 
 
 def audit_recipe(recipe):
@@ -181,6 +233,7 @@ def audit_recipe(recipe):
     where = recipe.path.relative_to(recipe.layer).as_posix()
     if 'AUTOREV' in recipe.text:
         errors.append(f'{where}: AUTOREV is forbidden')
+    errors += override_errors(recipe, where)
     extra = recipe.get('FILESEXTRAPATHS')
     for directory in filter(None, extra.replace(':', ' ').split()):
         resolved = Path(directory).resolve() if Path(directory).is_absolute() else None
@@ -226,8 +279,12 @@ def audit_recipe(recipe):
             name = url[len('file://'):]
             if name.startswith('/') or '..' in PurePosixPath(name).parts:
                 errors.append(f'{where}: file:// source escapes the layer: {name}')
-            elif file_source(recipe, recipe.expand(name)) is None:
-                errors.append(f'{where}: file:// source is not in the layer: {name}')
+            else:
+                try:
+                    if file_source(recipe, recipe.expand(name)) is None:
+                        errors.append(f'{where}: file:// source is not in the layer: {name}')
+                except ValueError as error:
+                    errors.append(f'{where}: {error}')
             continue
         else:
             errors.append(f'{where}: unsupported fetcher {scheme}: {url}')
@@ -423,6 +480,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
             safe_extract(target, destination)
         else:
             shutil.copyfile(target, destination / name)
+    errors += fetched_state_errors(recipe, unpack)
     s_dir = Path(recipe.get('S'))
     if '${' in str(s_dir) or unpack.resolve() not in (s_dir.resolve(), *s_dir.resolve().parents):
         return errors + [f'{recipe.path.name}: cannot resolve S inside the unpack directory: {s_dir}'], fetched
