@@ -82,7 +82,7 @@ def check_codec(files, build_fields):
                 sha256={name: hashlib.sha256(data).hexdigest() for name, data in files.items()})
 
 
-def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fsck=None, pins=None):
+def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fsck=None, pins=None, starter=False):
     if not stat.S_ISREG(image.stat().st_mode):
         raise ValueError('input must be a regular image file, never a device')
     disk = work/'disk.wic'
@@ -134,6 +134,15 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
         out, err = debug('stat '+path)
         return 'Inode:' in out and 'File not found' not in err
     absent = ['/etc/suifleet/device.key','/etc/suifleet/device.address','/etc/suifleet/config.toml','/etc/suifleet/deployment.json','/etc/suifleet/firmware.toml','/etc/suifleet/signer.toml','/etc/suifleet/pkcs11.pin','/etc/suifleet/env','/run/suifleet-signer','/var/lib/suifleet','/home/operator/.ssh/id_ed25519','/root/.ssh/id_ed25519']
+    if starter:
+        absent += ['/etc/suifleet/first-boot.toml', '/home/operator/.ssh', '/root/.ssh']
+        # A reusable image has no provisioning media or per-unit state.
+        for directory in ['/etc/suifleet', '/boot']:
+            listing, _ = debug('ls -p ' + directory)
+            assert not re.search(r'enroll|provision|journal|private', listing, re.I), directory
+        boot_listing = subprocess.check_output(
+            [str(mtools_dir/'mdir'), '-b', '-s', '-i', fat_image, '::/'], text=True)
+        assert not re.search(r'enroll|provision|journal|authorized_keys|private', boot_listing, re.I)
     for path in absent:
         assert not exists(path), 'runtime secret/state baked into image: '+path
     ssh_listing = debug('ls -p /etc/ssh')[0]
@@ -153,16 +162,23 @@ def inspect(image, work, mtools_dir, expected_keys=None, debugfs="debugfs", e2fs
         password = next(line.split(':')[1] for line in shadow.splitlines() if line.startswith(user+':'))
         assert password and password[0] in '*!', 'password login enabled: '+user
     operator_uid = next(line.split(':')[2] for line in read('/etc/passwd').splitlines() if line.startswith('operator:'))
-    for path, mode in [('/home/operator', '0750'), ('/home/operator/.ssh', '0700'), ('/home/operator/.ssh/authorized_keys', '0600')]:
+    access_paths = [('/home/operator', '0750')]
+    if not starter:
+        access_paths += [('/home/operator/.ssh', '0700'), ('/home/operator/.ssh/authorized_keys', '0600')]
+    for path, mode in access_paths:
         info, _ = debug('stat '+path)
         assert 'Mode:  '+mode in info or 'Mode:  '+mode.lstrip('0') in info, 'unsafe access mode: '+path
         assert re.search(r'User:\s+'+re.escape(operator_uid)+r'\s', info), 'operator ownership: '+path
-    authorized_keys = read('/home/operator/.ssh/authorized_keys')
-    if expected_keys is not None:
-        assert authorized_keys == expected_keys.read_text(), 'image authorized keys differ from the private local overlay'
-    keys = authorized_keys.splitlines()
-    assert keys and all(k.startswith(('ssh-ed25519 ', 'ssh-rsa ', 'ecdsa-')) for k in keys)
+    keys = []
+    if not starter:
+        authorized_keys = read('/home/operator/.ssh/authorized_keys')
+        if expected_keys is not None:
+            assert authorized_keys == expected_keys.read_text(), 'image authorized keys differ from the private local overlay'
+        keys = authorized_keys.splitlines()
+        assert keys and all(k.startswith(('ssh-ed25519 ', 'ssh-rsa ', 'ecdsa-')) for k in keys)
     enabled = ['/etc/systemd/system/multi-user.target.wants/systemd-networkd.service','/etc/systemd/system/multi-user.target.wants/systemd-resolved.service','/etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service','/etc/systemd/system/multi-user.target.wants/suifleet-provision.service','/etc/systemd/system/multi-user.target.wants/suifleet-enrollment.path','/etc/systemd/system/multi-user.target.wants/suifleet.service','/etc/systemd/system/multi-user.target.wants/suifleet-signer.service','/etc/systemd/system/multi-user.target.wants/suifleet-firmware.path','/etc/systemd/system/sockets.target.wants/suifleet-signer.socket']
+    if starter:
+        enabled.append('/etc/systemd/system/multi-user.target.wants/suifleet-first-boot-enrollment.service')
     for path in enabled:
         assert exists(path), 'service not enabled: '+path
         assert exists('/usr/lib/systemd/system/'+Path(path).name), 'missing enabled unit target: '+path
@@ -239,11 +255,14 @@ def main():
     parser.add_argument('--expected-authorized-keys',type=Path)
     parser.add_argument('--mtools-dir',type=Path,default=Path('/usr/bin'))
     parser.add_argument('--recipe',type=Path,help='suifleet_1.0.bb whose SRCREV/lock digest the image must contain')
+    parser.add_argument('--starter', action='store_true')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
+    if args.starter and args.expected_authorized_keys:
+        parser.error('--starter requires an image with no authorized keys')
     with tempfile.TemporaryDirectory(prefix='sf029-inspect-') as directory:
         pins=recipe_pins(args.recipe.read_text()) if args.recipe else None
-        result=inspect(args.image,Path(directory),args.mtools_dir,args.expected_authorized_keys,args.debugfs,args.e2fsck,pins)
+        result=inspect(args.image,Path(directory),args.mtools_dir,args.expected_authorized_keys,args.debugfs,args.e2fsck,pins,args.starter)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 
