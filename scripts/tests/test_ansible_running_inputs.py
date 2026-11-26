@@ -107,6 +107,26 @@ class Reporter(unittest.TestCase):
         self.assertTrue(all(r["reload_needed"] and not r["stale"] for r in report.values()))
 
 
+class IdentityTasks(unittest.TestCase):
+    """A pending provisioning-unit definition is loaded before the oneshot starts."""
+
+    def test_pending_provisioning_reload_precedes_its_start(self):
+        import yaml
+
+        tasks = yaml.safe_load((ROLE / "tasks/identity.yml").read_text())
+        names = [t["name"] for t in tasks]
+        read = tasks[names.index("Read whether the provisioning unit has unloaded changes")]
+        self.assertEqual(read["ansible.builtin.command"]["argv"][-1], "suifleet-provision.service")
+        self.assertIn("NeedDaemonReload", read["ansible.builtin.command"]["argv"])
+        self.assertIs(read["check_mode"], False)
+        reload = tasks[names.index("Load the installed provisioning unit before starting it")]
+        self.assertTrue(reload["ansible.builtin.systemd_service"]["daemon_reload"])
+        self.assertEqual(reload["when"], "suifleet_provision_reload.stdout == 'yes'")
+        start = names.index("Provision the on-device identity")
+        self.assertEqual(tasks[start]["ansible.builtin.systemd_service"]["state"], "started")
+        self.assertLess(names.index("Load the installed provisioning unit before starting it"), start)
+
+
 class ServiceTasks(unittest.TestCase):
     """The role reloads systemd for a pending reload on any unit, before it starts one."""
 

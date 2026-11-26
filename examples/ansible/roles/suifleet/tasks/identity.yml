@@ -2,6 +2,24 @@
 # The device generates its own key, offline, through the packaged oneshot
 # unit (PrivateNetwork=yes). An existing key is always preserved. The key is
 # never read, copied or fetched by Ansible: only its metadata is checked.
+# An earlier run may have stopped after installing a changed provisioning
+# unit and before its daemon-reload; the copy is then unchanged and starting a
+# stopped unit would use systemd's cached definition (and its sandboxing).
+# Load a pending definition first. The rollout units' restart decisions do
+# not depend on this: service.yml compares their inputs, including their unit
+# files, with the applied-inputs record.
+- name: Read whether the provisioning unit has unloaded changes
+  ansible.builtin.command:
+    argv: [systemctl, show, -p, NeedDaemonReload, --value, suifleet-provision.service]
+  register: suifleet_provision_reload
+  changed_when: false
+  check_mode: false
+
+- name: Load the installed provisioning unit before starting it
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: suifleet_provision_reload.stdout == 'yes'
+
 - name: Provision the on-device identity
   ansible.builtin.systemd_service:
     name: suifleet-provision.service
