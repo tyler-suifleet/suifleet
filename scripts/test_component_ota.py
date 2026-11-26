@@ -31,6 +31,7 @@ class ComponentSimulator(Simulator):
         self.allow_reports = True
         self.fail_execution = False
         self.blobs = {}
+        self.health_digest_reads = 0
 
     def deploy(self, id, artifact):
         artifact_blob, recipe_blob = f"artifact-{id}", f"recipe-{id}"
@@ -65,8 +66,18 @@ def run(binary):
 
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            response = {"jsonrpc": "2.0", "id": request["id"]}
+            method, params = request["method"], request["params"]
+            # Throttle the health-failure case before the updater can run.
+            if (method == "suix_getDynamicFieldObject" and params[0] == "0x204"
+                    and params[1]["type"].endswith("::RecipeDigestKey")):
+                sim.health_digest_reads += 1
+                if sim.health_digest_reads == 1:
+                    response["error"] = {"code": 429, "message": "HTTP status 429"}
+                    self.respond(json.dumps(response).encode())
+                    return
             try:
-                response = {"jsonrpc": "2.0", "id": request["id"], "result": sim.rpc(request["method"], request["params"])}
+                response["result"] = sim.rpc(method, params)
             except Exception as error:
                 sim.errors.append(repr(error))
                 response = {"jsonrpc": "2.0", "id": request["id"], "error": {"code": -32000, "message": str(error)}}
@@ -138,6 +149,7 @@ def run(binary):
             assert all(r["run"]["arch"] == os.uname().machine for r in history if r["run"])
             assert (base / "current").read_text().strip() == "4.0.0"
             assert not (base / "versions" / "0.9.0").exists() and not (base / "versions" / "3.0.0").exists()
+            assert sim.health_digest_reads >= 2, sim.health_digest_reads
             assert not sim.errors, sim.errors
             print("PASS: real daemon applied test component v1/v2 via suifleet-test-updater; receipts match version, run ID and SHA-256")
             print("PASS: injected install failure (previous version kept) and health failure reported Failed with distinct receipts")
