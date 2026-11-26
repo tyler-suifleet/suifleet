@@ -64,7 +64,10 @@ update on the binary host's stopped units interrupted before the
 daemon-reload (retry loads the installed provisioning unit before starting
 it; rerun changed=0), a signing-socket drop-in added and later removed on a
 deb host before a run without a daemon-reload (each run loads it, recreates
-the socket and verifies against the loaded unit files; rerun changed=0), check mode on
+the socket and verifies against the loaded unit files; rerun changed=0), a
+socket drop-in the socket never reports, loaded by the reload a
+configuration-only run makes (the run recreates the socket from the loaded
+definition and verifies it; removal likewise; rerun changed=0), check mode on
 configured hosts with their SuiFleet units stopped
 (one with only the signing socket active, so a socket-activated signer would
 show) and one journal not yet initialized, as an interrupted upgrade leaves them
@@ -1488,6 +1491,44 @@ class Harness:
             previous = dict(previous, **{name: state})
         return previous
 
+    def drop_in_loaded_by_config_reload(self, vault, rollout, previous):
+        """A socket drop-in systemd never reports, loaded by a reload the role makes for a config change.
+
+        The drop-in is added without touching the fragment, so the socket reports
+        no pending reload and matches its applied record before the run. The run
+        changes only the daemon configuration, which makes the role reload
+        systemd; that reload loads the drop-in, so the role must recreate the
+        socket from the sample taken after the reload and verify against it.
+        The drop-in is then removed in a second run that restores the earlier
+        configuration."""
+        name = next(n for n, h in self.hosts.items() if h["profile"] == "deb")
+        container = self.hosts[name]["container"]
+        drop_in = "/etc/systemd/system/suifleet-signer.socket.d"
+        assert previous[name]["socket_mode"] == "660", (name, previous[name]["socket_mode"])
+        self.exec(container, "sh", "-c", f"umask 022 && mkdir -p {drop_in}"
+                  f" && printf '[Socket]\\nSocketMode=0620\\n' > {drop_in}/sf304.conf")
+        report = self.running_inputs(name)["suifleet-signer.socket"]
+        assert report["active"] and not report["reload_needed"] and not report["stale"], (name, report)
+        for phase, extra, mode in (("config change with an unreported socket drop-in",
+                                    ["-e", "suifleet_poll_seconds=13"], "620"),
+                                   ("config restored with the socket drop-in removed", [], "660")):
+            if not extra:
+                self.exec(container, "rm", "-r", drop_in)
+            _, recap = self.ansible(f"run after the {phase}", "site.yml", "--limit", name, *vault, *rollout, *extra)
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert state["poll_seconds"] == ("13" if extra else "12"), (name, phase, state["poll_seconds"])
+            assert state["socket_mode"] == mode, (name, phase, "socket not recreated with the loaded unit", state["socket_mode"])
+            for unit in ("suifleet-signer.socket", "suifleet-signer.service", "suifleet.service"):
+                assert state["invocations"][unit] != previous[name]["invocations"][unit], (name, phase, unit, "not restarted")
+            for field in ("key_sha256", "address", "enrollment_sha256"):
+                assert state[field] == previous[name][field], (name, field)
+            print(f"PASS run after the {phase} recreated the socket (mode {mode}) from the definition its reload loaded")
+            _, recap = self.ansible(f"rerun after the {phase}", "site.yml", "--limit", name, *vault, *rollout, *extra)
+            self.unchanged(recap, f"rerun after the {phase}", hosts=[name])
+            previous = dict(previous, **{name: state})
+        return previous
+
     def stopped_host_preview(self, vault, rollout, previous):
         """Check mode on configured hosts whose units are stopped, one with its journal not yet initialized.
 
@@ -1646,6 +1687,7 @@ class Harness:
         after, rollout = self.pending_reload_on_stopped_units(vault, rollout, after)
         after, rollout = self.provision_unit_pending_reload(vault, rollout, after)
         after = self.socket_drop_in_before_run(vault, rollout, after)
+        after = self.drop_in_loaded_by_config_reload(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")

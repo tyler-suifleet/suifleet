@@ -26,27 +26,66 @@
       changed_when: false
       check_mode: false
 
-    - name: Decide which units to restart
+    # A daemon-reload is needed before anything starts when a unit, active or
+    # stopped, has changed unit files systemd has not loaded (an earlier run may
+    # have stopped after installing them and before its daemon-reload), and
+    # before any restart this run already plans.
+    - name: Decide whether systemd must load unit changes
       vars:
         running: "{{ suifleet_running_before.stdout | from_json }}"
-        signer_inputs_changed: >-
+      ansible.builtin.set_fact:
+        suifleet_signer_inputs_changed: >-
           {{ (suifleet_code_changed | default(false) | bool)
              or suifleet_manifest_file is changed or suifleet_signer_file is changed }}
+        suifleet_reload_pending: >-
+          {{ running | dict2items | selectattr('value.reload_needed') | list | length > 0 }}
+        suifleet_restart_planned: >-
+          {{ running | dict2items | selectattr('value.stale') | list | length > 0 }}
+
+    - name: Load unit changes before starting or restarting
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: >-
+        suifleet_reload_pending | bool or suifleet_restart_planned | bool
+        or suifleet_signer_inputs_changed | bool or suifleet_config_file is changed
+
+    # A reload loads every changed definition, including one whose unit never
+    # reported NeedDaemonReload (systemd does not report a newly added drop-in),
+    # and a unit's file paths (fragment and drop-ins) are only known once it is
+    # loaded. The units are therefore sampled again: a unit whose loaded
+    # definition differs from the applied record is restarted, and verification
+    # compares against these loaded digests. Staleness found before the reload
+    # is kept. Read-only, so it also runs in a preview (where nothing reloads).
+    - name: Sample the units as systemd loaded them
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', 'running_inputs.py') }}"
+          - --loaded
+          - "{{ suifleet_applied_record }}"
+          - "suifleet-signer.socket="
+          - "suifleet-enrollment.path="
+          - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
+          - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
+        stdin: "{{ suifleet_running_before.stdout }}"
+      register: suifleet_running_loaded
+      changed_when: false
+      check_mode: false
+
+    - name: Decide which units to restart
+      vars:
+        running: "{{ suifleet_running_loaded.stdout | from_json }}"
       ansible.builtin.set_fact:
         suifleet_running: "{{ running }}"
         suifleet_restart_socket: "{{ running['suifleet-signer.socket'].stale }}"
         suifleet_restart_path: "{{ running['suifleet-enrollment.path'].stale }}"
         suifleet_restart_signer: >-
-          {{ signer_inputs_changed | bool or running['suifleet-signer.socket'].stale
+          {{ suifleet_signer_inputs_changed | bool or running['suifleet-signer.socket'].stale
              or running['suifleet-signer.service'].stale }}
         suifleet_restart_daemon: >-
-          {{ signer_inputs_changed | bool or suifleet_config_file is changed
+          {{ suifleet_signer_inputs_changed | bool or suifleet_config_file is changed
              or running | dict2items | selectattr('value.stale') | list | length > 0 }}
-        # Any unit, active or stopped, whose changed unit files systemd has not
-        # loaded: an earlier run may have stopped after installing them and
-        # before its daemon-reload, and starting it would use the cached copy.
-        suifleet_reload_pending: >-
-          {{ running | dict2items | selectattr('value.reload_needed') | list | length > 0 }}
 
     - name: Report units still using replaced inputs
       ansible.builtin.debug:
@@ -55,34 +94,6 @@
       loop_control:
         label: "{{ item.key }}"
       when: item.value.stale
-
-    - name: Load unit changes before starting or restarting
-      ansible.builtin.systemd_service:
-        daemon_reload: true
-      when: >-
-        suifleet_reload_pending | bool or suifleet_restart_signer | bool
-        or suifleet_restart_daemon | bool or suifleet_restart_path | bool
-
-    # The unit files of a unit that needed the reload are only known once it
-    # is loaded (a drop-in added or removed earlier changes the path list on
-    # reload alone), so verification compares against digests sampled now for
-    # those units. The restart decisions above keep the earlier sample.
-    - name: Record the loaded inputs that verification compares against
-      ansible.builtin.command:
-        argv:
-          - python3
-          - -c
-          - "{{ lookup('ansible.builtin.file', 'running_inputs.py') }}"
-          - --rebase
-          - "{{ suifleet_applied_record }}"
-          - "suifleet-signer.socket="
-          - "suifleet-enrollment.path="
-          - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
-          - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
-        stdin: "{{ suifleet_running | to_json }}"
-      register: suifleet_running_loaded
-      changed_when: false
-      when: not ansible_check_mode
 
     # A running signing service keeps the listening socket it inherited, so it
     # stops before its socket is recreated with the new unit settings and

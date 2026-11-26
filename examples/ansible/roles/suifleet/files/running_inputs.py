@@ -1,6 +1,6 @@
 """Report whether active SuiFleet units still use replaced inputs (SF-304).
 
-Usage: running_inputs.py [--since | --rebase] APPLIED UNIT=PATH[,PATH...] [UNIT=...]
+Usage: running_inputs.py [--since | --loaded] APPLIED UNIT=PATH[,PATH...] [UNIT=...]
 
 APPLIED is the root-owned JSON record ({unit: digest}) that the role writes
 only after the units were restarted onto, or verified against, those inputs.
@@ -17,15 +17,18 @@ unit also reports "changed_since" (its digest differs from that report) and
 "not_restarted" (it was active and stale then and still runs the same
 invocation), which the role's verification requires to be false.
 
-With --rebase, an earlier report taken before a daemon-reload is read from
-stdin and printed again, with the digest of each unit that needed the reload
-replaced by its digest now. The unit files of such a unit (its fragment and
-drop-in paths) are only known once systemd has loaded them: a drop-in added
-or removed before the run changes the path list on reload alone. Restart
-decisions keep the earlier sample (activity, invocation, staleness); later
-verification compares against this loaded baseline. Units that did not need
-the reload keep their earlier digest, so any change after that sample is still
-detected.
+With --loaded, an earlier report taken before a daemon-reload is read from
+stdin and every unit is sampled again as systemd has now loaded it. A unit's
+unit files (its fragment and drop-in paths) are only known once systemd has
+loaded them, and a reload performed for any reason (another unit's change, a
+configuration change) can load a definition that differs from the running one
+without that unit ever reporting NeedDaemonReload: systemd does not report a
+newly added drop-in, for example. Each unit therefore takes its activity,
+invocation and digest from the new sample, and is stale if it was stale in
+either sample (the earlier reason is kept); "reload_needed" is true if either
+sample needed the reload. Restart decisions and later verification both use
+this merged report, so a definition loaded by the reload restarts its unit
+and is the baseline the restarted unit is verified against.
 
 "reload_needed" is reported for every unit, active or not: a stopped unit with
 unloaded changes would otherwise start from systemd's cached definition, so
@@ -108,15 +111,20 @@ def check(unit, inputs, applied):
     return report
 
 
-def rebase(previous, current):
-    """The earlier report, with the loaded digest of each unit that needed a reload."""
-    return {unit: dict(before, digest=current[unit]["digest"]) if before["reload_needed"] else before
-            for unit, before in previous.items()}
+def merge_loaded(previous, current):
+    """The sample after a daemon-reload, keeping the earlier staleness and pending reload."""
+    merged = {}
+    for unit, now in current.items():
+        before = previous[unit]
+        merged[unit] = dict(now, reload_needed=before["reload_needed"] or now["reload_needed"])
+        if before["stale"]:
+            merged[unit].update(stale=True, reason=before["reason"])
+    return merged
 
 
 def main():
     arguments = sys.argv[1:]
-    mode = arguments[0] if arguments[:1] in (["--since"], ["--rebase"]) else None
+    mode = arguments[0] if arguments[:1] in (["--since"], ["--loaded"]) else None
     since = mode == "--since"
     if mode:
         arguments = arguments[1:]
@@ -135,8 +143,8 @@ def main():
             current["changed_since"] = before["digest"] != current["digest"]
             current["not_restarted"] = (before["stale"] and before["active"] and current["active"]
                                         and before["invocation"] == current["invocation"])
-    if mode == "--rebase":
-        report = rebase(previous, report)
+    if mode == "--loaded":
+        report = merge_loaded(previous, report)
     print(json.dumps(report, sort_keys=True))
 
 

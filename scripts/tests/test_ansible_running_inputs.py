@@ -106,26 +106,33 @@ class Reporter(unittest.TestCase):
         self.assertEqual(sorted(report), ["suifleet-signer.socket", "suifleet.service"])
         self.assertTrue(all(r["reload_needed"] and not r["stale"] for r in report.values()))
 
-    def cli(self, *arguments, samples, stdin=None):
+    def cli(self, *arguments, samples, stdin=None, applied=None):
         """Run the reporter with systemctl replaced by a script printing one unit's properties."""
         bindir = Path(tempfile.mkdtemp())
         self.addCleanup(subprocess.run, ["rm", "-rf", bindir])
         lines = "".join(f"{k}={v}\\n" for k, v in samples.items())
         (bindir / "systemctl").write_text(f"#!/bin/sh\nprintf '{lines}'\n")
         (bindir / "systemctl").chmod(0o700)
+        record = bindir / "absent.json"
+        if applied is not None:
+            record.write_text(json.dumps(applied))
         out = subprocess.run([sys.executable, "-I", ROLE / "files/running_inputs.py", *arguments,
-                              bindir / "absent.json", "suifleet-signer.socket="],
+                              record, "suifleet-signer.socket="],
                              env=dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}"), input=stdin,
                              check=True, capture_output=True, text=True).stdout
         return json.loads(out)["suifleet-signer.socket"]
 
-    def test_drop_in_loaded_by_the_reload_is_verified_against_the_loaded_baseline(self):
-        """A drop-in added before the run appears in DropInPaths only after the reload."""
+    def socket_files(self):
         folder = Path(tempfile.mkdtemp())
         self.addCleanup(subprocess.run, ["rm", "-rf", folder])
         fragment, drop_in = folder / "suifleet-signer.socket", folder / "sf304.conf"
         fragment.write_text("[Socket]\n")
         drop_in.write_text("[Socket]\nSocketMode=0620\n")
+        return fragment, drop_in
+
+    def test_drop_in_loaded_by_the_reload_is_verified_against_the_loaded_baseline(self):
+        """A drop-in added before the run appears in DropInPaths only after the reload."""
+        fragment, drop_in = self.socket_files()
         cached = dict(ActiveState="active", MainPID="0", InvocationID="old", NeedDaemonReload="yes",
                       FragmentPath=fragment, DropInPaths="")
         loaded = dict(cached, NeedDaemonReload="no", DropInPaths=drop_in)
@@ -135,25 +142,51 @@ class Reporter(unittest.TestCase):
         report = json.dumps({"suifleet-signer.socket": before})
         # Without the loaded baseline the path list alone reads as an input change.
         self.assertTrue(self.cli("--since", samples=restarted, stdin=report)["changed_since"])
-        baseline = self.cli("--rebase", samples=loaded, stdin=report)
-        self.assertEqual({k: v for k, v in baseline.items() if k != "digest"},
-                         {k: v for k, v in before.items() if k != "digest"}, "restart decision changed")
+        baseline = self.cli("--loaded", samples=loaded, stdin=report)
+        self.assertEqual((baseline["stale"], baseline["reason"], baseline["reload_needed"]),
+                         (True, before["reason"], True), "earlier staleness lost")
         after = self.cli("--since", samples=restarted, stdin=json.dumps({"suifleet-signer.socket": baseline}))
         self.assertEqual((after["changed_since"], after["not_restarted"], after["reload_needed"]), (False, False, False))
         self.assertEqual(after["digest"], baseline["digest"])
         # The same for a drop-in removed before the run.
-        removed = self.cli("--rebase", samples=dict(cached, DropInPaths=""),
+        removed = self.cli("--loaded", samples=dict(cached, NeedDaemonReload="no", DropInPaths=""),
                            stdin=json.dumps({"suifleet-signer.socket": self.cli(samples=dict(cached, DropInPaths=drop_in))}))
+        self.assertTrue(removed["stale"])
         self.assertFalse(self.cli("--since", samples=dict(cached, NeedDaemonReload="no", InvocationID="new"),
                                   stdin=json.dumps({"suifleet-signer.socket": removed}))["changed_since"])
 
-    def test_rebase_keeps_the_earlier_digest_of_units_that_did_not_need_the_reload(self):
-        """A change after the first sample of a loaded unit is still detected."""
-        previous = {"a": dict(digest="d1", reload_needed=False, stale=False), "b": dict(digest="d2", reload_needed=True, stale=True)}
-        current = {"a": dict(digest="x1"), "b": dict(digest="x2")}
-        self.assertEqual(running_inputs.rebase(previous, current),
-                         {"a": dict(digest="d1", reload_needed=False, stale=False),
-                          "b": dict(digest="x2", reload_needed=True, stale=True)})
+    def test_drop_in_loaded_by_a_reload_for_another_change_restarts_and_verifies(self):
+        """The socket never reports NeedDaemonReload; a reload for another unit loads its drop-in.
+
+        The socket is current against its applied record before the reload, so
+        only the loaded sample can plan its restart, and verification must
+        compare against that loaded definition."""
+        fragment, drop_in = self.socket_files()
+        running = dict(ActiveState="active", MainPID="0", InvocationID="old", NeedDaemonReload="no",
+                       FragmentPath=fragment, DropInPaths="")
+        applied = {"suifleet-signer.socket": running_inputs.digest([str(fragment)])}
+        before = self.cli(samples=running, applied=applied)
+        self.assertEqual((before["stale"], before["reload_needed"]), (False, False))
+        loaded = dict(running, DropInPaths=drop_in)  # after a reload triggered by e.g. a config change
+        merged = self.cli("--loaded", samples=loaded, applied=applied,
+                          stdin=json.dumps({"suifleet-signer.socket": before}))
+        self.assertTrue(merged["stale"], "loaded drop-in does not restart the socket")
+        self.assertEqual(merged["reason"], "its inputs changed since they were applied")
+        after = self.cli("--since", samples=dict(loaded, InvocationID="new"), applied=applied,
+                         stdin=json.dumps({"suifleet-signer.socket": merged}))
+        self.assertEqual((after["changed_since"], after["not_restarted"], after["reload_needed"]), (False, False, False))
+        # Left running on the old listener, verification refuses it.
+        stuck = self.cli("--since", samples=loaded, applied=applied, stdin=json.dumps({"suifleet-signer.socket": merged}))
+        self.assertTrue(stuck["not_restarted"])
+
+    def test_loaded_sample_keeps_earlier_staleness_and_pending_reload(self):
+        previous = {"a": dict(digest="d1", reload_needed=False, stale=False, reason="current"),
+                    "b": dict(digest="d2", reload_needed=True, stale=True, reason="unit files changed and are not loaded")}
+        current = {"a": dict(digest="x1", reload_needed=False, stale=True, reason="its inputs changed since they were applied"),
+                   "b": dict(digest="x2", reload_needed=False, stale=False, reason="current")}
+        self.assertEqual(running_inputs.merge_loaded(previous, current),
+                         {"a": dict(digest="x1", reload_needed=False, stale=True, reason="its inputs changed since they were applied"),
+                          "b": dict(digest="x2", reload_needed=True, stale=True, reason="unit files changed and are not loaded")})
 
 
 class IdentityTasks(unittest.TestCase):
@@ -188,20 +221,30 @@ class ServiceTasks(unittest.TestCase):
         return next(i for i, t in enumerate(self.tasks) if t["name"].startswith(prefix))
 
     def test_pending_reload_on_any_unit_triggers_the_reload(self):
-        decide = self.tasks[self.task("Decide which units to restart")]["ansible.builtin.set_fact"]
+        decide = self.tasks[self.task("Decide whether systemd must load")]["ansible.builtin.set_fact"]
         self.assertIn("selectattr('value.reload_needed')", decide["suifleet_reload_pending"])
         self.assertNotIn("active", decide["suifleet_reload_pending"])
         reload = self.tasks[self.task("Load unit changes")]
         self.assertTrue(reload["ansible.builtin.systemd_service"]["daemon_reload"])
         self.assertIn("suifleet_reload_pending | bool", reload["when"])
 
-    def test_loaded_baseline_is_sampled_after_the_reload_and_used_by_verification(self):
+    def test_restarts_are_planned_from_the_sample_taken_after_the_reload(self):
         import yaml
 
-        rebase = self.task("Record the loaded inputs")
-        self.assertGreater(rebase, self.task("Load unit changes"))
-        argv = self.tasks[rebase]["ansible.builtin.command"]["argv"]
-        self.assertIn("--rebase", argv)
+        reload, loaded, decide = (self.task("Load unit changes"), self.task("Sample the units as systemd loaded them"),
+                                  self.task("Decide which units to restart"))
+        self.assertLess(reload, loaded)
+        self.assertLess(loaded, decide)
+        sample = self.tasks[loaded]
+        self.assertIn("--loaded", sample["ansible.builtin.command"]["argv"])
+        self.assertIs(sample["check_mode"], False)
+        self.assertNotIn("when", sample)
+        self.assertIn("suifleet_running_loaded.stdout", self.tasks[decide]["vars"]["running"])
+        # A reload for any reason, including a configuration change, precedes the loaded sample.
+        when = self.tasks[reload]["when"]
+        for reason in ("suifleet_reload_pending", "suifleet_restart_planned", "suifleet_signer_inputs_changed",
+                       "suifleet_config_file is changed"):
+            self.assertIn(reason, when)
         verify = yaml.safe_load((ROLE / "tasks/verify.yml").read_text())[1]["block"]
         check = next(t for t in verify if t["name"].startswith("Check that the active units use the installed inputs"))
         self.assertIn("suifleet_running_loaded.stdout", check["ansible.builtin.command"]["stdin"])
