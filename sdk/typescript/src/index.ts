@@ -279,8 +279,13 @@ export class Client {
 
   // Messaging (SF-027 volatile inboxes and SF-032 durable subscriptions).
   async publish(topic: string, payload: JsonValue): Promise<PublishResult> {
-    if (Buffer.byteLength(JSON.stringify(payload ?? null)) > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
-    return this.request('publish', { topic, payload });
+    // Serialize the caller's value exactly once and send a plain copy parsed from
+    // those bytes: a getter or proxy could otherwise return different data on a
+    // second read, so the validated and transmitted payloads could diverge.
+    const text: string | undefined = JSON.stringify(payload ?? null);
+    if (typeof text !== 'string') throw new TypeError('publish payload is not JSON-serializable');
+    if (Buffer.byteLength(text) > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
+    return this.request('publish', { topic, payload: JSON.parse(text) as JsonValue });
   }
   /**
    * Nonblocking. Volatile inbox and QoS 0 reads are destructive; a QoS 1 read

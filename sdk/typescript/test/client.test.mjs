@@ -273,6 +273,31 @@ test('publish payloads above 4096 serialized bytes are refused locally', async (
   await assert.rejects(client.publish('t', 'x'.repeat(4095)), RangeError);
 });
 
+test('publish validates and sends one serialization of the caller payload', async () => {
+  // A getter that changes between reads must not let unvalidated bytes reach the daemon.
+  let connections = 0;
+  const server = await serve((r) => ok({ delivered: 1, durable: 0, volatile: 0, echoed: r.payload }));
+  const counted = createServer((socket) => { connections++; socket.destroy(); });
+  const countedPath = join(directory, `s${counter++}.sock`);
+  await new Promise((resolve) => counted.listen(countedPath, resolve));
+  try {
+    let reads = 0;
+    const growing = { get value() { reads++; return reads === 1 ? 'ok' : 'x'.repeat(5000); } };
+    await new Client({ socketPath: server.path, component: 'svc' }).publish('t', growing);
+    assert.equal(reads, 1);
+    assert.deepEqual(server.requests[0].payload, { value: 'ok' });
+
+    let oversizedReads = 0;
+    const shrinking = { get value() { oversizedReads++; return oversizedReads === 1 ? 'x'.repeat(5000) : 'ok'; } };
+    await assert.rejects(new Client({ socketPath: countedPath, component: 'svc' }).publish('t', shrinking), RangeError);
+    assert.equal(oversizedReads, 1);
+    assert.equal(connections, 0, 'an oversized serialized payload must not open a connection');
+  } finally {
+    await server.close();
+    await new Promise((resolve) => counted.close(resolve));
+  }
+});
+
 test('putData chunks, hashes and resumes with a stable upload ID', async () => {
   let fail = 2;
   const server = await serve((r) => r.payload.descriptor.chunk === fail
