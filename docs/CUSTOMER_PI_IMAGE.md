@@ -59,17 +59,17 @@ python3 scripts/build_pi_starter.py --manifest /path/to/deployment-manifest.json
 ```
 
 The build uses the public Scarthgap layer and pinned BSP and toolchain. It
-checks the crate version from the public recipe and the version installed in
-the image, requires the SF-322 first-boot service and compares each image and
-package inventory. The current public pin predates SF-322. The build rejects
-that pin until the reviewed export from [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820)
-is available. The output is an unsigned candidate for local validation.
+checks that the recipe and installed client versions are supported by the
+Testnet deployment manifest, checks for the automatic first-boot enrollment
+service, and compares the two images and their package inventories. This build
+requires an updated public Scarthgap layer revision that includes the
+enrollment service. The currently pinned revision predates that service, so
+the build stops before producing a bundle. A successful local build produces
+an unsigned candidate for validation.
 
-The protected Raspberry Pi starter release workflow uses an explicit
-`pi-starter-vMAJOR.MINOR.PATCH` tag at a reviewed main commit and a large
-GitHub-hosted Linux runner configured through `PI_STARTER_BUILD_RUNNER`.
-It checks both builds before signing with the [SF-039 release scheme](RELEASES.md),
-then verifies the signed files before publishing an immutable release.
+The release pipeline compares both builds before signing and verifies the
+signed files before publication. See the [release signing and verification
+reference](RELEASES.md) for details.
 
 When a signed bundle is available, collect all its assets in one directory
 and verify with a trusted SuiFleet CLI and independently obtained trust roots
@@ -81,7 +81,5 @@ suifleet --verify-release /path/to/bundle /path/to/trust.toml raspberrypi3-64-st
 ```
 
 The signed manifest covers the image, checksums, SPDX package inventory,
-provenance and target deployment manifest. Production signing setup remains
-in [SF-042](https://github.com/tyler-suifleet/suifleet/issues/62).
-Physical boot and network acceptance remain in
-[SF-031](https://github.com/tyler-suifleet/suifleet/issues/32).
+provenance and target deployment manifest. Production signing setup and
+physical boot and network validation are pending.
