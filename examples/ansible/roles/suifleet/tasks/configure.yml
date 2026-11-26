@@ -2,6 +2,11 @@
 # Installed in this order: deployment.json, signer.toml, then config.toml.
 # config.toml's appearance starts the daemon through suifleet-enrollment.path,
 # and the daemon asks the signing service for its address at startup.
+# The controller file may change after preflight.yml hashed it. copy writes
+# the transferred bytes to a temporary file, runs validate on that file, and
+# only then renames it over /etc/suifleet/deployment.json: bytes other than
+# the ones preflight hashed fail the task and leave the installed manifest
+# (the last valid one) byte for byte as it was.
 - name: Install the network manifest
   ansible.builtin.copy:
     src: "{{ suifleet_manifest_src }}"
@@ -9,9 +14,14 @@
     owner: root
     group: suifleet
     mode: "0640"
+    validate: >-
+      sh -c 'test "$(sha256sum < "$1" | cut -c1-64)" = "$0"'
+      {{ suifleet_manifest.stat.checksum }} %s
   register: suifleet_manifest_file
 
 # In check mode copy writes nothing, so there is no installed copy to compare.
+# An unchanged copy transfers nothing to validate: this also refuses a
+# controller file that changed to the bytes already installed.
 - name: Check the installed manifest against the controller digest
   when: not ansible_check_mode
   ansible.builtin.include_tasks: verify_manifest.yml
