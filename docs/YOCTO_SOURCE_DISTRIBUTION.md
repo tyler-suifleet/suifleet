@@ -73,8 +73,12 @@ These static checks always run, on every recipe in the layer:
   `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, every `SUIFLEET_*`
   variable, and any variable they reference. Only a plain `:append` or
   `:prepend` is accepted. Machine, distro, class, `pn-` and `:remove`
-  overrides are rejected, because the reader doesn't evaluate them. That way
-  the audited assignment is the one BitBake uses in every configuration.
+  overrides are rejected, because the reader doesn't evaluate them. So are
+  flagged appends and `?=`/`??=` appends. That way the audited assignment is
+  the one BitBake uses in every configuration.
+- The reader follows BitBake's ordering. Plain `:append` and `:prepend` apply
+  after every assignment, even one that comes later in the file. `??=` is a
+  weak default, used only when nothing else assigns the variable.
 - The layer and `export-files.json` contain no runtime identity/state files.
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit
@@ -86,7 +90,14 @@ the lockfile's registry crates, versions and checksums. The crate include is
 still regenerated with `bitbake -c update_crates suifleet`; this check confirms
 the committed result matches.
 
-`--fetch` downloads each non-crate source into a new directory. Downloads send
+`--fetch` skips any recipe that has static findings. For the others, it first
+checks every `subdir=`/`destsuffix=` destination and `S`. Each must be a plain
+relative path that stays inside the recipe's unpack directory after following
+symlinks. A failure stops that recipe before anything is downloaded or
+written. Each destination is checked again just before writing, in case an
+earlier source unpacked a symlink on the path.
+
+It then downloads each non-crate source into a new directory. Downloads send
 no Authorization header and don't read `.netrc`. Git uses an empty credential
 helper, no global or system configuration and no prompts. Each SHA-256 is
 checked before unpacking. Unpacking follows BitBake `subdir=`/`destsuffix=`
