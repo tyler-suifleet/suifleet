@@ -218,6 +218,8 @@ LOOKUP_TASK = "TASK [suifleet : Find this key's enrollment on chain]"
 LOOKUP_NONE = "found no enrollment for this device's key"
 ATTEMPT_DEPLOYMENT = "/etc/suifleet/.enrollment.json.partial.deployment"
 DEPLOYMENT_REFUSAL = "from an attempt that did not run under the configured deployment"
+RECORD_DEPLOYMENT_REFUSAL = "enrolled under a deployment other than the configured one"
+UNBOUND_RECORD_REFUSAL = "but neither its deployment binding"
 MANIFEST_TASK = "    - name: Install the network manifest\n"
 # The role's tasks through enrollment, without configuration: the record is
 # promoted, and nothing else is written (used for the on-chain lookup case).
@@ -1521,7 +1523,8 @@ class Harness:
         assert statuses <= {"skipping"}, (name, "the enrollment command ran after a lost receipt", statuses)
         assert LOOKUP_TASK in output, (name, "the on-chain lookup did not run")
         assert absent(partial) and absent(staging) and absent(transfer), (name, "marker, lookup or claim copies left")
-        assert absent(ATTEMPT_DEPLOYMENT), (name, "the attempt's deployment binding was left after promotion")
+        assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", \
+            (name, "the deployment binding did not outlive the promotion before configuration")
         for root in ("/run", "/dev/shm"):
             assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, root, "claim remains")
         restored = json.loads(sh(f"cat {record}"))
@@ -1532,6 +1535,7 @@ class Harness:
         print("PASS retry after a committed enrollment that printed nothing, with a noncanonical but equivalent"
               " enroll.toml, found it on chain without the claim and restored the same record (digest and IDs); no"
               " second submission; key and address preserved")
+        self.promoted_record_unconfigured(name, vault, record, restored, manifest_sha256)
         # Back to an unpromoted receipt, for the recovery without the batch below.
         self.exec(container, "rm", "-f", record)
 
@@ -1545,10 +1549,19 @@ class Harness:
             assert recap[name]["failed"] == 0 and recap[name]["changed"] > 0, (name, recap[name])
             assert sh(f"cat {partial}") == receipt and absent(record), (name, "check mode promoted the receipt")
             # No credential batch: a second submission is impossible, and must not be needed.
-            output, recap = self.ansible("retry restores the record from the receipt", "site.yml", "--limit", name, *vault)
+            # The run stops after promoting the record, before configuration
+            # (an interruption between the two); the retry resumes it.
+            output, recap = self.ansible("retry restores the record from the receipt, stopped before configuration",
+                                         "/work/enroll-only.yml", "--limit", name, *vault)
+            assert recap[name]["failed"] == 0, (name, recap[name], output[-8000:])
+            assert sh(f"cat {record}") == receipt and absent(partial), (name, "receipt not promoted")
+            assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", (name, "binding not kept until configuration")
+            assert absent("/etc/suifleet/config.toml"), (name, "configuration written by the enrollment-only play")
+            resumed, recap = self.ansible("retry under the enrolled deployment resumes configuration", "site.yml",
+                                          "--limit", name, *vault)
         finally:
             hidden.rename(self.batch)
-        statuses = {s for block in output.split(ENROLL_TASK)[1:]
+        statuses = {s for out in (output, resumed) for block in out.split(ENROLL_TASK)[1:]
                     for s, h in TASK_RESULT.findall(block.split("\nTASK [", 1)[0]) if h == name}
         assert statuses <= {"skipping"}, (name, "the enrollment command ran again", statuses)
         state, _ = self.host_state(name)
@@ -1557,9 +1570,53 @@ class Harness:
         assert state["enrollment"] == enrolled and state["address"] == address and state["key_sha256"] == key_sha256, \
             (name, "identity or enrollment changed by the recovery")
         assert absent(partial), (name, "receipt not promoted")
-        assert absent(ATTEMPT_DEPLOYMENT), (name, "the attempt's deployment binding was left after promotion")
-        print("PASS retry restored the record from the receipt without the credential batch or a second submission;"
-              " key, address and enrollment preserved (the record is verified on chain with the other enrollments)")
+        assert absent(ATTEMPT_DEPLOYMENT), (name, "the deployment binding was left after configuration")
+        print("PASS retry restored the record from the receipt without the credential batch or a second submission,"
+              " kept its deployment binding through an interruption before configuration, then configured the host"
+              " and removed the binding; key, address and enrollment preserved (the record is verified on chain with"
+              " the other enrollments)")
+
+    def promoted_record_unconfigured(self, name, vault, record, enrolled, manifest_sha256):
+        """A record promoted by a run stopped before configuration: only the enrolled deployment may configure it."""
+        container = self.hosts[name]["container"]
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        text = sh(f"cat {record}")
+        assert json.loads(text) == enrolled
+        configuration = ("/etc/suifleet/config.toml", "/etc/suifleet/signer.toml", "/etc/suifleet/deployment.json")
+        assert all(absent(path) for path in configuration), (name, "host already configured")
+        other = self.work / "ctl/other-deployment.json"
+        other.write_text(other_manifest((self.work / "chain/deployment.json").read_text()))
+        try:
+            cases = (("check mode", ["--check", "--diff"], ["-e", "suifleet_manifest_src=/work/other-deployment.json"],
+                      RECORD_DEPLOYMENT_REFUSAL),
+                     ("a retry", [], ["-e", "suifleet_manifest_src=/work/other-deployment.json"], RECORD_DEPLOYMENT_REFUSAL),
+                     ("a retry without a binding", [], [], UNBOUND_RECORD_REFUSAL))
+            for kind, mode, extra, refusal in cases:
+                if refusal == UNBOUND_RECORD_REFUSAL:
+                    self.exec(container, "rm", ATTEMPT_DEPLOYMENT)
+                output, _ = self.ansible(f"{kind} refuses a promoted, unconfigured record", "site.yml", *mode,
+                                         "--limit", name, *vault, *extra, expect_rc="nonzero")
+                assert refusal in output, (name, kind, "not refused by the record's deployment binding", output[-8000:])
+                assert self.task_statuses(output, ENROLL_TASK, name) <= {"skipping"}, (name, kind, "enrollment reached")
+                assert sh(f"cat {record}") == text, (name, kind, "the record changed")
+                for path in configuration:
+                    assert absent(path), (name, kind, "written", path)
+                if refusal == UNBOUND_RECORD_REFUSAL:
+                    assert absent(ATTEMPT_DEPLOYMENT), (name, kind, "a binding was invented")
+                else:
+                    assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", (name, kind, "binding changed")
+        finally:
+            other.unlink()
+            self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", ATTEMPT_DEPLOYMENT,
+                      input=manifest_sha256 + "\n")
+        print("PASS a record promoted before configuration was refused under another deployment (check mode and a"
+              " retry) and without a binding, before deployment.json, signer.toml or config.toml was written")
 
     def receipt_for_other_deployment(self, name, vault, partial, record, receipt, manifest_sha256):
         """A complete receipt for the key, but the inventory now selects another deployment (or none is recorded)."""

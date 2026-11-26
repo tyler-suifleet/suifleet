@@ -399,6 +399,25 @@ allows it). The role does not check the controller.
   select the deployment the device enrolled under, or restore the record under
   the selected one by hand as below.
 
+  The binding outlives the promotion: it stays beside
+  `/etc/suifleet/enrollment.json` until the run has installed `config.toml`,
+  and only then is removed. A run stopped after the record was promoted but
+  before configuration finished (or whose manifest failed its digest check)
+  therefore resumes only under the deployment the device enrolled under,
+  without enrolling again; with another deployment selected it stops before
+  installing `deployment.json`, `signer.toml` or `config.toml` (check mode
+  too). A record with neither a binding nor `config.toml` also stops the run:
+  after confirming which deployment the device enrolled under, record that
+  manifest's SHA-256 as root (here from a copy of the manifest in the current
+  directory; it must be the file `suifleet_manifest_src` names) and run again:
+
+  ```sh
+  sha256sum < deployment.json | cut -c1-64 > /etc/suifleet/.enrollment.json.partial.deployment
+  ```
+
+  On a configured host (the binding removed, `config.toml` present) a later
+  manifest change, such as a package upgrade, applies as usual.
+
   The role creates the partial file exclusively, and flushes it to disk,
   before it runs the enrollment command, so every attempt leaves it. An empty
   partial file means the attempt printed nothing, and its outcome is unknown:
@@ -450,14 +469,15 @@ allows it). The role does not check the controller.
   install -m 0640 -o root -g suifleet "$dir/receipt.json" /etc/suifleet/.enrollment.json.restore
   sync -f /etc/suifleet/.enrollment.json.restore
   ln /etc/suifleet/.enrollment.json.restore /etc/suifleet/enrollment.json
-  rm -f /etc/suifleet/.enrollment.json.restore /etc/suifleet/.enrollment.json.partial \
-    /etc/suifleet/.enrollment.json.partial.deployment
+  rm -f /etc/suifleet/.enrollment.json.restore /etc/suifleet/.enrollment.json.partial
   rm -r "$dir"
   EOF
   ```
 
   It installs the record, and only then removes the attempt marker, after the
   lookup succeeded and printed a complete receipt for the device's own key.
+  It keeps the attempt's deployment binding, so the next run configures the
+  host only under the deployment that attempt enrolled under.
   Any failure (a lookup that found nothing, a receipt for another key, an
   existing record) stops it with a non-zero status, installs nothing and
   keeps `/etc/suifleet/.enrollment.json.partial`. The next run checks the
@@ -639,9 +659,15 @@ The harness checks these phases:
    recorded its manifest's SHA-256; the complete receipt with another
    deployment selected in `suifleet_manifest_src`, and with no recorded
    deployment, is refused in check mode and a retry, keeping the receipt and
-   writing no record, `deployment.json`, `signer.toml` or `config.toml`. With the real receipt restored
-   and the batch removed, check mode reports the pending recovery without
-   promoting it, and the run restores the record byte for byte without
+   writing no record, `deployment.json`, `signer.toml` or `config.toml`. The
+   on-chain lookup restores the record in a play stopped before configuration;
+   its deployment binding must remain, and with that promoted, unconfigured
+   record another deployment is refused (check mode and a retry), as is a
+   retry without the binding, before any configuration is written. With the
+   real receipt restored and the batch removed, check mode reports the pending
+   recovery without promoting it; a play stopped before configuration
+   promotes it byte for byte, keeping the binding, and the retry under the
+   enrolled deployment configures the host and removes the binding, without
    running the enrollment command again; key, address and enrollment are
    preserved, and the record is verified on chain with the others.
    Then install, on-device identity, enrollment, configuration and start run on

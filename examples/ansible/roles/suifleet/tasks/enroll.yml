@@ -106,7 +106,9 @@
         # Each attempt also records, in the deployment file beside it, the
         # SHA-256 of the manifest it enrolled under: a receipt is promoted only
         # beside that same manifest (the same key can enroll under another
-        # deployment, and configure.yml installs suifleet_manifest_src).
+        # deployment, and configure.yml installs suifleet_manifest_src). The
+        # binding outlives the promotion: configure.yml removes it only after
+        # config.toml is installed, and the checks after this block enforce it.
         - name: Look for the output of an interrupted enrollment
           ansible.builtin.stat:
             path: /etc/suifleet/.enrollment.json.partial
@@ -321,11 +323,8 @@
                 chown root:suifleet "$partial"
                 chmod 0640 "$partial"
                 mv -f "$partial" /etc/suifleet/enrollment.json
-                rm -f "$DEPLOYMENT"
               args:
                 creates: /etc/suifleet/enrollment.json
-              environment:
-                DEPLOYMENT: "{{ suifleet_enrollment_deployment }}"
 
         - name: Enroll with a claim from the batch
           when: not suifleet_enrollment_partial.stat.exists
@@ -433,7 +432,6 @@
                     chown root:suifleet "$partial"
                     chmod 0640 "$partial"
                     mv -f "$partial" /etc/suifleet/enrollment.json
-                    rm -f "$DEPLOYMENT"
                   args:
                     creates: /etc/suifleet/enrollment.json
                   environment:
@@ -481,3 +479,60 @@
       /etc/suifleet/enrollment.json does not belong to this device's key. Do not
       replace device.key or copy records between hosts.
   when: suifleet_enrollment is defined
+
+# The deployment binding stays beside the promoted record until configure.yml
+# has installed config.toml. A run stopped between the promotion and the end
+# of configuration (or a manifest that failed its digest check there) leaves
+# a record and its binding but no complete configuration: a retry configures
+# only under the deployment the device enrolled under. A record without a
+# binding is accepted only on a configured host (configuration completed, or
+# a record restored by hand for a configured host); later manifest changes
+# (for example a package upgrade) then apply as usual.
+- name: Check the enrollment record's deployment binding
+  when: suifleet_enrollment is defined
+  block:
+    - name: Look for the enrollment's deployment binding
+      ansible.builtin.stat:
+        path: "{{ suifleet_enrollment_deployment }}"
+        get_checksum: false
+      register: suifleet_enrollment_binding
+
+    - name: Read the enrollment's deployment binding
+      ansible.builtin.slurp:
+        src: "{{ suifleet_enrollment_deployment }}"
+      register: suifleet_enrollment_binding_file
+      when: suifleet_enrollment_binding.stat.exists
+
+    - name: Stop unless the record is bound to the configured deployment
+      ansible.builtin.assert:
+        that: >-
+          (suifleet_enrollment_binding_file.content | b64decode)
+          == suifleet_manifest.stat.checksum ~ '\n'
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }} enrolled under a deployment other than the
+          configured one ({{ suifleet_manifest_src }}, SHA-256
+          {{ suifleet_manifest.stat.checksum }}); {{ suifleet_enrollment_deployment }}
+          records the manifest it enrolled under, and its configuration is not
+          complete. The role writes no configuration. Select the deployment the
+          device enrolled under and run again (docs/ANSIBLE.md#recovery).
+      when: suifleet_enrollment_binding.stat.exists
+
+    - name: Look for the daemon configuration of a record without a binding
+      ansible.builtin.stat:
+        path: /etc/suifleet/config.toml
+        get_checksum: false
+      register: suifleet_enrollment_configured
+      when: not suifleet_enrollment_binding.stat.exists
+
+    - name: Stop on an unconfigured record without a deployment binding
+      ansible.builtin.assert:
+        that: suifleet_enrollment_configured.stat.exists
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }} has /etc/suifleet/enrollment.json but neither
+          its deployment binding ({{ suifleet_enrollment_deployment }}) nor a
+          configuration. The role cannot tell which deployment the device
+          enrolled under, and writes no configuration. Record that deployment's
+          manifest SHA-256 in the binding by hand (docs/ANSIBLE.md#recovery).
+      when: not suifleet_enrollment_binding.stat.exists

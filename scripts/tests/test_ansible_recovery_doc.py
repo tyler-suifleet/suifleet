@@ -99,6 +99,14 @@ class ManualRecovery(unittest.TestCase):
         self.assertFalse((self.etc / ".enrollment.json.restore").exists())
         self.assertFalse(self.lookup.exists())
 
+    def test_attempt_deployment_binding_is_kept(self):
+        # The next run configures the host only under the deployment the attempt enrolled under.
+        binding = self.etc / ".enrollment.json.partial.deployment"
+        binding.write_text("f" * 64 + "\n")
+        result = self.run_procedure(json.dumps(RECEIPT, separators=(",", ":")) + "\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(binding.read_text(), "f" * 64 + "\n")
+
 
 if __name__ == "__main__":
     unittest.main()

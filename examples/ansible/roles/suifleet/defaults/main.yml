@@ -53,7 +53,8 @@ suifleet_enroll_staging: /run/suifleet-enroll
 suifleet_enroll_lock: /run/suifleet-enroll.lock
 # SHA-256 of the manifest an enrollment attempt ran under, kept beside its
 # attempt marker (/etc/suifleet/.enrollment.json.partial) on persistent
-# storage until the receipt is promoted beside that same manifest.
+# storage. A receipt is promoted only beside that same manifest, and the
+# binding stays beside the record until configure.yml installed config.toml.
 suifleet_enrollment_deployment: /etc/suifleet/.enrollment.json.partial.deployment
 # Memory-backed directory writable by the SSH account (not root). The claim
 # reaches the host here without privilege escalation, because sudo may log a
