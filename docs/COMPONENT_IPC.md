@@ -124,6 +124,10 @@ python3 sdk/python/suifleet_ipc.py install --payload '"0xDEPLOYMENT_ID"'
 ```
 
 The Python module provides named methods for all workflows and generic `request`.
+SF-302 adds a TypeScript/Node.js SDK with the same wire contract, typed APIs,
+connect-phase-only reconnects and a bounded outbound buffer: see [NODE_SDK.md](NODE_SDK.md).
+The operation list, administrator-only set and protocol codes shared by the daemon and
+both SDKs are recorded in [`interfaces/ipc-v1.json`](../interfaces/ipc-v1.json).
 Transport exceptions/timeouts have an **unknown mutation outcome**. Never automatically
 retry a destructive operation; inspect `status`, logs and the durable deployment
 outcome before deciding. The SDK does not retry. Only install has existing-deployment
