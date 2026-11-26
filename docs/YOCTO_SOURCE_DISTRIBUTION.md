@@ -87,6 +87,13 @@ These static checks always run, on every recipe in the layer:
   after every assignment, even one that comes later in the file. `??=` is a
   weak default, used only when nothing else assigns the variable; each later
   `??=` replaces the previous weak default, while `?=` keeps the first.
+- The reader accepts both double- and single-quoted values. An
+  assignment-shaped line it can't read is reported if it names a
+  source-affecting variable, rather than skipped.
+- Each matching `.bbappend` (an exact name, or `name_%.bbappend`) is read after
+  its recipe as one set of metadata, as BitBake does. So a variable assigned in
+  the append affects the recipe's sources. A `.bbappend` that matches no
+  recipe in the layer is rejected, because the audit can't see its target.
 - The layer and `export-files.json` contain no runtime identity/state files.
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit
