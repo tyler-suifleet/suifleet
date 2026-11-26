@@ -19,7 +19,7 @@
       enrolled device's alias, serial and group. Rejects malformed and
       duplicate serials/aliases before writing anything.
 
-  claims.py ptb OUT_DIR --package PKG --policy POLICY [--fund-mist 20000000]
+  claims.py ptb OUT_DIR --package PKG --policy POLICY [--fund-mist 40000000]
       Prints `sui client ptb` commands that add the claim addresses to the
       policy and fund each with --fund-mist (the enrollment gas it will
       sponsor), at most 250 claims per transaction. Each command's gas
@@ -169,12 +169,12 @@ if __name__ == "__main__":
     g.add_argument("--policy", help="write enroll.toml for this EnrollmentPolicy")
     g.add_argument("--manifest", type=Path, help="deployment manifest to copy beside each enroll.toml")
     g.add_argument("--keypair-path", default="/etc/suifleet/device.key", help="device key path in enroll.toml")
-    g.add_argument("--fund-mist", type=int, default=20_000_000, help="enrollment gas recorded in roster.json")
+    g.add_argument("--fund-mist", type=int, default=40_000_000, help="enrollment gas recorded in roster.json")
     p = commands.add_parser("ptb")
     p.add_argument("out", type=Path)
     p.add_argument("--package", required=True)
     p.add_argument("--policy", required=True)
-    p.add_argument("--fund-mist", type=int, default=20_000_000)
+    p.add_argument("--fund-mist", type=int, default=40_000_000)
     args = parser.parse_args()
     if args.command == "ptb":
         ptb(args.out, args.package, args.policy, args.fund_mist)
