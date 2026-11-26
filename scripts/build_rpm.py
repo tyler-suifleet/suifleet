@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = "x86_64-unknown-linux-gnu"
 PACKAGING = ROOT / "suifleet-edge/packaging/rpm"
 UNITS = ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket",
-         "suifleet-provision.service", "suifleet-enrollment.path")
+         "suifleet-provision.service", "suifleet-enrollment.path", "suifleet-first-boot-enrollment.service")
 
 
 def digest(data):

@@ -21,10 +21,15 @@ PKCS#11 case (make test-enrollment-localnet).
 """
 import argparse
 import hashlib
+import grp
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
+import socketserver
+import select
+import stat
 import signal
 import subprocess
 import tempfile
@@ -39,7 +44,7 @@ import deployment_manifest as dm
 import test_component as component
 
 ROOT = Path(__file__).resolve().parents[1]
-DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
+DAEMON = Path(os.environ.get("SUIFLEET_ENROLLMENT_BIN", ROOT / "suifleet-edge/target/debug/suifleet"))
 CLOCK = "@0x6"
 SOFTHSM = Path("/usr/lib/softhsm/libsofthsm2.so")
 
@@ -55,7 +60,7 @@ def wait_for(condition, message, process=None, timeout=90):
     raise AssertionError(message)
 
 
-def run(rpc_url, faucet_url):
+def run(rpc_url, faucet_url, first_boot_only=False):
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
@@ -88,15 +93,21 @@ def run(rpc_url, faucet_url):
                         command.append("--json")
                     result = subprocess.run(command, text=True, capture_output=True, timeout=300)
                     if result.returncode and check:
-                        raise RuntimeError(f"sui client {args[0]} failed:\n{result.stderr[-3000:]}")
+                        raise RuntimeError(f"sui client {args[0]} failed:\n{(result.stderr or result.stdout)[-3000:]}")
                     if not json_output or result.returncode:
                         return result
                     out = result.stdout
                     return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
 
                 client("-y", "active-address", json_output=False)
-                client("new-env", "--alias", "enroll-test", "--rpc", rpc_url, json_output=False)
-                client("switch", "--env", "enroll-test", json_output=False)
+                # The pinned CLI creates a default local entry. Select it
+                # offline instead of probing the default public testnet.
+                config_path = root / "wallet/client.yaml"
+                config = config_path.read_text()
+                assert 'rpc: "http://127.0.0.1:9000"' in config and "active_env: testnet" in config
+                config_path.write_text(config.replace(
+                    'rpc: "http://127.0.0.1:9000"', f"rpc: {json.dumps(rpc_url)}"
+                ).replace("active_env: testnet", "active_env: local"))
                 operator = client("active-address", json_output=False).stdout.strip().split()[-1]
 
                 def new_address():
@@ -156,6 +167,10 @@ def run(rpc_url, faucet_url):
                     funding += ["--transfer-objects", f"[fees.{index}]", f"@{address}"]
                 transaction("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector{addresses}", *funding)
                 print("PASS: policy created; 4 claim keys added and funded in one transaction")
+
+                if first_boot_only:
+                    check_first_boot(root, manifest, policy, operator, claims, client, transaction, created, package, registry)
+                    return
 
                 def enroll(name, claim, *, device_key=None, signer=None):
                     config = root / f"enroll-{name}.toml"
@@ -343,9 +358,181 @@ def run(rpc_url, faucet_url):
         walrus.server_close()
 
 
+def check_first_boot(root, manifest, policy, operator, claims, client, transaction, created, package, registry):
+    assert os.geteuid() == 0, "use a disposable root container for service file ownership checks"
+    gids = {name: grp.getgrnam(name).gr_gid for name in ("suifleet", "suifleet-signer")}
+    assert len(set(gids.values())) == 2 and 0 not in gids.values()
+    template = b'[apply]\ncommand = "/usr/bin/false"\n[runtime]\npoll_seconds = 11\n'
+
+    def prepare(name, claim, *, batch=policy, expected_policy=None, deployment=manifest):
+        directory = root / name
+        directory.mkdir(mode=0o750)
+        media = directory / "enrollment"
+        folder = media / name
+        folder.mkdir(parents=True)
+        manifest_bytes = json.dumps(deployment).encode()
+        (folder / "deployment.json").write_bytes(manifest_bytes)
+        (folder / "config.template.toml").write_bytes(template)
+        shutil.copyfile(claim, folder / "claim.key")
+        (folder / "enroll.toml").write_text(
+            f'manifest_path = "deployment.json"\nclaim_key_path = "claim.key"\n'
+            f'policy_id = "{batch}"\nname = "{name}"\nkeypair_path = "{directory / "device.key"}"\n'
+        )
+        (directory / "first-boot.toml").write_text(
+            f'policy_id = "{expected_policy or batch}"\noperator = "{operator}"\n'
+            f'history_start_checkpoint = 0\nlocations = ["{media}"]\n'
+            f'manifest_sha256 = "{hashlib.sha256(manifest_bytes).hexdigest()}"\n'
+            f'template_sha256 = "{hashlib.sha256(template).hexdigest()}"\n'
+        )
+        subprocess.run([str(DAEMON), "--provision", directory / "device.key"], check=True, capture_output=True)
+        return directory, folder
+
+    def command(directory):
+        return [str(DAEMON), "--first-boot-enroll", directory]
+
+    def run_boot(directory, folder, expected):
+        process = subprocess.run(command(directory), capture_output=True, text=True, timeout=220)
+        if expected == "enrolled":
+            assert process.returncode == 0, (process.stdout, process.stderr)
+        else:
+            assert process.returncode != 0, process.stdout
+        actual = json.loads((folder / "enrollment-status.json").read_text())["enrollment"]
+        assert actual == expected, (actual, process.stdout, process.stderr)
+        return process
+
+    def check_install(directory, folder):
+        import configparser
+        for file, group in (("deployment.json", "suifleet"), ("signer.toml", "suifleet-signer"), ("config.toml", "suifleet")):
+            info = (directory / file).stat()
+            assert (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, gids[group], 0o640)
+        config = configparser.ConfigParser()
+        config.read(directory / "config.toml")
+        signer = configparser.ConfigParser()
+        signer.read_string("[signer]\n" + (directory / "signer.toml").read_text())
+        assert config["device"]["device_cap_id"] == signer["signer"]["device_cap_id"]
+        assert config["device.signer"]["kind"] == '"service"'
+        assert config["runtime"].getint("poll_seconds") == 11
+        assert not (folder / "claim.key").exists()
+        return {key: json.loads(config["device"][key]) for key in ("device_cap_id", "device_object_id")}
+
+    # Start with the verified endpoint unavailable, then allow connections to
+    # the same isolated node without rewriting any trusted input.
+    endpoint = urlparse(manifest["rpc_url"])
+    online = threading.Event()
+
+    class Proxy(socketserver.BaseRequestHandler):
+        def handle(self):
+            if not online.is_set():
+                return
+            with socket.create_connection((endpoint.hostname, endpoint.port), timeout=8) as node:
+                pair = {self.request: node, node: self.request}
+                while readable := select.select(list(pair), [], [], 20)[0]:
+                    for source in readable:
+                        data = source.recv(65536)
+                        if not data:
+                            return
+                        pair[source].sendall(data)
+
+    class Relay(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+
+    with Relay(("127.0.0.1", 0), Proxy) as relay:
+        threading.Thread(target=relay.serve_forever, daemon=True).start()
+        address = f"http://127.0.0.1:{relay.server_address[1]}"
+        device, media = prepare("offline-recovery", claims["c1"][0],
+                                deployment={**manifest, "rpc_url": address, "rpc_urls": [address]})
+        first_boot = subprocess.Popen(command(device), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            wait_for(lambda: (media / "enrollment-status.json").exists(), "offline status missing", first_boot, timeout=45)
+            assert not (device / "config.toml").exists()
+            assert (media / "claim.key").exists()
+            online.set()
+            out, err = first_boot.communicate(timeout=220)
+            assert first_boot.returncode == 0, (out, err)
+            check_install(device, media)
+        finally:
+            if first_boot.poll() is None:
+                first_boot.kill()
+                first_boot.communicate()
+            relay.shutdown()
+
+    recovered, recovery_media = prepare("reboot-after-submit", claims["c2"][0])
+    # Simulate a stop immediately after chain effects and before any config is
+    # published. The old CLI executes exactly the same sponsored call.
+    prior_policy_version = int(client("object", policy)["version"])
+    result = subprocess.run([str(DAEMON), "--enroll", recovery_media / "enroll.toml"],
+                            capture_output=True, text=True, check=True, timeout=60)
+    previous = json.loads(result.stdout)
+    assert not (recovered / "config.toml").exists()
+    wait_for(lambda: int(client("object", policy)["version"]) > prior_policy_version,
+             "confirmed enrollment did not reach policy state")
+    confirmed_policy_version = client("object", policy)["version"]
+    run_boot(recovered, recovery_media, "enrolled")
+    actual = check_install(recovered, recovery_media)
+    assert actual["device_cap_id"] == previous["device_cap_id"]
+    assert actual["device_object_id"] == previous["device_object_id"]
+
+    # Simulate a stop after claim erasure and before final config publication.
+    kept = (recovered / "config.toml").read_bytes()
+    (recovered / "config.toml").unlink()
+    run_boot(recovered, recovery_media, "enrolled")
+    assert check_install(recovered, recovery_media) == actual
+    assert (recovered / "config.toml").read_bytes() == kept
+    # A filesystem can retain only part of the claim overwrite after a stop.
+    # The installed signer and confirmed cap are sufficient to finish erasure.
+    (recovered / "config.toml").unlink()
+    original_claim = claims["c2"][0].read_bytes()
+    (recovery_media / "claim.key").write_bytes(b"\0" * 8 + original_claim[8:])
+    run_boot(recovered, recovery_media, "enrolled")
+    assert check_install(recovered, recovery_media) == actual
+    assert client("object", policy)["version"] == confirmed_policy_version
+
+    invalid, invalid_media = prepare("invalid-unspent-claim", claims["c4"][0])
+    (invalid_media / "claim.key").write_bytes(b"invalid")
+    run_boot(invalid, invalid_media, "invalid-claim-key")
+    assert not (invalid / "config.toml").exists()
+    assert (invalid_media / "claim.key").read_bytes() == b"invalid"
+
+    shutil.copyfile(claims["c3"][0], recovery_media / "claim.key")
+    subprocess.run(command(recovered), check=True, capture_output=True)
+    assert (recovered / "config.toml").read_bytes() == kept
+    assert (recovery_media / "claim.key").read_bytes() == claims["c3"][0].read_bytes()
+
+    for name, field in (("tampered-manifest", "deployment.json"), ("tampered-template", "config.template.toml")):
+        directory, folder = prepare(name, claims["c3"][0])
+        file = folder / field
+        file.write_bytes(file.read_bytes() + b" ")
+        run_boot(directory, folder, "invalid-enrollment-media-or-config")
+        assert (folder / "claim.key").exists() and not (directory / "deployment.json").exists()
+
+    transaction("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{claims['c3'][1]}")
+    expired = created(transaction("--move-call", f"{package}::enrollment::create_policy", f"@{registry}", "1", "1"),
+                      "::enrollment::EnrollmentPolicy")[0]
+    cases = [
+        ("revoked", "c3", policy, "claim-unavailable-or-consumed"),
+        ("consumed", "c2", policy, "claim-unavailable-or-consumed"),
+        ("expired", "c4", expired, "policy-closed-expired-or-exhausted"),
+        ("foreign-claim", "c4", created(transaction("--move-call", f"{package}::enrollment::create_policy", f"@{registry}", "1", "0"),
+                                        "::enrollment::EnrollmentPolicy")[0], "claim-unavailable-or-consumed"),
+    ]
+    policy_version = client("object", policy)["version"]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(cases)) as pool:
+        checks = []
+        for name, claim, batch, expected in cases:
+            directory, folder = prepare(name, claims[claim][0], batch=batch)
+            checks.append((pool.submit(run_boot, directory, folder, expected), directory, folder))
+        for job, directory, folder in checks:
+            job.result()
+            assert (folder / "claim.key").exists() and not (directory / "config.toml").exists()
+    assert client("object", policy)["version"] == policy_version, "refused or recovered enrollment consumed a claim"
+    print("PASS: first boot, offline recovery, confirmed-submit reboot, interrupted claim erasure, pre-existing config, tampering, invalid/revoked/expired/consumed/foreign claims")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rpc", default="http://127.0.0.1:9000")
     parser.add_argument("--faucet", default="http://127.0.0.1:9123/v2/gas")
+    parser.add_argument("--first-boot-only", action="store_true")
     args = parser.parse_args()
-    run(args.rpc, args.faucet)
+    run(args.rpc, args.faucet, args.first_boot_only)

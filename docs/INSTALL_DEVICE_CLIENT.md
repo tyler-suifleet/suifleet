@@ -153,7 +153,9 @@ The included units require systemd, and their signer configuration requires
 Linux 6.5 or later for caller identity checks. For a source installation on an
 older kernel or a host without systemd, follow the separate
 [portable signer setup](KEY_ISOLATION.md#portable-linux-signer) and its runtime
-requirements. The service signer remains incompatible with daemon self-update.
+requirements. That profile supports [managed client updates](DAEMON_UPDATE.md#managed-updates-with-the-portable-signer)
+with a platform-approved executable. The native systemd signer uses
+platform-managed package updates.
 Keep device keys isolated from the daemon account.
 Follow [key isolation](KEY_ISOLATION.md) for the current signer and PKCS#11
 build requirements. The standard bundles use the current service signer
@@ -233,6 +235,11 @@ sudo install -m 0640 -o root -g suifleet-signer signer.toml /etc/suifleet/signer
 
 macOS has no signing service: the daemon reads the key itself (see
 [macOS guide](CUSTOMER_MACOS.md)), so skip this step there.
+
+For a batch of new Linux devices, use [first-boot enrollment](CUSTOMER_ENROLLMENT.md)
+to install the deployment, signer and daemon settings from provisioning media.
+The manual configuration procedure below applies to individual or already
+enrolled clients.
 
 ## Configuration file
 

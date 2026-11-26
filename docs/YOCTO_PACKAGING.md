@@ -43,7 +43,9 @@ any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
 `b9bb2ef6210624d732ab2de2075ea1826e5300c1`: reviewed merged main, including
 client 0.2.3 required by the current Seal testnet evaluation manifest. The codec
-is rebuilt from that same revision. `nobranch=1` selects this immutable revision,
+is rebuilt from that same revision. The daemon recipe applies the first-boot
+enrollment backport as a layer patch. The layer commit identifies the patch
+and service included in the package. `nobranch=1` selects this immutable revision,
 never AUTOREV. Runtime manifest version rejection and signer separation remain
 enabled. The Cargo.lock SHA-256 is
 `c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6`.
@@ -380,6 +382,9 @@ prints only the public address. Never run provisioning during image creation.
 unprivileged account in the existing sandbox and starts only when
 `/etc/suifleet/config.toml` exists. `suifleet-enrollment.path` notices that
 file's installation; the service also starts on subsequent enrolled boots.
+For new fleets, `suifleet-first-boot-enrollment.service` consumes a per-device
+claim when the image has the [public batch settings](ENROLLMENT.md#automatic-linux-first-boot)
+and the unit's provisioning media is mounted and writable.
 
 Register the address through the current registry flow and obtain the
 device/capability IDs. Existing fleets must complete the registry-identity

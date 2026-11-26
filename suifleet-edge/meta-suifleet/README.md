@@ -11,7 +11,7 @@ This is a prepared standalone export, **not a published standalone repository or
 an OpenEmbedded Layer Index listing**. The authoritative development repository is
 https://github.com/tyler-suifleet/suifleet (public).
 The packaged daemon is deliberately pinned to 0.2.3 at
-`b9bb2ef6210624d732ab2de2075ea1826e5300c1`, not the latest development client.
+`b9bb2ef6210624d732ab2de2075ea1826e5300c1`, with the layer’s first-boot enrollment backport.
 Do not advertise current-client feature completeness for this pin.
 
 Declared series: kirkstone, scarthgap and wrynose, using only the full revisions
