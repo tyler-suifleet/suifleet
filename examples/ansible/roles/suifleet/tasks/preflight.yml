@@ -89,6 +89,32 @@
       profile, the artifact path and its 64-hex SHA-256 from the verified
       release.json (and suifleet_units_src for systemd-binary).
 
+# The controller checksums below use stat, which resolves a relative path from
+# the controller's working directory and expands environment references ($VAR).
+# copy (and template/file lookups) instead search a relative src in the role's
+# and play's files/ directories. A relative or $-containing source could
+# therefore be hashed from one file and installed from another. Require every
+# controller source to be an absolute path without $, so all tasks read the same
+# file; the staged manifest is also checked against this digest on the host.
+- name: Require literal, absolute controller source paths
+  vars:
+    sources: >-
+      {{ {'suifleet_manifest_src': suifleet_manifest_src}
+         | combine({'suifleet_deb_src': suifleet_deb_src}
+                   if suifleet_selected_profile == 'deb' else
+                   {'suifleet_binary_src': suifleet_binary_src,
+                    'suifleet_units_src': suifleet_units_src}) }}
+    bad: >-
+      {{ sources | dict2items
+         | rejectattr('value', 'match', '^/[^$]*$') | map(attribute='key') | list }}
+  ansible.builtin.assert:
+    that: bad | length == 0
+    quiet: true
+    fail_msg: >-
+      {{ bad | join(', ') }} must be an absolute controller path without $
+      (Ansible would resolve a relative or $ path to different files for the
+      checksum and the copy). This run changed nothing.
+
 - name: Authenticate the artifact on the controller
   delegate_to: localhost
   become: false

@@ -11,6 +11,13 @@
     mode: "0640"
   register: suifleet_manifest_file
 
+# In check mode copy writes nothing, so there is no installed copy to compare.
+- name: Check the installed manifest against the controller digest
+  when: not ansible_check_mode
+  ansible.builtin.include_tasks: verify_manifest.yml
+  vars:
+    staged: /etc/suifleet/deployment.json
+
 - name: Configure only enrolled devices
   when: suifleet_enrollment is defined
   block:

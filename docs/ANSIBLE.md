@@ -85,6 +85,13 @@ source control. The inventory holds no secrets and no device addresses.
 | `suifleet_max_fail_percentage` | play | Default `0`: any failed host stops later batches. |
 | `suifleet_hosts` | play | Inventory group. Default `suifleet_devices`. |
 
+Every controller path (`suifleet_manifest_src`, `suifleet_deb_src`,
+`suifleet_binary_src`, `suifleet_units_src`, `suifleet_enrollment_root`) must be
+absolute and contain no `$`; the role refuses others before reading anything.
+Ansible would resolve a relative or `$` path to one file for the checksum and
+another for the copy. The role also checks each copy of the manifest on the host
+against the controller's SHA-256.
+
 All defaults are in [`roles/suifleet/defaults/main.yml`](../examples/ansible/roles/suifleet/defaults/main.yml).
 
 **The only secret input is the credential batch.** Create it with the dApp's

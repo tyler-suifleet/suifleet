@@ -33,7 +33,8 @@ suifleet_deb_distributions:
 suifleet_allow_untested_distribution: false
 
 # Network manifest on the controller (console "Download connection settings"
-# or a publisher's deployments/ENV/current/deployment.json).
+# or a publisher's deployments/ENV/current/deployment.json). Like every
+# controller path here (artifacts, units, batch), use an absolute path without $.
 suifleet_manifest_src: ""
 
 # Enrollment batch on the controller: the extracted dApp credential archive or

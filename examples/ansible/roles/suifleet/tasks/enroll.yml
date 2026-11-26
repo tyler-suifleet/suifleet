@@ -180,6 +180,11 @@
                   loop_control:
                     label: "{{ item.dest }}"
 
+                - name: Check the staged manifest against the controller digest
+                  ansible.builtin.include_tasks: verify_manifest.yml
+                  vars:
+                    staged: "{{ suifleet_enroll_staging }}/deployment.json"
+
                 # Read-only: the current key holder signs nothing and the claim
                 # file is never read. Exit 3: no enrollment in retained history.
                 - name: Find this key's enrollment on chain
@@ -341,6 +346,11 @@
                     - {dest: deployment.json, src: "{{ suifleet_manifest_src }}"}
                   loop_control:
                     label: "{{ item.dest }}"
+
+                - name: Check the staged manifest against the controller digest
+                  ansible.builtin.include_tasks: verify_manifest.yml
+                  vars:
+                    staged: "{{ suifleet_enroll_staging }}/deployment.json"
 
                 - name: Enroll and record the public IDs
                   ansible.builtin.shell: |
