@@ -52,6 +52,11 @@ class ComponentSimulator(Simulator):
 
 def run(binary):
     sim = ComponentSimulator()
+    digest_rate_limited = threading.Event()
+    digest_read_retried = threading.Event()
+    resume_digest_reads = threading.Event()
+    health_deployment = "0x204"
+    health_history_at_report = []
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -66,7 +71,19 @@ def run(binary):
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             try:
-                response = {"jsonrpc": "2.0", "id": request["id"], "result": sim.rpc(request["method"], request["params"])}
+                method, params = request["method"], request["params"]
+                if (method == "suix_getDynamicFieldObject" and params[0] == health_deployment
+                        and params[1]["type"].endswith("::RecipeDigestKey")
+                        and not resume_digest_reads.is_set()):
+                    if digest_rate_limited.is_set():
+                        digest_read_retried.set()
+                    digest_rate_limited.set()
+                    response = {"jsonrpc": "2.0", "id": request["id"],
+                                "error": {"code": 429, "message": "injected recipe-digest rate limit"}}
+                else:
+                    if method == "sui_executeTransactionBlock" and sim.built[-1][0] == health_deployment:
+                        health_history_at_report.extend(history())
+                    response = {"jsonrpc": "2.0", "id": request["id"], "result": sim.rpc(method, params)}
             except Exception as error:
                 sim.errors.append(repr(error))
                 response = {"jsonrpc": "2.0", "id": request["id"], "error": {"code": -32000, "message": str(error)}}
@@ -110,15 +127,35 @@ def run(binary):
                 "0x201": ("1.0.0", "none", 1),
                 "0x202": ("2.0.0", "none", 1),
                 "0x203": ("3.0.0", "install", 2),
-                "0x204": ("4.0.0", "health", 2),
+                health_deployment: ("4.0.0", "health", 2),
             }
             artifacts = {id: component.build(version, run_id, fail) for id, (version, fail, _) in plan.items()}
             sim.deploy("0x200", component.build("0.9.0", run_id))  # Before enrollment: must never run.
+
+            def history():
+                path = components / component.DEFAULT_COMPONENT / "history.jsonl"
+                return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
             with (root / "daemon.log").open("w") as log:
                 process = subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=log, stderr=log)
                 wait_for(lambda: state().get("initialized"), "enrollment did not establish cursor", process)
                 for id, artifact in artifacts.items():
-                    sim.deploy(id, artifact)
+                    if id != health_deployment:
+                        sim.deploy(id, artifact)
+                wait_for(lambda: len(sim.reports) == 3, "first three deployments did not report", process)
+
+                sim.deploy(health_deployment, artifacts[health_deployment])
+                wait_for(digest_rate_limited.is_set, "recipe digest lookup was not rate-limited", process)
+                wait_for(lambda: digest_read_retried.is_set()
+                         or any(id == health_deployment for id, _ in sim.reports),
+                         "daemon did not process the rate limit", process)
+                assert health_deployment not in state()["deployments"], (
+                    "recipe-digest rate limit became a terminal Failed receipt before apply",
+                    [r["version"] for r in history()],
+                )
+                assert not any(id == health_deployment for id, _ in sim.reports)
+                assert [r["version"] for r in history()] == ["1.0.0", "2.0.0", "3.0.0"]
+                resume_digest_reads.set()
                 wait_for(lambda: len(state().get("deployments", {})) == len(plan)
                          and all(o["reported"] for o in state()["deployments"].values()),
                          "test component deployments were not applied and reported", process)
@@ -130,16 +167,18 @@ def run(binary):
             assert {id: o["status"] for id, o in outcomes.items()} == {id: p[2] for id, p in plan.items()}, outcomes
             assert sorted(sim.reports) == sorted((id, p[2]) for id, p in plan.items()), sim.reports
             base = components / component.DEFAULT_COMPONENT
-            history = [json.loads(line) for line in (base / "history.jsonl").read_text().splitlines()]
+            records = history()
+            assert health_history_at_report == records, "history changed after the failure report was submitted"
             expected = [(p[0], run_id, hashlib.sha256(artifacts[id]).hexdigest()) for id, p in plan.items()]
-            assert [(r["version"], r["runId"], r["artifactSha256"]) for r in history] == expected, history
-            assert [(r["install"], r["health"]) for r in history] == [
+            assert [(r["version"], r["runId"], r["artifactSha256"]) for r in records] == expected, records
+            assert [(r["install"], r["health"]) for r in records] == [
                 ("succeeded", "passed"), ("succeeded", "passed"), ("failed", "not-run"), ("succeeded", "failed")]
-            assert all(r["run"]["arch"] == os.uname().machine for r in history if r["run"])
+            assert all(r["run"]["arch"] == os.uname().machine for r in records if r["run"])
             assert (base / "current").read_text().strip() == "4.0.0"
             assert not (base / "versions" / "0.9.0").exists() and not (base / "versions" / "3.0.0").exists()
             assert not sim.errors, sim.errors
             print("PASS: real daemon applied test component v1/v2 via suifleet-test-updater; receipts match version, run ID and SHA-256")
+            print("PASS: recipe-digest rate limit stays pending; recovered health failure is in history before reporting")
             print("PASS: injected install failure (previous version kept) and health failure reported Failed with distinct receipts")
     finally:
         if process and process.poll() is None:

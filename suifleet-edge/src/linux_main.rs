@@ -1452,17 +1452,23 @@ async fn execute(
     if !admit(sui, journal, &event.deployment_id, &cfg.device.device_object_id).await? {
         return Ok(None);
     }
-    let resolved = catalog::resolve(sui, event, &record.fields).await;
-    if let Err(error) = &resolved {
-        let mut outcome = Outcome::default();
-        record_result(&mut outcome, Err(anyhow::anyhow!("{error:#}")));
-        warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
-        let status = outcome.status;
-        journal.state.deployments.insert(event.deployment_id.clone(), outcome);
-        journal.save()?;
-        return Ok(status);
-    }
-    let resolved = resolved?;
+    let resolved = match catalog::resolve(sui, event, &record.fields).await {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            // A transport failure while reading authenticated metadata leaves
+            // the outcome and discovery position pending for the next poll.
+            if error.downcast_ref::<tonic::Status>().is_some_and(sui_client::retryable) {
+                return Err(error);
+            }
+            let mut outcome = Outcome::default();
+            record_result(&mut outcome, Err(anyhow::anyhow!("{error:#}")));
+            warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");
+            let status = outcome.status;
+            journal.state.deployments.insert(event.deployment_id.clone(), outcome);
+            journal.save()?;
+            return Ok(status);
+        }
+    };
     if cfg.daemon_update.enabled && event.component_name == cfg.daemon_update.component {
         return stage_daemon_update(cfg, sui, walrus, store, journal, &resolved).await;
     }
