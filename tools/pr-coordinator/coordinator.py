@@ -2795,6 +2795,9 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         current = self.pr(project,pr['number']); current_owner=json.loads(self.ticket(project,'show',owner['key']))
         if current_owner['token'] != owner['token'] or gate(current,current_owner,review) is not None: raise RuntimeError('review gates or ownership changed before push')
         self.assert_review_owner(project,owner)
+        from batch_integration import recovery_source_held
+        if recovery_source_held(self, project, current, current_owner):
+            raise RuntimeError('recovery source routing no longer permits independent integration')
         remote = run(['git','ls-remote','origin',f"refs/heads/{pr['baseRefName']}"],cwd=directory).split()[0]
         if remote != base: raise RuntimeError('main changed before push; discard prepared integration and re-review')
         commit = run(['git','rev-parse','HEAD'],cwd=directory).strip()
