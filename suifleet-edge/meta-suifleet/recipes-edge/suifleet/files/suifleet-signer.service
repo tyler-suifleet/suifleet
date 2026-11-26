@@ -1,5 +1,4 @@
 [Unit]
-ConditionPathExists=!/etc/suifleet/migration.pending
 Description=SuiFleet device signing service
 Documentation=file:///usr/share/doc/suifleet/KEY_ISOLATION.md
 Requires=suifleet-signer.socket suifleet-provision.service

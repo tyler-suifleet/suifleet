@@ -93,7 +93,7 @@ manifest_sha256 = "<LOWERCASE_SHA256_OF_DEPLOYMENT_JSON>"
 Mount writable media before the service starts. Each configured location is
 the parent of the serial folder. Use a systemd drop-in for custom mount
 dependencies or write access outside `/boot`, `/media`, `/run/media` and `/mnt`.
-Yocto enables the service. Debian and RPM installations follow their existing
+The core Yocto kas profiles enable the service through `meta-suifleet-enrollment`. Custom systemd images using the public layer need the [same enrollment companion layer](CUSTOMER_YOCTO.md). Debian and RPM installations follow their existing
 opt-in policy. Enable `suifleet-first-boot-enrollment.service` after preparing
 the batch settings, and enable `suifleet.service` for later enrolled boots.
 
