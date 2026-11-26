@@ -256,7 +256,10 @@ the codec at local `file://` inputs that are absent, parsing still succeeds
 (SF-307): the recipe's parse-time guard skips it and names the missing files, so
 the core client and other targets still parse and build. An image or command
 that asks for `suifleet-walrus-codec` then fails with "was skipped: optional
-Walrus codec inputs not found: …". Every searched `FILESPATH` candidate is
+Walrus codec inputs not found: …". The guard resolves each input with
+BitBake's own local fetcher (URL decoding, absolute paths, `FILESPATH` and, on
+BitBake 2.0/Kirkstone only, the `DL_DIR` fallback), so it keeps every input the
+fetcher would find. Every searched candidate is
 recorded as a parse dependency, so staging the files makes the recipe eligible on
 the next parse in the same build directory, without changing metadata or
 clearing the cache. `scripts/tests/test_yocto_codec_bitbake_cache.py` checks this
