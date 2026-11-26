@@ -1,8 +1,10 @@
 name: Documentation
 on:
   pull_request:
+    paths: ['docs/**', 'site/docs/**', '**/*.md', '.github/workflows/docs.yml']
   push:
     branches: [main]
+    paths: ['docs/**', 'site/docs/**', '**/*.md', '.github/workflows/docs.yml']
 permissions:
   contents: read
 jobs:

@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import coordinator as c
@@ -73,6 +73,28 @@ class PipelineLanes(unittest.TestCase):
             # Use actual discovery/sorting with a deliberately earlier source PR.
             c.Coordinator.prs(engine, project, lambda pr: engine.advance_candidate_snapshot(project,pr))
             self.assertEqual(events, [('snapshot',99),('advance',99),('snapshot',1)])
+
+    def test_source_failure_is_discovered_before_any_completed_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.engine(directory, 'integration')
+            project = dict(id='p', repository='a/b')
+            owner = dict(branch='work', status='review', spec={'area': 'edge'})
+            row = dict(number=7, head=dict(ref='work', sha='a'*40))
+            pr = dict(number=7, headRefOid='a'*40, baseRefOid='b'*40,
+                      _review_mode='source', threads=[], comments=[], reviews=[],
+                      statusCheckRollup=[dict(__typename='CheckRun', name='Security CodeQL',
+                                              status='COMPLETED', conclusion='FAILURE',
+                                              detailsUrl='https://example.org/check/7')])
+            self.assertFalse(engine.discovery_needed(project, row, [owner]))
+            engine.observe_pr(project, pr)
+            self.assertTrue(engine.discovery_needed(project, row, [owner]))
+            self.assertFalse(engine.discovery_needed(project, row, [dict(owner, expired=True)]))
+            row['head']['sha'] = 'c'*40
+            self.assertFalse(engine.discovery_needed(project, row, [owner]))
+            row['head']['sha'] = pr['headRefOid']
+            pr['statusCheckRollup'][0].update(status='IN_PROGRESS', conclusion=None)
+            engine.observe_pr(project, pr)
+            self.assertFalse(engine.discovery_needed(project, row, [owner]))
 
     def test_lane_lock_fences_duplicates_but_not_other_roles(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -143,3 +165,20 @@ c.main()
                     parent.terminate()
                     parent.wait(timeout=15)
                 log.close()
+
+    def test_expensive_poll_cadence_keeps_completion_independent_and_accounts_for_work(self):
+        from types import SimpleNamespace
+        import ctypes
+        for lane, expected_wait in [('integration',50),('completion',5),('ci',110),('source',290)]:
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as directory:
+                engine=Mock()
+                args=SimpleNamespace(state=Path(directory),project_id='p',parent_pid=123,
+                                     lane=lane,interval=300)
+                with patch.object(ctypes,'CDLL',return_value=SimpleNamespace(prctl=lambda *args:0)), \
+                     patch.object(c.os,'getppid',side_effect=[123,123,0]), \
+                     patch.object(c,'Coordinator',return_value=engine), \
+                     patch.object(c.time,'monotonic',side_effect=[0,10]), \
+                     patch.object(c.time,'sleep') as sleep:
+                    c.run_lane({'projects':[{'id':'p'}]},args)
+                engine.tick.assert_called_once_with(True)
+                sleep.assert_called_once_with(expected_wait)

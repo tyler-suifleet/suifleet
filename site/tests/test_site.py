@@ -178,7 +178,7 @@ class SiteTest(unittest.TestCase):
         self.assertTrue(any("broken link /missing/" in e for e in self.errors()))
 
     def test_missing_anchor(self):
-        self.edit("index.html", 'href="/security/#status"', 'href="/security/#nowhere"')
+        self.edit("index.html", 'href="/security/"', 'href="/security/#nowhere"')
         self.assertTrue(any("missing anchor" in e for e in self.errors()))
 
     def test_no_scripts_or_trackers(self):

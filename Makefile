@@ -130,6 +130,8 @@ test-yocto-packaging:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_inspect_pi_image.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_runtime_packaging.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_layer_export.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_series.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_core_fixes.py'
 
 dapp-typecheck:
 	$(RUN) node scripts/test_subscription_card.cjs
@@ -715,6 +717,12 @@ test-aws-credentials:
 .PHONY: test-cloudwatch-metrics
 test-cloudwatch-metrics:
 	bash scripts/test_cloudwatch_metrics.sh
+
+# SF-303: pinned real Prometheus/OpenTelemetry Collector binaries, then the real
+# daemon, console and monitoring adapter end to end, network-none.
+.PHONY: test-edge-monitoring
+test-edge-monitoring:
+	bash scripts/test_edge_monitoring.sh
 
 # SF-058: actual durable daemon IPC + unmodified SDK against local AWS API emulators.
 .PHONY: test-stream-export

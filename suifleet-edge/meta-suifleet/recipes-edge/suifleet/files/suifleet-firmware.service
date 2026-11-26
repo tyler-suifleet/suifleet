@@ -1,4 +1,5 @@
 [Unit]
+ConditionPathExists=!/etc/suifleet/migration.pending
 Description=SuiFleet privileged firmware helper
 # The only root-run SuiFleet code path: verifies a submitted artifact and runs
 # the firmware command from root-owned /etc/suifleet/firmware.toml.

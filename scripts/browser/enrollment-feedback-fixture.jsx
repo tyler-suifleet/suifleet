@@ -43,7 +43,12 @@ export const snapshot = async (_client, job) => ({
 export const useCurrentAccount = () => ({ address: operator });
 export const useCurrentClient = () => ({});
 export const useCurrentNetwork = () => 'localnet';
-export const useFleetSelection = () => ({ supported: false, identity: 'legacy', fleet: undefined, fleets: [] });
+// A managed fleet's device slots can be scripted with localStorage 'fixture-fleet' = { active, limit }.
+export const useFleetSelection = () => {
+  const f = JSON.parse(localStorage.getItem('fixture-fleet') ?? 'null');
+  return { supported: !!f, identity: f ? 'fleet' : 'legacy', fleets: [], refresh() {},
+    fleet: f ? { id: operator, activeDevices: BigInt(f.active), deviceLimit: BigInt(f.limit) } : undefined };
+};
 const query = data => ({ data, isLoading: false, isSuccess: true, error: null, refetch: async () => ({ data }) });
 export const useDevices = () => query([device]);
 export const useGroups = () => query([]);

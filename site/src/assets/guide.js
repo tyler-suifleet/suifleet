@@ -49,6 +49,15 @@
         if (!video.dataset.guideLoaded) { video.dataset.guideLoaded = "true"; video.preload = "metadata"; video.load(); }
       });
     });
+    root.querySelectorAll('[data-how-section]').forEach(media => {
+      media.hidden = media.dataset.howSection !== (finished ? stages[0].id : stages[stageIndex].id);
+      media.querySelectorAll('video').forEach(video => {
+        if (media.hidden) video.pause();
+        else if (video.getClientRects().length && !video.dataset.howLoaded) {
+          video.dataset.howLoaded = 'true'; video.preload = 'metadata'; video.load();
+        }
+      });
+    });
     complete.hidden = !finished;
     root.querySelectorAll(".overview-video").forEach(video => {
       if (!video.getClientRects().length) video.pause();
@@ -165,7 +174,7 @@
         video.addEventListener('loadedmetadata', () => {
           video.currentTime = position; prepared = true;
           video.dataset.overviewPrepared = 'true'; status.hidden = true;
-          if (resume) void video.play().catch(() => { status.hidden = false; status.textContent = 'Press Play to continue.'; });
+          if (resume && video.getClientRects().length) void video.play().catch(() => { status.hidden = false; status.textContent = 'Press Play to continue.'; });
         }, { once: true });
         video.src = objectUrl; video.load();
       } catch {

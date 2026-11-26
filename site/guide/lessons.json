@@ -24,7 +24,7 @@
         },
         {
           "label": "Approve the connection",
-          "text": "This walkthrough uses a demo account. Approve the connection in your own wallet; your private key stays there.",
+          "text": "Review the connection request in your wallet, then approve it. Your private key stays in your wallet.",
           "wait": false
         },
         {
@@ -62,7 +62,7 @@
         },
         {
           "label": "Review the plan",
-          "text": "This demonstration uses a test plan. Review the device allowance and price shown in your own console.",
+          "text": "Review the plan\u2019s device allowance and price. Choose the capacity that fits your fleet before continuing.",
           "wait": false
         },
         {

@@ -1007,23 +1007,38 @@ merged-runtime path; this change does not restart services from a worktree.
 
 ### Shared discovery snapshots
 
-The coordinator uses the installed atomic-ticketing engine's `ticket_snapshot.py`
-provider when available. Install atomic-ticketing 0.3.2 or later before deploying
-this coordinator change. The provider is resolved from the `ticket` command's
-versioned installation; cache data is shared with dispatcher-triggered CLI
-refreshes in `${XDG_STATE_HOME:-~/.local/state}/github-snapshots-v1`.
+Install the verified merged atomic-ticketing engine (0.3.3 or later) before
+activating the matching coordinator. The coordinator resolves
+`ticket_snapshot.py` through the installed `ticket` symlink. The provider change
+is tracked in [atomic-ticketing PR #5](https://github.com/therealtime/atomic-ticketing/pull/5).
+Both tools share
+`${XDG_STATE_HOME:-~/.local/state}/github-snapshots-v2` by credential and host.
+Older engines use a separate cache and retain their previous cooldown behavior.
 
-Only discovery lists are cached, with an absolute 60-second lifetime and
-credential/host isolation. Writes invalidate snapshots, and concurrent readers
-coalesce. PR details, review feedback, checks, ownership verification and branch
-tips remain live: the cache never supplies merge approval. Quota observations are
-shared for 60 seconds; discovery reserves 250 GraphQL points and 100 REST
-requests for fresh decisions and writes. Server rate limits establish a shared
-cooldown rather than a retry loop per worker. Expired/error snapshots are not
-served as fallback. Existing exact-head/base and review gates remain in force.
+Mutable discovery lists have a 60-second lifetime. Project identity and field
+metadata have a five-minute lifetime and survive routine issue, PR and Project
+item writes. Schema-changing and unclassified mutations invalidate both groups.
+Per-request file locks coalesce concurrent discovery misses across processes.
+Writes fence mutable snapshots before and after the request, including ambiguous
+failures. Direct ownership checks, PR details, feedback, CI and branch tips
+remain live. Expired or failed snapshots never stand in for fresh evidence.
 
-An older ticket engine keeps the previous live transport until upgraded. Updating
-source on main does not bypass the existing runtime activation/validation policy.
+One quota probe per credential per minute reserves 250 GraphQL points and
+100 REST requests for fresh decisions and writes. Primary exhaustion pauses the
+affected API resource until its known reset. In the absence of a reset hint,
+the next attempt is eligible after one minute. Secondary limits pause all API
+resources for the credential for at least one minute and honor a longer
+Retry-After. Fresh cache hits require no network request during these pauses.
+The coordinator delegates cooldowns to the provider so an exhausted resource
+cannot start a second account-wide pause.
+
+After verifying both merges, install the portable engine from its exact merged
+revision and activate the coordinator through the existing merged-only
+runtime path. Record the portable Git revision, resolved `ticket` path and
+module digest, the coordinator generation/revision and readiness, and confirm
+worker preservation. Verify shared discovery with ordinary read-only traffic.
+Offline tests simulate rate limits without spending quota or provoking throttling
+on the live account.
 
 ### Authenticated preparation errors (SF-205)
 
@@ -1384,24 +1399,25 @@ and is retried idempotently; terminal cleanup failures are isolated and do not
 stop independent queue selection. No publication intent may be reclassified this
 way after a push could have occurred.
 
-For a one-member batch, attribution is unambiguous: the original source head gets
-`_batch_review_failure`, and its existing owner receives normal feedback repair
-in the same scan. The worker gets the real published findings and requested
-regression checks. This is distinct from `_ci_repair`; changing CI evidence must
-not veto a genuine source-finding repair. Early read-only review is suppressed
-while that repair context is present. Existing claim, live/uncertain worker,
-capacity, provider and execution fences still apply. Source-complete receipts do
-not erase a later combined finding.
+For a one-member batch, a review without typed attribution still routes to
+the source owner. For a multi-member finding, the independent reviewer supplies
+`affected_source_prs` as a nonempty array of distinct source PR numbers. The
+coordinator verifies those IDs against the immutable manifest, the reviewed
+head/base and feedback snapshot, and the published change request. It attaches
+`_batch_review_failure` to each affected source head and rechecks the retained
+implementation claim before dispatch. Unaffected source-ready PRs remain eligible.
+The repair worker receives the published findings and requested regression checks.
+Early source review is suppressed while repair is pending. The existing capacity,
+provider and execution fences still apply.
 
-The finding remains attached when unrelated main advances, and expires when the
-source head changes. The changed source then needs fresh independent review and
-actual combined CI/testnet. For an unattributed multi-member finding, do not guess
-which owner is responsible or dispatch every owner: record the failed exact group
-and split it deterministically into smaller candidates. The same rejected head
-combination is not resubmitted just because main advanced. Singleton findings
-become owner repairs; unaffected source-ready PRs remain eligible for another
-batch. Never disable batching, fabricate source-head CI failures, blindly rerun
-checks or clear old failed-job/claim receipts to force this transition.
+A finding stays attached when main advances and expires when its source head
+changes. A changed source needs fresh independent review and combined CI/testnet.
+Missing or invalid multi-member attribution preserves the finding and excludes
+the rejected head combination, including reordered or larger groups containing
+it. The coordinator requests bounded attribution review in smaller candidates.
+Reviewers consult the earlier published findings and record whether the defect
+reproduces and which members require repair. The earlier rejection remains on
+record if the subset cannot reproduce a composition defect.
 
 SF-214's operational recovery used the installed controller to retire rejected
 batch #433, attached the independently reproduced enrollment finding to source
@@ -1914,3 +1930,27 @@ durable results. Linux parent-death signalling also stops scheduling children if
 the supervisor is killed abruptly. Keep the existing `KillMode=process` unit.
 Disabling `parallel_pipeline` and restarting restores the combined loop; retained
 jobs, batch reservations and merge evidence stay in the same database.
+
+SF-318 discovery scheduling also checks local state before fetching an expensive
+PR snapshot: a full reviewer pool, an active worker, or a source review that has
+not finished is a scheduling wait. Active integration candidates and untracked
+or local-test infrastructure PRs retain discovery. Reserved batch members are
+re-read by the batch's existing validation/publication fences. These hints never
+supply approval, ownership, CI, head/base or feedback evidence: selected work
+still obtains a fresh snapshot and the final fences remain unchanged. Old cache
+and coordinator pauses are preserved through activation until their recorded
+expiry, and server Retry-After deadlines are never shortened.
+
+
+## Direct cosmetic and documentation requests — 2026-11-25
+
+The user-authorized [small-change fast lane](SMALL_CHANGES.md) takes precedence
+for direct, low-impact marketing/docs edits. Do not enqueue these into feature
+batch integration or testnet, require a new ticket/claim/PR, or wait for another
+model/hosted CI before an already-authorized publication. Keep isolated work,
+focused validation, user authorship and actual publication verification. Record
+an existing issue when useful; its API availability is not a prerequisite.
+
+This does not let an assigned worker skip its job, dismiss a finding, reclassify
+wallet/runtime/security/configuration work, or bypass actual release authority.
+Ordinary engineering and the local-test infrastructure rule remain unchanged.
