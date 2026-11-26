@@ -124,6 +124,19 @@ longer accepts. If automatic retries are exhausted, correct the cause and use
 Keep the existing device key and the original claim with the unit until the
 service reports completion.
 
+## Host provisioning media writer
+
+Use [Write one claim per medium](CUSTOMER_ENROLLMENT.md#write-one-claim-per-medium)
+to install credentials from the dApp tar archive onto a mounted FAT or exFAT
+volume. The writer reserves the claim in a host-side SQLite database before
+writing it, then stages and verifies the credential directory before renaming
+it to `enrollment/` on the same volume. The database records each serial,
+generated volume marker, assignment state and a SHA-256 fingerprint of the
+random claim seed for duplicate detection. Keep the database on a local
+filesystem outside the provisioning volume and preserve it across retries and
+across archives that might include the same claim. The tool refuses existing
+enrollment directories without a matching assignment.
+
 ## Address-free bulk enrollment in the dApp (SF-100)
 
 The dApp's **Enrollment** page puts the claim flow above behind names and serial numbers. Operators never copy a blockchain address and approve one transaction per batch chunk, not per device.

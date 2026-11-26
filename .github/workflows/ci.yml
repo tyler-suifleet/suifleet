@@ -47,6 +47,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  enrollment-media:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Offline enrollment media tests on disposable FAT images
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dosfstools
+          sudo env PYTHONDONTWRITEBYTECODE=1 SUIFLEET_TEST_FAT_LOOP=1 \
+            /usr/bin/python3 -m unittest discover -s scripts/tests -p test_provision_enrollment_media.py -v
+
   check:
     runs-on: ubuntu-22.04
     # SF-179: complete serial suite exceeded 60m (run 40542334953).
