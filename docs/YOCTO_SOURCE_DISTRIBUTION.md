@@ -58,6 +58,15 @@ The file set is the daemon build closure, computed from that commit's tree:
 - each file named by a literal `include_str!`/`include_bytes!` or a `#[path]`
   module attribute, followed transitively.
 
+`src/`, `examples/` and each local crate directory are packaged whole, so Rust
+module files there are always present. Outside them only the declared files,
+the default `build.rs` and their literal include/`#[path]` targets are
+packaged. An implicit out-of-line module (`mod name;` without a literal
+`#[path]`) in one of those files would make Cargo also read a sibling
+`name.rs` or `name/mod.rs` that the closure does not include. The build stops
+instead: give the module a `#[path]` or move the target under `src/`.
+`cfg_attr` paths count as implicit. Inline `mod name { ... }` blocks are fine.
+
 A missing workspace member, local path dependency, declared target file or include target, a path outside the
 repository, a symlink or submodule, or a runtime identity/state file name
 (`device.key`, `config.toml`, `*.key`, journals, databases and so on) stops the
@@ -181,7 +190,8 @@ check then verifies the resulting `S`:
 - for every recipe, the license file checksums;
 - for the daemon, the lockfile digest, crate version, crate include, workspace
   members, transitive local path-dependency crates, manifest-declared target
-  files and every include target, plus `cargo metadata --offline --locked
+  files, every include target and the same implicit-module refusal outside the
+  directories packaged whole, plus `cargo metadata --offline --locked
   --no-deps` when `--cargo` is set;
 - for the codec, the exact five pinned files, their digests, provenance
   revision, licenses and Node version.
