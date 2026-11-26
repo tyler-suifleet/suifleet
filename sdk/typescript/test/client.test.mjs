@@ -252,6 +252,32 @@ test('time spent encoding the payload counts against the deadline: nothing is se
   assert.equal(frames.length, 0, 'a request was written after its deadline');
 });
 
+test('publish serializes its payload inside the deadline: nothing is sent late', async (t) => {
+  const path = join(directory, 'slow-publish.sock');
+  const frames = [];
+  const sockets = [];
+  const server = createServer((socket) => {
+    sockets.push(socket);
+    socket.on('data', (chunk) => frames.push(chunk));
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(path, resolve));
+  t.after(() => new Promise((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
+  let reads = 0;
+  const payload = {};
+  Object.defineProperty(payload, 'value', {
+    enumerable: true,
+    get() { reads++; const until = performance.now() + 100; while (performance.now() < until) { /* stall */ } return 1; },
+  });
+  const client = new Client({ socketPath: path, component: 'svc', timeoutMs: 40 });
+  await assert.rejects(client.publish('t', payload),
+    (e) => e instanceof TransportError && e.outcome === 'not_sent' && /timed out after 40 ms/.test(e.message));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(reads, 1, 'the payload is still read exactly once');
+  assert.equal(sockets.length, 0, 'a connection was opened after the deadline');
+  assert.equal(frames.length, 0, 'a publish was written after its deadline');
+});
+
 test('the response wait uses only the time left after connect backoff', async (t) => {
   const path = join(directory, 'late-silent.sock');
   const client = new Client({ socketPath: path, timeoutMs: 400, connectAttempts: 3, connectRetryDelayMs: 200 });

@@ -23,8 +23,8 @@ export interface ClientOptions {
   /** Configured component name owned by this process's UID ('' for administrators). */
   component?: string;
   /**
-   * Whole-request deadline, started when `request` is called. It covers request
-   * encoding, every connection attempt and the backoff between them, so a request is never
+   * Whole-request deadline, started when `request` or a typed helper is called. It covers
+   * reading and encoding the caller's payload, every connection attempt and the backoff between them, so a request is never
    * first sent after it expires. The daemon ends connections after 120 s.
    * A finite number in (0, 2147483647] (Node's maximum timer delay); anything
    * else throws RangeError before connecting. Default 120000.
@@ -175,10 +175,19 @@ export class Client {
    * Send one request on a fresh connection (the protocol has no pipelining) and
    * return the response `data`. The SDK never retries after a byte was sent.
    */
-  async request<T = unknown>(operation: string, options: RequestOptions = {}): Promise<T> {
-    // The deadline starts before encoding: serialization can run caller getters,
-    // and that time counts against the budget so the request is never first sent late.
+  request<T = unknown>(operation: string, options: RequestOptions = {}): Promise<T> {
+    return this.call<T>(operation, () => options);
+  }
+
+  /**
+   * Start the whole-request deadline, then build the request and encode it.
+   * Building and serialization can run caller getters, so that time counts against
+   * the budget and the request is never first sent late. A helper that reads the
+   * caller's values itself does so inside `build`.
+   */
+  private async call<T>(operation: string, build: () => RequestOptions): Promise<T> {
     const deadline = performance.now() + this.timeoutMs;
+    const options = build();
     const frame = encodeRequest(operation, options.component ?? this.component, options.topic ?? '', options.payload);
     let delay = this.connectRetryDelayMs;
     for (let attempt = 1; ; attempt++) {
@@ -278,14 +287,17 @@ export class Client {
   health(state: HealthState): Promise<{ reported: boolean }> { return this.request('health', { payload: state }); }
 
   // Messaging (SF-027 volatile inboxes and SF-032 durable subscriptions).
-  async publish(topic: string, payload: JsonValue): Promise<PublishResult> {
-    // Serialize the caller's value exactly once and send a plain copy parsed from
-    // those bytes: a getter or proxy could otherwise return different data on a
-    // second read, so the validated and transmitted payloads could diverge.
-    const text: string | undefined = JSON.stringify(payload ?? null);
-    if (typeof text !== 'string') throw new TypeError('publish payload is not JSON-serializable');
-    if (Buffer.byteLength(text) > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
-    return this.request('publish', { topic, payload: JSON.parse(text) as JsonValue });
+  publish(topic: string, payload: JsonValue): Promise<PublishResult> {
+    // Serialize the caller's value exactly once, inside the request deadline, and
+    // send a plain copy parsed from those bytes: a getter or proxy could otherwise
+    // return different data on a second read, so the validated and transmitted
+    // payloads could diverge.
+    return this.call('publish', () => {
+      const text: string | undefined = JSON.stringify(payload ?? null);
+      if (typeof text !== 'string') throw new TypeError('publish payload is not JSON-serializable');
+      if (Buffer.byteLength(text) > MAX_PUBLISH_PAYLOAD) throw new RangeError('publish payload exceeds 4096 serialized bytes');
+      return { topic, payload: JSON.parse(text) as JsonValue };
+    });
   }
   /**
    * Nonblocking. Volatile inbox and QoS 0 reads are destructive; a QoS 1 read
@@ -303,7 +315,7 @@ export class Client {
   messaging(): Promise<JsonObject> { return this.request('messaging'); }
   /** Administrator only (SF-035): action list, enroll, revoke or remove. */
   clientDevices(action: 'list' | 'enroll' | 'revoke' | 'remove', fields: JsonObject = {}): Promise<JsonValue> {
-    return this.request('client_devices', { payload: { ...fields, action } });
+    return this.call('client_devices', () => ({ payload: { ...fields, action } }));
   }
 
   /**
@@ -404,8 +416,8 @@ export class Client {
   /** Trusted operator-declared external exporter only: numeric counters, never secrets. */
   streamExportStatus(name: string, status: { batches: number; failures: number; consecutiveFailures: number; lastSuccessMs?: number | null }):
     Promise<{ updated: boolean }> {
-    return this.request('stream_export_status', { topic: name, payload: { batches: status.batches, failures: status.failures,
-      consecutive_failures: status.consecutiveFailures, last_success_ms: status.lastSuccessMs ?? null } });
+    return this.call('stream_export_status', () => ({ topic: name, payload: { batches: status.batches, failures: status.failures,
+      consecutive_failures: status.consecutiveFailures, last_success_ms: status.lastSuccessMs ?? null } }));
   }
 
   // Device shadows (SF-033). '' is the classic shadow.
