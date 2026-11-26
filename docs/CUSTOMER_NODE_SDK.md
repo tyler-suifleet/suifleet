@@ -10,16 +10,25 @@ Use the TypeScript/Node.js package to read component configuration, report healt
 
 ## Steps
 
-1. Build the tarball from the reviewed commit and compare the printed SHA-256 with the release record:
+1. Get the tarball one of two ways. Either way, its SHA-256 must match the release record before you install it:
+
+   - **Verify a supplied tarball.** Hash the file you were given. It does not need to be rebuilt:
+
+     ```sh
+     sha256sum suifleet-component-ipc-1.0.0.tgz
+     ```
+
+   - **Rebuild it from the reviewed commit.** Check out that commit and use the pinned dev image (its Node.js, pnpm and npm versions are part of the recorded build). The build uses the committed lockfile and packs from a staging copy with fixed file modes, so checkout permissions and umask do not change the hash. It prints the SHA-256:
+
+     ```sh
+     make sdk-node
+     ```
+
+     A different hash from the same commit means a different toolchain or a modified tree. Do not install that tarball.
+
+2. Install the verified tarball into your application:
 
    ```sh
-   make sdk-node
-   ```
-
-2. Install it into your application and verify the tarball hash before deployment:
-
-   ```sh
-   sha256sum sdk/typescript/suifleet-component-ipc-1.0.0.tgz
    npm install /path/to/suifleet-component-ipc-1.0.0.tgz
    ```
 

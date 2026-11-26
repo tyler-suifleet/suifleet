@@ -39,7 +39,13 @@ npm install ./sdk/typescript/suifleet-component-ipc-1.0.0.tgz
 Provenance is the reviewed git commit plus the printed SHA-256 of the tarball:
 the build uses only the committed `pnpm-lock.yaml` (TypeScript 5.9.3 and
 `@types/node` 20.19.39, both build-time only) and the pinned dev image's
-Node/pnpm. CI builds the same tarball in `make ci` (`test-sdk-node`) and runs
+Node/pnpm/npm. `scripts/pack_sdk_node.sh` deletes `dist/`, compiles it again and
+packs from a private staging copy with fixed modes. Every file is 0644, except
+the runnable examples (0755). `npm pack` already normalizes mtimes and owners
+but keeps input modes, so this staging step means checkout permissions and
+umask do not change the hash. Verifying a supplied tarball needs only its
+`sha256sum` against the release record; rebuilding needs the reviewed commit
+and the pinned toolchain. CI builds the same tarball in `make ci` (`test-sdk-node`) and runs
 the real-daemon suite against that packed artifact, not against the source
 tree. Vendoring `dist/` from an unreviewed build or installing from an
 unverified tarball is outside this boundary.

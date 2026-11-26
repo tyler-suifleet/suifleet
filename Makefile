@@ -674,10 +674,12 @@ endif
 
 # SF-302 TypeScript/Node component SDK: locked toolchain, strict build, offline
 # unit/interface tests and the packed tarball (SHA-256 printed for provenance).
+# The tarball is packed from a mode-normalized staging copy so checkout
+# permissions and umask do not change its SHA-256.
 SDK_NODE_PACKAGE := sdk/typescript/suifleet-component-ipc-1.0.0.tgz
 .PHONY: sdk-node test-sdk-node test-ipc-node
 sdk-node:
-	$(RUN) bash -c "cd sdk/typescript && pnpm install --frozen-lockfile && node_modules/.bin/tsc -p tsconfig.json && rm -f ./*.tgz && npm pack --ignore-scripts --pack-destination . >/dev/null && sha256sum ./*.tgz"
+	$(RUN) bash scripts/pack_sdk_node.sh
 
 test-sdk-node: sdk-node
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_ipc_interface.py
