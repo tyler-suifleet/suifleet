@@ -359,7 +359,13 @@ Keep the existing local status report current. Finish this bounded recovery pass
                 changed.append(project)
             progress = self.now if not old or completed else old['progress_at']
             prior_waits = old.get('dependency_waits',{})
-            waits = {}
+            observed = model.get('_watchdog_tickets',{}).get(project)
+            blocked = ({t['key'] for t in observed if t.get('status') == 'blocked'}
+                       if observed is not None else None)
+            # A missing/slow detail read is not proof of completion. Preserve
+            # its clock, but only fresh hints may trigger dependency recovery.
+            waits = {k:v for k,v in prior_waits.items() if k not in excluded
+                     and (blocked is None or k in blocked)}
             for hint in view.get('dependency_waits',[]):
                 prior = prior_waits.get(hint['ticket'],{})
                 since = prior.get('since',self.now) if prior.get('receipt') == hint['receipt'] else self.now
@@ -371,7 +377,8 @@ Keep the existing local status report current. Finish this bounded recovery pass
                 activity_at=self.now if activity else old.get('activity_at', progress))
             diagnosis = reason(view)
             due = min([progress+self.options['stall_seconds']]
-                      + [w['since']+self.options['stall_seconds'] for w in waits.values()])
+                      + [waits[h['ticket']]['since']+self.options['stall_seconds']
+                         for h in view.get('dependency_waits',[])])
             if diagnosis:
                 if kick or self.now >= due:
                     candidates.append(dict(reason=diagnosis, no_completion_seconds=self.now-progress, view=view))

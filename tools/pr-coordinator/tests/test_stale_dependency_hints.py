@@ -128,6 +128,23 @@ class PartialStallTests(unittest.TestCase):
         self.tick(1040)
         self.assertIn('would launch',self.tick(1061)['status'])
 
+    def test_temporary_detail_loss_does_not_reset_a_blocked_handoff_clock(self):
+        self.model['_watchdog_tickets']={'p':[dict(key='SF-311',status='blocked')]}
+        self.tick(1000)
+        self.model['_watchdog_dependency_hints']['p']=[]
+        self.model['queue']['p']['done']=6
+        self.assertIn('workers active',self.tick(1040)['status'])
+        self.model['_watchdog_dependency_hints']['p']=[self.hint]
+        self.assertIn('would launch',self.tick(1061)['status'])
+
+    def test_confirmed_ticket_resolution_removes_its_old_wait_clock(self):
+        self.tick(1000)
+        self.model['_watchdog_dependency_hints']['p']=[]
+        self.model['_watchdog_tickets']={'p':[dict(key='SF-311',status='done')]}
+        self.tick(1040)
+        state=json.loads((self.root/'recovery-watchdog/state.json').read_text())
+        self.assertEqual(state['observations']['p']['dependency_waits'],{})
+
     def test_changed_handoff_restarts_its_own_grace(self):
         self.tick(1000)
         self.model['_watchdog_dependency_hints']['p'][0]['receipt']='c'*64
