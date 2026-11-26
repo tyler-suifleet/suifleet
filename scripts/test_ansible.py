@@ -57,7 +57,10 @@ inputs, rerun (changed=0), a configuration-only change timestamped within a
 second of the daemon's start (detected; retry restarts; rerun changed=0), an
 interrupted signing-socket unit-only update on the binary host (retry
 recreates the socket with its new mode and restarts signer and daemon; rerun
-changed=0), check mode on configured hosts with their SuiFleet units stopped
+changed=0), a unit-only update on the binary host's stopped but enabled units
+interrupted after the unit files land and before the daemon-reload (retry
+reloads systemd before starting them; rerun changed=0), check mode on
+configured hosts with their SuiFleet units stopped
 (one with only the signing socket active, so a socket-activated signer would
 show) and one journal not yet initialized, as an interrupted upgrade leaves them
 (succeeds; starts nothing; identity, journal and units untouched) followed by
@@ -391,12 +394,12 @@ class Harness:
         # passing, so crash cases run with a /proc/swaps fixture (see crash_fixture).
         self.crash_committed = self.variant_examples("examples-crash-committed", {"swap_policy.sh": self.SWAP_SOURCE_STUBS})
 
-    def variant_examples(self, name, edits):
-        """A test-only copy of the examples with each named function in edits replaced (each must occur once)."""
+    def variant_examples(self, name, edits, folder="files"):
+        """A test-only copy of the examples with each named text in edits replaced (each must occur once)."""
         copy = self.work / name
         shutil.copytree(EXAMPLES, copy)
         for script, changes in edits.items():
-            path = copy / "roles/suifleet/files" / script
+            path = copy / "roles/suifleet" / folder / script
             text = path.read_text()
             for old, new in changes:
                 assert text.count(old) == 1, f"{script} no longer defines {old.strip()!r} as expected"
@@ -1342,6 +1345,57 @@ class Harness:
         previous = dict(previous, **{name: state})
         return previous, rollout
 
+    RELOAD_TASK = ("- name: Reload systemd after unit changes\n  ansible.builtin.systemd_service:\n"
+                   "    daemon_reload: true\n  when: suifleet_units_copy is changed\n")
+    RELOAD_INTERRUPT = ("- name: Interrupted before the daemon-reload (test only)\n"
+                        "  ansible.builtin.fail: {msg: interrupted before the daemon-reload}\n"
+                        "  when: suifleet_units_copy is changed\n")
+
+    def pending_reload_on_stopped_units(self, vault, rollout, previous):
+        """Stopped, enabled units whose new unit files were installed but never loaded.
+
+        A run stops after installing the unit files and before its daemon-reload
+        while the units are stopped. On the retry the copies are unchanged and
+        no unit is active (so none is stale), but systemd still holds the old
+        definitions: the role must reload before it starts them."""
+        name = next(n for n, h in self.hosts.items() if h["profile"] == "systemd-binary")
+        container = self.hosts[name]["container"]
+        all_units = ["suifleet-enrollment.path", "suifleet.service", "suifleet-signer.service", "suifleet-signer.socket"]
+        assert previous[name]["socket_mode"] == "620", previous[name]["socket_mode"]
+        self.exec(container, "systemctl", "stop", *all_units)
+        for unit in ("suifleet-signer.socket", "suifleet-enrollment.path"):
+            enabled = self.exec(container, "systemctl", "is-enabled", unit, check=False).stdout.strip()
+            assert enabled == "enabled", (name, unit, "not already enabled", enabled)
+        # Back to the committed units (SocketMode=0660), with the reload replaced by a failure.
+        rollout = [*rollout, "-e", "suifleet_units_src=/units"]
+        committed = self.examples
+        self.examples = self.variant_examples("examples-reload-interrupt", {
+            "install_binary.yml": [(self.RELOAD_TASK, self.RELOAD_INTERRUPT)]}, folder="tasks")
+        try:
+            output, _ = self.ansible("unit update on stopped units: interrupted before daemon-reload", "/work/interrupted.yml",
+                                     "--limit", name, *vault, *rollout, expect_rc="nonzero")
+        finally:
+            self.examples = committed
+        assert "interrupted before the daemon-reload" in output, (name, "not interrupted at the daemon-reload")
+        state, _ = self.host_state(name)
+        report = state["running_inputs"]
+        for unit in all_units:
+            assert not report[unit]["active"] and not report[unit]["stale"], (name, unit, report[unit])
+        assert report["suifleet-signer.socket"]["reload_needed"], (name, "socket unit change not pending", report)
+        print("PASS stopped units with installed but unloaded unit files report a pending reload without being stale")
+        _, recap = self.ansible("retry with a pending reload on stopped units", "site.yml", "--limit", name, *vault, *rollout)
+        state, _ = self.host_state(name)
+        self.assert_converged(name, state)
+        assert recap[name]["changed"] > 0, (name, recap[name])
+        assert not any(r["reload_needed"] for r in state["running_inputs"].values()), (name, state["running_inputs"])
+        assert state["socket_mode"] == "660", (name, "socket started from the cached unit", state["socket_mode"])
+        for field in ("key_sha256", "address", "enrollment_sha256"):
+            assert state[field] == previous[name][field], (name, field)
+        print("PASS retry reloaded systemd before starting the stopped units; the socket uses the installed unit")
+        _, recap = self.ansible("rerun after the pending-reload retry", "site.yml", "--limit", name, *vault, *rollout)
+        self.unchanged(recap, "rerun after the pending-reload retry", hosts=[name])
+        return dict(previous, **{name: state}), rollout
+
     def stopped_host_preview(self, vault, rollout, previous):
         """Check mode on configured hosts whose units are stopped, one with its journal not yet initialized.
 
@@ -1497,6 +1551,7 @@ class Harness:
         after, rollout = self.interrupted_rollout(vault, upgrade, after)
         after, rollout = self.rapid_config_rollout(vault, rollout, after)
         after, rollout = self.socket_unit_update(vault, rollout, after)
+        after, rollout = self.pending_reload_on_stopped_units(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")
