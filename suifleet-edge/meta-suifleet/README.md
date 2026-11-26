@@ -74,7 +74,10 @@ repository's `docs/YOCTO_STANDALONE_VALIDATION.md`. Apart from the class, that
 standalone configuration requires OE-Core, meta-oe, the Scarthgap Rust mixin, and
 the systemd/usrmerge distro features listed above. It needs no other distro
 setting. The earlier SF-309 Kirkstone recipe builds used the integration layer. Its
-layer-check pass covered the export before the opt-in class. See
+layer-check pass covered the export before the opt-in class. SF-307 later built
+`suifleet`, `suifleet-node` and `suifleet-walrus-codec` on Kirkstone from the
+export with the class, the Kirkstone Rust mixin and no integration layer, from the
+public pins; see the core repository's `docs/validation/SF307.md`. See
 [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) for standalone
 validation of the public source distribution and RELEASE.md for release criteria.
 
