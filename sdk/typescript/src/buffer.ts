@@ -6,8 +6,14 @@
  * does not survive this process. Use a durable stream for data that must.
  *
  * Retry rules follow the daemon's outcome guarantees:
- * - publish IpcError: publication is all-or-nothing (inbox and durable spool
- *   backpressure store nothing), so resending cannot duplicate.
+ * - publish IpcError `full`: the daemon codes backpressure (a full inbox or
+ *   durable subscription queue) only when nothing was stored, so it is retried.
+ * - any other publish IpcError, including `request_failed`: generic, and it does
+ *   not promise nothing was stored. A failed durable-spool rollback, for
+ *   example, can leave a copy that the daemon delivers after a restart. It is
+ *   treated like an `unknown` outcome below. An older daemon that returns
+ *   `request_failed` for backpressure therefore stops the buffer instead of
+ *   being retried.
  * - stream_append IpcError with a stream protocol code: every coded refusal is
  *   raised before the record is stored. `full` and `unavailable` are retried;
  *   permanent codes (`invalid`, `retired`, `not-found`, ...) end the flush at
@@ -38,6 +44,9 @@ import { IpcError, MAX_PUBLISH_PAYLOAD, MAX_TIMER_DELAY_MS, TransportError, enco
 export type OutboundItem =
   | { readonly kind: 'publish'; readonly topic: string; readonly payload: JsonValue }
   | { readonly kind: 'stream'; readonly stream: string; readonly payload: JsonValue };
+
+/** Publish refusals that store nothing and may succeed later (interfaces/ipc-v1.json). */
+const RETRYABLE_PUBLISH_CODES = new Set(['full']);
 
 /** Stream refusals that store nothing and may succeed later. */
 const RETRYABLE_STREAM_CODES = new Set(['full', 'unavailable']);
@@ -80,7 +89,7 @@ export class BufferFullError extends Error {
 
 export class UncertainDeliveryError extends Error {
   readonly item: OutboundItem;
-  /** TransportError `unknown`, or a stream_append `request_failed` IpcError. */
+  /** TransportError `unknown`, a stream_append `request_failed`, or a publish IpcError other than `full`. */
   constructor(item: OutboundItem, cause: TransportError | IpcError) {
     super(`delivery of the head item is uncertain: ${cause.message}`, { cause });
     this.name = 'UncertainDeliveryError';
@@ -231,6 +240,11 @@ export class OutboundBuffer {
               throw new UncertainDeliveryError(entry.item, error);
             }
             if (!(error instanceof IpcError || error instanceof TransportError)) throw error;
+            if (entry.item.kind === 'publish' && error instanceof IpcError && !RETRYABLE_PUBLISH_CODES.has(error.code)) {
+              // Only `full` promises nothing was stored; never replay a generic failure.
+              this.uncertain = true;
+              throw new UncertainDeliveryError(entry.item, error);
+            }
             if (entry.item.kind === 'stream' && error instanceof IpcError) {
               // A generic failure may follow a stored append; never replay it blindly.
               if (error.code === 'request_failed') {

@@ -93,6 +93,11 @@ class TypeScriptSdk(unittest.TestCase):
         self.assertEqual(self.number('DATA_CHUNK_SIZE'), CONTRACT['limits']['data_put_chunk_bytes'])
         self.assertEqual(self.number('MAX_DATA_SIZE'), CONTRACT['limits']['data_put_max_bytes'])
 
+    def test_buffer_retries_only_coded_publish_backpressure(self):
+        buffer = (ROOT / 'sdk/typescript/src/buffer.ts').read_text()
+        codes = quoted(re.search(r'const RETRYABLE_PUBLISH_CODES = new Set\(\[(.*?)\]\)', buffer).group(1))
+        self.assertEqual(codes, CONTRACT['error_codes']['publish'])
+
     def test_request_field_order(self):
         fields = re.search(r'JSON\.stringify\(\{\s*(.*?)\}\)', self.source, re.S).group(1)
         self.assertEqual(re.findall(r'(\w+)(?=[:,])', fields.replace('PROTOCOL_VERSION', ''))[:5], CONTRACT['request_fields'])

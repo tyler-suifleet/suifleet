@@ -699,7 +699,7 @@ test('messages() abort of a sent receive throws unknown; idle or unsent abort en
 test('OutboundBuffer is bounded, ordered and retries only definite rejections', async () => {
   let full = 2;
   const server = await serve((r) => {
-    if (r.operation === 'publish' && full > 0) { full--; return { version: 1, ok: false, error: 'request_failed' }; }
+    if (r.operation === 'publish' && full > 0) { full--; return { version: 1, ok: false, error: 'full' }; }
     return ok(r.operation === 'publish' ? { delivered: 1, durable: 0, volatile: 0 } : { sequence: 0 });
   });
   const buffer = new OutboundBuffer(new Client({ socketPath: server.path, component: 'svc' }), { maxItems: 3, maxBytes: 64 });
@@ -711,7 +711,8 @@ test('OutboundBuffer is bounded, ordered and retries only definite rejections', 
   const partial = await buffer.flush({ maxAttempts: 2, retryDelayMs: 1 });
   assert.equal(partial.sent, 0);
   assert.equal(partial.pending, 3);
-  assert.ok(partial.error instanceof IpcError);
+  assert.ok(partial.error instanceof IpcError && partial.error.code === 'full');
+  assert.equal(buffer.blocked, false);
   assert.deepEqual(await buffer.flush({ retryDelayMs: 1 }), { sent: 3, pending: 0 });
   assert.deepEqual(server.requests.map((r) => [r.operation, r.payload]),
     [['publish', 1], ['publish', 1], ['publish', 1], ['stream_append', 2], ['publish', 3]]);
@@ -790,6 +791,35 @@ test('OutboundBuffer never replays a stream_append that may have been stored', a
   await server.close();
 });
 
+test('OutboundBuffer never replays a publish whose generic failure may follow a stored copy', async () => {
+  // A daemon whose durable spool rollback failed returns request_failed and is
+  // poisoned; after its restart the surviving queue copy counts as committed.
+  // Neither a later flush nor one spanning that restart may resend the head.
+  const path = join(directory, `s${counter++}.sock`);
+  for (const code of ['request_failed', 'some-future-code']) {
+    const first = await serve((r) => r.operation === 'publish' ? fail(code) : ok({ sequence: 0 }), path);
+    const buffer = new OutboundBuffer(new Client({ socketPath: path }));
+    buffer.publish('t', 'a');
+    buffer.publish('t', 'b');
+    await assert.rejects(buffer.flush({ maxAttempts: 5, retryDelayMs: 1 }),
+      (e) => e instanceof UncertainDeliveryError && e.item.payload === 'a' && e.cause instanceof IpcError && e.cause.code === code);
+    assert.equal(buffer.blocked, true);
+    assert.equal(buffer.pending, 2);
+    assert.deepEqual(first.requests.map((r) => r.payload), ['a'], 'an ambiguous publish was retried');
+    await first.close();
+    // The daemon restarts and now accepts everything: still no automatic resend.
+    const restarted = await serve(() => ok({ id: 1, delivered: 0, durable: 1, volatile: 0 }), path);
+    await assert.rejects(buffer.flush({ retryDelayMs: 1 }), /resolveUncertain/);
+    assert.throws(() => buffer.discardHead(), /resolveUncertain/);
+    assert.deepEqual(restarted.requests, []);
+    // The caller found the copy delivered after recovery and discards it.
+    buffer.resolveUncertain('discard');
+    assert.deepEqual(await buffer.flush({ retryDelayMs: 1 }), { sent: 1, pending: 0 });
+    assert.deepEqual(restarted.requests.map((r) => r.payload), ['b']);
+    await restarted.close();
+  }
+});
+
 test('OutboundBuffer retries transient stream codes and stops at once on permanent ones', async () => {
   const replies = ['full', 'unavailable', null, 'not-found'];
   const server = await serve(() => {
@@ -811,7 +841,7 @@ test('OutboundBuffer retries transient stream codes and stops at once on permane
 test('OutboundBuffer snapshots payloads at enqueue', async () => {
   let refuse = 1;
   const server = await serve((r) => {
-    if (r.operation === 'publish' && refuse > 0) { refuse--; return { version: 1, ok: false, error: 'request_failed' }; }
+    if (r.operation === 'publish' && refuse > 0) { refuse--; return { version: 1, ok: false, error: 'full' }; }
     return ok(r.operation === 'publish' ? { delivered: 1, durable: 0, volatile: 0 } : { sequence: 0 });
   });
   const buffer = new OutboundBuffer(new Client({ socketPath: server.path }), { maxBytes: 40 });
