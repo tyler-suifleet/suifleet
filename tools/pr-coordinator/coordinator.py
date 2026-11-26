@@ -243,6 +243,15 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                 and pr.get('_included_evidence', {}).get('head') == pr.get('baseRefOid'))
     source_base = pr['_included_source']['comparison'] if included else pr['baseRefOid']
     source_ref = pr['_included_source']['base_ref'] if included else 'main'
+    # Snapshot-local only: shared metadata is fetched once per run. No mutable
+    # authorization evidence survives this call, and proofs remain staged until
+    # each run is freshly rechecked after all its job evidence has been read.
+    snapshots, pending = {}, {}
+    def snapshot_read(path):
+        if path not in snapshots:
+            snapshots[path] = read(path)
+        return snapshots[path]
+
     for check in pr.get('statusCheckRollup', []):
         check.pop('_optional_skip', None)
         if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
@@ -272,7 +281,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                         or scope[0].get('sha') != OPTIONAL_CONTENT_SCOPE_BLOB):
                     continue
             path = f'{prefix}/actions/runs/{run_id}'
-            run = read(path)
+            run = snapshot_read(path)
             attempt = run['run_attempt']
             if (run['id'] != run_id or run['head_sha'] != pr['headRefOid']
                     or run['head_repository']['full_name'] != repository
@@ -283,14 +292,14 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                                and p['base']['sha'] == source_base and p['base']['ref'] == source_ref
                                for p in run['pull_requests'])):
                 continue
-            jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
+            jobs = snapshot_read(f'{path}/attempts/{attempt}/jobs?per_page=100')
             matches = [j for j in jobs['jobs'] if j['id'] == job_id]
             if (jobs['total_count'] != len(jobs['jobs']) or jobs['total_count'] > 100 or len(matches) != 1
                     or not any(j['name'] == prerequisite and j['status'] == 'completed' and j['conclusion'] == 'success'
                                for j in jobs['jobs'])):
                 continue
             job = matches[0]
-            verified = read(f'{prefix}/check-runs/{job_id}')
+            verified = snapshot_read(f'{prefix}/check-runs/{job_id}')
             if (job['run_id'] != run_id or job['head_sha'] != pr['headRefOid']
                     or job['name'] != check['name'] or job['status'] != 'completed' or job['conclusion'] != 'skipped'
                     or verified['id'] != job_id or verified['head_sha'] != pr['headRefOid']
@@ -298,16 +307,24 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                     or verified['name'] != check['name'] or verified['status'] != 'completed'
                     or verified['conclusion'] != 'skipped' or verified['details_url'] != check['detailsUrl']):
                 continue
-            fresh = read(path)
-            if fresh != run:
-                continue
-            check['_optional_skip'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'], url=check['detailsUrl'],
+            proof = dict(head=pr['headRefOid'], base=pr['baseRefOid'], url=check['detailsUrl'],
                                            workflow_blob=blobs[0]['sha'], run=run_id, job=job_id, attempt=attempt)
             if content:
-                check['_optional_skip']['scope_blob'] = OPTIONAL_CONTENT_SCOPE_BLOB
+                proof['scope_blob'] = OPTIONAL_CONTENT_SCOPE_BLOB
+            pending.setdefault(path, []).append((check, proof))
         except Exception:
             # Unknown/unavailable evidence stays blocking; do not leak API errors.
             continue
+    for path, proofs in pending.items():
+        try:
+            # Deliberately bypass snapshot_read: a rerun or changed/unavailable
+            # final response invalidates every staged proof from this run.
+            if read(path) != snapshots[path]:
+                continue
+        except Exception:
+            continue
+        for check, proof in proofs:
+            check['_optional_skip'] = proof
     return pr
 
 
@@ -2881,7 +2898,10 @@ def run_lane(config, args):
             fcntl.flock(startup, fcntl.LOCK_EX)
             coordinator = Coordinator(config, args.state)
         coordinator.lane = args.lane
-        interval = dict(completion=15, ci=120, integration=30).get(args.lane, args.interval)
+        # Integration reads complete live approval evidence. Poll once a minute
+        # rather than consuming the shared REST allowance twice as fast; the
+        # independent completion lane still publishes finished work every 15s.
+        interval = dict(completion=15, ci=120, integration=60).get(args.lane, args.interval)
         while os.getppid() == args.parent_pid:
             started = time.monotonic()
             from activation import atomic
