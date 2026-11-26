@@ -352,8 +352,24 @@ fn builder_status(error: sui_transaction_builder::Error) -> tonic::Status {
     tonic::Status::failed_precondition(format!("transaction simulation failed: {error}"))
 }
 
+/// An RPC failure that can be retried without treating the payload as invalid.
+#[derive(Debug)]
+pub struct RetryableRpcError(String);
+
+impl std::fmt::Display for RetryableRpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RetryableRpcError {}
+
 fn status(error: tonic::Status) -> anyhow::Error {
-    anyhow::anyhow!("{}: {}", error.code(), error.message())
+    let message = format!("{}: {}", error.code(), error.message());
+    if retryable(&error) {
+        return RetryableRpcError(message).into();
+    }
+    anyhow::Error::msg(message)
 }
 
 fn mask(paths: &[&str]) -> FieldMask {

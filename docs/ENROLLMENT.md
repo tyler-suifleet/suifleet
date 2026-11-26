@@ -99,7 +99,7 @@ manifest_sha256 = "<LOWERCASE_SHA256_OF_DEPLOYMENT_JSON>"
 Mount writable media before the service starts. Each configured location is
 the parent of the serial folder. Use a systemd drop-in for custom mount
 dependencies or write access outside `/boot`, `/media`, `/run/media` and `/mnt`.
-Yocto enables the service. Debian and RPM installations follow their existing
+The core Yocto kas profiles enable the service through `meta-suifleet-enrollment`. Custom systemd images using the public layer need the [same enrollment companion layer](CUSTOMER_YOCTO.md). Debian and RPM installations follow their existing
 opt-in policy. Enable `suifleet-first-boot-enrollment.service` after preparing
 the batch settings, and enable `suifleet.service` for later enrolled boots.
 
@@ -129,6 +129,19 @@ longer accepts. If automatic retries are exhausted, correct the cause and use
 `systemctl start suifleet-first-boot-enrollment.service` with the same media.
 Keep the existing device key and the original claim with the unit until the
 service reports completion.
+
+## Host provisioning media writer
+
+Use [Write one claim per medium](CUSTOMER_ENROLLMENT.md#write-one-claim-per-medium)
+to install credentials from the dApp tar archive onto a mounted FAT or exFAT
+volume. The writer reserves the claim in a host-side SQLite database before
+writing it, then stages and verifies the credential directory before renaming
+it to `enrollment/` on the same volume. The database records each serial,
+generated volume marker, assignment state and a SHA-256 fingerprint of the
+random claim seed for duplicate detection. Keep the database on a local
+filesystem outside the provisioning volume and preserve it across retries and
+across archives that might include the same claim. The tool refuses existing
+enrollment directories without a matching assignment.
 
 ## Address-free bulk enrollment in the dApp (SF-100)
 
