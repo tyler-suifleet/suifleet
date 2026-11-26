@@ -216,6 +216,9 @@ ENROLL_STOP = "                    echo SF304-STOPPED-BEFORE-PROMOTION >&2; exit
 ENROLL_TASK = "TASK [suifleet : Enroll and record the public IDs]"
 LOOKUP_TASK = "TASK [suifleet : Find this key's enrollment on chain]"
 LOOKUP_NONE = "found no enrollment for this device's key"
+ATTEMPT_DEPLOYMENT = "/etc/suifleet/.enrollment.json.partial.deployment"
+DEPLOYMENT_REFUSAL = "from an attempt that did not run under the configured deployment"
+MANIFEST_TASK = "    - name: Install the network manifest\n"
 # The role's tasks through enrollment, without configuration: the record is
 # promoted, and nothing else is written (used for the on-chain lookup case).
 ENROLL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: {name: suifleet, tasks_from: configure.yml}\n", 1)[0]
@@ -315,6 +318,14 @@ RECAP = re.compile(r"^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s
 # The role's self-check connects to the signing socket; a preview must never dispatch it.
 SELF_CHECK_TASK = "TASK [suifleet : Check configuration, identity and journal binding as the daemon user]"
 TASK_RESULT = re.compile(r"^(ok|changed|skipping|fatal|failed): \[([^\]]+)\]", re.M)
+
+
+def other_manifest(text):
+    """The manifest with its first object ID changed: well-formed, for another deployment."""
+    match = re.search("0x[0-9a-f]{64}", text)
+    assert match, "the manifest names no object ID"
+    flipped = "0x" + format(int(match.group(0), 16) ^ 1, "064x")
+    return text[:match.start()] + flipped + text[match.end():]
 
 
 def run(*args, **kwargs):
@@ -1420,7 +1431,11 @@ class Harness:
         assert sh(f"stat -c '%U:%G %a' {partial}").strip() == "root:root 600", name
         assert absent(record) and absent("/etc/suifleet/config.toml"), (name, "record or configuration written")
         assert absent("/run/suifleet-enroll"), (name, "claim staging left by the interrupted enrollment")
-        print("PASS enrollment interrupted after the transaction: receipt in the partial file, no record or configuration")
+        manifest_sha256 = sha256(self.work / "chain/deployment.json")
+        assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", (name, "attempt not bound to its manifest")
+        assert sh(f"stat -c '%U:%G %a' {ATTEMPT_DEPLOYMENT}").strip() == "root:root 600", name
+        print("PASS enrollment interrupted after the transaction: receipt in the partial file, bound to the manifest's"
+              " SHA-256; no record or configuration")
 
         # With the claim batch present, output the role cannot verify stops the run
         # before anything is staged or submitted, and is kept for manual recovery.
@@ -1460,6 +1475,8 @@ class Harness:
                 assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, label, root, "claim remains")
             print(f"PASS retry with a {label} stopped before staging or submitting, kept the file and erased the"
                   " abandoned staged claim and transfer copy")
+
+        self.receipt_for_other_deployment(name, vault, partial, record, receipt, manifest_sha256)
 
         # The same key can hold a valid enrollment under another deployment. A
         # stale or misselected batch folder (its deployment.json is not the
@@ -1504,6 +1521,7 @@ class Harness:
         assert statuses <= {"skipping"}, (name, "the enrollment command ran after a lost receipt", statuses)
         assert LOOKUP_TASK in output, (name, "the on-chain lookup did not run")
         assert absent(partial) and absent(staging) and absent(transfer), (name, "marker, lookup or claim copies left")
+        assert absent(ATTEMPT_DEPLOYMENT), (name, "the attempt's deployment binding was left after promotion")
         for root in ("/run", "/dev/shm"):
             assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, root, "claim remains")
         restored = json.loads(sh(f"cat {record}"))
@@ -1518,6 +1536,8 @@ class Harness:
         self.exec(container, "rm", "-f", record)
 
         self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", partial, input=receipt)
+        self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", ATTEMPT_DEPLOYMENT,
+                  input=manifest_sha256 + "\n")
         hidden = self.work / "chain/batch-hidden-for-recovery"
         self.batch.rename(hidden)
         try:
@@ -1537,8 +1557,92 @@ class Harness:
         assert state["enrollment"] == enrolled and state["address"] == address and state["key_sha256"] == key_sha256, \
             (name, "identity or enrollment changed by the recovery")
         assert absent(partial), (name, "receipt not promoted")
+        assert absent(ATTEMPT_DEPLOYMENT), (name, "the attempt's deployment binding was left after promotion")
         print("PASS retry restored the record from the receipt without the credential batch or a second submission;"
               " key, address and enrollment preserved (the record is verified on chain with the other enrollments)")
+
+    def receipt_for_other_deployment(self, name, vault, partial, record, receipt, manifest_sha256):
+        """A complete receipt for the key, but the inventory now selects another deployment (or none is recorded)."""
+        container = self.hosts[name]["container"]
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        other = self.work / "ctl/other-deployment.json"
+        other.write_text(other_manifest((self.work / "chain/deployment.json").read_text()))
+        assert sha256(other) != manifest_sha256
+        self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", partial, input=receipt)
+        cases = (("selection of another deployment", ["-e", "suifleet_manifest_src=/work/other-deployment.json"], True),
+                 ("no recorded deployment", [], False))
+        for label, extra, bound in cases:
+            if not bound:
+                self.exec(container, "rm", "-f", ATTEMPT_DEPLOYMENT)
+            for mode in (["--check", "--diff"], []):
+                kind = "check mode" if mode else "a retry"
+                output, _ = self.ansible(f"{kind} refuses a receipt with {label}", "site.yml", *mode, "--limit", name,
+                                         *vault, *extra, expect_rc="nonzero")
+                assert DEPLOYMENT_REFUSAL in output, (name, label, kind, "not refused by the deployment binding",
+                                                      output[-8000:])
+                assert ENROLL_TASK not in output, (name, label, kind, "the enrollment command was reached")
+                assert sh(f"cat {partial}") == receipt, (name, label, kind, "the receipt was changed")
+                assert sh(f"stat -c '%U:%G %a' {partial}").strip() == "root:root 600", (name, label, kind)
+                if bound:
+                    assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", (name, label, kind, "binding changed")
+                else:
+                    assert absent(ATTEMPT_DEPLOYMENT), (name, label, kind, "a binding was invented")
+                for path in (record, "/etc/suifleet/config.toml", "/etc/suifleet/signer.toml", "/etc/suifleet/deployment.json"):
+                    assert absent(path), (name, label, kind, "written", path)
+            print(f"PASS a complete receipt with {label} was kept and refused before any record or configuration was"
+                  " written (check mode and a retry)")
+        self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", ATTEMPT_DEPLOYMENT,
+                  input=manifest_sha256 + "\n")
+        other.unlink()
+
+    def manifest_changed_in_transfer(self, vault, rollout, previous):
+        """The controller manifest changes after preflight hashed it: the installed manifest stays as it was."""
+        race = self.work / "ctl/race-deployment.json"
+        replacement = self.work / "ctl/race-replacement.json"
+        real = (self.work / "chain/deployment.json").read_text()
+        replacement.write_text(other_manifest(real))
+        # A test-only copy that rewrites the controller file between preflight's hash and the copy.
+        examples = self.variant_examples("examples-manifest-race", {"configure.yml": [(
+            MANIFEST_TASK.replace("    ", "", 1),
+            "- name: SF304 test - the controller manifest changes after preflight hashed it\n"
+            "  delegate_to: localhost\n  become: false\n"
+            "  ansible.builtin.copy: {src: /work/race-replacement.json, dest: \"{{ suifleet_manifest_src }}\"}\n\n"
+            + MANIFEST_TASK.replace("    ", "", 1))]}, folder="tasks")
+        committed, self.examples = self.examples, examples
+        try:
+            for name, host in self.hosts.items():
+                container = host["container"]
+                listing = self.exec(container, "ls", "-A", "/etc/suifleet").stdout
+                installed = self.exec(container, "sha256sum", "/etc/suifleet/deployment.json").stdout.split()[0]
+                assert installed == sha256(self.work / "chain/deployment.json"), (name, "unexpected installed manifest")
+                race.write_text(real)
+                output, _ = self.ansible("the controller manifest changes between its hash and the transfer", "site.yml",
+                                         "--limit", name, *vault, *rollout, "-e", "suifleet_manifest_src=/work/race-deployment.json",
+                                         expect_rc="nonzero")
+                assert "failed to validate" in output, (name, "the copy was not refused by its digest check", output[-8000:])
+                assert race.read_text() != real, (name, "the controller file did not change during the run")
+                state, _ = self.host_state(name)
+                assert self.exec(container, "sha256sum", "/etc/suifleet/deployment.json").stdout.split()[0] == installed, \
+                    (name, "the installed manifest changed")
+                assert self.exec(container, "ls", "-A", "/etc/suifleet").stdout == listing, (name, "files left in /etc/suifleet")
+                assert state["config"].split("\n")[2] == "root:suifleet 640", (name, state["config"])
+                for field in ("main_pid", "signer_pid", "key_sha256", "enrollment_sha256"):
+                    assert state[field] == previous[name][field], (name, field, "changed by the refused manifest")
+                assert not state["ansible_tmp"], (name, "Ansible temporary files left", state["ansible_tmp"])
+                print(f"PASS {name}: a controller manifest changed after its hash was refused before replacing the"
+                      " installed manifest, which stayed byte for byte; no restart, no files left")
+        finally:
+            self.examples = committed
+            race.unlink(missing_ok=True)
+            replacement.unlink()
+        _, recap = self.ansible("rerun after the refused manifest change", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the refused manifest change")
 
     LITERAL_REFUSAL = "must be an absolute controller path without $"
 
@@ -2143,6 +2247,7 @@ class Harness:
         after = self.socket_drop_in_before_run(vault, rollout, after)
         after = self.drop_in_loaded_by_config_reload(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
+        self.manifest_changed_in_transfer(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")
         for name in self.hosts:
