@@ -56,7 +56,12 @@ The file set is the daemon build closure, computed from that commit's tree:
   neither a string nor a boolean stop the build. Today the only declaration is
   `[[bin]] path = "src/main.rs"`, already under `src/`;
 - each file named by a literal `include!`/`include_str!`/`include_bytes!` or a
-  `#[path]` module attribute, followed transitively.
+  `#[path]` module attribute, followed transitively. Every macro delimiter
+  (`(..)`, `[..]`, `{..}`), spacing, path prefix (`std::include!`), raw string
+  and a `path` inside `cfg_attr(..)` is recognized. An include or `#[path]`
+  whose argument is not one string literal without escapes (for example
+  `include!(concat!(env!("OUT_DIR"), ..))`) stops the build instead of being
+  skipped. The scan is lexical, so comments and strings count too.
 
 `src/`, `examples/` and each local crate directory are packaged whole, so Rust
 module files there are always present. Outside them only the declared files,
@@ -68,7 +73,7 @@ instead: give the module a `#[path]` or move the target under `src/`.
 The same check applies to a file outside those directories that a file inside
 them reaches through a literal include or `#[path]`, such as
 `#[path = "../tools/entry.rs"]` in `src/main.rs`.
-`cfg_attr` paths count as implicit. Inline `mod name { ... }` blocks are fine.
+A `cfg_attr` path is packaged but still counts as implicit for this check. Inline `mod name { ... }` blocks are fine.
 
 A missing workspace member, local path dependency, declared target file or include target, a path outside the
 repository, a symlink or submodule, or a runtime identity/state file name
