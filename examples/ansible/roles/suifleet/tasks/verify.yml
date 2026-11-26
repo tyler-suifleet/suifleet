@@ -9,8 +9,9 @@
 # preview. Check mode reads the daemon state once and reports it instead. The
 # self-check of the installed configuration, identity and journal binding
 # connects to the signing socket, which would socket-activate a stopped
-# signing service, so a preview runs it only while that service is already
-# running. The real run performs every check after the start.
+# signing service. A state read earlier in the preview cannot rule that out
+# (the service may stop between the read and the check), so the self-check
+# runs on real runs only. The real run performs every check after the start.
 - name: Read the configured state
   ansible.builtin.stat:
     path: /etc/suifleet/config.toml
@@ -37,18 +38,16 @@
       check_mode: false
       when: ansible_check_mode
 
-    - name: Report services the real run will start
+    - name: Report the service states the real run will check
       ansible.builtin.debug:
         msg: >-
           On {{ inventory_hostname }} suifleet.service is
           {{ suifleet_preview_active.stdout_lines[0] | default('unknown') }} and
           suifleet-signer.service is
           {{ suifleet_preview_active.stdout_lines[1] | default('unknown') }}. The real
-          run starts them and then checks that the daemon is active, its journal
-          initialized and its configuration accepted.
-      when: >-
-        ansible_check_mode
-        and suifleet_preview_active.stdout_lines != ['active', 'active']
+          run starts any stopped unit and then checks that the daemon is active,
+          its journal initialized and its configuration accepted.
+      when: ansible_check_mode
 
     # The journal stays on the host; only the exit status is reported.
     - name: Wait for the daemon journal to initialize
@@ -75,17 +74,15 @@
           see journalctl -u suifleet.service on the host.
       when: not ansible_check_mode
 
-    # Read-only, and it accepts a journal the daemon has not created yet. In
-    # check mode it runs only while the signing service is already running,
-    # so the preview never activates it through its socket.
+    # Read-only, and it accepts a journal the daemon has not created yet. It
+    # connects to the signing socket, so it never runs in check mode: a preview
+    # must not socket-activate the signing service, even one that stopped after
+    # the state read above.
     - name: Check configuration, identity and journal binding as the daemon user
       ansible.builtin.command:
         argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
       changed_when: false
-      check_mode: false
-      when: >-
-        not ansible_check_mode
-        or (suifleet_preview_active.stdout_lines | default([]))[1:2] == ['active']
+      when: not ansible_check_mode
 
     # The on-disk checks above do not prove the running units loaded these
     # inputs; this does. Every unit that was active on replaced inputs must now

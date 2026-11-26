@@ -148,12 +148,13 @@ Check mode reports pending installs, upgrades and enrollments without
 performing them; an upgrade preview leaves the installed bytes, package and
 running services untouched. Because a preview starts nothing, it reads the
 daemon state once and reports a stopped daemon instead of waiting for it, and
-skips the journal-initialization and running-inputs checks. It runs the
-read-only `--self-check` only while the signing service is already running,
-because the check connects to the signing socket and would otherwise start the
-service through socket activation. A configured host whose units are stopped (for
-example after an interrupted upgrade) therefore previews successfully, and the
-real run performs every post-start check.
+skips the journal-initialization and running-inputs checks. It never runs the
+read-only `--self-check`: the check connects to the signing socket and could
+start the signing service through socket activation, even one that was running
+when the preview read its state and stopped afterwards. A configured host whose
+units are stopped (for example after an interrupted upgrade) therefore previews
+successfully, and the real run performs every post-start check, including the
+self-check.
 
 **Interrupted runs.** Restarts are not tied only to the current run's changes.
 After the units pass their health checks, the role records a SHA-256 digest
@@ -494,8 +495,10 @@ The harness checks these phases:
 11. Check mode on configured hosts with their SuiFleet units stopped, as an
    interrupted upgrade leaves them, one host with only the signing socket
    still active and one host's journal not yet initialized: the preview
-   succeeds, starts no unit (no socket-activated signer) and leaves the identity,
-   enrollment, journal and applied record untouched. The real run then starts
+   succeeds, starts no unit (no socket-activated signer), dispatches no
+   self-check and leaves the identity, enrollment, journal and applied record
+   untouched. The converged and upgrade previews, where every signing service
+   is active when the preview reads it, also dispatch no self-check. The real run then starts
    and verifies the hosts, and a rerun reports `changed=0`.
 12. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
