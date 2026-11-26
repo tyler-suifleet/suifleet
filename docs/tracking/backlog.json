@@ -5835,6 +5835,88 @@
         "Focused local validation is recorded; merge without model review or hosted-CI approval wait."
       ],
       "validation": "Workflow parse, focused smoke-script checks and exact diff inspection; actual macOS runtime remains hosted evidence."
+    },
+    {
+      "key": "SF-308",
+      "title": "Validate standalone meta-suifleet builds without private integration-layer assumptions",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:enhancement",
+      "depends_on": [],
+      "paths": [
+        "docs",
+        "kas",
+        "scripts",
+        "suifleet-edge/meta-suifleet",
+        "suifleet-edge/meta-suifleet-integration"
+      ],
+      "resources": [],
+      "description": "Audit the distro/core recipe fixes currently supplied by meta-suifleet-integration and provide a proper upstream fix, documented dependency or narrowly scoped metadata solution for standalone consumers. Validate from an extracted/public layer checkout without the board/access/test-policy integration layer. Do not copy its login, SSH, network, image or hardware policy into the generic software layer. Agree on SF295 repository/export layout before implementation.",
+      "evidence": "User2026-11-24 explicitly requests all OpenEmbedded support tickets needed for submission. Existing SF295 is active and retains standalone repository/publication ownership. Existing release checklist records standalone build, source availability, optional codec parsing and integration-layer gaps.",
+      "acceptance": [
+        "Fresh Scarthgap and Wrynose builds execute suifleet tasks and package QA; optional archive packages are separately tested when enabled.",
+        "Document every remaining dependency or required distro setting; no hidden monorepo path, developer cache or unreviewed global append.",
+        "Run yocto-check-layer plus actual recipe/image execution with exact layer/compiler/build logs; parsing alone is not acceptance.",
+        "Coordinate implementation boundaries in SF295/#820; preserve existing claim ownership, normal tests/reviews, user authorship and deferred physical/mainnet acceptance."
+      ],
+      "validation": "Run the scoped clean-host OE fetch/parse/build/package/runtime checks and record exact versions/results. Distinguish parsing from task execution, old userspace from an old kernel, repository publication from index listing, and simulated boot from hardware acceptance."
+    },
+    {
+      "key": "SF-310",
+      "title": "Add standalone layer CI and tested release-branch maintenance",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:enhancement",
+      "depends_on": [
+        "SF-308"
+      ],
+      "paths": [
+        ".github",
+        "docs",
+        "kas",
+        "scripts",
+        "suifleet-edge/meta-suifleet"
+      ],
+      "resources": [],
+      "description": "Provide CI in the published meta-suifleet repository for layer checks, actual recipe/package builds, anonymous source fetch, license/SBOM QA, deterministic export and compatibility branches. Reuse the existing atomic/coordinator ownership model when registering the new repository; never make two models own the same implementation. Coordinate branch names and publication with SF295. Keep optional runtime checks separately selectable.",
+      "evidence": "User2026-11-24 explicitly requests all OpenEmbedded support tickets needed for submission. Existing SF295 is active and retains standalone repository/publication ownership. Existing release checklist records standalone build, source availability, optional codec parsing and integration-layer gaps.",
+      "acceptance": [
+        "CI validates each declared series and catches changed source/crate/checksum or branch compatibility drift.",
+        "Document supported branch policy, reviewed release tags and coordinated core/layer version updates.",
+        "No publishing credentials in PR jobs, device identities in caches, inherited core test SSH/login policy or unbounded heavyweight build concurrency.",
+        "Coordinate implementation boundaries in SF295/#820; preserve existing claim ownership, normal tests/reviews, user authorship and deferred physical/mainnet acceptance."
+      ],
+      "validation": "Run the scoped clean-host OE fetch/parse/build/package/runtime checks and record exact versions/results. Distinguish parsing from task execution, old userspace from an old kernel, repository publication from index listing, and simulated boot from hardware acceptance."
+    },
+    {
+      "key": "SF-312",
+      "title": "Verify Layer Index readiness and complete the submission evidence",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:enhancement",
+      "depends_on": [
+        "SF-308",
+        "SF-310"
+      ],
+      "paths": [
+        "docs",
+        "scripts",
+        "suifleet-edge/meta-suifleet"
+      ],
+      "resources": [],
+      "description": "Provide the final readiness/evidence gate for SF295. Verify the real public repository, root path, maintainer/contribution/license metadata, dependencies, real branches and parse-safe recipes. Prepare the exact Software-layer submission fields and verify the submitted/indexed entry under the existing authorized SF295 publication owner. Do not duplicate repository creation/submission or silently treat index listing as Yocto certification. Older series from SF309 are added only after validation; their later completion must not prevent listing already verified current profiles.\n\nUser direction 2026-11-26: start software preparation now instead of waiting on final evidence collection. SF-308 and SF-310 are the implemented prerequisites. SF-306 source-audit, SF-307 optional-runtime packaging and SF-311 customer-guide completion remain final submission verification inputs, not prerequisites to implementing the readiness reporter, metadata checks and submission artifact. Work from currently published immutable sources and current merged interfaces; report missing evidence explicitly. Before an actual index submission or claiming final readiness, recheck all three completed source tickets, advertised-series build evidence and the exact public layer revision. Record submitted versus indexed states and external maintainer approval honestly; do not mark this final acceptance complete merely because tooling is ready. No physical Pi is required for this preparation.",
+      "evidence": "User2026-11-24 explicitly requests all OpenEmbedded support tickets needed for submission. Existing SF295 is active and retains standalone repository/publication ownership. Existing release checklist records standalone build, source availability, optional codec parsing and integration-layer gaps.",
+      "acceptance": [
+        "A reproducible readiness report links actual anonymous fetch, layer-check and standalone build evidence for every advertised series.",
+        "Submission and public index record are recorded as distinct states with real URL/branch/dependency/maintainer fields and recipe indexing checked after processing.",
+        "Any external account/maintainer approval is recorded as the specific pending acceptance step; software preparation continues and no success is invented.",
+        "Coordinate implementation boundaries in SF295/#820; preserve existing claim ownership, normal tests/reviews, user authorship and deferred physical/mainnet acceptance.",
+        "Preparation tooling, metadata checks and submission artifacts can be implemented and reviewed independently; final submission readiness explicitly retains SF-306, SF-307 and SF-311 evidence and exact public-revision verification."
+      ],
+      "validation": "Run the scoped clean-host OE fetch/parse/build/package/runtime checks and record exact versions/results. Distinguish parsing from task execution, old userspace from an old kernel, repository publication from index listing, and simulated boot from hardware acceptance."
     }
   ]
 }
