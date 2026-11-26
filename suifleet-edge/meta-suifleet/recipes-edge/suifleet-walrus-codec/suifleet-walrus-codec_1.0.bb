@@ -73,18 +73,25 @@ python () {
         raise bb.parse.SkipRecipe('the Walrus codec runs only on the Linux AArch64 glibc suifleet-node runtime; %s is unsupported' % d.getVar('HOST_SYS'))
     if d.getVar('TCLIBC') != 'glibc':
         raise bb.parse.SkipRecipe('the Walrus codec runs only on the glibc suifleet-node runtime; TCLIBC=%s is unsupported' % d.getVar('TCLIBC'))
-    local = [entry[len('file://'):].split(';')[0]
-             for entry in (d.getVar('SRC_URI') or '').split() if entry.startswith('file://')]
-    # Record every searched path as a parse dependency, including absent ones
+    import os
+    local = [entry for entry in (d.getVar('SRC_URI') or '').split() if entry.startswith('file://')]
+    # Resolve local inputs exactly as the local fetcher will: its URL decoding,
+    # absolute paths, FILESPATH search and (BitBake 2.0) the DL_DIR fallback.
+    # Record every candidate as a parse dependency, absent ones included
     # (mtime 0). BitBake caches a skipped recipe with only these __depends, so
     # without them a cached skip would survive after the files are staged.
     missing = []
-    for name in local:
-        found, searched = bb.utils.which(d.getVar('FILESPATH'), name, history=True)
-        for path in searched:
-            bb.parse.mark_dependency(d, path)
-        if not found:
-            missing.append(name)
+    if local:
+        fetcher = bb.fetch2.Fetch(local, d, cache=False, localonly=True)
+        for entry in local:
+            ud = fetcher.ud[entry]
+            # Renamed from localpaths after BitBake 2.0.
+            search = getattr(ud.method, 'localfile_searchpaths', None) or ud.method.localpaths
+            searched = search(ud, d)
+            for path in searched:
+                bb.parse.mark_dependency(d, path)
+            if not searched or not os.path.exists(searched[-1]):
+                missing.append(entry[len('file://'):].split(';')[0])
     if missing:
         raise bb.parse.SkipRecipe('optional Walrus codec inputs not found: %s. Build them with scripts/package_walrus_codec.py at SUIFLEET_CODEC_SOURCE_REV (docs/YOCTO_PACKAGING.md) or leave suifleet-walrus-codec out of the image' % ', '.join(missing))
 }

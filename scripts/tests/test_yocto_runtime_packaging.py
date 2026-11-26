@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import types
 import unittest
+import urllib.parse
 import sys
 
 ROOT = Path(__file__).parents[2]
@@ -397,7 +398,37 @@ def which(path, item, history=False):
     return ('', searched) if history else ''
 
 
-def run_anonymous(text, depends=None, **values):
+class FakeLocal:
+    """Local fetcher of BitBake 2.8+: decoded URL path, absolute paths taken
+    as is, otherwise the FILESPATH candidates (the last one is localpath)."""
+    def localfile_searchpaths(self, ud, d):
+        if ud.decodedurl.startswith('/'):
+            return [ud.decodedurl]
+        return which(d.getVar('FILESPATH'), ud.decodedurl, history=True)[1]
+
+
+class FakeLocalV20:
+    """Local fetcher of BitBake 2.0: as above, then DL_DIR when FILESPATH lacks it."""
+    def localpaths(self, ud, d):
+        if ud.decodedurl.startswith('/'):
+            return [ud.decodedurl]
+        found, searched = which(d.getVar('FILESPATH'), ud.decodedurl, history=True)
+        if not found:
+            searched.append(os.path.join(d.getVar('DL_DIR'), ud.decodedurl))
+        return searched
+
+
+def fake_fetch(method):
+    class Fetch:
+        def __init__(self, urls, d, cache=True, localonly=False):
+            assert not cache and localonly and all(u.startswith('file://') for u in urls)
+            self.ud = {u: types.SimpleNamespace(url=u, method=method,
+                                                decodedurl=urllib.parse.unquote(u.split('://')[1].split(';')[0]))
+                       for u in urls}
+    return Fetch
+
+
+def run_anonymous(text, depends=None, method=None, **values):
     """Evaluate a recipe's parse-time guard; returns the skip reason or None.
     Paths passed to bb.parse.mark_dependency are appended to depends."""
     data = dict(HOST_ARCH='aarch64', HOST_SYS='aarch64-poky-linux', TCLIBC='glibc', FILESPATH='', SRC_URI='')
@@ -406,7 +437,8 @@ def run_anonymous(text, depends=None, **values):
     fake_bb = types.SimpleNamespace(
         parse=types.SimpleNamespace(SkipRecipe=SkipRecipe,
                                     mark_dependency=lambda d, path: depends.append(path)),
-        utils=types.SimpleNamespace(which=which))
+        utils=types.SimpleNamespace(which=which),
+        fetch2=types.SimpleNamespace(Fetch=fake_fetch(method or FakeLocal())))
     try:
         exec(anonymous_python(text), {'d': FakeData(**data), 'bb': fake_bb})
     except SkipRecipe as skipped:
@@ -449,6 +481,34 @@ class OptionalRuntimeParseTests(unittest.TestCase):
             for name in codec.ARTIFACTS[1:]:
                 expected += [os.path.join(first, name), os.path.join(second, name)]
             self.assertEqual(depends, expected)
+
+    # The fetcher decodes URI escapes and takes absolute paths as is.
+    def test_percent_encoded_absolute_inputs_are_resolved_decoded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, 'a dir').mkdir()
+            uri = ' '.join('file://%s/a%%20dir/%s;subdir=codec' % (tmp, n) for n in codec.ARTIFACTS)
+            for name in codec.ARTIFACTS:
+                Path(tmp, 'a dir', name).write_text('x')
+            depends = []
+            self.assertIsNone(run_anonymous(CODEC, depends=depends, SRC_URI=uri, FILESPATH='/nonexistent'))
+            self.assertEqual(depends, [os.path.join(tmp, 'a dir', n) for n in codec.ARTIFACTS])
+            os.unlink(Path(tmp, 'a dir', codec.ARTIFACTS[0]))
+            reason = run_anonymous(CODEC, SRC_URI=uri, FILESPATH='/nonexistent')
+        self.assertIn('a%%20dir/%s' % codec.ARTIFACTS[0], reason)
+        self.assertNotIn(codec.ARTIFACTS[1], reason)
+
+    def test_bitbake_2_0_dl_dir_fallback_is_followed(self):
+        with tempfile.TemporaryDirectory() as files, tempfile.TemporaryDirectory() as dl:
+            for name in codec.ARTIFACTS:
+                Path(dl, name).write_text('x')
+            depends = []
+            self.assertIsNone(run_anonymous(CODEC, depends=depends, method=FakeLocalV20(),
+                                            SRC_URI=self.LOCAL, FILESPATH=files, DL_DIR=dl))
+            self.assertEqual(depends, [p for n in codec.ARTIFACTS
+                                       for p in (os.path.join(files, n), os.path.join(dl, n))])
+            # The same files are not inputs to a fetcher without that fallback.
+            self.assertIn('optional Walrus codec inputs not found',
+                          run_anonymous(CODEC, SRC_URI=self.LOCAL, FILESPATH=files, DL_DIR=dl))
 
     def test_remote_codec_inputs_are_left_to_the_fetcher(self):
         remote = 'https://example.invalid/codec.tar.gz;subdir=codec'
