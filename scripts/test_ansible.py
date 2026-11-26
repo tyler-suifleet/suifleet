@@ -1486,6 +1486,10 @@ class Harness:
         # stops the run before the lookup: the empty marker stays, no record is
         # written, and nothing is staged on the host.
         self.mismatched_lookup_batch(name, vault, partial, record, staging, abandon_claim_copies)
+        # The batch and inventory agree with each other, but not with the
+        # deployment the attempt recorded (or none is recorded): the same key
+        # may hold a valid enrollment there, so the lookup must not run.
+        self.lookup_binding_mismatch(name, vault, partial, record, staging, abandon_claim_copies, manifest_sha256)
 
         # The enrollment above committed on chain. An empty file is that same
         # attempt with its response lost before anything was printed: the local
@@ -1855,6 +1859,73 @@ class Harness:
             cleanup()
         print("PASS an empty attempt marker with a batch root naming $SF304_BATCH_ALIAS (a valid sibling it would expand"
               " to) was refused before the batch was read or looked up, in check mode and a real run: marker kept")
+
+    LOOKUP_BINDING_REFUSAL = "empty /etc/suifleet/.enrollment.json.partial from an attempt that did not run under"
+
+    def lookup_binding_mismatch(self, name, vault, partial, record, staging, abandon_claim_copies, manifest_sha256):
+        """An empty attempt marker whose recorded deployment differs from a batch and inventory that agree.
+
+        Both supplied inputs select deployment B while the attempt is bound to
+        A, or no binding is recorded. The role must refuse before the on-chain
+        lookup (check mode too): no lookup, no promotion, no binding change."""
+        container = self.hosts[name]["container"]
+        folder = self.batch / "enrollment" / self.hosts[name]["serial"]
+        transfer = "/dev/shm/suifleet-claim.RefusedRun"
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", (name, "attempt binding not in place")
+        original = (folder / "deployment.json").read_text()
+        other = self.work / "ctl/lookup-other-deployment.json"
+        other.write_text(other_manifest((self.work / "chain/deployment.json").read_text()))
+        assert sha256(other) != manifest_sha256
+        (self.work / "ctl/enroll-only.yml").write_text(ENROLL_ONLY_PLAY)
+        cases = (("a batch and inventory for another deployment", ["-e", "suifleet_manifest_src=/work/lookup-other-deployment.json"],
+                  True),
+                 ("no recorded deployment", [], False))
+        try:
+            for label, extra, bound in cases:
+                if bound:
+                    (folder / "deployment.json").write_text(other.read_text())
+                else:
+                    (folder / "deployment.json").write_text(original)
+                    self.exec(container, "rm", "-f", ATTEMPT_DEPLOYMENT)
+                sh(f"umask 077 && : > {partial}")
+                for mode in (["--check", "--diff"], []):
+                    kind = "check mode" if mode else "a retry"
+                    marker = abandon_claim_copies() if not mode else None
+                    output, _ = self.ansible(f"{kind} refuses a lookup with {label}", "/work/enroll-only.yml", *mode,
+                                             "--limit", name, *vault, *extra, expect_rc="nonzero")
+                    assert self.LOOKUP_BINDING_REFUSAL in output, (name, label, kind, "not refused by the attempt binding",
+                                                                   output[-8000:])
+                    assert "Would look up" not in output, (name, label, kind, "reported a pending lookup")
+                    for task in (LOOKUP_TASK, "TASK [suifleet : Create the lookup directory]", ENROLL_TASK,
+                                 "TASK [suifleet : Promote the interrupted enrollment's receipt]"):
+                        assert task not in output, (name, label, kind, "reached", task)
+                    assert sh(f"stat -c '%s %U:%G %a' {partial}").strip() == "0 root:root 600", \
+                        (name, label, kind, "attempt marker changed")
+                    if bound:
+                        assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == manifest_sha256 + "\n", (name, label, kind, "binding changed")
+                    else:
+                        assert absent(ATTEMPT_DEPLOYMENT), (name, label, kind, "a binding was invented")
+                    for path in (record, "/etc/suifleet/config.toml", "/etc/suifleet/signer.toml"):
+                        assert absent(path), (name, label, kind, "written", path)
+                    if marker is not None:
+                        assert absent(staging) and absent(transfer), (name, label, "lookup staging or claim copies left")
+                        for root in ("/run", "/dev/shm"):
+                            assert not self.disk_hits(container, [marker], root, one_filesystem=False), \
+                                (name, label, root, "claim remains")
+                print(f"PASS an empty attempt marker with {label} was refused before the on-chain lookup (check mode"
+                      " and a retry): marker and binding unchanged, no lookup, record or configuration")
+        finally:
+            (folder / "deployment.json").write_text(original)
+            other.unlink()
+            self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", ATTEMPT_DEPLOYMENT,
+                      input=manifest_sha256 + "\n")
 
     def staging_after_record(self, vault, previous):
         """Enrollment stopped after the record's rename, before its cleanup: the staged claim is left behind."""

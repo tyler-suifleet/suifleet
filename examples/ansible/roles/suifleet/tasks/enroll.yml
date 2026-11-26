@@ -128,6 +128,37 @@
             - suifleet_enrollment_partial.stat.exists
             - suifleet_enrollment_partial.stat.size == 0
           block:
+            # The attempt recorded, durably and before anything was submitted,
+            # the SHA-256 of the manifest it enrolled under. The lookup and the
+            # record it restores belong to that deployment only: a batch and
+            # inventory that agree with each other but select another
+            # deployment could find this key's valid enrollment there and
+            # discard the evidence of the unresolved attempt. A missing
+            # binding cannot be attributed either. Refuse both before the
+            # lookup (check mode too), keeping the marker and the binding.
+            - name: Read the deployment the attempt that printed no receipt enrolled under
+              ansible.builtin.slurp:
+                src: "{{ suifleet_enrollment_deployment }}"
+              register: suifleet_enrollment_lookup_binding
+              failed_when: false
+
+            - name: Stop unless the attempt is bound to the configured deployment
+              ansible.builtin.assert:
+                that:
+                  - suifleet_enrollment_lookup_binding.content is defined
+                  - >-
+                    (suifleet_enrollment_lookup_binding.content | b64decode)
+                    == suifleet_manifest.stat.checksum ~ '\n'
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial
+                  from an attempt that did not run under the configured deployment
+                  ({{ suifleet_manifest_src }}, SHA-256 {{ suifleet_manifest.stat.checksum }}),
+                  or whose deployment is not recorded in {{ suifleet_enrollment_deployment }}.
+                  The role keeps the file and the binding, looks nothing up and writes no
+                  record or configuration. Select the deployment the attempt enrolled
+                  under, or settle it as in docs/ANSIBLE.md#recovery.
+
             - name: Require the batch folder for the lookup
               ansible.builtin.assert:
                 that:
@@ -229,17 +260,8 @@
 
             # The checks below verify it like any receipt; the file stays the
             # attempt marker until the record is promoted. The lookup ran
-            # under the verified suifleet_manifest_src, so the receipt is
-            # bound to it; the binding is written first.
-            - name: Bind the receipt the lookup found to the configured deployment
-              ansible.builtin.copy:
-                content: "{{ suifleet_manifest.stat.checksum }}\n"
-                dest: "{{ suifleet_enrollment_deployment }}"
-                owner: root
-                group: root
-                mode: "0600"
-              when: not ansible_check_mode
-
+            # under the verified suifleet_manifest_src, which the attempt's
+            # binding (checked above, and kept as it is) already names.
             - name: Keep the receipt the lookup found in the attempt marker
               ansible.builtin.copy:
                 content: "{{ suifleet_enrollment_lookup.stdout }}\n"

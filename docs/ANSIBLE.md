@@ -436,7 +436,12 @@ allows it). The role does not check the controller.
   receipt as the enrollment command. The role verifies that receipt like any
   other and restores the record from it, keeping the device's key and
   identity. It never enrolls again. The same key can hold an enrollment under
-  another deployment, so before the lookup the role requires the folder's
+  another deployment, so before the lookup the role first requires the
+  attempt's binding (`/etc/suifleet/.enrollment.json.partial.deployment`) to
+  name `suifleet_manifest_src`. A binding for another deployment, or none,
+  stops the run (check mode too) before anything is looked up, keeping the
+  empty file and the binding unchanged: select the deployment the attempt
+  enrolled under, or settle it by hand as below. It then requires the folder's
   `deployment.json` to be identical to `suifleet_manifest_src` (the manifest
   it installs beside the restored IDs) and its `enroll.toml`, as parsed TOML,
   to name that batch-relative manifest and `/etc/suifleet/device.key`, with no
@@ -733,7 +738,10 @@ The harness checks these phases:
    recorded its manifest's SHA-256; the complete receipt with another
    deployment selected in `suifleet_manifest_src`, and with no recorded
    deployment, is refused in check mode and a retry, keeping the receipt and
-   writing no record, `deployment.json`, `signer.toml` or `config.toml`. The
+   writing no record, `deployment.json`, `signer.toml` or `config.toml`. An
+   empty file whose binding names another deployment than a batch and
+   inventory that agree with each other, or with no binding, is refused before
+   the lookup (check mode and a retry), keeping the file and the binding. The
    on-chain lookup restores the record in a play stopped before configuration;
    its deployment binding must remain, and with that promoted, unconfigured
    record another deployment is refused (check mode and a retry), as is a
