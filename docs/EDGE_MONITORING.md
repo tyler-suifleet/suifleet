@@ -147,7 +147,8 @@ the two apart.
 |---|---|---|
 | `suifleet_up` | gauge | Current: 1 when the last console read succeeded. While 0, every device metric below is withdrawn instead of repeating stale values. |
 | `suifleet_device_healthy` | gauge | Current: the daemon's own judgement, 1 healthy / 0 degraded. |
-| `suifleet_device_health_reasons` | gauge | Current: number of degraded reasons. Reason texts are not exported. |
+| `suifleet_device_health_reasons` | gauge | Current: number of degraded reasons. The console lists at most 32 and summarizes the rest as one `N more problems` entry; that entry counts as N, so the total keeps rising as health worsens. Reason texts are not exported. |
+| `suifleet_device_health_reasons_truncated` | gauge | Current: 1 when the reason list exceeded the console limit without a recognizable summary, so the reason count is a lower bound. 0 with the current daemon. |
 | `suifleet_device_uptime_seconds` | gauge | Current: daemon uptime. |
 | `suifleet_device_pending_receipts` | gauge | Current: outcomes not yet reported on chain. |
 | `suifleet_device_sync_consecutive_failures` | gauge | Current: failed chain synchronizations in a row. |
