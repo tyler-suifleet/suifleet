@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "description": "Cost-indexed public prices (prototype). Each configuration's published per-device price is the larger of its list price (price table) and the subscription-policy floor computed from the current network-cost basis. List prices are the minimum; prices rise only when current SUI costs push the floor above list. Customers keep their price for their term; renewals follow the policy's repricing trigger.",
+  "reference_devices": 1000,
+  "quote_basis": {
+    "as_of": "2026-10-23",
+    "sui_usd": "0.987",
+    "reference_gas_price_mist": 100
+  },
+  "current_basis": {
+    "kind": "estimated",
+    "as_of": "2026-10-23",
+    "sui_usd": "0.987",
+    "reference_gas_price_mist": 100,
+    "sources": [
+      "Quote basis from docs/business/subscription-example.json: SUI $0.987 (CoinGecko 2026-10-23), Mainnet reference gas price 100 MIST (epoch 1291)",
+      "Update with: python3 scripts/cost_indexed_pricing.py --set-basis ... then python3 scripts/subscription_pricing.py --generate-site"
+    ]
+  },
+  "scaling": "SUI-sensitive cost scales with (current SUI/USD ÷ quote SUI/USD) × (current reference gas price ÷ quote reference gas price). Scaling storage gas with the reference gas price overstates cost, so floors err high. Walrus cost is held at the basis; policy floors stress it separately.",
+  "configurations": {
+    "essentials": {
+      "sui_sensitive_usd_per_device": "0.0060",
+      "walrus_usd_per_device": "0.0030",
+      "sources": [
+        "docs/business/SUBSCRIPTION_PRICING.md cost split at 1,000 devices: SUI-sensitive $6.00, Walrus $3.00 (defaults: daily health, weekly logs kept 6 weeks)"
+      ]
+    },
+    "extended_logs": {
+      "sui_sensitive_usd_per_device": "0.0137",
+      "walrus_usd_per_device": "0.0293",
+      "sources": [
+        "Essentials plus daily log archives (+$0.028, docs/BUSINESS_PLAN.md settings table) and 6-month retention (+$0.006)",
+        "Daily archives split like weekly archives in SUBSCRIPTION_PRICING.md (SUI anchors/non-rebated storage $1.10 of $4.00 per 1,000 devices): +$0.0077 SUI, +$0.0203 Walrus; longer retention is Walrus storage"
+      ]
+    },
+    "full_year_logs": {
+      "sui_sensitive_usd_per_device": "0.0137",
+      "walrus_usd_per_device": "0.0373",
+      "sources": [
+        "Essentials plus daily log archives (+$0.028) and 1-year retention (+$0.014, docs/BUSINESS_PLAN.md settings table); split as for extended_logs"
+      ]
+    }
+  }
+}

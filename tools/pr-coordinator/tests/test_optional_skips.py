@@ -47,6 +47,7 @@ class OptionalSkips(unittest.TestCase):
         for workflow_blob in (
             "9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0",
             "639a9fdfe76247089caf70f2fbf754bb6c3046ad",
+            "f86e2c737f1891f9aba0ad6e86050bae6fe3e84b",
         ):
             for name in c.OPTIONAL_DEPLOYMENT_JOBS:
                 with self.subTest(name=name, workflow_blob=workflow_blob):
@@ -139,3 +140,135 @@ class OptionalSkips(unittest.TestCase):
         self.assertIsNone(c.checks_blocker(self.pr))
         self.pr['statusCheckRollup'].append(dict(__typename='CheckRun',name='security',status='COMPLETED',conclusion='SKIPPED'))
         self.assertIsNotNone(c.checks_blocker(self.pr))
+
+
+    def setup_content(self, name='check'):
+        self.setup_evidence(name)
+        self.run['path'] = c.OPTIONAL_CONTENT_WORKFLOW
+        self.build['name'] = 'scope'
+        self.tree['tree'] = [
+            dict(path=c.OPTIONAL_CONTENT_WORKFLOW, type='blob', sha=c.OPTIONAL_CONTENT_BLOB),
+            dict(path='scripts/content_scope.py', type='blob', sha=c.OPTIONAL_CONTENT_SCOPE_BLOB)]
+
+    def test_content_skips_require_pinned_scope_and_run_provenance(self):
+        for name in c.OPTIONAL_CONTENT_JOBS:
+            self.setup_content(name)
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+            self.annotate()
+            self.assertIsNone(c.checks_blocker(self.pr))
+            self.assertEqual(self.check['conclusion'], 'SKIPPED')
+            self.check['_optional_skip']['scope_blob'] = 'wrong'
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+
+    def test_content_unknown_scope_and_required_security_skips_remain_blocking(self):
+        mutations = [
+            lambda: self.tree['tree'][1].update(sha='changed-scope'),
+            lambda: self.tree['tree'].pop(),
+            lambda: self.tree['tree'][0].update(sha='changed-workflow'),
+            lambda: self.build.update(conclusion='skipped'),
+            lambda: self.build.update(name='build'),
+            lambda: self.run.update(event='workflow_dispatch'),
+            lambda: self.run.update(head_sha='stale'),
+            lambda: self.run['pull_requests'][0]['base'].update(sha='stale'),
+            lambda: self.verified['app'].update(slug='foreign'),
+            lambda: self.jobs.update(total_count=101),
+        ]
+        for mutate in mutations:
+            self.setup_content(); mutate(); self.annotate()
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+        self.setup_content(); self.annotate()
+        self.pr['statusCheckRollup'].append(dict(__typename='CheckRun',name='security',
+            status='COMPLETED',conclusion='SKIPPED'))
+        self.assertIsNotNone(c.checks_blocker(self.pr))
+        self.pr['statusCheckRollup'].pop()
+        self.pr['_testnet_required'] = True
+        self.assertIsNotNone(c.checks_blocker(self.pr))
+
+    def test_current_workflows_and_classifier_match_the_reviewed_pins(self):
+        import hashlib
+        from pathlib import Path
+        root = Path(c.__file__).resolve().parents[2]
+        if not (root/'.github/workflows').is_dir():
+            self.skipTest('Runtime-only activation snapshot omits CI sources; repository CI verifies their pins')
+        def blob(name):
+            data = (root/name).read_bytes()
+            return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+        self.assertIn(blob(c.OPTIONAL_DEPLOYMENT_WORKFLOW), c.OPTIONAL_DEPLOYMENT_BLOBS)
+        self.assertEqual(blob(c.OPTIONAL_CONTENT_WORKFLOW), c.OPTIONAL_CONTENT_BLOB)
+        self.assertEqual(blob('scripts/content_scope.py'), c.OPTIONAL_CONTENT_SCOPE_BLOB)
+
+    def setup_multiple_deployment_jobs(self):
+        self.setup_evidence()
+        template_check, template_job, template_verified = map(copy.deepcopy,
+            (self.check, self.job, self.verified))
+        self.pr['statusCheckRollup'] = []
+        self.jobs['jobs'] = [self.build]
+        for job_id, name in enumerate(sorted(c.OPTIONAL_DEPLOYMENT_JOBS), 10):
+            url = f'https://github.com/owner/repo/actions/runs/1/job/{job_id}'
+            check = dict(template_check, name=name, detailsUrl=url)
+            job = dict(template_job, id=job_id, name=name)
+            verified = dict(template_verified, id=job_id, name=name, details_url=url)
+            self.pr['statusCheckRollup'].append(check)
+            self.jobs['jobs'].append(job)
+            self.data[f'repos/owner/repo/check-runs/{job_id}'] = verified
+        self.jobs['total_count'] = len(self.jobs['jobs'])
+
+    def test_shared_run_reads_are_deduplicated_only_inside_one_snapshot(self):
+        self.setup_multiple_deployment_jobs()
+        calls = []
+        def read(path):
+            calls.append(path)
+            return copy.deepcopy(self.data[path])
+        for iteration in range(2):
+            before = len(calls)
+            self.annotate(read)
+            self.assertIsNone(c.checks_blocker(self.pr))
+            current = calls[before:]
+            self.assertEqual(current.count(self.path), 2)  # initial + fresh final
+            self.assertEqual(current.count(self.path+'/attempts/1/jobs?per_page=100'), 1)
+            self.assertEqual(len(current), 3 + len(c.OPTIONAL_DEPLOYMENT_JOBS))
+            self.assertEqual(current[-1], self.path)
+        self.assertEqual(len(calls), 12)  # original per-job implementation used 24
+
+    def test_changed_or_unavailable_final_run_discards_all_job_proofs(self):
+        for mode in ('changed', 'unavailable'):
+            self.setup_multiple_deployment_jobs()
+            calls = []
+            def read(path):
+                calls.append(path)
+                if path == self.path and calls.count(path) == 2:
+                    if mode == 'unavailable':
+                        raise RuntimeError('private API diagnostic')
+                    return dict(copy.deepcopy(self.run), run_attempt=2)
+                return copy.deepcopy(self.data[path])
+            self.annotate(read)
+            self.assertIsNotNone(c.checks_blocker(self.pr))
+            self.assertTrue(all('_optional_skip' not in x for x in self.pr['statusCheckRollup']))
+            self.assertEqual(calls.count(self.path), 2)
+
+    def test_final_run_failure_does_not_discard_an_independent_run(self):
+        self.setup_multiple_deployment_jobs()
+        checks1 = self.pr['statusCheckRollup']
+        path1, data1, tree1 = self.path, copy.deepcopy(self.data), copy.deepcopy(self.tree)
+        self.setup_content()
+        check2 = self.check
+        check2['detailsUrl'] = 'https://github.com/owner/repo/actions/runs/9/job/99'
+        self.run.update(id=9, check_suite_id=30)
+        self.job.update(id=99, run_id=9)
+        self.verified.update(id=99, details_url=check2['detailsUrl'], check_suite={'id':30})
+        path2 = 'repos/owner/repo/actions/runs/9'
+        data = dict(data1)
+        data.update({path2:self.run, path2+'/attempts/1/jobs?per_page=100':self.jobs,
+                     'repos/owner/repo/check-runs/99':self.verified})
+        tree = dict(truncated=False, tree=tree1['tree']+self.tree['tree'])
+        self.pr['statusCheckRollup'] = checks1+[check2]
+        calls=[]
+        def read(path):
+            calls.append(path)
+            if path == path1 and calls.count(path) == 2:
+                raise RuntimeError('first run unavailable')
+            return copy.deepcopy(data[path])
+        c.annotate_optional_skips(self.pr,'owner/repo',read,lambda _:copy.deepcopy(tree))
+        self.assertTrue(all('_optional_skip' not in x for x in checks1))
+        self.assertIn('_optional_skip',check2)
+        self.assertEqual(calls.count(path2),2)
