@@ -2,8 +2,10 @@
 
 Runs the documented shell block as written, with its fixed paths redirected
 to a scratch directory and runuser/suifleet/install replaced by stubs. A
-failed or foreign lookup must install nothing and keep the attempt marker.
+failed or foreign lookup must install nothing and keep the attempt marker, and
+a record is restored only beside the deployment the lookup ran under.
 """
+import hashlib
 import json
 import os
 import re
@@ -21,6 +23,16 @@ RECEIPT = {
     "owner_cap_id": "0x" + "3" * 64,
     "digest": "4" * 44,
 }
+FLEET = {"schema_version": 1, "network": "testnet", "chain_identifier": "4c78adac",
+         "rpc_url": "https://fleet.example", "rpc_urls": [], "call_package_id": "0x" + "5" * 64}
+OTHER = {**FLEET, "call_package_id": "0x" + "6" * 64}
+ENROLL = ('manifest_path = "deployment.json"\npolicy_id = "0x7"\nclaim_key_path = "claim.key"\n'
+          'name = "pi-1"\nkeypair_path = "/etc/suifleet/device.key"\n')
+LINE = json.dumps(RECEIPT, separators=(",", ":")) + "\n"
+
+
+def digest(manifest):
+    return hashlib.sha256(json.dumps(manifest).encode()).hexdigest()
 
 
 def procedure():
@@ -39,7 +51,7 @@ STUBS = {
                'exec /usr/bin/install $args "$1" "$2"\n',
 }
 SUIFLEET = ('#!/bin/sh\ncase "$1" in\n--derive-address) echo "$FAKE_ADDRESS";;\n'
-            '--find-enrollment) printf %s "$FAKE_RECEIPT"; exit "$FAKE_RC";;\n*) exit 64;;\nesac\n')
+            '--find-enrollment) : > "$FAKE_LOOKED_UP"; printf %s "$FAKE_RECEIPT"; exit "$FAKE_RC";;\n*) exit 64;;\nesac\n')
 
 
 class ManualRecovery(unittest.TestCase):
@@ -51,16 +63,25 @@ class ManualRecovery(unittest.TestCase):
             d.mkdir()
         (self.etc / "device.key").write_text("k")
         (self.etc / ".enrollment.json.partial").write_text("")
-        (self.lookup / "enroll.toml").write_text("")
+        self.write_enroll(ENROLL)
+        (self.lookup / "fleet.json").write_text(json.dumps(FLEET))
+        (self.lookup / "deployment.json").write_text(json.dumps(FLEET))
+        self.binding = self.etc / ".enrollment.json.partial.deployment"
+        self.looked_up = self.tmp / "looked-up"
         for name, body in {**STUBS, "suifleet": SUIFLEET}.items():
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
+
+    def write_enroll(self, text):
+        # The procedure's /etc/suifleet paths, including the key path it requires, are redirected.
+        (self.lookup / "enroll.toml").write_text(text.replace("/etc/suifleet", str(self.etc)))
 
     def run_procedure(self, receipt, rc=0):
         script = (procedure().replace("/etc/suifleet", str(self.etc)).replace("/run/lookup", str(self.lookup))
                   .replace("/usr/bin/suifleet", str(self.bin / "suifleet")))
         env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "FAKE_ADDRESS": ADDRESS,
-               "FAKE_RECEIPT": receipt, "FAKE_RC": str(rc)}
+               "FAKE_RECEIPT": receipt, "FAKE_RC": str(rc),
+               "FAKE_LOOKED_UP": str(self.looked_up)}
         return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True)
 
     def assert_untouched(self, result):
@@ -99,14 +120,74 @@ class ManualRecovery(unittest.TestCase):
         self.assertFalse((self.etc / ".enrollment.json.restore").exists())
         self.assertFalse(self.lookup.exists())
 
-    def test_attempt_deployment_binding_is_kept(self):
+    def test_matching_attempt_binding_is_kept(self):
         # The next run configures the host only under the deployment the attempt enrolled under.
-        binding = self.etc / ".enrollment.json.partial.deployment"
-        binding.write_text("f" * 64 + "\n")
-        result = self.run_procedure(json.dumps(RECEIPT, separators=(",", ":")) + "\n")
+        self.binding.write_text(digest(FLEET) + "\n")
+        result = self.run_procedure(LINE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(binding.read_text(), "f" * 64 + "\n")
+        self.assertEqual((self.etc / "enrollment.json").read_text(), LINE)
+        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
 
+    def test_binding_for_another_deployment_is_refused_before_the_lookup(self):
+        # The attempt enrolled under A; restoring with B's lookup and manifest would pair
+        # B's Device and DeviceCap with A's binding.
+        self.binding.write_text(digest(OTHER) + "\n")
+        result = self.run_procedure(LINE)
+        self.assert_untouched(result)
+        self.assertIn("another deployment", result.stderr)
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+        self.assertEqual(self.binding.read_text(), digest(OTHER) + "\n")
+
+    def test_unreadable_binding_is_refused(self):
+        self.binding.write_text("")
+        self.assert_untouched(self.run_procedure(LINE))
+        self.assertEqual(self.binding.read_text(), "")
+
+    def test_unconfigured_host_without_binding_records_the_lookup_deployment(self):
+        result = self.run_procedure(LINE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+        self.assertEqual(self.binding.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(Path(str(self.binding) + ".new").exists())
+
+    def test_configured_host_without_binding_gets_none(self):
+        (self.etc / "config.toml").write_text("")
+        result = self.run_procedure(LINE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.binding.exists())
+
+    def test_failed_lookup_records_no_binding(self):
+        self.assert_untouched(self.run_procedure("", rc=3))
+        self.assertFalse(self.binding.exists())
+
+    def test_lookup_manifest_may_differ_only_in_node_urls(self):
+        (self.lookup / "deployment.json").write_text(
+            json.dumps({**FLEET, "rpc_url": "https://archive.example", "rpc_urls": ["https://archive.example"]}))
+        result = self.run_procedure(LINE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+
+    def test_lookup_under_another_deployment_is_refused(self):
+        (self.lookup / "deployment.json").write_text(json.dumps(OTHER))
+        self.assert_untouched(self.run_procedure(LINE))
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+        self.assertFalse(self.binding.exists())
+
+    def test_duplicate_manifest_key_is_refused(self):
+        text = json.dumps(FLEET)[:-1] + ', "call_package_id": "0x' + "6" * 64 + '"}'
+        (self.lookup / "deployment.json").write_text(text)
+        self.assert_untouched(self.run_procedure(LINE))
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+
+    def test_enroll_config_for_another_manifest_or_key_is_refused(self):
+        for enroll in (ENROLL.replace('"deployment.json"', '"other.json"'),
+                       ENROLL.replace("/etc/suifleet/device.key", "/tmp/key"),
+                       ENROLL + '\n[signer]\nsocket = "/run/s"\n'):
+            with self.subTest(enroll=enroll):
+                self.write_enroll(enroll)
+                self.assert_untouched(self.run_procedure(LINE))
+                self.assertFalse(self.looked_up.exists(), "the lookup ran")
+                self.assertFalse(self.binding.exists())
 
 if __name__ == "__main__":
     unittest.main()

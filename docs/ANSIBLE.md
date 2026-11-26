@@ -395,9 +395,12 @@ allows it). The role does not check the controller.
   anything is submitted. A receipt is promoted only while
   `suifleet_manifest_src` still has those bytes. If the inventory now selects
   another deployment, or no deployment is recorded, the run keeps the receipt
-  and stops before writing a record or any configuration (check mode too):
-  select the deployment the device enrolled under, or restore the record under
-  the selected one by hand as below.
+  and stops before writing a record or any configuration (check mode too).
+  With another deployment recorded, select the deployment the device enrolled
+  under: the receipt and the binding belong to it, and the procedure below
+  refuses to restore a record under any other. With none recorded, restore the
+  record under the selected deployment by hand as below; the lookup checks that
+  the device enrolled under it, and the procedure records it.
 
   The binding outlives the promotion: it stays beside
   `/etc/suifleet/enrollment.json` until the run has installed `config.toml`,
@@ -446,15 +449,40 @@ allows it). The role does not check the controller.
   To restore a record by hand (for example after a truncated receipt, or a
   configured host with no record), first make sure no play targets the host.
   Copy the host's `enroll.toml` and `deployment.json`, but not `claim.key`,
-  into `/run/lookup`, a directory the key holder can read, and run this as
-  root. The `deployment.json` must describe the fleet's deployment, the one in
-  `suifleet_manifest_src` (only its node URLs may differ, as below): the
-  restored IDs are used with that manifest.
+  into `/run/lookup`, a directory the key holder can read, together with a
+  copy of the manifest `suifleet_manifest_src` names, as `fleet.json`, and run
+  this as root. The restored IDs are used with `fleet.json`, so the lookup's
+  `deployment.json` must describe the same deployment (only its node URLs,
+  `rpc_url` and `rpc_urls`, may differ, as below), and `enroll.toml` must use
+  it and the device's own key.
 
   ```sh
   sh -eu <<'EOF'
   dir=/run/lookup
+  binding=/etc/suifleet/.enrollment.json.partial.deployment
   test ! -e /etc/suifleet/enrollment.json
+  want=$(sha256sum < "$dir/fleet.json" | cut -c1-64)
+  if test -e "$binding" && test "$(cat "$binding")" != "$want"; then
+    echo "the attempt enrolled under another deployment: use its manifest as fleet.json" >&2
+    exit 1
+  fi
+  python3 -I -c 'import json, sys, tomllib
+  def unique(pairs):
+      if len({k for k, _ in pairs}) != len(pairs):
+          sys.exit("duplicate key in a manifest")
+      return dict(pairs)
+  manifests = [json.load(open(sys.argv[1] + name), object_pairs_hook=unique)
+               for name in ("/deployment.json", "/fleet.json")]
+  for m in manifests:
+      if not isinstance(m, dict):
+          sys.exit("not a manifest")
+      m.pop("rpc_url", None), m.pop("rpc_urls", None)
+  if manifests[0] != manifests[1]:
+      sys.exit("deployment.json describes another deployment than fleet.json")
+  c = tomllib.load(open(sys.argv[1] + "/enroll.toml", "rb"))
+  if (c.get("manifest_path") != "deployment.json" or "signer" in c
+          or c.get("keypair_path") != "/etc/suifleet/device.key"):
+      sys.exit("enroll.toml must use deployment.json and /etc/suifleet/device.key")' "$dir"
   holder=$(stat -c %U /etc/suifleet/device.key)
   address=$(runuser -u "$holder" -- /usr/bin/suifleet --derive-address /etc/suifleet/device.key)
   runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment "$dir/enroll.toml" > "$dir/receipt.json"
@@ -466,6 +494,11 @@ allows it). The role does not check the controller.
         and all(re.fullmatch("0x[0-9a-f]{64}", str(i)) for i in ids)
         and re.fullmatch("[1-9A-HJ-NP-Za-km-z]{32,44}", str(r.get("digest", ""))))
   sys.exit(0 if ok else "not a complete receipt for " + sys.argv[2])' "$dir/receipt.json" "$address"
+  if test ! -e "$binding" && test ! -e /etc/suifleet/config.toml; then
+    (umask 077 && printf '%s\n' "$want" > "$binding.new")
+    sync -f "$binding.new"
+    mv "$binding.new" "$binding"
+  fi
   install -m 0640 -o root -g suifleet "$dir/receipt.json" /etc/suifleet/.enrollment.json.restore
   sync -f /etc/suifleet/.enrollment.json.restore
   ln /etc/suifleet/.enrollment.json.restore /etc/suifleet/enrollment.json
@@ -474,14 +507,22 @@ allows it). The role does not check the controller.
   EOF
   ```
 
-  It installs the record, and only then removes the attempt marker, after the
-  lookup succeeded and printed a complete receipt for the device's own key.
-  It keeps the attempt's deployment binding, so the next run configures the
-  host only under the deployment that attempt enrolled under.
-  Any failure (a lookup that found nothing, a receipt for another key, an
-  existing record) stops it with a non-zero status, installs nothing and
-  keeps `/etc/suifleet/.enrollment.json.partial`. The next run checks the
-  record against the device key again.
+  Before it changes anything it refuses an attempt binding for another
+  deployment than `fleet.json`, a lookup `deployment.json` that differs from
+  `fleet.json` in more than its node URLs, and an `enroll.toml` that names
+  another manifest or key or has a `[signer]` table. It then installs the
+  record, and only then removes the attempt marker, after the lookup
+  succeeded and printed a complete receipt for the device's own key. An
+  existing binding (necessarily for `fleet.json`) is kept; on an unconfigured
+  host without one it first records `fleet.json`'s SHA-256 as the binding, so
+  the next run configures the host only under the deployment the lookup found
+  the enrollment in. A configured host gets no binding, as after a completed
+  run. Any failure (a conflicting binding or folder, a lookup that found
+  nothing, a receipt for another key, an existing record) stops it with a
+  non-zero status, installs nothing and keeps
+  `/etc/suifleet/.enrollment.json.partial`. The next run checks the record
+  against the device key and the binding against the configured deployment
+  again.
 
   The lookup exits with status 3 when the node's retained history holds no
   enrollment by this key. That does not settle an attempt: the history may be
