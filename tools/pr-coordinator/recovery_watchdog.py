@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -151,6 +152,25 @@ def completed_dependency_hints(tickets, project, show, excluded=(), deadline=Non
     return hints
 
 
+def acceptance_gap_hints(model, project, excluded):
+    """Only retain current locally owned Review tickets and sanitized identities."""
+    tickets = model.get('_watchdog_tickets', {}).get(project, [])
+    eligible = {row['key'] for row in tickets if row['status'] == 'review'
+                and not row.get('publish_pending') and row['key'] not in excluded}
+    hints = []
+    pipeline = model.get('pipeline')
+    rows = pipeline.get('acceptance_gaps') if isinstance(pipeline, dict) else None
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get('project') != project:
+            continue
+        key, pr, job, receipt = (row.get(k) for k in ('ticket', 'pr', 'review_job', 'receipt'))
+        if (isinstance(key, str) and re.fullmatch(r'[A-Z][A-Z0-9]*-[0-9]+', key)
+                and key in eligible and type(pr) is int and pr > 0 and type(job) is int and job > 0
+                and isinstance(receipt, str) and re.fullmatch(r'[0-9a-f]{64}', receipt)):
+            hints.append(dict(ticket=key, pr=pr, review_job=job, receipt=receipt))
+    return hints
+
+
 def project_view(model, project, excluded=()):
     inventory = model.get('inventory', {}).get(project, {})
     counts = dict(inventory.get('breakdown', {}))
@@ -175,6 +195,7 @@ def project_view(model, project, excluded=()):
                 workers=workers, attention=attention,
                 inventory_available=inventory.get('state') == 'ok',
                 completion_source=completion_source,
+                acceptance_gaps=acceptance_gap_hints(model, project, excluded),
                 dependency_waits=[h for h in model.get('_watchdog_dependency_hints',{}).get(project,[])
                                   if h['ticket'] not in excluded])
 
@@ -279,6 +300,15 @@ Inspect services, dispatch/review receipts, pending ticket mirrors, CI jobs, dep
 Completed-dependency hints are local discovery only, never resume authority. Re-read current prerequisites and handoffs,
 verify actual merge/ownership/process/resource fences, and distinguish obsolete waits on a Done owner from genuine
 software, hardware, production or credential blockers. Missing/legacy receipt format is not itself a feature blocker.
+Source acceptance hints name a published review job and digest, never authorization to resume. Re-read that
+job's result, the current PR head and feedback, acceptance policy, existing claim, worker/helper receipts,
+competing reservations, candidate publication and resource leases. Distinguish missing actionable software
+evidence (for example a required BitBake build and package QA) from pending-only CI, product decisions and
+external acceptance. For authorized software evidence, use the installed coordinator's normal same-owner
+fix reservation and launch path (the fenced dispatch in acceptance_watch.py is an example), with a concrete
+handoff on the existing PR. Use recovery_control only for an eligible verified-stopped implementation or
+repair. Never replay a launch or duplicate CI, a build, a repair or hardware work. If action is unavailable,
+record the reason and a next check; do not convert the typed source receipt into approval.
 Perform concrete authorized recovery; preserve live workers and their branches. Never clear an expired claim without proving
 the original worker and same-claim helpers stopped. Use installed ticket commands and the sole existing coordinator for
 claims, repair/review dispatch and merges. Do not race its authority locks or edit its SQLite database directly.
@@ -370,8 +400,18 @@ Keep the existing local status report current. Finish this bounded recovery pass
                 prior = prior_waits.get(hint['ticket'],{})
                 since = prior.get('since',self.now) if prior.get('receipt') == hint['receipt'] else self.now
                 waits[hint['ticket']] = dict(receipt=hint['receipt'],since=since)
+            prior_gaps = old.get('acceptance_gaps', {})
+            reviewing = ({t['key'] for t in observed if t['status'] == 'review'}
+                         if observed is not None else None)
+            gaps = {key: item for key, item in prior_gaps.items() if key not in excluded
+                    and (reviewing is None or key in reviewing)}
+            for hint in view['acceptance_gaps']:
+                key = hint['ticket']
+                prior = prior_gaps.get(key, {})
+                since = prior['since'] if prior.get('receipt') == hint['receipt'] else self.now
+                gaps[key] = dict(receipt=hint['receipt'], since=since)
             self.state['observations'][project] = dict(
-                dependency_waits=waits,
+                acceptance_gaps=gaps, dependency_waits=waits,
                 fingerprint=fingerprint, progress_at=progress, done=done,
                 inventory_available=view['inventory_available'], completion_source=view['completion_source'],
                 activity_at=self.now if activity else old.get('activity_at', progress))
@@ -379,11 +419,19 @@ Keep the existing local status report current. Finish this bounded recovery pass
             due = min([progress+self.options['stall_seconds']]
                       + [waits[h['ticket']]['since']+self.options['stall_seconds']
                          for h in view.get('dependency_waits',[])])
-            if diagnosis:
-                if kick or self.now >= due:
-                    candidates.append(dict(reason=diagnosis, no_completion_seconds=self.now-progress, view=view))
-                else:
-                    waiting.append(dict(project=project, reason=diagnosis, recovery_due_at=due))
+            for hint in view['acceptance_gaps']:
+                gap_due = gaps[hint['ticket']]['since'] + self.options['stall_seconds']
+                if not kick and self.now < gap_due:
+                    waiting.append(dict(project=project, ticket=hint['ticket'],
+                                        reason='source acceptance grace', recovery_due_at=gap_due))
+            view['acceptance_gaps'] = [hint for hint in view['acceptance_gaps']
+                                      if kick or self.now >= gaps[hint['ticket']]['since'] + self.options['stall_seconds']]
+            if view['acceptance_gaps']:
+                diagnosis = 'completed source review has overdue acceptance evidence; inspect its retained handoff'
+            if view['acceptance_gaps'] or diagnosis and (kick or self.now >= due):
+                candidates.append(dict(reason=diagnosis, no_completion_seconds=self.now-progress, view=view))
+            elif diagnosis:
+                waiting.append(dict(project=project, reason=diagnosis, recovery_due_at=due))
             elif view['workers']:
                 active.append(project)
         if self.state.get('last_result'):
@@ -432,21 +480,31 @@ def main():
             return
         watchdog = Watchdog(read(args.config), args.state)
         # Offline only: the existing status reporter owns periodic remote refresh.
-        observed = subprocess.run(['fleet-status', '--json'], capture_output=True, text=True, timeout=60)
-        if observed.returncode:
-            model = {}  # Missing inventory itself becomes a stalled observability diagnosis.
-        else:
+        try:
+            observed = subprocess.run(['fleet-status', '--json'], capture_output=True, text=True, timeout=60, check=True)
             model = json.loads(observed.stdout)
+            if not isinstance(model, dict):
+                model = {}
+        except (OSError, ValueError, subprocess.SubprocessError):
+            model = {}  # Missing inventory itself becomes a stalled observability diagnosis.
         model['_watchdog_tickets'] = {}
         local_tickets = {}
         for project in watchdog.options['projects']:
             # Local ownership reads only; omit paths, evidence and all claim tokens.
-            tickets = subprocess.run(['ticket', '--project', project, 'list'],
-                                     capture_output=True, text=True, timeout=45)
-            if tickets.returncode == 0:
-                local_tickets[project] = json.loads(tickets.stdout)
-                model['_watchdog_tickets'][project] = [dict(key=t['key'], status=t['status'])
-                                                     for t in local_tickets[project]]
+            try:
+                tickets = subprocess.run(['ticket', '--project', project, 'list'],
+                                         capture_output=True, text=True, timeout=45, check=True)
+                rows = json.loads(tickets.stdout)
+                if not isinstance(rows, list):
+                    continue
+                local_tickets[project] = [t for t in rows if isinstance(t, dict)
+                                          and isinstance(t.get('key'), str)
+                                          and isinstance(t.get('status'), str)]
+                model['_watchdog_tickets'][project] = [
+                    dict(key=t['key'], status=t['status'], publish_pending=t.get('publish_pending'))
+                    for t in local_tickets[project]]
+            except (OSError, ValueError, subprocess.SubprocessError):
+                continue
         # A single five-second budget across projects preserves the service's
         # existing bound. Rotate project priority so a slow local read cannot
         # permanently starve the other repository. No GitHub calls are added.

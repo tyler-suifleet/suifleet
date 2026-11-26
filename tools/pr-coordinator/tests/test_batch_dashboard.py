@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from test_dashboard import Fixture, NOW, dash
+from test_dashboard import Fixture, NOW, TOKEN, dash
 
 HEAD = 'a' * 40
 BASE = 'b' * 40
@@ -127,7 +127,7 @@ class PipelineCollectionTests(unittest.TestCase):
         path.write_text(json.dumps(raw))
         os.utime(path, (NOW-10, NOW-10))
         result = dict(verdict='blocked', acceptance_complete=False, source_complete=True,
-                      acceptance_ready=True, model='reviewer', evidence='private details', **result)
+                      acceptance_ready=True, model='reviewer', evidence='private details') | result
         with sqlite3.connect(f.paths['reviews']) as db:
             db.execute('UPDATE jobs SET result=?,publication_done=1 WHERE id=?', (json.dumps(result), f.job_id))
         return folder
@@ -139,6 +139,69 @@ class PipelineCollectionTests(unittest.TestCase):
             db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?)',
                        ('suifleet', 'batch-1', status, BASE, hashlib.sha1(str(pr).encode()).hexdigest(), pr,
                         json.dumps(members), NOW-5))
+
+    def test_parked_source_gap_is_sanitized_and_fenced(self):
+        f = self.fixture
+        f.ticket('SF-307', status='review')
+        f.ticket('SF-308', status='review', session='other-owner')
+        self.job(860, ticket='SF-307', acceptance_ready=False, evidence=f'BitBake QA missing: {TOKEN}')
+        self.job(861, ticket='SF-308', acceptance_ready=False)
+        self.batches([], status='collecting')
+
+        def hints():
+            return f.collect()['pipeline']['acceptance_gaps']
+
+        with sqlite3.connect(f.paths['tickets']) as db:
+            db.execute("UPDATE tickets SET remote=?", (json.dumps(dict(state='open')),))
+        with sqlite3.connect(f.paths['reviews']) as db:
+            db.execute("UPDATE jobs SET result='broken' WHERE pr=861")
+        first, = hints()
+        self.assertEqual((first['ticket'], first['pr'], first['review_job']), ('SF-307', 860, 1))
+        self.assertNotIn(TOKEN, json.dumps(first))
+        self.assertNotIn('BitBake', json.dumps(first))
+        for state in [dict(state='closed'), dict(state='open', external_blockers=['physical Pi'])]:
+            with sqlite3.connect(f.paths['tickets']) as db:
+                db.execute("UPDATE tickets SET remote=?", (json.dumps(state),))
+            self.assertEqual(hints(), [])
+        with sqlite3.connect(f.paths['tickets']) as db:
+            db.execute("UPDATE tickets SET remote=?", (json.dumps(dict(state='open')),))
+
+        f.run('sess-impl', 'SF-307', status='launching', pid=None, process_json=False)
+        self.assertEqual(hints(), [])
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute("UPDATE runs SET status='finished'")
+        f.job(860, kind='fix', status='reserved', ticket='SF-307', snapshot=False)
+        self.assertEqual(hints(), [])
+        with sqlite3.connect(f.paths['reviews']) as db:
+            db.execute("UPDATE jobs SET status='orphaned' WHERE kind='fix'")
+        self.assertEqual(hints(), [])
+        with sqlite3.connect(f.paths['reviews']) as db:
+            db.execute("DELETE FROM jobs WHERE kind='fix'")
+            db.execute("UPDATE integration_batches SET status='publish_pending',members=?",
+                       (json.dumps([dict(pr=860, head=hashlib.sha1(b'860').hexdigest())]),))
+        self.assertEqual(hints(), [])
+        with sqlite3.connect(f.paths['reviews']) as db:
+            db.execute("UPDATE integration_batches SET members='[]'")
+            db.execute("INSERT INTO integrations(project,pr,reconciled) VALUES('suifleet',860,0)")
+        self.assertEqual(hints(), [])
+
+    def test_pending_ci_does_not_hide_a_typed_acceptance_gap_or_create_one(self):
+        f = self.fixture
+        f.ticket('SF-307', status='review')
+        folder = self.job(860, ticket='SF-307', acceptance_ready=False)
+        self.batches([], status='collecting')
+        with sqlite3.connect(f.paths['tickets']) as db:
+            db.execute("UPDATE tickets SET remote=?", (json.dumps(dict(state='open')),))
+        path = folder/'snapshot.json'
+        raw = json.loads(path.read_text())
+        raw['statusCheckRollup'][0]['conclusion'] = 'PENDING'
+        path.write_text(json.dumps(raw))
+        os.utime(path, (NOW-10, NOW-10))
+        self.assertEqual(len(f.collect()['pipeline']['acceptance_gaps']), 1)
+        with sqlite3.connect(f.paths['reviews']) as db:
+            receipt, = db.execute('SELECT result FROM jobs').fetchone()
+            db.execute('UPDATE jobs SET result=?', (json.dumps(dict(json.loads(receipt), acceptance_ready=True)),))
+        self.assertEqual(f.collect()['pipeline']['acceptance_gaps'], [])
 
     def test_distinct_pipeline_states_preserve_authoritative_queue_totals(self):
         f = self.fixture

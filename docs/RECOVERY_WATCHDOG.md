@@ -17,6 +17,10 @@ The same command also accepts an orphaned or normally verified-stopped quarantin
 
 Blocked software with completed declared prerequisites is audited separately from project-wide activity. The watchdog reads local ticket state with a five-second total inspection budget across projects and reports only ticket IDs, dependency IDs and a handoff digest. Each blocked handoff has its own grace clock, so an unrelated completion or another busy worker cannot hide it; a new ticket does not reset an older ticket's clock. Acceptance-only tickets, foreign or unfinished dependencies, pending ownership publication and explicit external blockers are excluded.
 
+The offline PR pipeline also projects completed, published source reviews that report source complete and acceptance incomplete for a current Review claim. The projection checks the PR head and source feedback, excludes source-ready CI-only receipts, explicit external blockers, closed or integrated work, and checks local worker, repair and batch reservations. A typed acceptance gap can coexist with running CI. It passes only ticket and PR IDs, the review job ID and a handoff digest to the watchdog. Each handoff has a separate grace clock. A changed receipt starts a new clock, an unavailable read preserves the previous clock, and only a current overdue hint can trigger recovery. Unrelated workers and completed tickets do not reset these clocks.
+
+The bounded recovery session rereads the review and current state. Missing software evidence, such as an authorized BitBake build and package QA run, can go through the installed coordinator's fenced same-owner repair path. Use the existing stopped-worker recovery command only when its eligibility checks apply. CI-only waits, product decisions and external acceptance receive a reason and next-check time. An active or uncertain launch, build or candidate publication must be resolved through its existing owner and receipts before dispatch.
+
 These hints request bounded investigation; they grant no resume authority. Recovery still verifies current merges, the retained claim, stopped processes/helpers, worktree and resource fences through the existing recovery route. Free-form blocked text never authorizes automatic resume. Explicit structured dependency waits also tolerate older nonempty JSON diagnostic objects/lists; new worker reports must continue to use nonempty string evidence. Missing structured intent requires investigation rather than silently assuming permission.
 
 The recovery agent must act on repairable operational gaps, including fixing a missing dispatch route under a valid infrastructure claim, rather than treating that missing route as an external blocker. Implement and test those changes under the claim, then hand them to normal PR review. Installation is permitted only through the reviewed merged-only path; never install unreviewed working-tree changes. It must inspect all affected queues; one blocked feature must not end the entire recovery pass.
@@ -43,13 +47,13 @@ An uncertain receipt or surviving helper requires checking that process before c
 
 ## Installation and configuration
 
-Install only the additive watchdog component from the implementation checkout:
+Install the additive watchdog component from the clean merged revision:
 
 ```bash
 python3 tools/pr-coordinator/install_watchdog.py --project suifleet --enable
 ```
 
-The installer stages a content-addressed watchdog generation, sets its own `current` link, installs its timer/service, and adds only `recovery_watchdog` to the existing private configuration. It preserves the full prior configuration in a private backup, rejects concurrent configuration changes and holds the runtime activation lock while installing. It does not replace or restart the review coordinator, dispatcher or their workers. Node's resolved directory is included in the service PATH for the configured Codex CLI. The service observation timeout allows 60 seconds for fleet status, 45 seconds per enabled project for ticket inventory, and 60 seconds of launch overhead. Reinstall after changing the enabled project list. Manual worker launches also use private file permissions.
+The installer stages a content-addressed watchdog generation, sets its own `current` link, installs its timer/service, and adds only `recovery_watchdog` to the existing private configuration. It preserves the full prior configuration in a private backup, rejects concurrent configuration changes and holds the runtime activation lock while installing. It does not replace or restart the review coordinator, dispatcher or their workers. For changes to the offline dashboard projection, install the matching merged coordinator runtime and dashboard as well. Node's resolved directory is included in the service PATH for the configured Codex CLI. The service observation timeout allows 60 seconds for fleet status, 45 seconds per enabled project for ticket inventory, and 60 seconds of launch overhead. Reinstall after changing the enabled project list. Manual worker launches also use private file permissions.
 
 Multiple projects are explicit opt-ins:
 
