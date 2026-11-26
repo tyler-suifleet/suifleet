@@ -118,6 +118,10 @@ class Recipe:
         # of the same metadata, so its assignments and appends combine with it.
         for source in (self.path, *self.appends):
             self.read(source)
+        # THISDIR is only meaningful while its file is parsed (an immediate :=
+        # assignment). A deferred reference would expand to whichever file
+        # BitBake parsed last, so leave it unresolved for the audit to reject.
+        self.vars.pop('THISDIR', None)
         for name in set(self.weak) | set(self.deferred):
             self.vars[name] = self.raw(name)
         self.weak, self.deferred = {}, {}
@@ -134,6 +138,19 @@ class Recipe:
         return value
 
     def read(self, path):
+        # BitBake sets THISDIR to the directory of the file being parsed,
+        # including a required/included file, and restores it afterwards.
+        outer = self.vars.get('THISDIR')
+        self.vars['THISDIR'] = str(path.resolve().parent)
+        try:
+            self._read(path)
+        finally:
+            if outer is None:
+                self.vars.pop('THISDIR', None)
+            else:
+                self.vars['THISDIR'] = outer
+
+    def _read(self, path):
         text = path.read_text()
         self.text += text
         lines, block = [], False
@@ -302,13 +319,29 @@ def override_errors(recipe, where):
     return errors
 
 
+def extra_paths(recipe):
+    """FILESEXTRAPATHS entries, in the order BitBake's base_set_filespath uses."""
+    return [entry.strip() for entry in recipe.get('FILESEXTRAPATHS').split(':')
+            if entry.strip() and entry.strip() != '__default']
+
+
+def search_path(recipe):
+    """The local fetcher's FILESPATH: FILESEXTRAPATHS, then BP, BPN and files.
+
+    Only absolute FILESEXTRAPATHS entries are searched; audit_recipe reports
+    every other entry. An explicit FILESPATH is rejected by audit_recipe."""
+    base = recipe.path.parent
+    extra = [Path(entry) for entry in extra_paths(recipe) if '${' not in entry and Path(entry).is_absolute()]
+    return extra + [base / recipe.get('BP'), base / recipe.get('BPN'), base / 'files']
+
+
 def file_source(recipe, name):
     """Return the layer file BitBake would use for file://name, or None.
 
     Raises ValueError when the match (after following symlinks) leaves the layer."""
-    base, layer = recipe.path.parent, recipe.layer.resolve()
-    for directory in (recipe.get('BP'), recipe.get('BPN'), 'files', '.'):
-        candidate = base / directory / name
+    layer = recipe.layer.resolve()
+    for directory in search_path(recipe):
+        candidate = directory / name
         if candidate.is_file() or candidate.is_symlink():
             resolved = candidate.resolve()
             if layer not in resolved.parents or not resolved.is_file():
@@ -333,8 +366,12 @@ def audit_recipe(recipe):
         errors.append(f'{where}: AUTOREV is forbidden')
     errors += override_errors(recipe, where)
     errors += recipe.include_errors
-    extra = recipe.get('FILESEXTRAPATHS')
-    for directory in filter(None, extra.replace(':', ' ').split()):
+    if 'FILESPATH' in recipe.vars:
+        # The audit models BitBake's default FILESPATH (FILESEXTRAPATHS, then
+        # BP, BPN and files beside the recipe). An explicit search path could
+        # select a different, possibly out-of-layer, file.
+        errors.append(f'{where}: explicit FILESPATH is not supported; add in-layer directories with FILESEXTRAPATHS')
+    for directory in extra_paths(recipe):
         resolved = Path(directory).resolve() if Path(directory).is_absolute() else None
         if '${' in directory or resolved is None or recipe.layer.resolve() not in (resolved, *resolved.parents):
             errors.append(f'{where}: FILESEXTRAPATHS points outside the layer: {directory}')

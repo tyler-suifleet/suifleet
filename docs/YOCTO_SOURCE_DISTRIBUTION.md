@@ -75,6 +75,13 @@ These static checks always run, on every recipe in the layer:
 - `file://` entries resolve, after following symlinks, to regular files inside
   the layer, and `FILESEXTRAPATHS` doesn't point outside it. This rejects the
   pre-parse `${TOPDIR}` codec artifacts. No symlink in the layer may leave it.
+  The reader searches BitBake's default `FILESPATH` order: `FILESEXTRAPATHS`
+  entries first, then `${BP}`, `${BPN}` and `files` beside the recipe, so it
+  checks the same file BitBake would pick. An immediate
+  `FILESEXTRAPATHS:prepend := "${THISDIR}/...:"` uses the directory of the
+  file that contains it; a deferred `${THISDIR}` is rejected. An explicit
+  `FILESPATH` assignment is rejected, because it can replace that search
+  order with directories outside the layer.
 - Source-affecting variables take no conditional overrides. These are
   `SRC_URI` (and its flags), `SRCREV*`, `PV`, `PE`, `S`, `LICENSE`,
   `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, every `SUIFLEET_*`

@@ -290,6 +290,47 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue(any('FILESEXTRAPATHS points outside' in e for e in errors))
         self.assertTrue(any('not in the layer: codec.cjs' in e for e in errors))
 
+    def test_local_sources_follow_the_bitbake_search_path(self):
+        sibling = self.layer.parent / 'host-files'
+        sibling.mkdir()
+        (sibling / 'suifleet.service').write_text('[Unit]\nDescription=host only\n')
+        # An explicit FILESPATH selecting only an out-of-layer directory: the
+        # in-layer files/suifleet.service must not make the audit pass.
+        self.write_recipe(extra=f'FILESPATH = "{sibling}"')
+        errors = self.errors(repo=self.repo.root)
+        self.assertTrue(any('explicit FILESPATH is not supported' in e for e in errors), errors)
+        for extra in (f'FILESPATH:append = ":{sibling}"', f'FILESPATH ?= "{sibling}"'):
+            with self.subTest(extra):
+                self.write_recipe(extra=extra)
+                self.assertTrue(any('FILESPATH' in e for e in self.errors()), self.errors())
+        # An out-of-layer FILESEXTRAPATHS entry is searched first by BitBake, so
+        # the same-named host file is the one it would use.
+        self.write_recipe(extra=f'FILESEXTRAPATHS:prepend := "{sibling}:"')
+        errors = self.errors()
+        self.assertTrue(any('FILESEXTRAPATHS points outside' in e for e in errors), errors)
+        self.assertTrue(any('suifleet.service resolves outside the layer' in e for e in errors), errors)
+        self.write_recipe(extra='FILESEXTRAPATHS:prepend := "${THISDIR}/../../../host-files:"')
+        self.assertTrue(any('FILESEXTRAPATHS points outside' in e for e in self.errors()), self.errors())
+        # A deferred THISDIR cannot be attributed to one file and is rejected.
+        self.write_recipe(extra='FILESEXTRAPATHS:prepend = "${THISDIR}/extra:"')
+        self.assertTrue(any('FILESEXTRAPATHS points outside' in e for e in self.errors()), self.errors())
+        # A valid in-layer FILESEXTRAPATHS directory is searched before files/,
+        # as in BitBake, and a file only there is found.
+        extra_dir = self.recipe_dir / 'extra'
+        extra_dir.mkdir()
+        (extra_dir / 'suifleet.service').write_text('[Unit]\nDescription=extra\n')
+        (extra_dir / 'only-extra.conf').write_text('x\n')
+        recipe = 'FILESEXTRAPATHS:prepend := "${THISDIR}/extra:"\nSRC_URI += "file://only-extra.conf"'
+        self.write_recipe(extra=recipe)
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+        parsed = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        self.assertEqual(audit.file_source(parsed, 'suifleet.service'), (extra_dir / 'suifleet.service').resolve())
+        self.assertNotIn('THISDIR', parsed.vars)
+        # A file directly beside the recipe is not on BitBake's search path.
+        (self.recipe_dir / 'beside.conf').write_text('x\n')
+        self.write_recipe(extra='SRC_URI += "file://beside.conf"')
+        self.assertTrue(any('not in the layer: beside.conf' in e for e in self.errors()), self.errors())
+
     def test_conditional_source_overrides_are_rejected(self):
         cases = (
             'SRC_URI:qemuarm64 = "https://example.com/other.tar.gz;sha256sum=%s"' % ('0' * 64),
