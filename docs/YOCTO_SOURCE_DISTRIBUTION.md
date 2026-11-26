@@ -30,11 +30,15 @@ The file set is the daemon build closure, computed from that commit's tree:
 - the root `LICENSE` and `suifleet-edge/{Cargo.toml,Cargo.lock,config.example.toml}`;
 - `suifleet-edge/src/` and `examples/`;
 - every `[workspace] members` directory (currently `windows-runtime`). The
-  container's Python 3.10 has no `tomllib`, so the reader accepts one form: a
-  single `[workspace]` table with a bare `members` array of unescaped basic or
-  literal strings. Any other spelling (dotted or inline `workspace`, quoted
-  keys, escapes, multi-line strings) stops the build rather than dropping a
-  member;
+  container's Python 3.10 has no `tomllib`, so the packager parses the whole
+  manifest with a strict reader for the TOML subset Cargo manifests use:
+  tables, arrays of tables, dotted and quoted keys, single-line basic and
+  literal strings, arrays and inline tables. It decodes keys and escapes
+  before comparing them, so every TOML spelling of `workspace.members` is
+  found (for example `"memb\u0065rs"` or `["worksp\u0061ce"]`). Syntax outside
+  the subset, such as a multi-line string, and a `members` value that isn't
+  an array of strings stop the build rather than dropping a member. The fetch
+  audit uses the same reader and reports these as errors;
 - each file named by a literal `include_str!`/`include_bytes!` or a `#[path]`
   module attribute, followed transitively.
 
