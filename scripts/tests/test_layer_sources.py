@@ -344,6 +344,59 @@ class LayerAuditTests(unittest.TestCase):
                 self.write_recipe(extra=extra)
                 self.assertTrue(any('conditional override' in e for e in self.errors()), self.errors())
 
+    def test_single_quoted_and_unreadable_source_assignments_are_not_dropped(self):
+        unpinned = 'https://example.com/unpinned.tar.gz'
+        # Single-quoted values are read like double-quoted ones.
+        self.write_recipe(extra=f"SRC_URI:append = ' {unpinned}'")
+        self.assertTrue(any(f'lacks a SHA-256 pin: {unpinned}' in e for e in self.errors()), self.errors())
+        self.write_recipe(extra=f"SRC_URI:qemuarm64 = '{unpinned}'")
+        self.assertTrue(any('conditional override SRC_URI:qemuarm64' in e for e in self.errors()), self.errors())
+        self.write_recipe(extra="SRCREV = '%s'" % ('0' * 40))
+        self.assertTrue(any('SRCREV' in e for e in self.errors()), self.errors())
+        # A line that looks like an assignment but cannot be read is reported.
+        self.write_recipe(extra=f'SRC_URI += {unpinned}')
+        self.assertTrue(any('unparsed assignment to source-affecting variable SRC_URI' in e for e in self.errors()),
+                        self.errors())
+        # A single-quoted non-source assignment stays accepted.
+        self.write_recipe(extra="SUMMARY = 'SuiFleet daemon'\nCARGO_BUILD_FLAGS:append = ' --bin suifleet'")
+        self.assertEqual(self.errors(), [])
+
+    def test_bbappends_combine_with_their_recipe(self):
+        unpinned = 'https://example.com/unpinned.tar.gz'
+        self.write_recipe(extra='SRC_URI:append = "${HELPER}"\nHELPER = ""')
+        report = audit.check(self.layer, repo=self.repo.root)
+        self.assertEqual(report['errors'], [])
+        base_sources = report['recipes']['suifleet']['sources']
+        # An append assigning a helper the base recipe expands changes its sources.
+        for name in ('suifleet_%.bbappend', 'suifleet_1.0.bbappend'):
+            with self.subTest(name):
+                append = self.recipe_dir / name
+                append.write_text(f'HELPER = " {unpinned}"\n')
+                report = audit.check(self.layer, repo=self.repo.root)
+                self.assertTrue(any(f'lacks a SHA-256 pin: {unpinned}' in e for e in report['errors']), report['errors'])
+                self.assertEqual(list(report['recipes']), ['suifleet'])
+                self.assertEqual(report['recipes']['suifleet']['appends'], [f'recipes-edge/suifleet/{name}'])
+                self.assertEqual(report['recipes']['suifleet']['sources'][:len(base_sources)], base_sources)
+                # A conditional override in the append is rejected like one in the recipe.
+                append.write_text(f'HELPER:raspberrypi3 = " {unpinned}"\n')
+                self.assertTrue(any('conditional override HELPER:raspberrypi3' in e for e in self.errors()), self.errors())
+                append.unlink()
+        # A harmless append keeps the base report.
+        append = self.recipe_dir / 'suifleet_%.bbappend'
+        append.write_text('RDEPENDS:${PN} += "ca-certificates"\n')
+        report = audit.check(self.layer, repo=self.repo.root)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(report['recipes']['suifleet']['sources'], base_sources)
+        append.unlink()
+        # An append for a recipe outside the layer cannot be audited.
+        other = self.layer / 'recipes-core/busybox/busybox_%.bbappend'
+        other.parent.mkdir(parents=True)
+        other.write_text(f'SRC_URI += "{unpinned}"\n')
+        self.assertTrue(any('busybox_%.bbappend: bbappend matches no recipe' in e for e in self.errors()), self.errors())
+        # A recipe whose name merely shares a prefix without the separator does not match an exact append.
+        self.assertFalse(audit.append_matches('suifleet_2.0.bbappend', 'suifleet_1.0.bb'))
+        self.assertTrue(audit.append_matches('suifleet_%.bbappend', 'suifleet_1.0.bb'))
+
     def test_file_sources_must_resolve_inside_the_layer(self):
         outside = Path(self.tmp.name) / 'outside.service'
         outside.write_text('[Unit]\n')

@@ -16,6 +16,12 @@ Static checks (always):
     appends/prepends apply after every assignment wherever they appear, and
     ??= is a weak default used only when nothing else assigns the variable
     (the last ??= wins, while ?= keeps the first assignment);
+  * double- and single-quoted assignments are read; an assignment-shaped line
+    the reader cannot interpret is reported when it names a source-affecting
+    variable, never silently skipped;
+  * each .bbappend (name_%.bbappend or exact name) is parsed after its recipe
+    as one metadata set, as BitBake does, and a bbappend that matches no
+    recipe in the layer is rejected;
   * no runtime identity/state files in the layer, its export list or (with
     --fetch) any fetched and unpacked source;
   * coupled SuiFleet pins agree: PV equals the crate version, the codec source
@@ -57,7 +63,10 @@ import urllib.request
 
 HEX40 = re.compile(r'^[0-9a-f]{40}$')
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
-ASSIGN = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(?:\[([^\]]+)\])?\s*(\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)\s*"(.*)"\s*$', re.S)
+ASSIGN = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(?:\[([^\]]+)\])?\s*(\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)\s*(["\'])(.*)\4\s*$', re.S)
+# Anything shaped like an assignment; lines it matches but ASSIGN cannot read are
+# recorded as unparsed so that source-affecting ones are reported, not dropped.
+ASSIGN_LIKE = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(?:\[[^\]]*\])?\s*(\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)')
 REF = re.compile(r'\$\{([A-Za-z0-9_\-]+)\}')
 # The layer's Scarthgap/Wrynose unpack-root idiom; no other inline Python is evaluated.
 UNPACKDIR_EXPR = re.compile(r"""\$\{@d\.getVar\(['"]UNPACKDIR['"]\)\s+or\s+d\.getVar\(['"]WORKDIR['"]\)\}""")
@@ -84,19 +93,24 @@ def load_packager():
 class Recipe:
     """A deliberately small BitBake reader: assignments, flags and require."""
 
-    def __init__(self, path, layer):
+    def __init__(self, path, layer, appends=()):
         self.path, self.layer = Path(path), Path(layer)
+        self.appends = [Path(a) for a in appends]
         stem = self.path.name.rsplit('.', 1)[0]
         pn, _, pv = stem.partition('_')
         self.vars = {'PN': pn, 'BPN': pn, 'PV': pv or '1.0'}
         self.flags = {}
         self.overrides = []
+        self.unparsed = []
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
         # after every assignment, whatever their position in the metadata.
         self.weak, self.deferred = {}, {}
-        self.read(self.path)
+        # As in BitBake, each matching .bbappend is parsed after the recipe as part
+        # of the same metadata, so its assignments and appends combine with it.
+        for source in (self.path, *self.appends):
+            self.read(source)
         for name in set(self.weak) | set(self.deferred):
             self.vars[name] = self.raw(name)
         self.weak, self.deferred = {}, {}
@@ -130,7 +144,8 @@ class Recipe:
                 continue
             words = line.split()
             if words[0] in ('require', 'include'):
-                target = self.path.parent / self.expand(words[1])
+                # BitBake searches the including file's directory first.
+                target = path.parent / self.expand(words[1])
                 if not target.is_file() and words[0] == 'require':
                     raise ValueError(f'{self.path.name}: required file missing: {words[1]}')
                 if target.is_file():
@@ -138,8 +153,11 @@ class Recipe:
                 continue
             match = ASSIGN.match(line)
             if not match:
+                loose = ASSIGN_LIKE.match(line)
+                if loose:
+                    self.unparsed.append((loose.group(1).partition(':')[0], path.name))
                 continue
-            name, flag, op, value = match.groups()
+            name, flag, op, _, value = match.groups()
             base, _, override = name.partition(':')
             if override not in ('', 'append', 'prepend') or (override and (flag or op in ('?=', '??='))):
                 # Conditional or removing overrides are not evaluated here;
@@ -225,7 +243,7 @@ SOURCE_ROOTS = ('SRC_URI', 'SRCREV', 'SRCREV_FORMAT', 'PN', 'BPN', 'BP', 'PV', '
 def source_variables(recipe):
     """Source-affecting variables and every variable they reference."""
     pending = [v for v in recipe.vars if v in SOURCE_ROOTS or v.startswith(('SRCREV_', 'SUIFLEET_'))]
-    pending += list(SOURCE_ROOTS) + [b for b, _, _ in recipe.overrides if b.startswith(('SRCREV_', 'SUIFLEET_'))]
+    pending += list(SOURCE_ROOTS) + [b for b, *_ in recipe.overrides + recipe.unparsed if b.startswith(('SRCREV_', 'SUIFLEET_'))]
     for variable, flags in recipe.flags.items():
         if variable == 'SRC_URI' or variable.startswith('SUIFLEET_'):
             for value in flags.values():
@@ -241,8 +259,11 @@ def source_variables(recipe):
 
 def override_errors(recipe, where):
     names = source_variables(recipe)
-    return [f'{where}: conditional override {base}:{override} ({file}) on a source-affecting variable is not supported; '
-            'set the source pin unconditionally' for base, override, file in recipe.overrides if base in names]
+    errors = [f'{where}: conditional override {base}:{override} ({file}) on a source-affecting variable is not supported; '
+              'set the source pin unconditionally' for base, override, file in recipe.overrides if base in names]
+    errors += [f'{where}: unparsed assignment to source-affecting variable {base} ({file}); '
+               'use a plain double- or single-quoted assignment' for base, file in recipe.unparsed if base in names]
+    return errors
 
 
 def file_source(recipe, name):
@@ -633,6 +654,14 @@ def fetch_recipe(recipe, workdir, cargo=None):
     return errors, fetched
 
 
+def append_matches(append_name, recipe_name):
+    """BitBake's rule: name.bbappend applies to name.bb; '%' matches any suffix."""
+    target = append_name[:-len('.bbappend')] + '.bb'
+    if '%' in target:
+        return recipe_name.startswith(target[:target.index('%')])
+    return target == recipe_name
+
+
 def check(layer, repo=None, fetch=False, cargo=None, only=None):
     layer = Path(layer).resolve()
     report = {'layer': str(layer), 'errors': runtime_state_errors(layer), 'recipes': {}}
@@ -642,8 +671,13 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
     series = re.search(r'^LAYERSERIES_COMPAT_\S+\s*=\s*"([^"]*)"', conf, re.M)
     report['series'] = series.group(1).split() if series else []
     recipes, static_errors = {}, {}
-    for path in sorted(layer.glob('recipes-*/*/*.bb')) + sorted(layer.glob('recipes-*/*/*.bbappend')):
-        recipe = Recipe(path, layer)
+    bbappends = sorted(layer.glob('recipes-*/*/*.bbappend'))
+    bbfiles = sorted(layer.glob('recipes-*/*/*.bb'))
+    used = set()
+    for path in bbfiles:
+        appends = [a for a in bbappends if append_matches(a.name, path.name)]
+        used.update(appends)
+        recipe = Recipe(path, layer, appends)
         if only and recipe.get('PN') not in only:
             continue
         recipes[recipe.get('PN')] = recipe
@@ -651,13 +685,20 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         static_errors[recipe.get('PN')] = errors
         report['errors'] += errors
         report['recipes'][recipe.get('PN')] = {
-            'file': path.relative_to(layer).as_posix(), 'pv': recipe.get('PV'), 'license': recipe.get('LICENSE'),
+            'file': path.relative_to(layer).as_posix(),
+            'appends': [a.relative_to(layer).as_posix() for a in appends], 'pv': recipe.get('PV'), 'license': recipe.get('LICENSE'),
             'license_files': dict(license_md5s(recipe)), 'sources': sources,
             'source_revision': recipe.get('SRCREV') or recipe.get('SUIFLEET_CODEC_SOURCE_REV') or None,
             'crate_version': recipe.get('SUIFLEET_CRATE_VERSION') or None,
             'lock_sha256': recipe.get('SUIFLEET_LOCK_SHA256') or None,
             'crates': len(crate_include(recipe)) or None,
         }
+    for path in bbappends:
+        if path not in used:
+            # A dangling append targets a recipe outside this layer, whose
+            # effective sources this audit cannot see.
+            report['errors'].append(f'{path.relative_to(layer).as_posix()}: bbappend matches no recipe in the layer; '
+                                    'its effect on sources cannot be audited')
     daemon = next((r for r in recipes.values() if r.get('SUIFLEET_LOCK_SHA256')), None)
     codec = next((r for r in recipes.values() if r.get('SUIFLEET_CODEC_SOURCE_REV')), None)
     if daemon and codec and daemon.get('SRCREV') != codec.get('SUIFLEET_CODEC_SOURCE_REV'):
