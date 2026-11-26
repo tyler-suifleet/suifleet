@@ -530,6 +530,47 @@ test('CLI data_put bounds the file read: exact limit accepted, oversize and non-
   await server.close();
 });
 
+test('CLI data_put refuses a file that shrinks or grows between fstat and read, before connecting', async (t) => {
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+  // Preload: right after the CLI's fstat of the target, resize it by path so the
+  // read reaches EOF early (or late) relative to the size it was told.
+  // syncBuiltinESMExports makes the wrapper visible to the CLI's named import.
+  const preload = join(directory, 'resize-after-fstat.mjs');
+  writeFileSync(preload, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const original = fs.fstatSync;
+fs.fstatSync = function (...args) {
+  const stat = original.apply(this, args);
+  if (stat.isFile()) fs.truncateSync(process.env.SF302_FILE, Number(process.env.SF302_RESIZE));
+  return stat;
+};
+syncBuiltinESMExports();
+`);
+  const server = await serve(() => ok({ sequence: 0, state: 'queued', storage_acknowledged: false }));
+  // Close on failure too, so a regression reports instead of hanging the runner.
+  t.after(() => server.close());
+  const run = (file, resize) => new Promise((resolve) => execFile(process.execPath,
+    ['--import', preload, cli, '--socket', server.path, '--component', 'svc', '--topic', 'sensor', '--file', file, 'data_put'],
+    { env: { ...process.env, SF302_FILE: file, SF302_RESIZE: String(resize) }, timeout: 20000, killSignal: 'SIGKILL' },
+    (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr })));
+  for (const [name, resize] of [['shrunk.bin', 3], ['emptied.bin', 0], ['grown.bin', 9]]) {
+    const file = join(directory, name);
+    writeFileSync(file, Buffer.from('abcdef'));
+    const result = await run(file, resize);
+    assert.equal(result.code, 1, `${name}: ${result.stderr}`);
+    assert.match(result.stderr, /--file changed while it was read/, name);
+  }
+  assert.equal(server.requests.length, 0, 'a resized file never reaches the daemon');
+  // Control: the same preload with no size change still uploads the whole file.
+  const file = join(directory, 'stable.bin');
+  writeFileSync(file, Buffer.from('abcdef'));
+  const stable = await run(file, 6);
+  assert.equal(stable.code, 0, stable.stderr);
+  assert.equal(server.requests.length, 1);
+  assert.equal(server.requests[0].payload.descriptor.total_size, 6);
+  assert.equal(Buffer.from(server.requests[0].payload.data_base64, 'base64').toString(), 'abcdef');
+});
+
 test('messages() yields durable messages and acks them by id', async () => {
   const queue = [{ id: 4, topic: 'a/b', sender: 'p', payload: 1, published_ms: 1 }];
   const server = await serve((r) => r.operation === 'receive' ? ok(queue[0] ?? null)

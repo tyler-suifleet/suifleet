@@ -19,7 +19,8 @@ Identity is this process's Unix UID; --component only names the component it own
  * its fstat size + 1 (itself capped at MAX_DATA_SIZE + 1). O_NONBLOCK keeps a FIFO
  * open from waiting for a writer; anything but a regular file (FIFO, device,
  * socket, directory) is refused before reading, and a file that grows while it is
- * read is refused rather than truncated.
+ * read, or is shortened before the read reaches its fstat size, is refused rather
+ * than silently submitted with a different length.
  */
 function readDataFile(path: string): Buffer {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
@@ -32,7 +33,7 @@ function readDataFile(path: string): Buffer {
     for (let count = -1; count !== 0 && length < buffer.length; length += count) {
       count = readSync(fd, buffer, length, buffer.length - length, null);
     }
-    if (length > stat.size) throw new RangeError('--file changed while it was read');
+    if (length !== stat.size) throw new RangeError('--file changed while it was read');
     return buffer.subarray(0, length);
   } finally {
     closeSync(fd);
