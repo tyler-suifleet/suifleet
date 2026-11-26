@@ -27,7 +27,7 @@ make release-artifacts            # builds HEAD twice; fails unless byte-identic
 - It builds inside the pinned release image (`docker/release.Dockerfile`).
 - Embedded source paths are remapped, so the build location doesn't leak into the binary.
 
-**Builder pins:** Ubuntu 22.04 digest; Rust 1.94.0 via a checksum-verified rustup-init 1.29.1; `gcc-aarch64-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-aarch64-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-arm64-cross` 2.35-0ubuntu1cross3. For 32-bit x86: `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-i686-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-i386-cross` 2.35-0ubuntu1cross3.
+**Builder pins:** Ubuntu 22.04 digest; Rust 1.94.0 via a checksum-verified rustup-init 1.29.1; `gcc-aarch64-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-aarch64-linux-gnu` 2.38-4ubuntu2.14; `libc6-dev-arm64-cross` 2.35-0ubuntu1cross3. For 32-bit x86: `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-i686-linux-gnu` 2.38-4ubuntu2.14; `libc6-dev-i386-cross` 2.35-0ubuntu1cross3.
 
 **Debian packages (SF-231):** amd64 and arm64 bundles also contain versioned `.deb` files and SHA-256 files covered by the same signed manifest. The SBOM describes their included daemon/signer binary; distribution dependencies are declared in Debian control metadata. See [Debian build/install and data retention](DEBIAN_PACKAGING.md). The release workflow builds amd64, arm64 and ARMv7 hard-float and publishes one archive containing each complete signed bundle, avoiding ambiguous shared SBOM/manifest filenames. The release includes an independently OpenPGP-signed [APT snapshot](DEBIAN_PACKAGING.md#signed-apt-snapshots) built from those verified packages. Protected signing and HTTPS publication remain SF-042/#62.
 
@@ -35,7 +35,7 @@ make release-artifacts            # builds HEAD twice; fails unless byte-identic
 
 **Targets:** `armv7-unknown-linux-gnueabihf` (glibc hard-float archive), `aarch64-unknown-linux-gnu` (the default), `x86_64-unknown-linux-gnu` (amd64) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
 
-For ARMv7 hard-float: `gcc-arm-linux-gnueabihf` 4:11.2.0-1ubuntu1, `gcc-11-arm-linux-gnueabihf` 11.4.0-1ubuntu1~22.04.3cross1, `binutils-arm-linux-gnueabihf` 2.38-4ubuntu2.12 and `libc6-dev-armhf-cross` 2.35-0ubuntu1cross3.
+For ARMv7 hard-float: `gcc-arm-linux-gnueabihf` 4:11.2.0-1ubuntu1, `gcc-11-arm-linux-gnueabihf` 11.4.0-1ubuntu1~22.04.3cross1, `binutils-arm-linux-gnueabihf` 2.38-4ubuntu2.14 and `libc6-dev-armhf-cross` 2.35-0ubuntu1cross3.
 
 The daemon uses rustls for both gRPC and Walrus HTTP, so the release links no OpenSSL. Bump these pins deliberately, and record the new versions here.
 

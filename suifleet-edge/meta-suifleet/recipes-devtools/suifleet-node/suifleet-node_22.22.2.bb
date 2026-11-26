@@ -18,7 +18,13 @@ S = "${SUIFLEET_UNPACKDIR}/node-v${PV}-linux-arm64"
 
 # Prebuilt AArch64 glibc binary (needs glibc >= 2.28, libstdc++ GLIBCXX_3.4.21);
 # runtime libraries come from the image's shared-library dependencies.
+# COMPATIBLE_HOST also matches aarch64-*-linux-musl, so refuse other C
+# libraries explicitly: there is no musl build and no fallback.
 COMPATIBLE_HOST = "aarch64.*-linux"
+python () {
+    if d.getVar('TCLIBC') != 'glibc':
+        raise bb.parse.SkipRecipe('the official Node.js linux-arm64 binary requires glibc; TCLIBC=%s is unsupported' % d.getVar('TCLIBC'))
+}
 SUIFLEET_NODE_DIR = "${libdir}/suifleet/node"
 
 do_configure[noexec] = "1"
