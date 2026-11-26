@@ -5917,6 +5917,27 @@
         "Preparation tooling, metadata checks and submission artifacts can be implemented and reviewed independently; final submission readiness explicitly retains SF-306, SF-307 and SF-311 evidence and exact public-revision verification."
       ],
       "validation": "Run the scoped clean-host OE fetch/parse/build/package/runtime checks and record exact versions/results. Distinguish parsing from task execution, old userspace from an old kernel, repository publication from index listing, and simulated boot from hardware acceptance."
+    },
+    {
+      "key": "SF-337",
+      "title": "Recover software acceptance work stranded after source review",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/RECOVERY_WATCHDOG.md"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-337 -->\n## Reproduced stall\nSF-307 / PR #860 review job 4956 completed with source_complete=true, acceptance_ready=false and verdict=blocked. It identified a concrete missing Kirkstone public-source BitBake build/package QA run. No implementation or repair worker was active afterward; other workers kept the fleet busy. Codex manually started existing-claim repair job 4960. The dispatcher already fills eligible slots, but readiness/evidence work parked in Review is not Backlog and is missed by completed-dependency-only watchdog hints.\n\n## Required fix\nExtend independent recovery supervision to discover overdue completed source reviews whose software acceptance is not ready and whose existing owner has no verified active worker, repair reservation, candidate publication intent or uncertain launch. Use bounded offline installed state/receipts, ticket IDs and hashes; never expose raw tokens/evidence. Keep per-ticket/handoff grace clocks independent of unrelated completions and preserve them across temporary read failures. These are discovery hints, not permission to edit, bypass review or replay workers. The existing bounded recovery session must re-read the actual review, distinguish actionable software evidence from CI-only waits, product decisions and external acceptance, then use supported same-claim recovery/repair paths only when authorized. Do not launch a new implementation owner or duplicate an active BitBake/CI/hardware task. Preserve cooldowns, provider limits, active processes, locks and hardware/mainnet/credential boundaries.\n\n## Evidence and acceptance\nReproduce the SF-307 shape while unrelated workers and completions continue; show it becomes investigable without a user prompt. Cover fresh/changed receipts, temporary detail loss, pending-only CI, true external acceptance, active/uncertain repair and merged/closed tickets. Isolate malformed entries so other eligible work proceeds. Existing capacity-fill regression must still pass. Use meaningful local tests and the user's immediate infrastructure integration policy; install and verify the actual merged runtime AND separate watchdog helper if changed. No peer-review or hosted-CI approval wait for this infrastructure fix; no fabricated approval/test evidence.\n",
+      "acceptance": [
+        "Overdue completed software source-review gaps are investigated while unrelated work continues, without duplicate workers or invented resume authority.",
+        "Bounded local detection, independent handoff clocks, uncertainty/ownership/external/CI-only exclusions and secret-free reporting have regressions.",
+        "Merge after meaningful local checks and install/verify merged runtime and separate watchdog as applicable."
+      ],
+      "validation": "Reproduce source_complete=true, acceptance_ready=false parked source-review regression; targeted watchdog/recovery/dispatcher and combined local checks appropriate to changed runtime."
     }
   ]
 }
