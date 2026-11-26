@@ -146,7 +146,14 @@ which could only validate a real restart; it still reads the address.
 **Idempotence.** Rerunning `site.yml` on converged hosts reports no changes.
 Check mode reports pending installs, upgrades and enrollments without
 performing them; an upgrade preview leaves the installed bytes, package and
-running services untouched.
+running services untouched. Because a preview starts nothing, it reads the
+daemon state once and reports a stopped daemon instead of waiting for it, and
+skips the journal-initialization and running-inputs checks. It runs the
+read-only `--self-check` only while the signing service is already running,
+because the check connects to the signing socket and would otherwise start the
+service through socket activation. A configured host whose units are stopped (for
+example after an interrupted upgrade) therefore previews successfully, and the
+real run performs every post-start check.
 
 **Interrupted runs.** Restarts are not tied only to the current run's changes.
 After the units pass their health checks, the role records a SHA-256 digest
