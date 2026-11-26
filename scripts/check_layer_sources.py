@@ -491,8 +491,13 @@ def daemon_errors(recipe, read, exists=None):
     if hashlib.sha256(lock).hexdigest() != recipe.get('SUIFLEET_LOCK_SHA256'):
         errors.append(f'{recipe.path.name}: Cargo.lock sha256 {hashlib.sha256(lock).hexdigest()} differs from SUIFLEET_LOCK_SHA256')
     packager = load_packager()
-    version = packager.crate_version(manifest.decode())
-    if version != recipe.get('SUIFLEET_CRATE_VERSION'):
+    try:
+        version = packager.crate_version(manifest.decode())
+        members = packager.workspace_members(manifest.decode())
+    except ValueError as error:
+        errors.append(f'{recipe.path.name}: {src}/Cargo.toml: {error}')
+        version, members = None, []
+    if version is not None and version != recipe.get('SUIFLEET_CRATE_VERSION'):
         errors.append(f'{recipe.path.name}: Cargo.toml version {version} differs from SUIFLEET_CRATE_VERSION')
     locked, included = lock_packages(lock.decode()), crate_include(recipe)
     if any(v.startswith('unsupported:') for v in locked.values()):
@@ -508,7 +513,7 @@ def daemon_errors(recipe, read, exists=None):
         if data is None or hashlib.md5(data).hexdigest() != md5:
             errors.append(f'{recipe.path.name}: license file {rel} does not match md5 {md5}')
     if exists is not None:
-        for member in packager.workspace_members(manifest.decode()):
+        for member in members:
             if not exists(f'{src}/{member}/Cargo.toml'):
                 errors.append(f'{recipe.path.name}: workspace member {src}/{member} is missing from the source layout')
     return errors

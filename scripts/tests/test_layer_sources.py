@@ -166,30 +166,68 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing file suifleet-edge/src/missing.txt'):
             packager.plan(self.repo.root, 'HEAD')
 
-    def test_workspace_members_in_every_supported_string_form_are_packaged(self):
-        # A literal-string member was silently dropped by the old reader: the
-        # archive declared windows-runtime but carried none of its files.
-        for members in ("['windows-runtime']", '[\n  "windows-runtime", # the runtime\n]'):
-            with self.subTest(members):
-                self.repo.write('suifleet-edge/Cargo.toml',
-                                CARGO_TOML.replace('members = ["windows-runtime"]', f'members = {members}'))
-                self.repo.commit()
-                paths = packager.plan(self.repo.root, 'HEAD')['paths']
-                self.assertIn('suifleet-edge/windows-runtime/Cargo.toml', paths)
-                self.assertIn('suifleet-edge/windows-runtime/src/lib.rs', paths)
-        # Forms the strict reader does not model are refused, never skipped.
-        for workspace in ('[workspace]\nmembers = ["windows\\u002druntime"]',
-                          '[workspace]\nmembers = ["""windows-runtime"""]',
-                          '[workspace]\n"members" = ["windows-runtime"]',
-                          '[workspace]\nmembers = "windows-runtime"',
-                          'workspace.members = ["windows-runtime"]',
-                          'workspace = { members = ["windows-runtime"] }'):
+    def test_every_toml_spelling_of_workspace_members_is_packaged(self):
+        # Each spelling once dropped windows-runtime from the archive: literal
+        # strings, then escaped keys and headers that only decode to
+        # workspace.members. The whole manifest is parsed, so keys are compared
+        # after decoding, as Cargo compares them.
+        base = '[workspace]\nmembers = ["windows-runtime"]'
+        spellings = ("[workspace]\nmembers = ['windows-runtime']",
+                     '[workspace] # the daemon\nmembers = [\n  "windows-runtime", # the runtime\n]',
+                     '[workspace]\n"memb\\u0065rs" = ["windows-runtime"]',
+                     '["worksp\\u0061ce"]\nmembers = ["windows-runtime"]',
+                     "['workspace']\n'members' = [\"windows\\u002druntime\"]",
+                     '[workspace]\nmembers = ["\\U00000077indows-runtime"]',
+                     'workspace.members = ["windows-runtime"]',
+                     '"worksp\\u0061ce" . "members" = ["windows-runtime"]',
+                     'workspace = { "memb\\u0065rs" = ["windows-runtime"] }')
+        for workspace in spellings:
             with self.subTest(workspace):
-                self.repo.write('suifleet-edge/Cargo.toml',
-                                CARGO_TOML.replace('[workspace]\nmembers = ["windows-runtime"]', workspace))
+                # Root-level keys must precede the first table header.
+                text = (workspace + '\n' + CARGO_TOML.replace(base, '') if workspace.startswith(('workspace', '"'))
+                        else CARGO_TOML.replace(base, workspace))
+                self.repo.write('suifleet-edge/Cargo.toml', text)
                 self.repo.commit()
-                with self.assertRaisesRegex(ValueError, 'unsupported'):
+                self.assertEqual(packager.workspace_members(text), ['windows-runtime'])
+                info = packager.build(self.repo.root, 'HEAD', self.out / 'spelling.tar.gz')
+                (self.out / 'spelling.tar.gz').unlink()
+                self.assertIn('suifleet-edge/windows-runtime/Cargo.toml', info['paths'])
+                self.assertIn('suifleet-edge/windows-runtime/src/lib.rs', info['paths'])
+        # Syntax outside the supported subset is refused, never skipped. The
+        # multi-line string could otherwise hide a later members key.
+        for workspace in ('[workspace]\nmembers = ["""windows-runtime"""]',
+                          '[workspace]\nx = """\n[other]\n"""\nmembers = ["windows-runtime"]',
+                          '[workspace]\nmembers = "windows-runtime"',
+                          '[workspace]\nmembers = ["windows-runtime", 1]',
+                          '[[workspace.members]]\npath = "windows-runtime"',
+                          '[workspace]\nmembers = ["windows\\qruntime"]',
+                          '[workspace]\nmembers = ["\\ud800"]',
+                          '[workspace]\nmembers = ["windows-runtime"]\n"memb\\u0065rs" = []',
+                          '[workspace]\nmembers = ["windows-runtime"]\n["worksp\\u0061ce"]\nresolver = "2"'):
+            with self.subTest(workspace):
+                self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML.replace(base, workspace))
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, 'unsupported|duplicate'):
                     packager.plan(self.repo.root, 'HEAD')
+
+    def test_toml_reader_matches_a_reference_parser(self):
+        try:
+            import tomllib as reference
+        except ImportError:
+            try:
+                import tomli as reference
+            except ImportError:
+                self.skipTest('no reference TOML parser (tomllib or tomli) is importable')
+
+        def plain(value):
+            if isinstance(value, dict):
+                return {k: plain(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [plain(v) for v in value]
+            return str(value).lower() if isinstance(value, bool) else str(value)
+        manifests = [CARGO_TOML, (ROOT / 'suifleet-edge/Cargo.toml').read_text()]
+        for text in manifests:
+            self.assertEqual(plain(packager.parse_toml(text)), plain(reference.loads(text)))
 
     def test_runtime_state_symlinks_and_escapes_are_refused(self):
         cases = [
@@ -640,6 +678,35 @@ class LayerAuditTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertTrue(any('workspace member suifleet-edge/windows-runtime is missing' in e for e in report['errors']),
                         report['errors'])
+
+    def test_fetch_finds_escaped_workspace_members(self):
+        # A published manifest whose members key is only spelled with an
+        # escape still declares windows-runtime; leaving it out of the archive
+        # must be reported, and syntax the reader does not model is an error.
+        for spelling, expected in (('"memb\\u0065rs" = ["windows-runtime"]',
+                                    'workspace member suifleet-edge/windows-runtime is missing'),
+                                   ('members = ["""windows-runtime"""]',
+                                    'suifleet-edge/Cargo.toml: unsupported Cargo.toml syntax')):
+            with self.subTest(spelling):
+                manifest = CARGO_TOML.replace('members = ["windows-runtime"]', spelling).encode()
+                archive = self.archive.with_name(f'escaped-{len(manifest)}.tar.gz')
+                with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+                    for member in source.getmembers():
+                        if 'windows-runtime' in member.name:
+                            continue
+                        data = source.extractfile(member) if member.isfile() else None
+                        if member.name == 'suifleet-edge/Cargo.toml':
+                            member.size, data = len(manifest), io.BytesIO(manifest)
+                        tar.addfile(member, data)
+                self.write_recipe(sha=sha256(archive.read_bytes()))
+                original, self.archive = self.archive, archive
+                try:
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, fetch=True)
+                finally:
+                    self.archive = original
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
 
     def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
         # A checksum-pinned, otherwise coherent archive that carries runtime state.

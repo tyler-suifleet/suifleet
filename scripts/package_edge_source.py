@@ -71,83 +71,248 @@ def tree(repo, revision):
     return entries
 
 
-# A TOML basic string without escapes, or a literal string, on one line.
-MEMBER_STRING = re.compile(r'"([^"\\\n]*)"|\'([^\'\n]*)\'')
-WORKSPACE_HEADER = re.compile(r'^[ \t]*\[[ \t]*workspace[ \t]*\][ \t]*(?:#[^\n]*)?$', re.M)
-TABLE_HEADER = re.compile(r'^[ \t]*\[', re.M)
-# Other spellings of the workspace table: dotted/inline keys or a quoted header.
-OTHER_WORKSPACE = re.compile(r'^[ \t]*(?:["\']?workspace["\']?[ \t]*[.=]|\[[ \t]*["\']workspace["\'][ \t]*\])', re.M)
-TABLE_KEY = re.compile(r'^[ \t]*([^\s=#\[][^=\n]*?)[ \t]*=', re.M)
+class _Scalar(str):
+    """A non-string TOML value (boolean, number, date), kept as its raw text."""
 
 
-def member_array(text, pos):
-    """Parse a TOML array of strings starting at text[pos].
+class _InlineTable(dict):
+    """An inline table; TOML forbids extending it later."""
 
-    Accepts unescaped basic strings and literal strings, separated by commas,
-    with comments, newlines and a trailing comma. Anything else raises
-    ValueError instead of silently dropping a member."""
-    def skip(i):
-        while i < len(text):
+
+class _TableArray(list):
+    """An array of tables (`[[name]]`)."""
+
+
+TOML_BARE_KEY = re.compile(r'[A-Za-z0-9_-]+')
+TOML_SCALAR = re.compile(r'[0-9A-Za-z_+.:-]+')
+TOML_ESCAPES = {'b': '\b', 't': '\t', 'n': '\n', 'f': '\f', 'r': '\r', '"': '"', '\\': '\\'}
+
+
+def parse_toml(text):
+    """Parse a Cargo manifest into nested dicts, or raise ValueError.
+
+    Python 3.10 (the dev container) has no tomllib, so this is a strict reader
+    for the TOML subset Cargo manifests use: tables, arrays of tables, dotted
+    and quoted keys (escapes decoded), single-line basic and literal strings,
+    arrays, inline tables and raw scalars. Keys are compared after decoding, so
+    `"members"` and `["workspace"]` mean what TOML says they mean.
+    Multi-line strings and anything else outside the subset raise ValueError
+    instead of being skipped, so a declaration is never silently missed."""
+    i, n = 0, len(text)
+
+    def fail(message):
+        line = text.count('\n', 0, i) + 1
+        raise ValueError(f'unsupported Cargo.toml syntax at line {line}: {message} near {text[i:i + 40]!r}')
+
+    def blank():
+        nonlocal i
+        while i < n and text[i] in ' \t':
+            i += 1
+
+    def blank_lines():
+        nonlocal i
+        while i < n:
             if text[i] in ' \t\r\n':
                 i += 1
             elif text[i] == '#':
                 end = text.find('\n', i)
-                i = len(text) if end < 0 else end
+                i = n if end < 0 else end
             else:
                 break
-        return i
 
-    def unsupported(i):
-        return ValueError(f'unsupported [workspace] members syntax near: {text[i:i + 40]!r}')
+    def end_of_line():
+        nonlocal i
+        blank()
+        if i < n and text[i] == '#':
+            end = text.find('\n', i)
+            i = n if end < 0 else end
+        if text.startswith('\r\n', i):
+            i += 2
+        elif i < n and text[i] == '\n':
+            i += 1
+        elif i < n:
+            fail('expected end of line')
 
-    i = skip(pos)
-    if i >= len(text) or text[i] != '[':
-        raise unsupported(i)
-    members, i = [], skip(i + 1)
-    while i >= len(text) or text[i] != ']':
-        match = MEMBER_STRING.match(text, i)
-        if not match or text.startswith(('"""', "'''"), i):
-            raise unsupported(i)
-        member = match.group(1) if match.group(1) is not None else match.group(2)
-        if not member:
-            raise ValueError('empty [workspace] member')
-        members.append(member)
-        i = skip(match.end())
-        if i < len(text) and text[i] == ',':
-            i = skip(i + 1)
-        elif i >= len(text) or text[i] != ']':
-            raise unsupported(i)
-    return members
+    def string():
+        nonlocal i
+        if text.startswith(('"""', "'''"), i):
+            fail('multi-line string')
+        quote, out = text[i], []
+        i += 1
+        while True:
+            if i >= n or text[i] in '\r\n':
+                fail('unterminated string')
+            c = text[i]
+            if c == quote:
+                i += 1
+                return ''.join(out)
+            if (ord(c) < 0x20 and c != '\t') or ord(c) == 0x7f:
+                fail('control character in string')
+            if c == '\\' and quote == '"':
+                code = text[i + 1:i + 2]
+                if code in TOML_ESCAPES:
+                    out.append(TOML_ESCAPES[code])
+                    i += 2
+                    continue
+                width = {'u': 4, 'U': 8}.get(code)
+                digits = text[i + 2:i + 2 + width] if width else ''
+                if not width or len(digits) != width or not re.fullmatch(r'[0-9A-Fa-f]+', digits):
+                    fail('invalid escape')
+                value = int(digits, 16)
+                if value > 0x10FFFF or 0xD800 <= value <= 0xDFFF:
+                    fail('invalid unicode escape')
+                out.append(chr(value))
+                i += 2 + width
+                continue
+            out.append(c)
+            i += 1
+
+    def key():
+        nonlocal i
+        parts = []
+        while True:
+            blank()
+            if i < n and text[i] in '"\'':
+                parts.append(string())
+            else:
+                match = TOML_BARE_KEY.match(text, i)
+                if not match:
+                    fail('expected a key')
+                parts.append(match.group(0))
+                i = match.end()
+            blank()
+            if i < n and text[i] == '.':
+                i += 1
+                continue
+            return parts
+
+    def value():
+        nonlocal i
+        blank()
+        if i < n and text[i] in '"\'':
+            return string()
+        if i < n and text[i] == '[':
+            i += 1
+            items = []
+            while True:
+                blank_lines()
+                if i < n and text[i] == ']':
+                    i += 1
+                    return items
+                items.append(value())
+                blank_lines()
+                if i < n and text[i] == ',':
+                    i += 1
+                elif not (i < n and text[i] == ']'):
+                    fail('expected , or ] in array')
+        if i < n and text[i] == '{':
+            i += 1
+            table = _InlineTable()
+            blank()
+            if i < n and text[i] == '}':
+                i += 1
+                return table
+            while True:
+                path = key()
+                if not (i < n and text[i] == '='):
+                    fail('expected =')
+                i += 1
+                assign(table, path, value())
+                blank()
+                if i < n and text[i] == ',':
+                    i += 1
+                elif i < n and text[i] == '}':
+                    i += 1
+                    return table
+                else:
+                    fail('expected , or } in inline table')
+        match = TOML_SCALAR.match(text, i)
+        if not match:
+            fail('expected a value')
+        i = match.end()
+        return _Scalar(match.group(0))
+
+    def descend(node, part, path):
+        child = node.setdefault(part, {})
+        if isinstance(child, _TableArray):
+            child = child[-1]
+        if not isinstance(child, dict) or isinstance(child, _InlineTable):
+            fail(f'{".".join(path)} is not a table')
+        return child
+
+    def assign(table, path, item):
+        node = table
+        for depth, part in enumerate(path[:-1]):
+            node = descend(node, part, path[:depth + 1])
+        if path[-1] in node:
+            fail(f'duplicate key {".".join(path)}')
+        node[path[-1]] = item
+
+    root, defined = {}, set()
+    current = root
+    while True:
+        blank_lines()
+        if i >= n:
+            return root
+        if text.startswith('[[', i):
+            i += 2
+            path = key()
+            if not text.startswith(']]', i):
+                fail('expected ]]')
+            i += 2
+            node = root
+            for depth, part in enumerate(path[:-1]):
+                node = descend(node, part, path[:depth + 1])
+            tables = node.setdefault(path[-1], _TableArray())
+            if not isinstance(tables, _TableArray):
+                fail(f'{".".join(path)} is not an array of tables')
+            tables.append({})
+            current = tables[-1]
+        elif text[i] == '[':
+            i += 1
+            path = key()
+            if not (i < n and text[i] == ']'):
+                fail('expected ]')
+            i += 1
+            node = root
+            for depth, part in enumerate(path[:-1]):
+                node = descend(node, part, path[:depth + 1])
+            existing = node.get(path[-1])
+            if existing is None:
+                node[path[-1]] = current = {}
+            elif type(existing) is dict and id(existing) not in defined:
+                current = existing
+            else:
+                fail(f'duplicate table {".".join(path)}')
+            defined.add(id(current))
+        else:
+            path = key()
+            if not (i < n and text[i] == '='):
+                fail('expected =')
+            i += 1
+            assign(current, path, value())
+        end_of_line()
 
 
 def workspace_members(manifest):
     """Return `[workspace] members` from a Cargo manifest (literal paths only).
 
-    Python 3.10 (the dev container) has no tomllib, so this reads the one
-    supported form strictly: a single `[workspace]` table with a bare `members`
-    key whose value is an array of unescaped basic or literal strings. Other
-    spellings (dotted keys, inline tables, quoted keys or headers, escapes,
-    multi-line strings) raise ValueError, so a member is never silently
-    omitted from the archive or the fetched-layout check."""
-    other = OTHER_WORKSPACE.search(manifest)
-    if other:
-        raise ValueError(f'unsupported workspace declaration: {other.group(0).strip()}')
-    headers = list(WORKSPACE_HEADER.finditer(manifest))
-    if len(headers) > 1:
-        raise ValueError('duplicate [workspace] table')
-    if not headers:
+    The whole manifest is parsed (see parse_toml), so every TOML spelling of
+    workspace.members is found; syntax outside the supported subset, or a
+    members value that is not an array of strings, raises ValueError. A
+    member is never silently omitted from the archive or the fetched-layout
+    check."""
+    workspace = parse_toml(manifest).get('workspace')
+    if workspace is None:
         return []
-    following = TABLE_HEADER.search(manifest, headers[0].end())
-    body = manifest[headers[0].end():following.start() if following else len(manifest)]
-    members = None
-    for key in TABLE_KEY.finditer(body):
-        name = key.group(1)
-        if name.split('.')[0].strip().strip('"\'') == 'members':
-            if name != 'members' or members is not None:
-                raise ValueError(f'unsupported [workspace] members key: {name}')
-            members = member_array(body, key.end())
-    members = members or []
+    if not isinstance(workspace, dict):
+        raise ValueError('unsupported workspace declaration: not a table')
+    members = workspace.get('members', [])
+    if type(members) is not list or any(type(m) is not str for m in members):
+        raise ValueError('unsupported [workspace] members value: expected an array of strings')
     for member in members:
+        if not member:
+            raise ValueError('empty [workspace] member')
         if any(c in member for c in '*?[') or '..' in PurePosixPath(member).parts or member.startswith('/'):
             raise ValueError(f'unsupported workspace member pattern: {member}')
     return members
@@ -218,10 +383,10 @@ def audit(paths, files, read):
 
 
 def crate_version(manifest):
-    match = re.search(r'^\[package\][^\[]*?^version\s*=\s*"([^"]+)"', manifest, re.M | re.S)
-    if not match:
-        raise ValueError('Cargo.toml has no [package] version')
-    return match.group(1)
+    version = parse_toml(manifest).get('package', {}).get('version')
+    if type(version) is not str:
+        raise ValueError('Cargo.toml has no literal [package] version')
+    return version
 
 
 def plan(repo, revision, paths=None):
