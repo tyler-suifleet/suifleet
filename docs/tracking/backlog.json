@@ -5752,6 +5752,25 @@
         "Scoped positive/negative tests and actual live candidate proof."
       ],
       "validation": "Focused coordinator applicability and gate regressions; meaningful local combined-main checks; verified activation."
+    },
+    {
+      "key": "SF-330",
+      "title": "Preserve activation proof across unchanged carry-forward merges",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Verify identical installed runtime trees carried forward through a second parent without relaxing receipt checks for later runtime changes.",
+      "acceptance": [
+        "Exact runtime-tree equality and installed ancestry are required at a carry-forward checkpoint.",
+        "Verify subsequently merged runtime changes through the existing authorization paths."
+      ],
+      "validation": "Offline activation and supervisor upgrade regressions."
     }
   ]
 }
