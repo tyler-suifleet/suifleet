@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_SUIFLEET_PATH/package/suifleet/Config.in"

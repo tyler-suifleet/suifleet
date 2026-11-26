@@ -115,7 +115,6 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.evaluate(() => window.uploadAcceptance.finish(2));
     await page.waitForFunction(() => window.uploadAcceptance.walletCalls() === 1);
     assert.equal(await page.getByRole('button', { name: 'Deploying…', exact: true }).isDisabled(), true);
-    // The validating stage label names no network since the console wording change (cca7b642).
     await page.getByRole('status').filter({ hasText: /Checking (?:testnet|the network) and wallet account/ }).waitFor();
     await page.evaluate(() => window.uploadAcceptance.phase('wallet'));
     await page.getByRole('dialog').getByText(/Your wallet is preparing/).waitFor();

@@ -1,0 +1,247 @@
+# Buildroot edge client
+
+The [external tree](../suifleet-edge/packaging/buildroot) packages the Rust edge
+client, CA certificates, and the Python launcher for the
+[portable signer](KEY_ISOLATION.md#portable-linux-signer). It creates separate
+unprivileged daemon and signer accounts. The tested profiles use BusyBox
+init with `/etc/init.d/S95suifleet`. For a different init system, run
+`/usr/sbin/suifleet-portable-signer` in the foreground as root and supervise
+the pair as one service.
+
+## Build
+
+Use Buildroot 2026.08.2 with the host tools from its manual. Verify the release
+archive before extraction.
+
+```sh
+printf '%s  %s\n' bc9497c8e3a734c277e541e2f7fcf9a6275dc92f75bd2f753b05981c54be8705 \
+  buildroot-2026.08.2.tar.xz | sha256sum -c -
+make -C buildroot-2026.08.2 BR2_EXTERNAL=/path/to/suifleet/suifleet-edge/packaging/buildroot \
+  O=/absolute/path/to/output-glibc suifleet_x86_64_glibc_defconfig
+make -C /absolute/path/to/output-glibc
+```
+
+Use a separate output directory with `suifleet_x86_64_musl_defconfig` for
+x86-64 musl or `suifleet_aarch64_glibc_defconfig` for 64-bit ARM glibc.
+All three profiles use Bootlin's pinned 2025.08-1 stable toolchain and produce
+`images/rootfs.cpio` for use with a board kernel or a VM kernel with initramfs,
+procfs, devtmpfs, tmpfs and Unix sockets enabled. Supply the kernel and boot
+arguments from your board configuration. For your own image, enable
+`BR2_PACKAGE_SUIFLEET` in the Buildroot configuration with the tree attached.
+If you customize BusyBox, keep the long options for `start-stop-daemon`,
+including `--output` for the init hook.
+Buildroot vendors the pinned source revision's `Cargo.lock` at download time,
+then builds with `--locked --offline`. The package pins SF-293 integration
+revision `19ee9e089ea6a2ca2ba9f307f163a6b96c5645ee`, which includes portable
+pair lifetime supervision. Run `make legal-info` for the source
+and license archive, including the vendored Rust sources. Inspect individual
+crate notices in that archive when preparing redistribution materials.
+
+The basic package uses rustls with the system CA store and the file-backed
+portable signer. The Python launcher uses the standard library and requires
+neither OpenSSL nor the optional Python compression modules. Add any
+decompressor, interpreter, libc or shared library required by an individual
+application artifact to the customer image. The package builds without the
+optional PKCS#11 and systemd Cargo features. Supervised lifecycle commands have
+the daemon's own [containment requirements](KEY_ISOLATION.md) and should be
+validated separately on the target init setup.
+
+## Provision after boot
+
+Keep `/etc/suifleet` and `/var/lib/suifleet` on persistent storage. Use a
+root-owned, traversable `/etc/suifleet` with individual file permissions.
+The init hook leaves an unconfigured device idle. Prepare settings and keys
+on the target as root.
+
+```sh
+umask 077
+install -d -m 0755 /etc/suifleet
+suifleet --provision /etc/suifleet/device.key
+```
+
+Use the root-only per-device bundle and `suifleet --enroll /secure/enroll.toml`
+from the [enrollment flow](ENROLLMENT.md). For bootstrap, the enrollment file
+references the root-only device key. Keep its claim key and enrollment files
+outside reusable images. After successful enrollment, install the public
+deployment manifest as root-owned mode 0644. Move ownership of `device.key`
+to `suifleet-signer:suifleet-signer` and keep mode 0600. Install
+`signer.toml` as `root:suifleet-signer` mode 0640 with `portable = true`,
+the returned DeviceCap ID, and the key and manifest paths. Install
+`config.toml` last as `root:suifleet` mode 0640, with the enrolled Device and
+DeviceCap IDs and `[device.signer]` set to `kind = "service"` and
+`socket = "/run/suifleet-portable/signer.sock"`. Keep daemon self-update disabled.
+
+Mount procfs for the service's PID namespace and keep `fs.suid_dumpable=0`.
+Start with `/etc/init.d/S95suifleet start` and use the same script to stop or
+restart. The init hook starts asynchronously and appends launcher and child
+stdout and stderr to the root-only `/run/suifleet-portable/launcher.log`.
+Check that log if the pair exits during startup. The log survives service
+restarts and clears on reboot when `/run` is volatile. Handle ongoing log
+retention through the board's service manager. The foreground launcher stops
+both children when either exits. Linux terminates both children if the
+launcher is killed. Supervise the foreground pair if the site
+requires automatic restart after a failure. Platform scripts own firmware
+installation, reboot, boot confirmation and firmware rollback.
+
+## Disposable VM test
+
+Use a network-isolated Sui 1.81.1 node with a faucet and a warm, private
+Move dependency cache. Build the host `chain_facts` example and host
+`suifleet` executable with `cargo build --locked --bin suifleet --example
+chain_facts` in `suifleet-edge`. Set `SUIFLEET_CHAIN_FACTS` to that example's
+path. Run the fixture server in the node's namespace, with the checkout
+available for the Move sources and test component.
+
+```sh
+python3 scripts/test_buildroot_localnet.py --claim-tool /path/to/host/suifleet
+```
+
+After `SF296_HOST_READY`, boot the Buildroot initramfs in the same namespace.
+Append a test-only CPIO archive containing the test script at
+`/sf296/test.py`, the kernel's matching `e1000.ko` at
+`/sf296/e1000.ko`, and the following executable at
+`/etc/init.d/S99sf296`. Keep the test archive separate from the release rootfs and omit the existing
+`/etc` and `/etc/init.d` directory entries so their permissions are preserved.
+
+```sh
+#!/bin/sh
+[ "$1" = start ] || exit 0
+set -e
+insmod /sf296/e1000.ko
+ifconfig eth0 10.0.2.15 netmask 255.255.255.0 up
+python3 /sf296/test.py --guest
+echo SF296_GUEST_PASS
+poweroff -f
+```
+
+```sh
+(cd overlay && printf '%s\n' sf296 sf296/test.py sf296/e1000.ko etc/init.d/S99sf296 \
+  | cpio --quiet -o -H newc --owner 0:0) > test-overlay.cpio
+cat output/images/rootfs.cpio test-overlay.cpio > test-initramfs.cpio
+qemu-system-x86_64 -m 1024 -smp 2 -nographic -no-reboot \
+  -kernel /path/to/vmlinuz -initrd test-initramfs.cpio \
+  -append 'console=ttyS0 suifleet_sf296_test=1' -nic user,model=e1000
+```
+
+For AArch64, use the matching ARM64 kernel and its own `e1000.ko`
+when creating the overlay, then boot with QEMU's `virt` machine.
+
+```sh
+qemu-system-aarch64 -machine virt -accel tcg -cpu cortex-a57 -m 1024 -smp 2 \
+  -nographic -no-reboot -kernel /path/to/arm64/vmlinuz -initrd test-initramfs.cpio \
+  -append 'console=ttyAMA0 suifleet_sf296_test=1' \
+  -netdev user,id=net0 -device e1000,netdev=net0,romfile=
+```
+
+The fixture deliberately triggers the launcher's binary permission check,
+verifies the error in the root-only log, and restores the binary mode before
+starting the service. It checks a fresh identity, claim-sponsored enrollment
+effects and cap ownership, harmless installation, and an authoritative Applied
+receipt from the node. It kills the launcher, verifies both child processes
+exit before restarting, and checks that the signer listens again after
+restart and that the endpoint disappears on stop. This uses an HTTP Walrus
+stand-in inside the isolated namespace. It exercises an application install
+in emulation. Physical and manual-wallet acceptance remains in
+[SF-031](https://github.com/tyler-suifleet/suifleet/issues/32), with mainnet
+and production providers in [SF-087](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## Validation on 2026-11-25
+
+### SF-293 pin and forced launcher exit
+
+Built `suifleet_x86_64_glibc_defconfig` in a clean Buildroot 2026.08.2 output
+directory with `make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl -j16`. Buildroot
+verified the regenerated Cargo archive and built the package offline with
+Rust 1.97.1. The `suifleet-legal-info` target verified the unchanged MIT
+license hash. The CPIO contained the packaged launcher, daemon, init hook,
+and CA bundle, with no SuiFleet configuration, keys, or journal directory.
+
+QEMU 7.2.22/KVM booted the CPIO with Debian kernel `6.1.0-56-amd64` and the
+test overlay. The guest printed `SF296_STARTUP_DIAGNOSTIC_PASS`,
+`SF296_FORCED_EXIT_PASS`, and `SF296_GUEST_PASS`. It verified both children
+exited after launcher `SIGKILL` and the signer listened again after restart.
+Isolated Sui 1.81.1 localnet (chain `c065dfa6`, protocol 138) verified
+enrollment effects, cap ownership, and the authoritative Applied receipt.
+The guest verified the installed app and its health.
+
+| Rootfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|
+| `5584cdca4eec158b566c17f97ec18531a1034e2f536dd3c956cdc71bf2b1afdb` | `5Vt8aV6UAUFrH7S7oh59qLgucXiRdQGUUbxjni5o4f4D` | `HwFXHznEK6pWfbezEDfnRzcKvbvR89YxZzTQpbWAwhaK` |
+
+The historical runs below used SF-292 source revision
+`773700486e111e74e8a5471057157ebbfda44814`. AArch64 glibc and x86-64 musl
+were not rerun with the SF-293 pin.
+
+### Original x86-64 builds
+
+Built both x86-64 defconfigs in separate clean Buildroot output directories with
+`make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl -j10` (glibc) and
+`make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl -j7` (musl). Buildroot 2026.08.2
+used Bootlin GCC 14.3.0, Rust 1.97.1, Python 3.14.10, and BusyBox 1.38.0.
+`make -C OUTPUT BR2_DL_DIR=/tmp/sf296-build/dl suifleet-legal-info` verified
+the MIT license hash and collected the vendored source on the glibc output.
+Each CPIO contained the executable, launcher, init hook and CA bundle, with no
+device keys, configuration, enrollment or journal directory. The glibc daemon
+uses the glibc loader and the musl daemon is static PIE.
+
+Both initramfs images booted with QEMU/KVM and Debian's
+`6.1.0-56-amd64` kernel (`6.1.192-2`), then passed the VM test above against
+a disposable network-none Sui 1.81.1 node (chain `da76ddb6`, protocol 138).
+The two guests generated different identities. Each enrolled with claim-paid
+gas and the expected cap owners, applied the authenticated test app with
+passing health, and reported an independently read authoritative Applied
+receipt. Each completed duplicate start, restart and stop through the shipped
+init hook.
+
+| Image | Rootfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|---|
+| x86-64 glibc | `e9b980ceecd6608d1507dc2550389ca225ce706df464500d4d0ee644c2c825ec` | `6Qq4xrt88MwoTaTPxDXHPXJSFdkUouEdd2f8rVBAtZQF` | `AJXd7B1jz3fs2mZ1wcDjuzLo3bguPvRfRzgcFoUpNzUR` |
+| x86-64 musl | `78a0f15f62290c2ed895696329dd7fb5ea3c3666a2f3c93d90085aa8bcd69f1a` | `CDaSc2PyDFx1Bz7hrxptxw8pvmHfvGMegpDBaCM7AMLo` | `Ew56dyt73ND2YZKetpYLno6Qd1VYiwfBuKU5NPT9aZMX` |
+
+### Startup diagnostics regression
+
+Rebooted the two x86-64 images with the repaired `S95suifleet` and the
+diagnostic fixture in the test overlay. Both QEMU 7.2.22/KVM runs printed
+`SF296_STARTUP_DIAGNOSTIC_PASS` and `SF296_GUEST_PASS` on isolated Sui 1.81.1
+localnet (chain `ca7f0b6a`, protocol 138). Each verified the rejected startup
+and the root-owned mode-0600 log, then completed enrollment, application
+installation, authoritative reporting and the init lifecycle.
+
+| Guest | Test initramfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|---|
+| x86-64 glibc | `0f6a8d43521587e8a62d89fe815e644aa0c4ffb9c9d9e1f35f23e4bd32823f03` | `ErgAJGLEJCu2u2cjdZiirvpLt7rzWSo478nnQ1eCwQru` | `EzfubA6NCohAttsMCq5KLUacRgAHqoUpNMwxVXCX1NRb` |
+| x86-64 musl | `c556b64caef6b156cbd939a89e8d619048e068ece986e969eff77afcb9bf65fa` | `BPg9DXzGKn3B1ND8DgarcPJVWRtTdJNcxDdJrSC9PMtG` | `9k3k4DEtq4NHZV3sHZXGoiYmDY4oSZJRKuQaqU4GFLTq` |
+
+### Clean AArch64 glibc build and boot
+
+Built `suifleet_aarch64_glibc_defconfig` from an empty output directory on
+`/mnt/suifleet-builds`. Buildroot 2026.08.2 used the pinned Bootlin 2025.08-1
+AArch64 glibc toolchain and Rust 1.97.1 for the locked offline package build.
+
+```sh
+make -C "$BUILDROOT" BR2_EXTERNAL="$EXTERNAL" O="$OUTPUT" suifleet_aarch64_glibc_defconfig
+make -C "$OUTPUT" BR2_DL_DIR=/tmp/sf296-build/dl -j16
+make -C "$OUTPUT" BR2_DL_DIR=/tmp/sf296-build/dl suifleet-legal-info
+```
+
+The package license hash passed. The CPIO contained the ELF64 AArch64 daemon
+with interpreter `/lib/ld-linux-aarch64.so.1`, launcher, repaired init hook and
+CA bundle. It contained no SuiFleet configuration, device keys, enrollment
+files or journal directory.
+
+QEMU 7.2.22 with `virt` and TCG booted that CPIO with Debian's
+`6.1.0-56-arm64` kernel (`6.1.192-2`) and a test-only overlay. The VM printed
+`SF296_STARTUP_DIAGNOSTIC_PASS` and `SF296_GUEST_PASS`. Isolated network-none
+Sui 1.81.1 localnet (chain `a11e33cd`, protocol 138) independently verified
+claim-sponsored enrollment effects, cap ownership and the authoritative
+Applied receipt. The guest verified the installed test app and its health,
+then completed duplicate start, restart and stop through the packaged hook.
+
+| Rootfs SHA-256 | Enrollment transaction | Deployment transaction |
+|---|---|---|
+| `b4931c34d1c456ea33d495d6a0924a8ca5757c4e1767423fccb7e977efe3f09d` | `4HDd6oHw67YqKXDhvPx7jkHPfFRhKRz3d5KUASNmRnvs` | `67o5vNBwW4pMKQvTVRJvAHd6BYnPyqrLcRFyVFEJbJ6W` |
+
+The VM runs cover the three BusyBox profiles with the file-backed signer.
+Separate SysV, ARMv7, AArch64 musl, PKCS#11 and certified Walrus were unrun.
+Hosted CI and applicable automatic public-testnet validation follow on the
+pushed head. Physical acceptance and firmware recovery remain separate.

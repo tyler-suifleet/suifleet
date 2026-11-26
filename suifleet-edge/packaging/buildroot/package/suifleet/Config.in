@@ -1,0 +1,15 @@
+config BR2_PACKAGE_SUIFLEET
+	bool "suifleet"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	depends on BR2_TOOLCHAIN_USES_GLIBC || BR2_TOOLCHAIN_USES_MUSL
+	depends on BR2_USE_MMU # python3
+	depends on BR2_USE_WCHAR # python3
+	depends on BR2_TOOLCHAIN_HAS_THREADS # python3
+	depends on !BR2_STATIC_LIBS # python3
+	select BR2_PACKAGE_HOST_RUSTC
+	select BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_CA_CERTIFICATES
+	help
+	  SuiFleet edge client with the portable signing service.
+	  Provision a unique identity and install fleet configuration at
+	  runtime. BusyBox and SysV init can start the paired service.

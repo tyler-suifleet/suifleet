@@ -37,20 +37,19 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     const open = async () => {
       await tab.goto(origin);
       await tab.locator("#policy").selectOption({ index: 1 });
-      await tab.getByTestId("status-counts").getByText("Waiting for device: 1").or(tab.getByTestId("status-counts").getByText("Revoked: 1")).first().waitFor();
+      await tab.getByTestId("status-counts").getByText("Funded, unused: 1").or(tab.getByTestId("status-counts").getByText("Revoked: 1")).first().waitFor();
     };
     const statusOf = async (serial) => (await tab.getByTestId("enrollment-entries").locator("tr", { hasText: serial }).locator("td").nth(3).innerText()).trim();
     const storedEntry = (serial) => tab.evaluate((s) => { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("suifleet.enrollment.")) { const job = JSON.parse(localStorage.getItem(k)); const e = job.entries.find((x) => x.serial === s); if (e) return e; } } return null; }, serial);
     await open();
-    assert.equal(await statusOf("SN-1"), "Waiting for device"); assert.equal(await statusOf("SN-2"), "Enrolled"); assert.equal(await statusOf("SN-3"), "Reserved");
+    assert.equal(await statusOf("SN-1"), "Funded, unused"); assert.equal(await statusOf("SN-2"), "Bound"); assert.equal(await statusOf("SN-3"), "Reserved");
 
     // 1. The single-copy warning precedes the download, which needs an explicit acknowledgment.
     await tab.getByRole("tab", { name: "Pair one device" }).click();
-    await tab.getByLabel("Alias").fill("pi-9"); await tab.getByLabel("Serial number").fill("SN-9");
-    await tab.getByRole("button", { name: "Check", exact: true }).click();
+    await tab.getByLabel("Name", { exact: true }).fill("pi-9"); await tab.getByLabel("Serial number").fill("SN-9");
     const download = tab.getByRole("button", { name: "Download credentials for 1 device" }), ack = tab.getByRole("checkbox", { name: "I understand this download is the only copy of these credentials" });
     const warning = tab.getByTestId("credential-warning");
-    assert.match(await warning.innerText(), /Before you download: this file is the only copy of the claim keys/);
+    assert.match(await warning.innerText(), /This file is the only copy of the credentials; SuiFleet cannot download it again/);
     assert.match(await warning.innerText(), /Lost a credential file\?/);
     assert.equal(await warning.evaluate((w, b) => !!(w.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING), await download.elementHandle()), true, "the warning comes before the download button");
     assert.equal(await download.isDisabled(), true, "download waits for acknowledgment");
@@ -83,7 +82,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await alert.waitFor(); assert.match(await alert.innerText(), /Do not try again yet/);
     assert.deepEqual(await tab.evaluate(() => window.fx.calls), [["revoke_claim"]], "double-click sends one revocation");
     assert.equal((await storedEntry("SN-1")).revoked, true, "an interrupted revocation is never re-registered automatically");
-    assert.equal(await statusOf("SN-1"), "Waiting for device", "no invented success");
+    assert.equal(await statusOf("SN-1"), "Funded, unused", "no invented success");
 
     // 3. Restart: guidance and the revocation marker survive a reload.
     await open();
@@ -96,13 +95,12 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.equal(await statusOf("SN-1"), "Revoked");
     await tab.getByTestId("lost-credentials").getByRole("button", { name: "Remove 1 reservation to reissue" }).click();
     await tab.getByTestId("enrollment-entries").locator("tr", { hasText: "SN-1" }).waitFor({ state: "detached" });
-    assert.equal(await statusOf("SN-2"), "Enrolled", "the enrolled device is untouched");
+    assert.equal(await statusOf("SN-2"), "Bound", "the enrolled device is untouched");
 
     // Reissue: the same serial is accepted again and a new file can be downloaded.
     await tab.getByRole("tab", { name: "Pair one device" }).click();
-    await tab.getByLabel("Alias").fill("pi-1"); await tab.getByLabel("Serial number").fill("SN-1");
-    await tab.getByRole("button", { name: "Check", exact: true }).click();
-    assert.match(await tab.getByTestId("reservation-check").innerText(), /^1 ready\./);
+    await tab.getByLabel("Serial number").fill("SN-1");
+    assert.match(await tab.getByTestId("reservation-check").innerText(), /^Ready: SN-1/, "a blank name defaults to the serial");
     await ack.check();
     const [again] = await Promise.all([tab.waitForEvent("download"), tab.getByRole("button", { name: "Download credentials for 1 device" }).click()]); await again.delete();
     assert.equal(await statusOf("SN-1"), "Reserved");
@@ -115,6 +113,27 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.deepEqual(await tab.evaluate(() => window.fx.calls), [["revoke_claim"]], "one deliberate retry after the reload; reissue needs no wallet request");
     assert.ok(dialogs.every((d) => d.startsWith("confirm")), `no browser alerts: ${dialogs}`);
     assert.deepEqual(errors, []);
+
+    // Device capacity: with no free slot, registration and new downloads pause before any wallet request.
+    await tab.setViewportSize({ width: 1280, height: 900 });
+    await tab.evaluate(() => localStorage.setItem("fixture-fleet", JSON.stringify({ active: 1, limit: 1 })));
+    const reopen = async () => { await tab.goto(origin); await tab.locator("#policy").selectOption({ index: 1 }); await tab.getByTestId("enrollment-entries").waitFor(); };
+    await reopen();
+    assert.match(await tab.getByTestId("device-capacity").innerText(), /All 1 device slots are in use\. Devices cannot enroll until you raise the limit\./);
+    await tab.getByTestId("capacity-short").waitFor();
+    assert.equal(await tab.getByRole("button", { name: "Nothing pending" }).isDisabled(), true, "registration waits for a free slot");
+    await tab.getByLabel("Serial number").fill("SN-7");
+    await tab.getByTestId("capacity-download").waitFor();
+    assert.equal(await tab.getByRole("button", { name: "Download credentials for 1 device" }).isDisabled(), true, "no credential without a slot");
+    // A raised limit resumes registration.
+    await tab.evaluate(() => localStorage.setItem("fixture-fleet", JSON.stringify({ active: 1, limit: 10 })));
+    await reopen();
+    assert.match(await tab.getByTestId("device-capacity").innerText(), /Device slots: 1 of 10 in use, 9 free\./);
+    assert.equal(await tab.getByTestId("capacity-short").count(), 0);
+    assert.equal(await tab.getByRole("button", { name: /^Run \d+ pending transactions?$/ }).isEnabled(), true);
+    assert.deepEqual(await tab.evaluate(() => window.fx.calls), [], "capacity checks send nothing");
+    assert.deepEqual(errors, []);
+    console.log("PASS: device capacity pauses registration and downloads at the limit and resumes when raised");
     console.log("PASS: single-copy warning and acknowledgment before each credential download; lost-file revoke/reissue limited to unused claims, enrolled device never reissued; unconfirmed double-clicked revocation sends one request, keeps its marker and guidance across reload; confirmed revoke frees the serial for a new credential; desktop and phone width; fixture chain/wallet only");
   } finally { if (browser) await browser.close(); if (server) await new Promise((r) => server.close(r)); await fs.rm(temp, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });

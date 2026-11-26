@@ -47,7 +47,7 @@ class ClaimsRoster(unittest.TestCase):
         roster = json.loads((out / "roster.json").read_text())
         self.assertEqual([(e["serial"], e["alias"], e.get("group")) for e in roster["entries"]],
                          [("SN1", "pi-007", "Lab"), ("SN2", "kitchen", None), ("SN3", "pi-009", None)])
-        self.assertEqual(roster["claimFundMist"], "20000000")
+        self.assertEqual(roster["claimFundMist"], "40000000")
         self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o700)
         for entry in roster["entries"]:
             folder = out / "enrollment" / entry["serial"]

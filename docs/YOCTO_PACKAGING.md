@@ -9,17 +9,22 @@ Operators installing a first device should follow
 [Install the device client](INSTALL_DEVICE_CLIENT.md#yocto-image-and-recipe);
 this page records the packaging details and evidence.
 
+See the [edge platform compatibility matrix](EDGE_PLATFORM_COMPATIBILITY.md)
+for candidate kernels, libc variants and older Yocto series.
+
 ## Standalone distribution readiness (SF-230)
 
 The [software layer README](../suifleet-edge/meta-suifleet/README.md) and
 [release/submission checklist](../suifleet-edge/meta-suifleet/RELEASE.md) describe
 the deterministic export and outstanding authorized public-source/repository/index
 publication. No standalone repository or Layer Index listing is available yet.
-Pi image/access policy, test component and core-recipe workarounds now live in
+Pi image/access policy, the test component and a cache-hygiene glibc guard live in
 `suifleet-edge/meta-suifleet-integration`; both pinned kas profiles include it.
-Manually maintained BBLAYERS configurations using the Pi image, test component
-or core-recipe workarounds must add the companion integration directory too.
-The generic software layer has no core recipe appends or BSP dependency.
+Manually maintained BBLAYERS configurations using the Pi image or test component
+must add the companion integration directory too. The generic software layer has
+no core recipe appends or BSP dependency. Its OpenSSL/libcap/xz fixes are an
+opt-in class (`INHERIT += "suifleet-core-fixes"`; SF-308), described in the layer
+README.
 Source, Cargo and codec pins remain unchanged. Current export, recipe build and
 layer-check evidence is in [standalone readiness validation](YOCTO_STANDALONE_VALIDATION.md).
 
@@ -38,7 +43,9 @@ any diff alongside the kas configuration and build artifacts. The daemon source
 is fetched independently at the recipe's fixed `SRCREV`
 `b9bb2ef6210624d732ab2de2075ea1826e5300c1`: reviewed merged main, including
 client 0.2.3 required by the current Seal testnet evaluation manifest. The codec
-is rebuilt from that same revision. `nobranch=1` selects this immutable revision,
+is rebuilt from that same revision. The daemon recipe applies the first-boot
+enrollment backport as a layer patch. The layer commit identifies the patch
+and service included in the package. `nobranch=1` selects this immutable revision,
 never AUTOREV. Runtime manifest version rejection and signer separation remain
 enabled. The Cargo.lock SHA-256 is
 `c2dcebe170dc37c488aa20ad5cae64ad718469f7770cf984d3741a792a789de6`.
@@ -72,6 +79,10 @@ OE-Core, BitBake 2.18, meta-openembedded and meta-raspberrypi directly and use
 Both series have the package/image and emulated boot validation recorded below.
 Support here covers the ARM64 Pi client package and writable-root QEMU image;
 physical Pi image/boot acceptance remains SF-029/SF-031. See the [Wrynose migration guide](https://docs.yoctoproject.org/6.0/migration-guides/migration-6.0.html).
+
+Kirkstone has its own pinned profiles and Rust mixin; its measured build,
+emulated runtime, kernel/signer limit and the Dunfell toolchain blocker are
+recorded in [older Yocto series](YOCTO_LEGACY_SERIES.md).
 
 Both recipe variants preserve core's `UNPACKDIR` when present and fall back to
 `WORKDIR` only for Scarthgap. Git explicitly unpacks to `git` on both releases;
@@ -113,7 +124,8 @@ Preserve the package feed, source/layer revisions, build configuration,
 `license.manifest`, image/package manifests, binary/image SHA-256 values and
 BitBake logs. `ca-certificates` is an explicit runtime dependency; the daemon uses Rustls and has no direct OpenSSL build dependency. Systemd and
 other image/native dependencies still use OpenSSL, so the observed recursive
-install serialization workaround remains in the integration layer. Shared-library QA stays
+install serialization workaround is in meta-suifleet's opt-in
+`suifleet-core-fixes` class, which the integration layer inherits. Shared-library QA stays
 enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.
@@ -370,6 +382,9 @@ prints only the public address. Never run provisioning during image creation.
 unprivileged account in the existing sandbox and starts only when
 `/etc/suifleet/config.toml` exists. `suifleet-enrollment.path` notices that
 file's installation; the service also starts on subsequent enrolled boots.
+For new fleets, `suifleet-first-boot-enrollment.service` consumes a per-device
+claim when the image has the [public batch settings](ENROLLMENT.md#automatic-linux-first-boot)
+and the unit's provisioning media is mounted and writable.
 
 Register the address through the current registry flow and obtain the
 device/capability IDs. Existing fleets must complete the registry-identity

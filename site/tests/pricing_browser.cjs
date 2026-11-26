@@ -14,29 +14,33 @@ const { chromium } = require('../../dapp/node_modules/playwright');
         try { await route.fulfill({ path: file }); } catch { await route.fulfill({ status: 404, body: '' }); }
       });
       await page.goto('https://pricing.test/pricing/');
-      await page.getByRole('heading', { name: 'Example monthly platform bills' }).waitFor();
-      const rows = page.getByRole('row');
-      assert.match(await rows.filter({ hasText: '50 ×' }).innerText(), /\$4.00\s+\$49.00\s+\$5.00/);
-      assert.match(await rows.filter({ hasText: '1,000 ×' }).innerText(), /\$80.00\s+\$80.00\s+\$100.00/);
-      assert.match(await page.locator('main').innerText(), /Those rates alone are not an all-in total/);
-      assert.equal(await page.getByText('Device capacity is the number', { exact: false }).isVisible(), false);
-      await page.getByText('Optional detail: operating resources and network tokens', { exact: true }).click();
-      assert.equal(await page.getByText('Device capacity is the number', { exact: false }).isVisible(), true);
-      await page.getByRole('link', { name: 'Discuss a private pilot or quote' }).click();
+      await page.getByRole('heading', { name: 'Pay per device.' }).waitFor();
+      assert.equal(await page.locator('.plan').count(), 3);
+      assert.match(await page.locator('.plan.featured').innerText(), /Essentials[\s\S]*\$0\.08/);
+      assert.doesNotMatch(await page.locator('main').innerText(), /Managed|At-cost|at cost|design partner/i);
+      const detail = page.locator('.estimates-body');
+      assert.equal(await detail.isVisible(), false);
+      await page.getByText('See price estimates', { exact: true }).click();
+      assert.equal(await detail.isVisible(), true);
+      assert.match(await detail.innerText(), /1,000\s+\$80\s+\$180\s+\$200/);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'expanded estimates overflow the page');
+      await page.getByText('Hide price estimates', { exact: true }).click();
+      assert.equal(await detail.isVisible(), false);
+      await page.locator('.price-band').getByRole('link', { name: 'Talk to us' }).click();
       await page.getByRole('heading', { name: 'Private pilot and quote requests' }).waitFor();
       assert.equal(await page.locator('main a[href="mailto:hello@suifleet.io"]').count(), 1);
-      assert.match(await page.locator('main').innerText(), /Mailbox delivery and response times are not yet verified/);
+      assert.match(await page.locator('main').innerText(), /provide a written quote/);
       await page.goto('https://pricing.test/privacy/');
       assert.equal(await page.locator('main a[href="mailto:hello@suifleet.io"]').count(), 1);
-      assert.match(await page.locator('main').innerText(), /Delivery and response times are not yet verified/);
+      assert.match(await page.locator('main').innerText(), /private security reporting/);
       await page.goto('https://pricing.test/docs/');
-      assert.equal(await page.getByRole('link', { name: 'documentation site', exact: true }).getAttribute('href'), 'https://docs.suifleet.io/');
+      assert.equal(await page.getByRole('link', { name: 'the public documentation site', exact: true }).getAttribute('href'), 'https://docs.suifleet.io/');
       for (const url of ['pricing', 'contact', 'privacy', 'docs']) {
         await page.goto(`https://pricing.test/${url}/`);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${url} overflow at ${width}`);
       }
       assert.deepEqual(errors, []);
-      console.log(`PASS ${width}px: worked bills, optional token details, private pilot handoff, consistent privacy email, docs link and no overflow`);
+      console.log(`PASS ${width}px: three configurations, fleet-size estimates, expandable detail, private pilot handoff, consistent privacy email, docs link and no overflow`);
       await page.close();
     }
   } finally { await browser.close(); }

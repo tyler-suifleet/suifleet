@@ -93,7 +93,7 @@ def transient_delay(error, attempt):
         return None
     rate_limited = rate_limit_error(error)
     if rate_limited:
-        return None  # Shared account backoff belongs to Coordinator.gh, not each PR.
+        return None  # The shared transport handles cooldowns across processes.
     if not any(value in message for value in (
             'tls handshake timeout', 'connection reset', 'connection refused',
             'temporary failure in name resolution', 'i/o timeout', 'unexpected eof',
@@ -209,22 +209,31 @@ OPTIONAL_DEPLOYMENT_BLOBS = frozenset((
     '9d3526058a8dda53e0e64ce49c4bff5e3ed9b0d0',
     # SF-284 adds the DNS download to the offline artifact build.
     '639a9fdfe76247089caf70f2fbf754bb6c3046ad',
+    # SF-321 changes server-side presentation path filters only.
+    'f86e2c737f1891f9aba0ad6e86050bae6fe3e84b',
 ))
+OPTIONAL_CONTENT_WORKFLOW = '.github/workflows/content.yml'
+OPTIONAL_CONTENT_BLOB = '77cf80ebe4cab6a6d6730b37ed199cd388178663'
+OPTIONAL_CONTENT_SCOPE_BLOB = '2e2537400eda8b86af0386476f38d5c6a11d551f'
+OPTIONAL_CONTENT_JOBS = frozenset(('check', 'Security dependencies, secrets and configuration'))
 OPTIONAL_DEPLOYMENT_JOBS = frozenset(('preview', 'production-preflight', 'production'))
 
 
 def verified_optional_skip(pr, check):
     proof = check.get('_optional_skip') or {}
-    return (check.get('conclusion') == 'SKIPPED' and check.get('name') in OPTIONAL_DEPLOYMENT_JOBS
+    return (check.get('conclusion') == 'SKIPPED' and ((check.get('name') in OPTIONAL_DEPLOYMENT_JOBS
+                  and proof.get('workflow_blob') in OPTIONAL_DEPLOYMENT_BLOBS)
+                 or (check.get('name') in OPTIONAL_CONTENT_JOBS
+                     and proof.get('workflow_blob') == OPTIONAL_CONTENT_BLOB
+                     and proof.get('scope_blob') == OPTIONAL_CONTENT_SCOPE_BLOB))
             and proof.get('head') == pr.get('headRefOid') and bool(pr.get('headRefOid'))
             and proof.get('base') == pr.get('baseRefOid') and bool(pr.get('baseRefOid'))
             and proof.get('url') == check.get('detailsUrl')
-            and proof.get('workflow_blob') in OPTIONAL_DEPLOYMENT_BLOBS
             and all(type(proof.get(key)) is int and proof[key] > 0 for key in ('run', 'job', 'attempt')))
 
 
 def annotate_optional_skips(pr, repository, read, immutable_read):
-    """Prove only the pinned deployment jobs are inapplicable to a PR run.
+    """Prove pinned deployment/content jobs are inapplicable to a PR run.
 
     Do not rewrite conclusions or accept skips on push/manual/live workflows.
     Mutable run/job/check evidence is fetched anew for every approval snapshot.
@@ -237,7 +246,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
     for check in pr.get('statusCheckRollup', []):
         check.pop('_optional_skip', None)
         if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
-                or check.get('conclusion') != 'SKIPPED' or check.get('name') not in OPTIONAL_DEPLOYMENT_JOBS
+                or check.get('conclusion') != 'SKIPPED' or check.get('name') not in OPTIONAL_DEPLOYMENT_JOBS | OPTIONAL_CONTENT_JOBS
                 or pr.get('isCrossRepository')
                 or (not included and (pr.get('baseRefName') != 'main' or not pr.get('baseIncluded')))):
             continue
@@ -245,20 +254,29 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                              + r'/actions/runs/([0-9]+)/job/([0-9]+)', check.get('detailsUrl') or '')
         if not match:
             continue
+        content = check.get('name') in OPTIONAL_CONTENT_JOBS
+        workflow = OPTIONAL_CONTENT_WORKFLOW if content else OPTIONAL_DEPLOYMENT_WORKFLOW
+        trusted_blobs = {OPTIONAL_CONTENT_BLOB} if content else OPTIONAL_DEPLOYMENT_BLOBS
+        prerequisite = 'scope' if content else 'build'
         run_id, job_id = map(int, match.groups())
         prefix = f'repos/{repository}'
         try:
             tree = immutable_read(f"{prefix}/git/trees/{pr['headRefOid']}?recursive=1")
-            blobs = [r for r in tree['tree'] if r['path'] == OPTIONAL_DEPLOYMENT_WORKFLOW]
+            blobs = [r for r in tree['tree'] if r['path'] == workflow]
             if (tree.get('truncated') or len(blobs) != 1 or blobs[0].get('type') != 'blob'
-                    or blobs[0].get('sha') not in OPTIONAL_DEPLOYMENT_BLOBS):
+                    or blobs[0].get('sha') not in trusted_blobs):
                 continue
+            if content:
+                scope = [r for r in tree['tree'] if r['path'] == 'scripts/content_scope.py']
+                if (len(scope) != 1 or scope[0].get('type') != 'blob'
+                        or scope[0].get('sha') != OPTIONAL_CONTENT_SCOPE_BLOB):
+                    continue
             path = f'{prefix}/actions/runs/{run_id}'
             run = read(path)
             attempt = run['run_attempt']
             if (run['id'] != run_id or run['head_sha'] != pr['headRefOid']
                     or run['head_repository']['full_name'] != repository
-                    or run['path'] != OPTIONAL_DEPLOYMENT_WORKFLOW or run['event'] != 'pull_request'
+                    or run['path'] != workflow or run['event'] != 'pull_request'
                     or run['status'] != 'completed' or run['conclusion'] != 'success'
                     or type(attempt) is not int or attempt < 1
                     or not any(p['number'] == pr['number'] and p['head']['sha'] == pr['headRefOid']
@@ -268,7 +286,7 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
             jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
             matches = [j for j in jobs['jobs'] if j['id'] == job_id]
             if (jobs['total_count'] != len(jobs['jobs']) or jobs['total_count'] > 100 or len(matches) != 1
-                    or not any(j['name'] == 'build' and j['status'] == 'completed' and j['conclusion'] == 'success'
+                    or not any(j['name'] == prerequisite and j['status'] == 'completed' and j['conclusion'] == 'success'
                                for j in jobs['jobs'])):
                 continue
             job = matches[0]
@@ -285,6 +303,8 @@ def annotate_optional_skips(pr, repository, read, immutable_read):
                 continue
             check['_optional_skip'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'], url=check['detailsUrl'],
                                            workflow_blob=blobs[0]['sha'], run=run_id, job=job_id, attempt=attempt)
+            if content:
+                check['_optional_skip']['scope_blob'] = OPTIONAL_CONTENT_SCOPE_BLOB
         except Exception:
             # Unknown/unavailable evidence stays blocking; do not leak API errors.
             continue
@@ -721,7 +741,6 @@ class Store:
           CREATE TABLE IF NOT EXISTS quarantine_backoff (
             family TEXT, kind TEXT, attempts INTEGER, retry_after REAL,
             PRIMARY KEY(family,kind));
-          CREATE TABLE IF NOT EXISTS github_backoff (account TEXT PRIMARY KEY, retry_after REAL);
           CREATE TABLE IF NOT EXISTS publications (project TEXT, pr INTEGER, node_id TEXT PRIMARY KEY, hash TEXT);
           CREATE TABLE IF NOT EXISTS ownership_publication (
             project TEXT, ticket TEXT, claim TEXT, revision INTEGER, attempts INTEGER,
@@ -1422,20 +1441,21 @@ class Coordinator:
 
     def gh(self, project, args):
         account = project['github_account']
-        pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?', (account,)).fetchone()
-        if pause and pause[0] > time.time():
-            raise RuntimeError('GitHub account read/write deferred by shared rate-limit backoff')
-        token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account]).strip()
-        env = {**os.environ, 'GH_TOKEN': token}
-        try:
-            return shared_github_snapshot(args, env, lambda: run(['gh', *args], cwd=project['root'], env=env))
-        except subprocess.CalledProcessError as error:
-            if rate_limit_error(error):
-                match = re.search(r'retry-after:\s*(\d+)', (error.stderr or '').lower())
-                delay = max(60, min(3600, int(match[1]) if match else 300))
-                self.store.db.execute('INSERT OR REPLACE INTO github_backoff VALUES(?,?)', (account,time.time()+delay))
-                raise RuntimeError('GitHub account rate limited; shared bounded backoff recorded') from None
-            raise
+        # Preserve any live old-runtime pause during activation. New rate-limit
+        # decisions belong solely to the resource-aware shared transport.
+        legacy = self.store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_backoff'").fetchone()
+        if legacy:
+            pause = self.store.db.execute('SELECT retry_after FROM github_backoff WHERE account=?',(account,)).fetchone()
+            if pause and pause[0] > time.time():
+                raise RuntimeError('Legacy GitHub cooldown preserved until '+str(int(pause[0])))
+        auth_env = {key: value for key, value in os.environ.items()
+                    if key not in ('GH_TOKEN', 'GITHUB_TOKEN')}
+        token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account],
+                    env=auth_env).strip()
+        if not token:
+            raise RuntimeError('Configured GitHub account has no token')
+        env = {**auth_env, 'GH_HOST': 'github.com', 'GH_TOKEN': token}
+        return shared_github_snapshot(args, env, lambda: run(['gh', *args], cwd=project['root'], env=env))
 
     def immutable_read(self, project, path):
         # Only content-addressed trees and SHA-to-SHA comparisons belong here.
@@ -1447,6 +1467,67 @@ class Coordinator:
                 self.immutable_reads.clear()
             self.immutable_reads[key] = value
         return self.immutable_reads[key]
+
+    def discovery_needed(self, project, row, owners):
+        """Scheduling hints only; every selected PR still gets a fresh snapshot.
+
+        Completion/CI lanes collect exits and failures independently. Batch
+        publication re-reads all reserved members, so polling them here adds no
+        authority and needlessly multiplies API traffic.
+        """
+        branch = (row.get('head') or {}).get('ref')
+        if not branch:
+            return True  # Incomplete discovery cannot establish a safe shortcut.
+        if row.get('draft'):
+            return False
+        owner = next((o for o in owners if o.get('branch') == branch), None)
+        number = row['number']
+        if self.lane == 'source':
+            if (not owner or owner.get('status') != 'review'
+                    or owner.get('publish_pending') or owner.get('expired')):
+                return False
+            active = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? "
+                "AND status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                (project['id'], number)).fetchone()
+            family = 'Claude' if owner.get('agent') == 'Codex' else 'Codex'
+            count = self.store.db.execute("SELECT COUNT(*) FROM jobs WHERE family=? AND kind='review' "
+                "AND status IN ('reserved','running','orphaned','quota_launch')", (family,)).fetchone()[0]
+            return not active and count < self.store.worker_limits.get(family, {}).get('review', 1)
+        if self.lane == 'integration':
+            candidate = self.store.db.execute("SELECT 1 FROM integration_batches WHERE project=? AND pr=? "
+                "AND status NOT IN ('done','invalidated','failed')", (project['id'], number)).fetchone()
+            if candidate:
+                return True
+            if number in self.batches.reserved_members(project):
+                # Unpublished batches still select/validate their sources on
+                # each scan. Filtering these members makes the next advance
+                # see no eligible PRs and repeatedly discard a partial batch.
+                return any(batch['status'] in ('collecting', 'building')
+                    and any(member['pr'] == number for member in json.loads(batch['members']))
+                    for batch in self.batches.rows(project))
+            if not owner:
+                return True  # Preserve discovery of untracked infrastructure PRs.
+            if (owner.get('status') != 'review' or owner.get('publish_pending') or owner.get('expired')):
+                return False
+            if owner.get('spec', {}).get('area') == 'infra':
+                return True  # Local-test infrastructure has no source-review wait.
+            head = (row.get('head') or {}).get('sha')
+            completed = self.store.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND head=? "
+                "AND kind='review' AND status='done' AND result IS NOT NULL",
+                (project['id'], number, head)).fetchone()
+            return bool(completed) or self.observed_source_failure(project, number, head)
+        return True
+
+    def observed_source_failure(self, project, number, head):
+        """Use the source snapshot only to decide which PR to re-read."""
+        path = self.state/project['id']/'pr-observations'/f'pr-{number}.json'
+        try:
+            observation = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return False
+        if not isinstance(observation, dict):
+            return False
+        return bool(head and observation.get('source_failure_head') == head)
 
     def prs(self, project, on_snapshot=None, owners=()):
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
@@ -1469,6 +1550,9 @@ class Coordinator:
             raw = [r for r in raw if r['number'] not in excluded]
         result = []
         for row in raw:
+            if (on_snapshot is not None and self.lane in ('source','integration')
+                    and self.batches.enabled(project) and not self.discovery_needed(project, row, owners)):
+                continue
             try:
                 pr = self.pr(project, row['number'], fields)
                 result.append(pr)
@@ -1564,6 +1648,8 @@ class Coordinator:
         view['threads'] = [dict(isResolved=t.get('isResolved') is True) for t in pr['threads']]
         payload = dict(schema=1, project=project['id'], repository=project['repository'],
                        source_fingerprint=source_feedback(pr), observed=time.time(), pr=view)
+        if pr.get('_review_mode') == 'source' and source_check_failures(pr):
+            payload['source_failure_head'] = pr['headRefOid']
         directory = self.state/project['id']/'pr-observations'
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor, temporary = tempfile.mkstemp(prefix='.pr-', dir=directory)
@@ -2068,7 +2154,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(row['id'],))
                     continue
                 child = self.children.get(row['id'])
-                alive = child.poll() is None if child else process_identity(row['pid']) == row['started']
+                alive = child.poll() is None if child else runnable_identity(row['pid']) == row['started']
                 if alive:
                     if row['kind'] == 'fix':
                         # Locate by branch from fresh PR; never renew somebody else's claim.
@@ -2095,7 +2181,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.hold_authentication(row)
                         continue
                     # An actual stopped read-only CLI with a durable exit receipt can retry usage/auth errors.
-                    retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
+                    retry = row['kind'] == 'review' and receipt_path.exists() and runnable_identity(row['pid']) != row['started']
                     status = 'retry' if retry else 'orphaned'
                     delay = min(3600,300*(2**min(row['attempts'],4)))
                     # SF-145: an explicit provider quota reset is never retried before that time.
@@ -2258,6 +2344,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             self.store.db.execute(f'UPDATE jobs SET {column}=? WHERE id=?',(posted['node_id'],row['id']))
 
     def tick(self, execute=False):
+        # Launching lanes own the subprocess handles. The completion lane
+        # independently consumes the durable exit and same-session evidence.
+        for job, child in list(self.children.items()):
+            if child.poll() is not None:
+                del self.children[job]
         for project in self.config['projects']:
             try:
                 self.tick_project(project,execute)
