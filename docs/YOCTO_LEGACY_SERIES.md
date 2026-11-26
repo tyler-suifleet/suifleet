@@ -195,26 +195,14 @@ binary under their own validation, but that is not layer support.
 
 ## Reproduce
 
-The QEMU profile installs `suifleet-walrus-codec`. BitBake does not fetch its
-npm inputs: the recipe reads local `file://` inputs from
-`SUIFLEET_WALRUS_CODEC_DIR`, which defaults to
-`${TOPDIR}/suifleet-walrus-codec/<SUIFLEET_CODEC_SOURCE_REV>/` (here
-`$KAS_WORK_DIR/build-qemu/suifleet-walrus-codec/<rev>/`). A new build
-directory has none of these files, so the QEMU build cannot find the codec
-inputs until they are staged. Before the first `kas build`, follow
-[Building the codec artifact](YOCTO_PACKAGING.md#building-the-codec-artifact)
-at the recipe's `SUIFLEET_CODEC_SOURCE_REV`. Write the output to that default
-directory, or put it elsewhere and set `SUIFLEET_WALRUS_CODEC_DIR` to it in
-the QEMU build's `conf/site.conf`. Run the packager's `--recipe` check against
-the staged directory: it must match the recipe's source revision, LICENSE and
-all five pinned SHA-256 values before you build. The recipe's
-`do_verify_codec` also refuses mismatched inputs. The Pi profile does not
-install the codec and needs no staging.
+The current QEMU profile installs `suifleet-walrus-codec` from the public
+software layer's checksum-pinned HTTPS archive. BitBake verifies the five codec
+files and their source provenance before install. The historical runs above
+used prebuilt codec files staged locally at the same source revision.
 
 ```sh
 export KAS_WORK_DIR=/absolute/path/to/yocto-kirkstone
 export KAS_BUILD_DIR="$KAS_WORK_DIR/build-qemu"
-# Stage and verify the codec inputs first (see above).
 kas build kas/packaging-kirkstone-qemu.yml
 export KAS_BUILD_DIR="$KAS_WORK_DIR/build-pi"
 kas build kas/packaging-kirkstone.yml
