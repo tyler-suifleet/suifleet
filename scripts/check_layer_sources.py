@@ -12,7 +12,9 @@ Static checks (always):
   * source-affecting variables (SRC_URI, SRCREV*, PV, S, LIC_FILES_CHKSUM,
     SUIFLEET_* and everything they reference) take no conditional overrides:
     only a plain :append/:prepend is accepted, so the audited assignment is the
-    one BitBake uses for every machine, distro and class;
+    one BitBake uses for every machine, distro and class. As in BitBake, those
+    appends/prepends apply after every assignment wherever they appear, and
+    ??= is a weak default used only when nothing else assigns the variable;
   * no runtime identity/state files in the layer, its export list or (with
     --fetch) any fetched and unpacked source;
   * coupled SuiFleet pins agree: PV equals the crate version, the codec source
@@ -22,9 +24,12 @@ Static checks (always):
 --repo checks SRCREV in a Git checkout: Cargo.lock digest, crate version,
 LICENSE md5 and the generated crate include (names, versions and checksums).
 
---fetch downloads every non-crate source with no credentials into a new
-directory, verifies its SHA-256 before unpacking, unpacks it as BitBake would
-(subdir=/destsuffix=), copies layer file:// entries and checks the resulting
+--fetch skips recipes with static findings. For the rest it first confines
+every subdir=/destsuffix= destination and S to the recipe's unpack directory
+(plain relative paths, resolved through symlinks), then downloads every
+non-crate source with no credentials into a new directory, verifies its
+SHA-256 before unpacking, re-checks each destination before writing, unpacks
+it as BitBake would, copies layer file:// entries and checks the resulting
 S: license checksums, the daemon lockfile/version/crate include/workspace
 members/include targets, and the codec's exact pinned file set and provenance.
 --cargo additionally runs `cargo metadata --offline --locked --no-deps`.
@@ -84,8 +89,25 @@ class Recipe:
         self.flags = {}
         self.overrides = []
         self.text = ''
+        # BitBake semantics: ??= is a weak default used only when nothing else
+        # assigns the variable, and :append/:prepend apply at expansion time,
+        # after every assignment, whatever their position in the metadata.
+        self.weak, self.deferred = {}, {}
         self.read(self.path)
+        for name in set(self.weak) | set(self.deferred):
+            self.vars[name] = self.raw(name)
+        self.weak, self.deferred = {}, {}
         self.vars.setdefault('BP', '${BPN}-${PV}')
+
+    def raw(self, name):
+        """The unexpanded value BitBake's getVar would expand for name."""
+        value = self.vars.get(name, self.weak.get(name))
+        if value is None and name not in self.deferred:
+            return None
+        value = value or ''
+        for kind, text in self.deferred.get(name, ()):
+            value = value + text if kind == 'append' else text + value
+        return value
 
     def read(self, path):
         text = path.read_text()
@@ -116,21 +138,33 @@ class Recipe:
                 continue
             name, flag, op, value = match.groups()
             base, _, override = name.partition(':')
-            if override not in ('', 'append', 'prepend'):
+            if override not in ('', 'append', 'prepend') or (override and (flag or op in ('?=', '??='))):
                 # Conditional or removing overrides are not evaluated here;
                 # audit_recipe rejects them on source-affecting variables.
-                self.overrides.append((base, override, path.name))
+                label = override + (f'[{flag}]' if flag else '') + (f' {op}' if op in ('?=', '??=') else '')
+                self.overrides.append((base, label, path.name))
                 continue
             if flag:
                 self.flags.setdefault(name, {})[flag] = value
                 continue
+            if override:
+                # The operator only joins the text: SRC_URI:append += "x" adds " x";
+                # := expands the text now and still applies it at the end.
+                value = self.expand(value) if op == ':=' else value
+                text = (' ' + value if op == '+=' else value + ' ' if op == '=+' else value)
+                self.deferred.setdefault(base, []).append((override, text))
+                continue
             old = self.vars.get(base, '')
-            if override.startswith('append') or op in ('+=', '.='):
+            if op in ('+=', '.='):
                 self.vars[base] = old + (' ' if op == '+=' else '') + value
-            elif override.startswith('prepend') or op in ('=+', '=.'):
+            elif op in ('=+', '=.'):
                 self.vars[base] = value + (' ' if op == '=+' else '') + old
-            elif op in ('?=', '??='):
+            elif op == '??=':
+                self.weak.setdefault(base, value)
+            elif op == '?=':
                 self.vars.setdefault(base, value)
+            elif op == ':=':
+                self.vars[base] = self.expand(value)
             else:
                 self.vars[base] = value
 
@@ -139,7 +173,10 @@ class Recipe:
             raise ValueError(f'{self.path.name}: recursive variable expansion')
         if 'UNPACKDIR' in self.vars:
             value = UNPACKDIR_EXPR.sub('${UNPACKDIR}', value)
-        expanded = REF.sub(lambda m: self.vars[m.group(1)] if m.group(1) in self.vars else m.group(0), value)
+        def lookup(match):
+            found = self.raw(match.group(1))
+            return match.group(0) if found is None else found
+        expanded = REF.sub(lookup, value)
         return expanded if expanded == value else self.expand(expanded, depth + 1)
 
     def get(self, name, default=''):
@@ -435,27 +472,62 @@ def safe_extract(archive, destination):
                 os.link(destination / member.linkname, target)
 
 
-def fetch_recipe(recipe, workdir, cargo=None):
-    errors, fetched = [], []
-    unpack = Path(workdir) / recipe.get('PN')
-    downloads = Path(workdir) / 'downloads'
-    unpack.mkdir(parents=True)
-    downloads.mkdir(exist_ok=True)
-    recipe.vars.update(UNPACKDIR=str(unpack), WORKDIR=str(unpack))
+def confined(root, rel, what):
+    """root/rel, resolved through any existing symlinks; ValueError unless it stays inside root."""
+    root = Path(root).resolve()
+    if '${' in rel or rel.startswith('/') or '..' in PurePosixPath(rel).parts:
+        raise ValueError(f'{what} {rel!r} is not a plain relative path')
+    path = (root / rel).resolve()
+    if root not in (path, *path.parents):
+        raise ValueError(f'{what} {rel!r} resolves outside the unpack directory: {path}')
+    return path
+
+
+def unpack_plan(recipe, unpack):
+    """Validate every metadata-derived destination before anything is written."""
+    plan = []
     for url, params in recipe.sources():
         scheme = url.split('://', 1)[0]
         if scheme == 'crate':
             continue
         if scheme == 'file':
             source = file_source(recipe, recipe.expand(url[len('file://'):]))
-            if source:
-                destination = unpack / params.get('subdir', '') / source.name
+            plan.append((url, params, scheme, source and confined(unpack, PurePosixPath(params.get('subdir', ''), source.name).as_posix(), 'file:// subdir')))
+        elif scheme in ('git', 'gitsm'):
+            plan.append((url, params, scheme, confined(unpack, params.get('destsuffix', 'git'), 'destsuffix')))
+        else:
+            name = PurePosixPath(urllib.parse.urlsplit(url).path).name
+            if name in ('', '.', '..'):
+                raise ValueError(f'source URL has no file name: {url}')
+            plan.append((url, params, scheme, confined(unpack, params.get('subdir', '') or '.', 'subdir')))
+    s_dir = recipe.get('S')
+    if not s_dir.startswith(str(unpack) + '/') and s_dir != str(unpack):
+        raise ValueError(f'cannot resolve S inside the unpack directory: {s_dir}')
+    return plan, confined(unpack, os.path.relpath(s_dir, unpack), 'S')
+
+
+def fetch_recipe(recipe, workdir, cargo=None):
+    errors, fetched = [], []
+    unpack = Path(workdir) / recipe.get('PN')
+    downloads = Path(workdir) / 'downloads'
+    recipe.vars.update(UNPACKDIR=str(unpack), WORKDIR=str(unpack))
+    try:
+        plan, s_dir = unpack_plan(recipe, unpack)
+    except ValueError as error:
+        return [f'{recipe.path.name}: {error}; nothing fetched'], fetched
+    unpack.mkdir(parents=True)
+    downloads.mkdir(exist_ok=True)
+    for url, params, scheme, destination in plan:
+        if scheme == 'file':
+            if destination:
+                destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'file:// subdir')
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
+                shutil.copyfile(file_source(recipe, recipe.expand(url[len('file://'):])), destination)
             continue
+        # Re-resolve: an earlier archive may have created a symlink on the path.
+        destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
         if scheme in ('git', 'gitsm'):
             rev = recipe.get(f'SRCREV_{params["name"]}') if 'name' in params else recipe.get('SRCREV')
-            destination = unpack / params.get('destsuffix', 'git')
             remote = 'https://' + url.split('://', 1)[1]
             env = anonymous_env(Path(workdir))
             for command in (['init', '-q', str(destination)], ['-C', str(destination), 'fetch', '-q', '--depth', '1', remote, rev],
@@ -474,16 +546,16 @@ def fetch_recipe(recipe, workdir, cargo=None):
         if actual != expected:
             errors.append(f'{recipe.path.name}: {name} sha256 {actual} differs from pin {expected}')
             continue
-        destination = unpack / params.get('subdir', '')
         destination.mkdir(parents=True, exist_ok=True)
         if TARBALL.search(name) and params.get('unpack', '1') == '1':
             safe_extract(target, destination)
         else:
             shutil.copyfile(target, destination / name)
     errors += fetched_state_errors(recipe, unpack)
-    s_dir = Path(recipe.get('S'))
-    if '${' in str(s_dir) or unpack.resolve() not in (s_dir.resolve(), *s_dir.resolve().parents):
-        return errors + [f'{recipe.path.name}: cannot resolve S inside the unpack directory: {s_dir}'], fetched
+    try:
+        s_dir = confined(unpack, os.path.relpath(s_dir, unpack.resolve()), 'S')
+    except ValueError as error:
+        return errors + [f'{recipe.path.name}: {error}'], fetched
     if not s_dir.is_dir():
         return errors + [f'{recipe.path.name}: S does not exist after unpack: {s_dir.relative_to(unpack)}'], fetched
     if recipe.get('SUIFLEET_LOCK_SHA256'):
@@ -525,13 +597,14 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         report['errors'].append('conf/layer.conf: AUTOREV is forbidden')
     series = re.search(r'^LAYERSERIES_COMPAT_\S+\s*=\s*"([^"]*)"', conf, re.M)
     report['series'] = series.group(1).split() if series else []
-    recipes = {}
+    recipes, static_errors = {}, {}
     for path in sorted(layer.glob('recipes-*/*/*.bb')) + sorted(layer.glob('recipes-*/*/*.bbappend')):
         recipe = Recipe(path, layer)
         if only and recipe.get('PN') not in only:
             continue
         recipes[recipe.get('PN')] = recipe
         errors, sources = audit_recipe(recipe)
+        static_errors[recipe.get('PN')] = errors
         report['errors'] += errors
         report['recipes'][recipe.get('PN')] = {
             'file': path.relative_to(layer).as_posix(), 'pv': recipe.get('PV'), 'license': recipe.get('LICENSE'),
@@ -560,6 +633,10 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         workdir = Path(tempfile.mkdtemp(prefix='meta-suifleet-fetch-'))
         report['fetch_dir'] = str(workdir)
         for name, recipe in recipes.items():
+            if static_errors[name]:
+                report['recipes'][name]['fetched'] = None
+                report['recipes'][name]['fetch_skipped'] = 'static source findings'
+                continue
             try:
                 errors, fetched = fetch_recipe(recipe, workdir, cargo)
             except (OSError, ValueError, subprocess.CalledProcessError) as error:

@@ -292,6 +292,34 @@ class LayerAuditTests(unittest.TestCase):
                                 'CARGO_BUILD_FLAGS:append = " --bin suifleet"\nSRC_URI:append = " file://suifleet.service"')
         self.assertEqual(self.errors(), [])
 
+    def test_appends_apply_after_every_assignment_like_bitbake(self):
+        recipe_path = self.recipe_dir / 'order_1.0.bb'
+        recipe_path.write_text(
+            'SRC_URI:append = " https://example.com/late.tar.gz"\n'
+            'SRC_URI:prepend = "https://example.com/first.tar.gz "\n'
+            'SRC_URI = "https://example.com/base.tar.gz"\n'
+            'SRC_URI += "https://example.com/plus.tar.gz"\n'
+            'SRC_URI:append += "https://example.com/last.tar.gz"\n'
+            'SRC_URI:prepend = "https://example.com/front.tar.gz "\n'
+            'X ??= "weak"\nX += "y"\nY ??= "weak"\nY ?= "soft"\nZ ??= "weak"\n')
+        recipe = audit.Recipe(recipe_path, self.layer)
+        self.assertEqual([url.rsplit('/', 1)[1] for url, _ in recipe.sources()],
+                         ['front.tar.gz', 'first.tar.gz', 'base.tar.gz', 'plus.tar.gz', 'late.tar.gz', 'last.tar.gz'])
+        self.assertEqual((recipe.get('X'), recipe.get('Y'), recipe.get('Z')), (' y', 'soft', 'weak'))
+        recipe_path.unlink()
+        # An append before the base assignment is still audited: an unpinned source is reported.
+        self.write_recipe(extra='')
+        text = (self.recipe_dir / 'suifleet_1.0.bb').read_text()
+        (self.recipe_dir / 'suifleet_1.0.bb').write_text(
+            'SRC_URI:append = " https://example.com/unpinned.tar.gz"\n' + text)
+        self.assertTrue(any('lacks a SHA-256 pin: https://example.com/unpinned.tar.gz' in e for e in self.errors()),
+                        self.errors())
+        # Flagged or conditional-default appends on source variables are not evaluated, so they are rejected.
+        for extra in ('SRC_URI:append ?= " file://suifleet.service"', 'SRC_URI:append[edge.sha256sum] = "%s"' % ('0' * 64)):
+            with self.subTest(extra):
+                self.write_recipe(extra=extra)
+                self.assertTrue(any('conditional override' in e for e in self.errors()), self.errors())
+
     def test_file_sources_must_resolve_inside_the_layer(self):
         outside = Path(self.tmp.name) / 'outside.service'
         outside.write_text('[Unit]\n')
@@ -390,6 +418,57 @@ class LayerAuditTests(unittest.TestCase):
         for rel in ('source/suifleet-edge/examples/device.key', 'source/var/lib/suifleet/journal.sqlite'):
             self.assertIn(f'suifleet_1.0.bb: runtime identity/state-like file in fetched source: {rel}', report['errors'])
         self.assertFalse(report['ok'])
+
+    def test_unpack_destinations_are_confined_before_any_write(self):
+        outside = Path(self.tmp.name) / 'escaped'
+        cases = {
+            f"subdir '{outside}' is not a plain relative path": ('subdir=source', f'subdir={outside}'),
+            "subdir '../../escaped' is not a plain relative path": ('subdir=source', 'subdir=../../escaped'),
+            "S '../escaped' is not a plain relative path": ('S = "${SUIFLEET_UNPACKDIR}/source"', 'S = "${SUIFLEET_UNPACKDIR}/../escaped"'),
+            "file:// subdir '../escaped/suifleet.service'": ('file://suifleet.service', 'file://suifleet.service;subdir=../escaped'),
+        }
+        downloads = []
+
+        def recording_download(url, target):
+            downloads.append(url)
+            return self.fake_download(url, target)
+        for label, (old, new) in cases.items():
+            with self.subTest(label):
+                self.write_recipe()
+                path = self.recipe_dir / 'suifleet_1.0.bb'
+                path.write_text(path.read_text().replace(old, new))
+                downloads.clear()
+                with mock.patch.object(audit, 'download', recording_download):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                self.assertFalse(report['ok'])
+                self.assertTrue(any(label in e and 'nothing fetched' in e for e in report['errors']), report['errors'])
+                self.assertEqual(downloads, [])
+                self.assertFalse(outside.exists())
+                self.assertEqual(list(Path(report['fetch_dir']).iterdir()), [])
+        # A destination reached through a symlink unpacked by an earlier source is re-checked before writing.
+        link = self.archive.with_name('link.tar.gz')
+        with tarfile.open(link, 'w:gz') as tar:
+            info = tarfile.TarInfo('hop')
+            info.type, info.linkname = tarfile.SYMTYPE, '.'
+            tar.addfile(info)
+        with self.assertRaisesRegex(ValueError, 'outside the unpack directory'):
+            root = Path(tempfile.mkdtemp(dir=self.tmp.name))
+            (root / 'pn').mkdir()
+            audit.safe_extract(link, root / 'pn')
+            (root / 'pn/hop').unlink()
+            (root / 'pn/hop').symlink_to(outside.parent)
+            audit.confined(root / 'pn', 'hop/escaped', 'subdir')
+
+    def test_fetch_is_skipped_for_recipes_with_static_findings(self):
+        self.write_recipe(url=f'http://example.com/{self.archive.name}')
+        with mock.patch.object(audit, 'download', side_effect=AssertionError('fetched')):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertTrue(any('must use https' in e for e in report['errors']))
+        entry = report['recipes']['suifleet']
+        self.assertEqual((entry['fetched'], entry['fetch_skipped']), (None, 'static source findings'))
+        self.assertEqual(list(Path(report['fetch_dir']).iterdir()), [])
 
     def test_unpack_refuses_escaping_members_and_links(self):
         for member in ('../escape', '/abs'):
