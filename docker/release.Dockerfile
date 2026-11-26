@@ -26,15 +26,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     gcc-aarch64-linux-gnu=4:11.2.0-1ubuntu1 \
     gcc-11-aarch64-linux-gnu=11.4.0-1ubuntu1~22.04.3cross1 \
-    binutils-aarch64-linux-gnu=2.38-4ubuntu2.12 \
+    binutils-aarch64-linux-gnu=2.38-4ubuntu2.14 \
     libc6-dev-arm64-cross=2.35-0ubuntu1cross3 \
     gcc-arm-linux-gnueabihf=4:11.2.0-1ubuntu1 \
     gcc-11-arm-linux-gnueabihf=11.4.0-1ubuntu1~22.04.3cross1 \
-    binutils-arm-linux-gnueabihf=2.38-4ubuntu2.12 \
+    binutils-arm-linux-gnueabihf=2.38-4ubuntu2.14 \
     libc6-dev-armhf-cross=2.35-0ubuntu1cross3 \
     gcc-i686-linux-gnu=4:11.2.0-1ubuntu1 \
     gcc-11-i686-linux-gnu=11.4.0-1ubuntu1~22.04.3cross1 \
-    binutils-i686-linux-gnu=2.38-4ubuntu2.12 \
+    binutils-i686-linux-gnu=2.38-4ubuntu2.14 \
     libc6-dev-i386-cross=2.35-0ubuntu1cross3 \
     && rm -rf /var/lib/apt/lists/*
 

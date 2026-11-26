@@ -27,7 +27,13 @@ The archive runtime's prebuilt Node recipe supports Linux AArch64/glibc only.
 See RELEASE.md for the validation and branch requirements.
 
 Add this directory to BBLAYERS and run `bitbake suifleet`. Optional archive
-packages are `suifleet-node` and `suifleet-walrus-codec`; the codec fetches its pinned archive when built.
+packages are `suifleet-node` and `suifleet-walrus-codec`; the codec fetches its
+pinned archive when built. They are not needed to parse the layer or build
+`suifleet`. If a bbappend replaces the codec input with local `file://` files
+that are absent, the codec recipe is skipped with a reason naming them, and
+requesting it fails with that reason. Both recipes are skipped, with a reason,
+on any target other than Linux AArch64 glibc. There is no musl, 32-bit or x86
+fallback.
 
 The separate, core-repository `meta-suifleet-integration` contains Pi image/access
 policy, test components and a glibc usrmerge layout guard for its reused build
@@ -68,7 +74,10 @@ repository's `docs/YOCTO_STANDALONE_VALIDATION.md`. Apart from the class, that
 standalone configuration requires OE-Core, meta-oe, the Scarthgap Rust mixin, and
 the systemd/usrmerge distro features listed above. It needs no other distro
 setting. The earlier SF-309 Kirkstone recipe builds used the integration layer. Its
-layer-check pass covered the export before the opt-in class. See
+layer-check pass covered the export before the opt-in class. SF-307 later built
+`suifleet`, `suifleet-node` and `suifleet-walrus-codec` on Kirkstone from the
+export with the class, the Kirkstone Rust mixin and no integration layer, from the
+public pins; see the core repository's `docs/validation/SF307.md`. See
 [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820) for standalone
 validation of the public source distribution and RELEASE.md for release criteria.
 
