@@ -1,0 +1,42 @@
+---
+# The device generates its own key, offline, through the packaged oneshot
+# unit (PrivateNetwork=yes). An existing key is always preserved. The key is
+# never read, copied or fetched by Ansible: only its metadata is checked.
+- name: Provision the on-device identity
+  ansible.builtin.systemd_service:
+    name: suifleet-provision.service
+    state: started
+
+- name: Check the device key metadata
+  ansible.builtin.stat:
+    path: /etc/suifleet/device.key
+    get_checksum: false
+  register: suifleet_key
+
+- name: Refuse a missing or exposed device key
+  ansible.builtin.assert:
+    that:
+      - suifleet_key.stat.exists
+      - suifleet_key.stat.mode == '0600'
+      - suifleet_key.stat.pw_name in ['suifleet', 'suifleet-signer']
+    quiet: true
+    fail_msg: /etc/suifleet/device.key is missing or not private to its holder.
+  when: not ansible_check_mode or suifleet_key.stat.exists
+
+- name: Read the public device address
+  ansible.builtin.slurp:
+    src: /etc/suifleet/device.address
+  register: suifleet_address_file
+  when: suifleet_key.stat.exists
+
+- name: Record the public device address
+  ansible.builtin.set_fact:
+    suifleet_device_address: "{{ suifleet_address_file.content | b64decode | trim }}"
+  when: suifleet_key.stat.exists
+
+- name: Refuse a malformed device address
+  ansible.builtin.assert:
+    that: suifleet_device_address is match('^0x[0-9a-f]{64}$')
+    quiet: true
+    fail_msg: /etc/suifleet/device.address is not a Sui address.
+  when: suifleet_key.stat.exists

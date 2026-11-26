@@ -1,0 +1,11 @@
+---
+# Install or upgrade, enroll, configure and start the SuiFleet device client
+# in rolling batches (docs/ANSIBLE.md). Idempotent: rerun it to converge, use
+# --check --diff to preview. A failed host stops later batches.
+- name: SuiFleet device client
+  hosts: "{{ suifleet_hosts | default('suifleet_devices') }}"
+  serial: "{{ suifleet_rollout_batches | default([1, '25%', '100%']) }}"
+  max_fail_percentage: "{{ suifleet_max_fail_percentage | default(0) }}"
+  gather_facts: true
+  roles:
+    - role: suifleet
