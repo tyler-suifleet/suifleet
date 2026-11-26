@@ -65,8 +65,16 @@ These static checks always run, on every recipe in the layer:
   non-commit ref, a `releases/latest` redirect or an expiring release-asset
   host.
 - Every `crate://` entry has a SHA-256.
-- `file://` entries exist inside the layer, and `FILESEXTRAPATHS` doesn't point
-  outside it. This rejects the pre-parse `${TOPDIR}` codec artifacts.
+- `file://` entries resolve, after following symlinks, to regular files inside
+  the layer, and `FILESEXTRAPATHS` doesn't point outside it. This rejects the
+  pre-parse `${TOPDIR}` codec artifacts. No symlink in the layer may leave it.
+- Source-affecting variables take no conditional overrides. These are
+  `SRC_URI` (and its flags), `SRCREV*`, `PV`, `PE`, `S`, `LICENSE`,
+  `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, every `SUIFLEET_*`
+  variable, and any variable they reference. Only a plain `:append` or
+  `:prepend` is accepted. Machine, distro, class, `pn-` and `:remove`
+  overrides are rejected, because the reader doesn't evaluate them. That way
+  the audited assignment is the one BitBake uses in every configuration.
 - The layer and `export-files.json` contain no runtime identity/state files.
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit
@@ -85,6 +93,8 @@ checked before unpacking. Unpacking follows BitBake `subdir=`/`destsuffix=`
 semantics, and members or links that escape the directory are refused. The
 check then verifies the resulting `S`:
 
+- for every recipe, no runtime identity/state file name anywhere in the fetched
+  and unpacked sources;
 - for every recipe, the license file checksums;
 - for the daemon, the lockfile digest, crate version, crate include, workspace
   members and every include target, plus `cargo metadata --offline --locked
