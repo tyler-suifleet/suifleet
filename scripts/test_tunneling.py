@@ -6,10 +6,13 @@ accounts, credentials, network, Sui transactions or hardware are used.
 """
 import argparse
 import base64
+from concurrent.futures import Future
 import hashlib
 import json
 import os
 from pathlib import Path
+from queue import Empty, Queue
+import select
 import shutil
 import socket
 import ssl
@@ -143,10 +146,24 @@ class Tunnel:
             accept = base64.b64encode(hashlib.sha1((headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
             sock.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                           f"Sec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: aws.iot.securetunneling-3.0\r\n\r\n").encode())
-            client = {"digest": digest, "socket": sock, "closed": False, "data": bytearray()}
+            outgoing = Queue()
+            client = {"digest": digest, "outgoing": outgoing, "closed": False, "data": bytearray()}
             self.clients.append(client)
-            # Test controls outgoing frames; incoming frames are collected here.
+            # One thread owns the TLS connection, including test frames and pong replies.
             while True:
+                try:
+                    payload, sent = outgoing.get_nowait()
+                except Empty:
+                    pass
+                else:
+                    try:
+                        frame(sock, payload)
+                    except OSError as error:
+                        sent.set_exception(error)
+                        raise
+                    sent.set_result(None)
+                if not sock.pending() and not select.select([sock], [], [], 0.02)[0]:
+                    continue
                 opcode, data = receive(sock)
                 if opcode == 8:
                     break
@@ -276,6 +293,11 @@ def inside():
     def client(digest):
         return wait_for(lambda: next((c for c in tunnel.clients if c["digest"] == digest), None), "proxy TLS/WebSocket handshake " + str(tunnel.errors))
 
+    def send(c, payload):
+        sent = Future()
+        c["outgoing"].put((payload, sent))
+        sent.result(timeout=2)
+
     def closed(c):
         wait_for(lambda: c["closed"], "proxy cleanup")
 
@@ -287,10 +309,10 @@ def inside():
     assert not tunnel.clients and not connections
     check("denied destinations/mode/region/notification commands launch no proxy")
     c = client(notify("forward"))
-    frame(c["socket"], message(5))
-    frame(c["socket"], message(2))
+    send(c, message(5))
+    send(c, message(2))
     wait_for(lambda: connections, "allow-listed local TCP connection")
-    frame(c["socket"], message(1, payload=b"sf063-echo-payload"))
+    send(c, message(1, payload=b"sf063-echo-payload"))
     wait_for(lambda: b"sf063-echo-payload" in c["data"], "round-trip bytes through actual AWS proxy")
     pids = proxy_pids()
     assert len(pids) == 1, pids
@@ -338,8 +360,8 @@ def inside():
     count = len(tunnel.clients)
     assert not proxy_pids()
     c = client(notify("connection-failure", services=["FAIL"]))
-    frame(c["socket"], message(5, service="FAIL"))
-    frame(c["socket"], message(2, service="FAIL"))
+    send(c, message(5, service="FAIL"))
+    send(c, message(2, service="FAIL"))
     closed(c)
     assert len(connections) == 1
     check("adapter SIGKILL cleans descendants; failed local destination never falls back or restarts CAT")
