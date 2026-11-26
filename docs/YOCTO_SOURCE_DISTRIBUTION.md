@@ -294,14 +294,34 @@ The layer pins the daemon and codec archives at
   - `suifleet-walrus-codec` ran `do_verify_codec` and `do_package_qa`, and
     `suifleet-node` ran `do_package_qa`, on both.
 
+- **Packaged daemon runtime check (Wrynose, 2026-11-26).** The same Wrynose
+  build directory, configuration and layer pins were rebuilt from scratch
+  (`tmp/` and the local sstate had been deleted; `DL_DIR` was kept). `bitbake -c
+  package_qa suifleet` exited 0 (1792 tasks, 1228 not rerun, all succeeded).
+  The packaged `/usr/bin/suifleet` has SHA-256 `0528b5e1…`, identical to the
+  first Wrynose build. A scratch root was assembled from the recipe's target
+  sysroot with the `suifleet` package on top. `scripts/test_pi_binary.py
+  --qemu <Wrynose qemu-native 10.2.0 qemu-aarch64> --rootfs <scratch root>`
+  ran the packaged AArch64 binary in user-mode QEMU and passed, covering:
+  - fresh identity provisioning, preservation of an existing key, address
+    derivation and refusal of a corrupt key;
+  - `--self-check` against the localnet fixture and the shipped
+    `profiles/seal-testnet` manifest, which reported crate version 0.2.3 from
+    `build-info`, plus refusal of unsupported protocol and client ranges;
+  - `--key-holder` for both signer modes, and refusal of daemon self-update
+    with the service signer.
+
+  This executes the packaged binary's offline commands only. It is not a
+  systemd service run, an image boot or a networked OTA.
+
 These are package builds, not image builds. Kirkstone's runtime limits (no
 `SO_PEERPIDFD`, weaker signer binding) are unchanged and recorded in
 `docs/YOCTO_LEGACY_SERIES.md`. Any other Kirkstone standalone claims in
 [YOCTO_STANDALONE_VALIDATION.md](YOCTO_STANDALONE_VALIDATION.md) (for example,
 the task-signature comparison) are separate and still unrun.
 
-Not run for SF-306: an image build, executing the packaged daemon,
-physical-target acceptance, Layer Index submission and mainnet acceptance. Physical and mainnet acceptance
+Not run for SF-306: an image build, a systemd or networked run of the packaged
+daemon, packaged runtime checks on Scarthgap and Kirkstone, physical-target acceptance, Layer Index submission and mainnet acceptance. Physical and mainnet acceptance
 remain in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 
