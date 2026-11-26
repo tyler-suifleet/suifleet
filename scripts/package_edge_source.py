@@ -49,6 +49,9 @@ ROOTS = (
 )
 REQUIRED = ('LICENSE', f'{CRATE}/Cargo.toml', f'{CRATE}/Cargo.lock')
 INCLUDE = re.compile(rb'include_(?:str|bytes)!\(\s*"([^"\\]+)"\s*\)|#\[path\s*=\s*"([^"\\]+)"\s*\]')
+# An out-of-line module declaration (`mod name;`) with its leading attributes.
+MODULE = re.compile(rb'((?:#\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;')
+PATH_ATTR = re.compile(rb'#\[path\s*=\s*"[^"\\]+"\s*\]')
 # Runtime identity/state names that must never be distributed.
 FORBIDDEN_NAME = re.compile(
     r'(^|/)(device\.key|signer\.key|config\.toml|firmware\.toml|signer\.toml|'
@@ -479,6 +482,47 @@ def include_targets(source_path, data):
     return targets
 
 
+def implicit_modules(data):
+    """Names of out-of-line modules (`mod name;`) not given a literal #[path].
+
+    Comments are not stripped, so a commented-out declaration also counts;
+    that only makes the refusal below stricter."""
+    return [name.decode() for attributes, name in MODULE.findall(data) if not PATH_ATTR.search(attributes)]
+
+
+def loose_sources(manifest, read_manifest, declared, exists, read):
+    """Rust sources outside the directories packaged whole, and their errors.
+
+    `src/`, `examples/` and every local crate directory are packaged
+    completely, so Rust's module resolution always finds its files there.
+    Elsewhere only the files the manifest declares (plus the default
+    `build.rs`) and their literal include/#[path] targets are packaged. Cargo
+    would also compile a sibling `name.rs` or `name/mod.rs` for each implicit
+    `mod name;` in such a file, which the closure does not model, so those
+    declarations are refused instead of producing an archive that compiles in
+    the repository and fails after extraction. Paths are relative to the root
+    crate; `exists(rel)` and `read(rel)` (bytes) see the source layout.
+    Returns (loose .rs files, error messages)."""
+    whole = ['src/', 'examples/', *(f'{d}/' for d in local_crates(manifest, read_manifest))]
+    pending = [rel for rel in [*declared, 'build.rs'] if rel.endswith('.rs') and exists(rel)]
+    seen, errors = set(), []
+    while pending:
+        rel = pending.pop()
+        if rel in seen or any(rel.startswith(prefix) for prefix in whole):
+            continue
+        seen.add(rel)
+        data = read(rel)
+        names = implicit_modules(data)
+        if names:
+            errors.append(f'{CRATE}/{rel} declares module(s) {", ".join(names)} without #[path]; outside src/, '
+                          'examples/ and local crates only declared and literally included files are packaged, '
+                          'so give each module a #[path] attribute or move the target under src/')
+        for target in include_targets(f'{CRATE}/{rel}', data):
+            if target.startswith(f'{CRATE}/') and target.endswith('.rs') and exists(target[len(CRATE) + 1:]):
+                pending.append(target[len(CRATE) + 1:])
+    return sorted(seen), errors
+
+
 def closure(files, read):
     """Select the build closure from `files` ({path: (mode, kind, oid)})."""
     selected = set()
@@ -516,6 +560,10 @@ def closure(files, read):
                 selected.add(target)
                 if target.endswith('.rs'):
                     pending.append(target)
+    _, errors = loose_sources(manifest, read_manifest, declared_files(manifest, read_manifest),
+                              lambda rel: f'{CRATE}/{rel}' in files, lambda rel: read(f'{CRATE}/{rel}'))
+    if errors:
+        raise ValueError(errors[0])
     return audit(selected, files, read)
 
 

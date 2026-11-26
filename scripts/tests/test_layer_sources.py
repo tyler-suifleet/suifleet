@@ -254,6 +254,41 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.repo.commit()
         packager.plan(self.repo.root, 'HEAD')
 
+    def test_implicit_modules_in_out_of_root_targets_are_refused(self):
+        # The reviewer's reproduction: a [[bin]] outside src/ whose `mod helper;`
+        # resolves to a sibling file compiles in the repository, but only the
+        # entry point would be packaged.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/standalone.rs"\n'
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        for source in ('mod helper;\nfn main() { helper::f() }\n',
+                       '#[cfg(unix)]\npub(crate) mod helper ;\nfn main() {}\n',
+                       '#[cfg_attr(unix, path = "helper.rs")]\nmod helper;\nfn main() {}\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/tools/standalone.rs', source)
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, r'tools/standalone.rs declares module\(s\) helper without #\[path\]'):
+                    packager.plan(self.repo.root, 'HEAD')
+        # A #[path] file is followed and checked transitively, as is build.rs.
+        self.repo.write('suifleet-edge/tools/standalone.rs', '#[path = "helper.rs"]\nmod helper;\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/helper.rs', 'mod nested;\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'tools/helper.rs declares module\(s\) nested'):
+            packager.plan(self.repo.root, 'HEAD')
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        self.repo.write('suifleet-edge/build.rs', 'mod gen;\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'suifleet-edge/build.rs declares module\(s\) gen'):
+            packager.plan(self.repo.root, 'HEAD')
+        # Explicit #[path] modules, inline modules and modules under src/ are packaged.
+        self.repo.write('suifleet-edge/build.rs', 'mod inline { pub fn f() {} }\nfn main() {}\n')
+        self.repo.write('suifleet-edge/src/main.rs', 'mod sub;\nfn main() {}\n')
+        self.repo.write('suifleet-edge/src/sub.rs', '')
+        self.repo.commit()
+        paths = packager.plan(self.repo.root, 'HEAD')['paths']
+        for rel in ('tools/standalone.rs', 'tools/helper.rs', 'build.rs', 'src/sub.rs'):
+            self.assertIn(f'suifleet-edge/{rel}', paths)
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -851,6 +886,35 @@ class LayerAuditTests(unittest.TestCase):
             report = audit.check(self.layer, repo=self.repo.root, fetch=True)
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
+
+    def test_fetch_and_repo_refuse_implicit_modules_outside_packaged_directories(self):
+        # A pinned archive with an out-of-root target whose sibling module file
+        # is absent must not audit clean, and neither must its SRCREV.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/standalone.rs"\n'
+        entry = 'mod helper;\nfn main() { helper::f() }\n'
+        archive = self.archive.with_name('implicit-module.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/Cargo.toml':
+                    member.size, data = len(manifest), io.BytesIO(manifest.encode())
+                tar.addfile(member, data)
+            added = tarfile.TarInfo('suifleet-edge/tools/standalone.rs')
+            added.size = len(entry)
+            tar.addfile(added, io.BytesIO(entry.encode()))
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/tools/standalone.rs declares module(s) helper without #[path]'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/standalone.rs', entry)
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        self.write_recipe(srcrev=rev)
+        self.assertTrue(any(expected in e for e in audit.check(self.layer, repo=self.repo.root)['errors']))
 
     def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
         # A checksum-pinned, otherwise coherent archive that carries runtime state.
