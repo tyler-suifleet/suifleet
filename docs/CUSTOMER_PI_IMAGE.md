@@ -48,7 +48,7 @@ each card.
 
 ### Build and verify
 
-On a Linux Yocto build host with kas 4.7, mtools and e2fsprogs, check out the
+On a Linux Yocto build host with kas 4.7, check out the
 reviewed source commit and obtain the Testnet deployment manifest from the
 console. Use separate new paths on a filesystem with space for two independent
 Yocto builds:
@@ -65,7 +65,8 @@ service, and compares the two images and their package inventories. The merged f
 companion layer supplies the enrollment patch and systemd service for the pinned
 public daemon recipe. Preflight checks the effective BitBake recipe and records
 the daemon archive, Cargo.lock and enrollment file digests. A successful local
-build produces an unsigned candidate for validation.
+build produces an unsigned candidate for validation. It inspects the disk with
+the filesystem tools from the pinned Yocto build.
 
 The release pipeline compares both builds before signing and verifies the
 signed files before publication. See the [release signing and verification

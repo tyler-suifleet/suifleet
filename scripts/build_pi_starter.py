@@ -71,6 +71,19 @@ def git(directory, *args):
     return subprocess.check_output(['git', '-C', directory, *args], text=True).strip()
 
 
+def inspect_output(work, deploy, pins):
+    # Match the filesystem tools that created this image. Ubuntu 22.04's
+    # e2fsprogs predates the orphan_file feature used by the pinned Yocto tools.
+    data = json.loads((deploy / (IMAGE + '.testdata.json')).read_text())
+    sysroot = work / 'build' / data['RECIPE_SYSROOT_NATIVE']
+    with tempfile.TemporaryDirectory(dir=work, prefix='inspect-') as scratch:
+        evidence = inspect(deploy / (IMAGE + '.wic.bz2'), Path(scratch), sysroot / 'usr/bin',
+                           debugfs=sysroot / 'sbin/debugfs', e2fsck=sysroot / 'sbin/e2fsck',
+                           pins=pins, starter=True)
+    evidence.pop('image')
+    return evidence
+
+
 def build(work, manifest, preflight_only):
     work.mkdir()
     # Separate checkouts, build directories and default sstate caches.
@@ -96,11 +109,7 @@ def build(work, manifest, preflight_only):
         return
     subprocess.run(args, env=env, cwd=ROOT, check=True)
     deploy = work / 'build/tmp/deploy/images' / MACHINE
-    with tempfile.TemporaryDirectory(dir=work, prefix='inspect-') as scratch:
-        evidence = inspect(deploy / (IMAGE + '.wic.bz2'), Path(scratch), Path(shutil.which('mdir')).parent,
-                           e2fsck='e2fsck', pins=pins, starter=True)
-    evidence.pop('image')
-    return deploy, revisions, pins, sources, evidence
+    return deploy, revisions, pins, sources, inspect_output(work, deploy, pins)
 
 
 def prepare_bundle(out, deploy, second, commit, pins, manifest_path, provenance):
