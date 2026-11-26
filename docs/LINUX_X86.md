@@ -18,7 +18,7 @@ claim below comes from the 32-bit build.
 | Loader / ELF | `/lib/ld-linux.so.2`, ELF32 little-endian, `EM_386` |
 | Kernel | Linux 3.2 or later (the Rust target minimum). Tested only through an x86_64 host kernel's IA-32 compatibility layer (WSL2 6.6) |
 | Catalog platform | `linux` / `x86`, Rust's `std::env::consts::ARCH`. `i686` and `i386` are not aliases and are rejected |
-| Cross toolchain | Ubuntu 22.04 `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1), `binutils-i686-linux-gnu` 2.38-4ubuntu2.12 and `libc6-dev-i386-cross` 2.35-0ubuntu1cross3, in [the release builder](../docker/release.Dockerfile) |
+| Cross toolchain | Ubuntu 22.04 `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1), `binutils-i686-linux-gnu` 2.38-4ubuntu2.14 and `libc6-dev-i386-cross` 2.35-0ubuntu1cross3, in [the release builder](../docker/release.Dockerfile) |
 | Runner | [docker/linux-x86.Dockerfile](../docker/linux-x86.Dockerfile): digest-pinned `i386/debian:bookworm-slim` (glibc 2.36), Python 3.11.2-1+b1 |
 
 Upstream references, checked 2026-10-17:
