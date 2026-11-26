@@ -129,10 +129,12 @@ def container_build(args):
     service_files = edge / "meta-suifleet/recipes-edge/suifleet/files"
     for name in (
         "config.toml.example", "signer.toml.example", "suifleet.service",
-        "suifleet-provision.service", "suifleet-enrollment.path", "suifleet-first-boot-enrollment.service",
+        "suifleet-provision.service", "suifleet-enrollment.path",
         "suifleet-signer.service", "suifleet-signer.socket",
     ):
         entries.append((f"suifleet/systemd/{name}", (service_files / name).read_bytes(), 0o644))
+    first_boot_unit = edge / "meta-suifleet-enrollment/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service"
+    entries.append((f"suifleet/systemd/{first_boot_unit.name}", first_boot_unit.read_bytes(), 0o644))
     entries.append(("suifleet/libexec/suifleet-provision",
                     (service_files / "suifleet-provision").read_bytes(), 0o755))
     write_tarball(tarball, epoch, entries)
