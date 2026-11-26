@@ -1,0 +1,103 @@
+---
+# suifleet.service is not enabled itself: suifleet-enrollment.path starts it
+# whenever /etc/suifleet/config.toml exists, including at boot. SuiFleet never
+# reboots the host; reboot and firmware decisions stay with the platform.
+#
+# Restarts follow this run's changes and also any active unit whose inputs
+# differ from the digests recorded after the last verified run
+# (suifleet_applied_record), so a rollout interrupted after its files landed
+# but before the restarts converges on the next run. The record is written
+# only by verify.yml, after the restarted units passed their checks.
+- name: Start services on enrolled devices
+  when: suifleet_enrollment is defined
+  block:
+    - name: Find active units whose inputs were not applied
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', 'running_inputs.py') }}"
+          - "{{ suifleet_applied_record }}"
+          - "suifleet-signer.socket="
+          - "suifleet-enrollment.path="
+          - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
+          - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
+      register: suifleet_running_before
+      changed_when: false
+      check_mode: false
+
+    - name: Decide which units to restart
+      vars:
+        running: "{{ suifleet_running_before.stdout | from_json }}"
+        signer_inputs_changed: >-
+          {{ (suifleet_code_changed | default(false) | bool)
+             or suifleet_manifest_file is changed or suifleet_signer_file is changed }}
+      ansible.builtin.set_fact:
+        suifleet_running: "{{ running }}"
+        suifleet_restart_socket: "{{ running['suifleet-signer.socket'].stale }}"
+        suifleet_restart_path: "{{ running['suifleet-enrollment.path'].stale }}"
+        suifleet_restart_signer: >-
+          {{ signer_inputs_changed | bool or running['suifleet-signer.socket'].stale
+             or running['suifleet-signer.service'].stale }}
+        suifleet_restart_daemon: >-
+          {{ signer_inputs_changed | bool or suifleet_config_file is changed
+             or running | dict2items | selectattr('value.stale') | list | length > 0 }}
+
+    - name: Report units still using replaced inputs
+      ansible.builtin.debug:
+        msg: "{{ item.key }} will restart: {{ item.value.reason }}."
+      loop: "{{ suifleet_running | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: item.value.stale
+
+    - name: Load unit changes before restarting
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: suifleet_restart_signer | bool or suifleet_restart_daemon | bool or suifleet_restart_path | bool
+
+    # A running signing service keeps the listening socket it inherited, so it
+    # stops before its socket is recreated with the new unit settings and
+    # starts again afterwards; the daemon restarts after both.
+    - name: Stop the signing service before replacing its socket
+      ansible.builtin.systemd_service:
+        name: suifleet-signer.service
+        state: stopped
+      when: suifleet_restart_socket | bool
+
+    - name: Recreate the signing socket with its installed unit
+      ansible.builtin.systemd_service:
+        name: suifleet-signer.socket
+        state: restarted
+      when: suifleet_restart_socket | bool
+
+    - name: Restart the configuration trigger with its installed unit
+      ansible.builtin.systemd_service:
+        name: suifleet-enrollment.path
+        state: restarted
+      when: suifleet_restart_path | bool
+
+    - name: Enable and start the signing socket and the configuration trigger
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: [suifleet-signer.socket, suifleet-enrollment.path]
+
+    - name: Restart the signing service after code, manifest, signer or socket changes
+      ansible.builtin.systemd_service:
+        name: suifleet-signer.service
+        state: restarted
+      when: suifleet_restart_signer | bool
+
+    - name: Restart the daemon after code or configuration changes
+      ansible.builtin.systemd_service:
+        name: suifleet.service
+        state: restarted
+      when: suifleet_restart_daemon | bool
+
+    - name: Keep the daemon running
+      ansible.builtin.systemd_service:
+        name: suifleet.service
+        state: started
+      when: not suifleet_restart_daemon | bool
