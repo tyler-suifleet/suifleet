@@ -1454,8 +1454,23 @@ class Harness:
         assert recap[name]["failed"] == 0 and "Would look up" in output, (name, "check mode did not report the lookup", recap[name])
         assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, "check mode changed the marker")
         print("PASS check mode with a committed enrollment that printed nothing reported the on-chain lookup and changed nothing")
-        output, recap = self.ansible("retry looks up a committed enrollment that printed nothing", "/work/enroll-only.yml",
-                                     "--limit", name, *vault)
+        # The batch's enroll.toml in an equivalent but noncanonical spelling
+        # (quoted keys, literal and multiline strings, comments, another order):
+        # its parsed values match, so the lookup runs with the rebuilt file.
+        enroll_toml = self.batch / "enrollment" / self.hosts[name]["serial"] / "enroll.toml"
+        original_toml = enroll_toml.read_text()
+        lines = [line for line in original_toml.splitlines() if line and not line.startswith("#")]
+        respelled = []
+        for line in reversed(lines):
+            key, value = line.split(" = ", 1)
+            value = json.loads(value)
+            respelled.append(f"'{key}' = '{value}'  # respelled" if key != "keypair_path" else f'"{key}" = """{value}"""')
+        enroll_toml.write_text("# noncanonical but equivalent\n" + "\n".join(respelled) + "\n")
+        try:
+            output, recap = self.ansible("retry looks up a committed enrollment that printed nothing", "/work/enroll-only.yml",
+                                         "--limit", name, *vault)
+        finally:
+            enroll_toml.write_text(original_toml)
         assert recap[name]["failed"] == 0, (name, recap[name], output[-8000:])
         statuses = {s for block in output.split(ENROLL_TASK)[1:]
                     for s, h in TASK_RESULT.findall(block.split("\nTASK [", 1)[0]) if h == name}
@@ -1469,8 +1484,9 @@ class Harness:
         assert sh(f"stat -c '%U:%G %a' {record}").strip() == "root:suifleet 640", name
         assert sh("cat /etc/suifleet/device.address").strip() == address, (name, "identity changed")
         assert hashlib.sha256(sh("cat /etc/suifleet/device.key").strip().encode()).hexdigest() == key_sha256, name
-        print("PASS retry after a committed enrollment that printed nothing found it on chain without the claim and"
-              " restored the same record (digest and IDs); no second submission; key and address preserved")
+        print("PASS retry after a committed enrollment that printed nothing, with a noncanonical but equivalent"
+              " enroll.toml, found it on chain without the claim and restored the same record (digest and IDs); no"
+              " second submission; key and address preserved")
         # Back to an unpromoted receipt, for the recovery without the batch below.
         self.exec(container, "rm", "-f", record)
 
@@ -1541,6 +1557,14 @@ class Harness:
              lambda t: t.replace('manifest_path = "deployment.json"', 'manifest_path = "other/deployment.json"'), paths_refusal),
             ("an enroll.toml with a [signer] table", "enroll.toml",
              lambda t: t.rstrip("\n") + '\n\n[signer]\nkind = "service"\nsocket = "/run/suifleet/other.sock"\n', paths_refusal),
+            # Valid TOML whose expected lines are only text: the parsed values decide.
+            ("an enroll.toml whose expected manifest line is inside a multiline string", "enroll.toml",
+             lambda t: 'name = """\nmanifest_path = "deployment.json"\n"""\n' + "\n".join(
+                 '"manifest_path" = \'other/deployment.json\'' if line.startswith("manifest_path") else line
+                 for line in t.splitlines() if not line.startswith("name")) + "\n", paths_refusal),
+            ("an enroll.toml with a quoted [\"signer\"] table", "enroll.toml",
+             lambda t: t.rstrip("\n") + '\n\n[ "signer" ]\nkind = \'service\'\nsocket = "/run/suifleet/other.sock"\n',
+             paths_refusal),
         )
         (self.work / "ctl/enroll-only.yml").write_text(ENROLL_ONLY_PLAY)
         for label, file, edit, refusal in cases:
