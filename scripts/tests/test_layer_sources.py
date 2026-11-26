@@ -314,6 +314,47 @@ class PackageEdgeSourceTests(unittest.TestCase):
         for rel in ('examples/demo.rs', 'tools/entry.rs', 'tools/helper.rs'):
             self.assertIn(f'suifleet-edge/{rel}', paths)
 
+    def test_every_literal_include_and_path_form_is_packaged(self):
+        # The reviewer's reproduction used `include! { .. }`, which the old
+        # parenthesis-only scanner skipped. Every delimiter, spacing, raw
+        # string and cfg_attr path must reach the archive.
+        self.repo.write('suifleet-edge/tools/entry.rs', 'pub fn f() {}\n')
+        self.repo.write('suifleet-edge/tools/data.json', '{}\n')
+        self.repo.write('suifleet-edge/tools/unix.rs', 'pub fn u() {}\n')
+        forms = ('include! { "../tools/entry.rs" }\nfn main() {}\n',
+                 'include ! [ "../tools/entry.rs", ];\nfn main() {}\n',
+                 'std::include!(r#"../tools/entry.rs"#);\nfn main() {}\n',
+                 'const D: &str = core::include_str! {\n    "../tools/data.json"\n};\nfn main() {}\n',
+                 'const D: &[u8] = include_bytes![r"../tools/data.json"];\nfn main() {}\n',
+                 '# [ path = "../tools/entry.rs" ]\nmod entry;\nfn main() {}\n',
+                 '#[cfg_attr(unix, path = "../tools/unix.rs")]\nmod entry;\nfn main() {}\n')
+        expected = ('entry.rs', 'entry.rs', 'entry.rs', 'data.json', 'data.json', 'entry.rs', 'unix.rs')
+        for index, (source, name) in enumerate(zip(forms, expected)):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source)
+                rev = self.repo.commit()
+                output = self.out / f'form-{index}.tar.gz'
+                info = packager.build(self.repo.root, rev, output)
+                self.assertIn(f'suifleet-edge/tools/{name}', info['paths'])
+                with tarfile.open(output) as tar:
+                    self.assertIn(f'suifleet-edge/tools/{name}', tar.getnames())
+        # Forms the scanner cannot resolve are refused, not skipped.
+        for source in ('include!(concat!(env!("OUT_DIR"), "/gen.rs"));\n',
+                       'include_str!("..\\\\tools\\\\entry.rs");\n',
+                       'include!(PATH);\n',
+                       '#[path = concat!("../tools/", "entry.rs")]\nmod entry;\n',
+                       'include_str!("");\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source + 'fn main() {}\n')
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, 'unsupported include form|unsupported #\\[path\\]|empty path'):
+                    packager.plan(self.repo.root, 'HEAD')
+        # A braced include of a missing file is an error like any other.
+        self.repo.write('suifleet-edge/src/main.rs', 'include! { "../tools/absent.rs" }\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, 'includes missing file suifleet-edge/tools/absent.rs'):
+            packager.plan(self.repo.root, 'HEAD')
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -972,6 +1013,54 @@ class LayerAuditTests(unittest.TestCase):
         rev = self.repo.commit()
         self.write_recipe(srcrev=rev)
         self.assertTrue(any(expected in e for e in audit.check(self.layer, repo=self.repo.root)['errors']))
+
+    def test_fetch_follows_braced_includes(self):
+        # The reviewer's fetched-layout reproduction: a pinned archive whose
+        # src/main.rs uses `include! { .. }` for a file the archive lacks.
+        main = 'include! { "../tools/entry.rs" }\nfn main() {}\n'
+        archive = self.archive.with_name('braced-include.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/src/main.rs':
+                    member.size, data = len(main), io.BytesIO(main.encode())
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/src/main.rs references suifleet-edge/tools/entry.rs, absent from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # An unresolvable include form in the fetched layout is refused too.
+        main = 'include!(concat!(env!("OUT_DIR"), "/gen.rs"));\nfn main() {}\n'
+        unsupported = self.archive.with_name('unsupported-include.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(unsupported, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/src/main.rs':
+                    member.size, data = len(main), io.BytesIO(main.encode())
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(unsupported.read_bytes()))
+        self.archive = unsupported
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertTrue(any('unsupported include form' in e for e in report['errors']), report['errors'])
+        # Committed and packaged, the braced include audits clean end to end.
+        self.repo.write('suifleet-edge/src/main.rs', 'include! { "../tools/entry.rs" }\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/entry.rs', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/tools/entry.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
 
     def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
         # A checksum-pinned, otherwise coherent archive that carries runtime state.

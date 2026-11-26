@@ -9,8 +9,10 @@ Paths are the daemon build closure: the root LICENSE, the Cargo manifest and
 lockfile, the crate sources and examples, every Cargo workspace member, every
 local crate reached through `path` dependencies (transitively), every
 file a manifest declares explicitly (`package.build` and each target `path`) and
-each file named by a literal ``include_str!``/``include_bytes!`` in those
-sources, or by a `#[path]` module attribute (resolved transitively). The closure is computed from the revision's
+each file named by a literal ``include!``/``include_str!``/``include_bytes!``
+(in any delimiter) in those sources, or by a `#[path]` module attribute
+(resolved transitively); an include or path form that is not one string literal
+is refused. The closure is computed from the revision's
 tree, so a missing workspace member or include target is an error instead of a
 broken release. Ownership, timestamps (the commit time) and modes come from
 ``git archive``; ``gzip -n`` omits the name and time, so rebuilding the same
@@ -48,10 +50,23 @@ ROOTS = (
     f'{CRATE}/examples/',
 )
 REQUIRED = ('LICENSE', f'{CRATE}/Cargo.toml', f'{CRATE}/Cargo.lock')
-INCLUDE = re.compile(rb'include(?:_str|_bytes)?!\(\s*"([^"\\]+)"\s*\)|#\[path\s*=\s*"([^"\\]+)"\s*\]')
+# Every include macro name, however it is delimited or spaced (`include!(..)`,
+# `include! { .. }`, `std::include_str![..]`).
+INCLUDE_MACRO = re.compile(rb'(?<![A-Za-z0-9_])include(?:_str|_bytes)?\s*!')
+# The one argument form followed: a single string literal (plain without
+# escapes, or raw) in any macro delimiter, with an optional trailing comma.
+INCLUDE_ARGUMENT = {
+    opener: re.compile(rb'\s*' + re.escape(opener) + rb'\s*(?:"([^"\\]*)"|r(#*)"(.*?)"\2)\s*,?\s*' + re.escape(closer),
+                       re.S)
+    for opener, closer in ((b'(', b')'), (b'[', b']'), (b'{', b'}'))}
+# An attribute opener (`#[`, `#![`, `# [`); its body is scanned bracket-balanced.
+ATTRIBUTE = re.compile(rb'#\s*!?\s*\[')
+PATH_KEY = re.compile(rb'\s*path\s*=')
+PATH_VALUE = re.compile(rb'\s*(?:"([^"\\]*)"|r(#*)"(.*?)"\2)\s*$', re.S)
+CFG_ATTR = re.compile(rb'\s*cfg_attr\s*\(')
 # An out-of-line module declaration (`mod name;`) with its leading attributes.
-MODULE = re.compile(rb'((?:#\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;')
-PATH_ATTR = re.compile(rb'#\[path\s*=\s*"[^"\\]+"\s*\]')
+MODULE = re.compile(rb'((?:#\s*\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;')
+PATH_ATTR = re.compile(rb'#\s*\[\s*path\s*=')
 # Runtime identity/state names that must never be distributed.
 FORBIDDEN_NAME = re.compile(
     r'(^|/)(device\.key|signer\.key|config\.toml|firmware\.toml|signer\.toml|'
@@ -465,11 +480,103 @@ def declared_files(manifest, read_manifest):
     return sorted(set(files))
 
 
+def _literal(match):
+    """The text of a PATH_VALUE/INCLUDE_ARGUMENT string-literal match."""
+    return match.group(1) if match.group(1) is not None else match.group(3)
+
+
+def _bracketed(data, start, opener, closer):
+    """Return the index just past the `closer` matching the `opener` before
+    `start`, skipping string literals, or None when it is unbalanced."""
+    depth, i = 1, start
+    while i < len(data):
+        c = data[i:i + 1]
+        if c == b'"':
+            i += 1
+            while i < len(data) and data[i:i + 1] != b'"':
+                i += 2 if data[i:i + 1] == b'\\' else 1
+        elif c == opener:
+            depth += 1
+        elif c == closer:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return None
+
+
+def _top_level_split(body):
+    """Split an attribute argument list at its top-level commas."""
+    parts, depth, start, i = [], 0, 0, 0
+    while i < len(body):
+        c = body[i:i + 1]
+        if c == b'"':
+            i += 1
+            while i < len(body) and body[i:i + 1] != b'"':
+                i += 2 if body[i:i + 1] == b'\\' else 1
+        elif c in b'([{':
+            depth += 1
+        elif c in b')]}':
+            depth -= 1
+        elif c == b',' and depth == 0:
+            parts.append(body[start:i])
+            start = i + 1
+        i += 1
+    parts.append(body[start:])
+    return parts
+
+
+def _path_attributes(source_path, body):
+    """Literal paths of a `path = ".."` attribute body, including one nested in
+    `cfg_attr(predicate, ..)`. A path value that is not one plain or raw string
+    literal raises ValueError instead of being skipped."""
+    key = PATH_KEY.match(body)
+    if key:
+        value = PATH_VALUE.match(body, key.end())
+        if not value:
+            raise ValueError(f'{source_path}: unsupported #[path] attribute {body.decode(errors="replace").strip()!r}; '
+                             'use a single string literal without escapes')
+        return [_literal(value)]
+    cfg = CFG_ATTR.match(body)
+    if cfg:
+        end = body.rfind(b')')
+        paths = []
+        for argument in _top_level_split(body[cfg.end():end])[1:]:
+            paths += _path_attributes(source_path, argument)
+        return paths
+    return []
+
+
+def literal_references(source_path, data):
+    """Every file path a Rust source names through an include macro or a path
+    attribute. The scan is lexical (comments and strings included, which only
+    makes it stricter): each include-macro name must be followed by one string
+    literal in any delimiter, otherwise ValueError, so an unhandled form cannot
+    silently drop a build input."""
+    references = []
+    for match in INCLUDE_MACRO.finditer(data):
+        rest = data[match.end():].lstrip()
+        argument = INCLUDE_ARGUMENT.get(rest[:1])
+        found = argument.match(data, match.end()) if argument else None
+        if not found:
+            snippet = data[match.start():match.start() + 60].split(b'\n')[0].decode(errors='replace')
+            raise ValueError(f'{source_path}: unsupported include form {snippet!r}; '
+                             'use a single string literal without escapes')
+        references.append(_literal(found))
+    for match in ATTRIBUTE.finditer(data):
+        end = _bracketed(data, match.end(), b'[', b']')
+        if end is None:
+            continue
+        references += _path_attributes(source_path, data[match.end():end - 1])
+    return references
+
+
 def include_targets(source_path, data):
     base = PurePosixPath(source_path).parent
     targets = []
-    for include, module in INCLUDE.findall(data):
-        raw = include or module
+    for raw in literal_references(source_path, data):
+        if not raw:
+            raise ValueError(f'{source_path} references an empty path')
         parts = []
         for part in (base / raw.decode()).parts:
             if part == '..':
