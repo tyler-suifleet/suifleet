@@ -103,6 +103,10 @@
         # marks every attempt. A run stopped before the receipt was renamed into
         # place leaves it: never submit again or overwrite it. Promote a receipt
         # for this device's key; stop on any other output for manual recovery.
+        # Each attempt also records, in the deployment file beside it, the
+        # SHA-256 of the manifest it enrolled under: a receipt is promoted only
+        # beside that same manifest (the same key can enroll under another
+        # deployment, and configure.yml installs suifleet_manifest_src).
         - name: Look for the output of an interrupted enrollment
           ansible.builtin.stat:
             path: /etc/suifleet/.enrollment.json.partial
@@ -222,7 +226,18 @@
               when: not ansible_check_mode
 
             # The checks below verify it like any receipt; the file stays the
-            # attempt marker until the record is promoted.
+            # attempt marker until the record is promoted. The lookup ran
+            # under the verified suifleet_manifest_src, so the receipt is
+            # bound to it; the binding is written first.
+            - name: Bind the receipt the lookup found to the configured deployment
+              ansible.builtin.copy:
+                content: "{{ suifleet_manifest.stat.checksum }}\n"
+                dest: "{{ suifleet_enrollment_deployment }}"
+                owner: root
+                group: root
+                mode: "0600"
+              when: not ansible_check_mode
+
             - name: Keep the receipt the lookup found in the attempt marker
               ansible.builtin.copy:
                 content: "{{ suifleet_enrollment_lookup.stdout }}\n"
@@ -265,6 +280,34 @@
                   file. Restore the record from suifleet --find-enrollment
                   (docs/ANSIBLE.md#recovery); never issue it a new claim.
 
+            # Shape and key above; the deployment here. A receipt from an
+            # attempt under another deployment (the inventory manifest changed
+            # since), or without a recorded deployment, is kept and stops the
+            # run before any record or configuration is written.
+            - name: Read the deployment the interrupted attempt enrolled under
+              ansible.builtin.slurp:
+                src: "{{ suifleet_enrollment_deployment }}"
+              register: suifleet_enrollment_attempt_deployment
+              failed_when: false
+
+            - name: Stop unless the receipt is bound to the configured deployment
+              ansible.builtin.assert:
+                that:
+                  - suifleet_enrollment_attempt_deployment.content is defined
+                  - >-
+                    (suifleet_enrollment_attempt_deployment.content | b64decode)
+                    == suifleet_manifest.stat.checksum ~ '\n'
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has an enrollment receipt in
+                  /etc/suifleet/.enrollment.json.partial from an attempt that did not
+                  run under the configured deployment ({{ suifleet_manifest_src }},
+                  SHA-256 {{ suifleet_manifest.stat.checksum }}), or whose deployment
+                  is not recorded in {{ suifleet_enrollment_deployment }}. The role
+                  keeps the receipt and writes no record or configuration. Select the
+                  deployment the device enrolled under, or restore the record under
+                  this deployment with suifleet --find-enrollment (docs/ANSIBLE.md#recovery).
+
             - name: Report the pending record recovery
               ansible.builtin.debug:
                 msg: "Would restore {{ inventory_hostname }}'s enrollment record from its interrupted enrollment's receipt."
@@ -278,8 +321,11 @@
                 chown root:suifleet "$partial"
                 chmod 0640 "$partial"
                 mv -f "$partial" /etc/suifleet/enrollment.json
+                rm -f "$DEPLOYMENT"
               args:
                 creates: /etc/suifleet/enrollment.json
+              environment:
+                DEPLOYMENT: "{{ suifleet_enrollment_deployment }}"
 
         - name: Enroll with a claim from the batch
           when: not suifleet_enrollment_partial.stat.exists
@@ -368,12 +414,14 @@
                       exit 1
                     fi
                     set +C
-                    # Record the attempt durably before anything can be submitted, so
-                    # a retry after a lost response or power loss never submits again.
-                    # Nothing was sent if this fails, so the marker is removed.
-                    if ! sync -f "$partial"; then
-                      rm -f "$partial"
-                      echo "could not flush $partial; nothing was sent" >&2
+                    # Record the attempt, and the manifest it enrolls under (staged
+                    # and verified above), durably before anything can be submitted,
+                    # so a retry after a lost response or power loss never submits
+                    # again and promotes its receipt only beside that manifest.
+                    # Nothing was sent if this fails, so both are removed.
+                    if ! { printf '%s\n' "$MANIFEST_SHA256" > "$DEPLOYMENT" && sync -f "$DEPLOYMENT" "$partial"; }; then
+                      rm -f "$partial" "$DEPLOYMENT"
+                      echo "could not record $partial; nothing was sent" >&2
                       exit 1
                     fi
                     # The command appends to the empty marker created above, which is
@@ -385,11 +433,14 @@
                     chown root:suifleet "$partial"
                     chmod 0640 "$partial"
                     mv -f "$partial" /etc/suifleet/enrollment.json
+                    rm -f "$DEPLOYMENT"
                   args:
                     creates: /etc/suifleet/enrollment.json
                   environment:
                     HOLDER: "{{ suifleet_key.stat.pw_name }}"
                     STAGING: "{{ suifleet_enroll_staging }}"
+                    DEPLOYMENT: "{{ suifleet_enrollment_deployment }}"
+                    MANIFEST_SHA256: "{{ suifleet_manifest.stat.checksum }}"
               always:
                 - name: Erase the staged claim
                   ansible.builtin.file:

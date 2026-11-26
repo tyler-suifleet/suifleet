@@ -51,6 +51,10 @@ suifleet_enroll_staging: /run/suifleet-enroll
 # Host-wide enrollment lock (a directory on tmpfs /run): one play at a time
 # enrolls a host. A reboot clears a lock left by a killed play.
 suifleet_enroll_lock: /run/suifleet-enroll.lock
+# SHA-256 of the manifest an enrollment attempt ran under, kept beside its
+# attempt marker (/etc/suifleet/.enrollment.json.partial) on persistent
+# storage until the receipt is promoted beside that same manifest.
+suifleet_enrollment_deployment: /etc/suifleet/.enrollment.json.partial.deployment
 # Memory-backed directory writable by the SSH account (not root). The claim
 # reaches the host here without privilege escalation, because sudo may log a
 # command's standard input; enrollment refuses a directory that is not tmpfs.
