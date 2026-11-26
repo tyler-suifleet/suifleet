@@ -19,6 +19,7 @@
   "administrator_only": ["install", "list", "messaging", "shadows", "client_devices"],
   "error_codes": {
     "generic": ["request_failed"],
+    "publish": ["full"],
     "stream": ["declared", "evicted", "exists", "full", "invalid", "not-enough-messages", "not-found", "quota", "retired", "unavailable"],
     "shadow": ["conflict", "invalid", "not-found", "quota", "too-large", "unavailable"]
   },

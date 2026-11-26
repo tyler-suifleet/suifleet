@@ -264,7 +264,7 @@ def run(package=None):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=pkg)
             first = json.loads(buffered.stdout.readline())
             assert (first['overflow'], first['sent'], first['pending']) == (4, 32, 4), first
-            assert first['error']['name'] == 'IpcError' and first['error']['code'] == 'request_failed', first
+            assert first['error']['name'] == 'IpcError' and first['error']['code'] == 'full', first
             drained = [python(INBOX, 'receive', 'bulk/samples')['payload']['n'] for _ in range(10)]
             buffered.stdin.write('drained\n')
             buffered.stdin.flush()
@@ -280,7 +280,7 @@ def run(package=None):
                 action='buffer', items=items, maxItems=64))], preexec_fn=drop(SENSOR), stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=pkg)
             first = json.loads(buffered.stdout.readline())
-            assert (first['sent'], first['pending'], first['error']['code']) == (SPOOL, 4, 'request_failed'), first
+            assert (first['sent'], first['pending'], first['error']['code']) == (SPOOL, 4, 'full'), first
             got = [m['payload']['n'] for m in example(CONSUMER, 'consumer.mjs', {'CONSUMER_COUNT': '10'})['received']]
             buffered.stdin.write('drained\n')
             buffered.stdin.flush()
@@ -296,7 +296,7 @@ def run(package=None):
             assert full['error']['code'] == 'full' and 0 < full['sent'] < 40 and full['sent'] + full['pending'] == 40, full
             small = ok(SENSOR, 'stream_describe', 'sensor-small')
             assert (small['oldest'], small['newest'], small['messages']) == (0, full['sent'] - 1, full['sent']), small
-            print('PASS: bounded buffer under real daemon backpressure: volatile inbox (32), durable spool '
+            print('PASS: bounded buffer under real daemon backpressure coded `full`: volatile inbox (32), durable spool '
                   f'({SPOOL}) and RejectNewData stream `full`; local overflow refused, delivery in order without loss or duplicates', flush=True)
 
             # Reconnect across a daemon restart. Only unsent requests are retried.

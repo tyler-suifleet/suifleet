@@ -38,6 +38,11 @@ class DaemonContract(unittest.TestCase):
             codes = set(re.findall(r'fail\(\s*"([a-z-]+)"', text)) | set(re.findall(r'code: "([a-z-]+)"', text))
             self.assertEqual(codes, set(CONTRACT['error_codes'][key]), module)
 
+    def test_publish_codes(self):
+        # Only definitive (nothing stored) publish backpressure is coded; the rest stays generic.
+        codes = set(re.findall(r'downcast_ref::<crate::pubsub::Backpressure>\(\)\.is_some\(\) => \{\s*json!\(\{"version":1,"ok":false,"error":"([a-z-]+)"\}\)', self.source))
+        self.assertEqual(codes, set(CONTRACT['error_codes']['publish']))
+
     def test_frame_limit(self):
         self.assertIn(f'MAX_FRAME: usize = {CONTRACT["max_frame_bytes"]}', (ROOT / 'suifleet-edge/src').joinpath('ipc.rs').read_text())
 
