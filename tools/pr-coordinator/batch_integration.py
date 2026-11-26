@@ -2470,7 +2470,7 @@ class ObsoleteBatchCI:
             return
         due = []
         for batch in batches:
-            if (batch.get('status') != 'invalidated' or not batch.get('pr')
+            if (batch.get('status') not in ('invalidated', 'failed') or not batch.get('pr')
                     or not re.fullmatch('[0-9a-f]{40}', batch.get('head') or '')
                     or batch.get('branch') != 'integration/batch/' + batch['id']):
                 continue
@@ -2520,7 +2520,7 @@ class ObsoleteBatchCI:
             except Exception as error:
                 pending = True
                 receipts.append({'run': run['id'], 'error_type': type(error).__name__})
-        # Allow delayed workflow delivery for ten minutes after invalidation.
+        # Allow delayed workflow delivery for ten minutes after the terminal update.
         # Settled batches require no more API reads; manual reruns are operator work.
         quiet = self.clock() - batch.get('updated', self.clock()) >= 600
         self.save(project, batch, 'settled' if quiet and not pending else 'retry', {'runs': receipts})
