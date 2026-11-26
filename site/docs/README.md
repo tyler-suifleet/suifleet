@@ -83,7 +83,8 @@ links use `NEXT_PUBLIC_DEVICE_DOCS_BASE` (default `https://docs.suifleet.io/`);
 set it at console build time to the deployed docs root, including any path prefix.
 `node scripts/test_device_client_links.cjs` checks app rendering and configured
 roots; the Python docs suite checks every app section against rendered HTML.
-SF-230/SF-231 own standalone layer and Debian package publication. Until those
-are published, the guide explicitly offers no layer clone URL or package download.
+The guide links to the public layer and its pinned series profiles. SF-295
+tracks the separate Layer Index submission.
+SF-231 tracks Debian packaging; the guide offers no public package download.
 Verify the new public path after authorized docs publication; local build checks
 do not establish live DNS, TLS or served-page availability.
