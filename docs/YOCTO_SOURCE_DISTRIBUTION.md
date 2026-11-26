@@ -39,10 +39,18 @@ The file set is the daemon build closure, computed from that commit's tree:
   the subset, such as a multi-line string, and a `members` value that isn't
   an array of strings stop the build rather than dropping a member. The fetch
   audit uses the same reader and reports these as errors;
+- every local crate reached through a `path` dependency, followed through each
+  local crate's manifest, even when `members` doesn't list it. Cargo builds
+  these either way. The packager reads `[dependencies]`,
+  `[dev-dependencies]`, `[build-dependencies]` (with the underscore
+  spellings), their `[target.*]` forms, `[workspace.dependencies]`, `[patch.*]`
+  and `[replace]`. A path that leaves `suifleet-edge/`, an absolute path, a
+  non-string `path` or a local crate without a `Cargo.toml` stops the build.
+  Currently the only one is `windows-runtime`, which is also a member;
 - each file named by a literal `include_str!`/`include_bytes!` or a `#[path]`
   module attribute, followed transitively.
 
-A missing workspace member, a missing include target, a path outside the
+A missing workspace member or local path dependency, a missing include target, a path outside the
 repository, a symlink or submodule, or a runtime identity/state file name
 (`device.key`, `config.toml`, `*.key`, journals, databases and so on) stops the
 build. Contents are not pattern-scanned for keys, because the redaction test
@@ -164,7 +172,7 @@ check then verifies the resulting `S`:
   and unpacked sources;
 - for every recipe, the license file checksums;
 - for the daemon, the lockfile digest, crate version, crate include, workspace
-  members and every include target, plus `cargo metadata --offline --locked
+  members, transitive local path-dependency crates and every include target, plus `cargo metadata --offline --locked
   --no-deps` when `--cargo` is set;
 - for the codec, the exact five pinned files, their digests, provenance
   revision, licenses and Node version.
