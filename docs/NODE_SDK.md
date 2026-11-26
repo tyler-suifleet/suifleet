@@ -74,7 +74,7 @@ integer.
 | Shadows ([SHADOWS.md](SHADOWS.md)) | `shadowGet`, `shadowUpdate(name, state, {version, clientToken})`, `shadowDelete`, `shadowList`; administrators: `shadows()` |
 | Opaque data ([OPAQUE_DATA.md](OPAQUE_DATA.md)) | `putData(stream, key, bytes, options)` — same chunk geometry and descriptor as the Python SDK. `options.metadata` is a string-to-string map (`DataMetadata`), as the daemon requires: at most 16 entries, keys of 1–64 UTF-8 bytes, values of at most 256 UTF-8 bytes, at most 6144 serialized bytes. `validateDataMetadata` checks it; the CLI's `--metadata` takes the same JSON object |
 | Client devices ([CLIENT_DEVICES.md](CLIENT_DEVICES.md)) | administrators: `clientDevices(action, fields)` |
-| CLI | `suifleet-ipc [--socket] [--component] [--topic] [--payload JSON] OPERATION`, `--file` for `data_put` |
+| CLI | `suifleet-ipc [--socket] [--component] [--topic] [--payload JSON] OPERATION`, `--file` for `data_put` (a regular file of at most 64 MiB; larger files, FIFOs, devices and directories are refused before reading or connecting) |
 
 Option objects use camelCase; results are the daemon's wire objects (for
 example `stream_describe` returns `max_size`). Response fields added by future

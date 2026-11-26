@@ -1,16 +1,16 @@
 // Client framing, outcome classification and buffering against a local fake
 // Unix-socket peer. Real-daemon behavior is covered by scripts/test_ipc_node.py.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  BufferFullError, Client, DATA_CHUNK_SIZE, DataPutError, IpcError, MAX_FRAME, MAX_TIMER_DELAY_MS, OutboundBuffer, ProtocolError,
+  BufferFullError, Client, DATA_CHUNK_SIZE, DataPutError, IpcError, MAX_DATA_SIZE, MAX_FRAME, MAX_TIMER_DELAY_MS, OutboundBuffer, ProtocolError,
   TransportError, UncertainDeliveryError, encodeRequest, validateDataMetadata,
 } from '../dist/index.js';
 
@@ -378,6 +378,47 @@ test('CLI data_put refuses non-string metadata before connecting and forwards a 
   const good = await run(server.path, '{"sampleCount":"5"}');
   assert.equal(good.code, 0, good.stderr);
   assert.deepEqual(server.requests[0].payload.descriptor.metadata, { sampleCount: '5' });
+  await server.close();
+});
+
+test('CLI data_put bounds the file read: exact limit accepted, oversize and non-regular inputs refused before connecting', async () => {
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+  const run = (socket, file) => new Promise((resolve) => execFile(process.execPath,
+    [cli, '--socket', socket, '--component', 'svc', '--topic', 'sensor', '--file', file, 'data_put'],
+    { timeout: 20000, killSignal: 'SIGKILL', maxBuffer: 1 << 20 },
+    (error, stdout, stderr) => resolve({ code: error ? error.code : 0, signal: error?.signal ?? null, stdout, stderr })));
+  // Sparse files: no disk/memory cost to create. The second chunk is refused so an
+  // exact-limit run proves the whole file was accepted without sending 64 MiB.
+  const server = await serve((r) => r.payload.descriptor.chunk === 0
+    ? ok({ sequence: 0, state: 'queued', storage_acknowledged: false }) : fail('full'));
+  const sparse = (name, size) => { const path = join(directory, name); closeSync(openSync(path, 'w')); truncateSync(path, size); return path; };
+
+  const exact = await run(server.path, sparse('exact.bin', MAX_DATA_SIZE));
+  assert.equal(exact.code, 1, exact.stderr);
+  assert.match(exact.stderr, /resume with --upload [0-9a-f]{64} --start-chunk 1/);
+  assert.equal(server.requests.length, 2);
+  assert.equal(server.requests[0].payload.descriptor.total_size, MAX_DATA_SIZE);
+  assert.equal(server.requests[0].payload.descriptor.chunks, Math.ceil(MAX_DATA_SIZE / DATA_CHUNK_SIZE));
+
+  const before = server.requests.length;
+  // A 1.5 GiB sparse file would previously be buffered whole before the size check.
+  for (const [name, size] of [['over.bin', MAX_DATA_SIZE + 1], ['huge.bin', 1536 * 1024 * 1024]]) {
+    const result = await run(server.path, sparse(name, size));
+    assert.equal(result.code, 1, `${name}: ${result.stderr}`);
+    assert.match(result.stderr, /data exceeds 64 MiB/);
+  }
+  // A FIFO with no writer must be refused promptly, not block in open() or read().
+  const fifo = join(directory, 'input.fifo');
+  execFileSync('mkfifo', [fifo]);
+  const dir = join(directory, 'input.dir');
+  mkdirSync(dir);
+  for (const path of [fifo, dir, '/dev/zero']) {
+    const result = await run(server.path, path);
+    assert.equal(result.signal, null, `${path} timed out`);
+    assert.equal(result.code, 1, `${path}: ${result.stderr}`);
+    assert.match(result.stderr, /--file must be a regular file/);
+  }
+  assert.equal(server.requests.length, before);
   await server.close();
 });
 

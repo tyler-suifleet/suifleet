@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** suifleet-ipc: generic native IPC v1 requests from the shell (same contract as sdk/python/suifleet_ipc.py). */
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import {
   Client, DEFAULT_SOCKET, DataPutError, IpcError, MAX_DATA_SIZE, OPERATIONS, SDK_VERSION, TransportError, validateDataMetadata,
@@ -13,6 +13,31 @@ const usage = `usage: suifleet-ipc [--socket PATH] [--component NAME] [--topic T
                     [--metadata JSON-OBJECT-OF-STRINGS] [--upload HEX] [--start-chunk N] data_put
 operations: ${OPERATIONS.join(', ')}
 Identity is this process's Unix UID; --component only names the component it owns.`;
+
+/**
+ * Read a regular file of at most MAX_DATA_SIZE bytes, never buffering more than
+ * its fstat size + 1 (itself capped at MAX_DATA_SIZE + 1). O_NONBLOCK keeps a FIFO
+ * open from waiting for a writer; anything but a regular file (FIFO, device,
+ * socket, directory) is refused before reading, and a file that grows while it is
+ * read is refused rather than truncated.
+ */
+function readDataFile(path: string): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new RangeError('--file must be a regular file');
+    if (stat.size > MAX_DATA_SIZE) throw new RangeError('data exceeds 64 MiB');
+    const buffer = Buffer.allocUnsafe(stat.size + 1);
+    let length = 0;
+    for (let count = -1; count !== 0 && length < buffer.length; length += count) {
+      count = readSync(fd, buffer, length, buffer.length - length, null);
+    }
+    if (length > stat.size) throw new RangeError('--file changed while it was read');
+    return buffer.subarray(0, length);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 async function main(): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -48,8 +73,7 @@ async function main(): Promise<number> {
     if (operation !== 'data_put') throw new RangeError('--file requires data_put');
     // The daemon accepts only a string-to-string map; refuse anything else before connecting.
     const metadata = validateDataMetadata(JSON.parse(values.metadata) as unknown);
-    const data = readFileSync(values.file);
-    if (data.length > MAX_DATA_SIZE) throw new RangeError('data exceeds 64 MiB');
+    const data = readDataFile(values.file);
     result = await client.putData(values.topic, values.key, data, {
       contentType: values['content-type'], metadata,
       startChunk: Number(values['start-chunk']), ...(values.upload !== undefined ? { upload: values.upload } : {}),
