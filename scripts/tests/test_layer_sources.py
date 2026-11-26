@@ -166,6 +166,41 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing file suifleet-edge/src/missing.txt'):
             packager.plan(self.repo.root, 'HEAD')
 
+    def test_local_path_dependencies_are_packaged_transitively(self):
+        # Cargo builds local path dependencies whether or not workspace.members
+        # lists them; an archive without them only fails on the clean host.
+        deps = ('\n[dependencies]\nlocal-helper = { path = "local-helper" }\n'
+                "\n[target.'cfg(unix)'.dev-dependencies]\nunix-helper = { path = './helpers/unix' }\n"
+                '\n[patch.crates-io]\nanyhow = { path = "vendor/anyhow" }\n')
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML + deps)
+        self.repo.write('suifleet-edge/local-helper/Cargo.toml',
+                        '[package]\nname = "local-helper"\nversion = "0.1.0"\n\n'
+                        '[build-dependencies.nested]\npath = "../nested"\n')
+        self.repo.write('suifleet-edge/local-helper/src/lib.rs', '')
+        for crate in ('nested', 'helpers/unix', 'vendor/anyhow'):
+            self.repo.write(f'suifleet-edge/{crate}/Cargo.toml', '[package]\nname = "x"\nversion = "0.1.0"\n')
+            self.repo.write(f'suifleet-edge/{crate}/src/lib.rs', '')
+        self.repo.commit()
+        info = packager.build(self.repo.root, 'HEAD', self.out / 'local.tar.gz')
+        with tarfile.open(self.out / 'local.tar.gz') as tar:
+            names = {m.name for m in tar.getmembers() if m.isfile()}
+        for crate in ('local-helper', 'nested', 'helpers/unix', 'vendor/anyhow', 'windows-runtime'):
+            with self.subTest(crate):
+                self.assertIn(f'suifleet-edge/{crate}/Cargo.toml', names)
+                self.assertIn(f'suifleet-edge/{crate}/src/lib.rs', names)
+        self.assertEqual(sorted(names), info['paths'])
+        # Unresolvable or unsupported local dependencies are refused, not dropped.
+        for dependency, error in (('{ path = "absent" }', 'path dependency absent has no Cargo.toml'),
+                                  ('{ path = "../interfaces" }', 'outside the suifleet-edge source layout'),
+                                  ('{ path = "/abs/crate" }', 'unsupported local dependency path'),
+                                  ('{ path = 1 }', 'unsupported path for dependency extra')):
+            with self.subTest(dependency):
+                self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML + deps + f'extra = {dependency}\n'.replace(
+                    'extra', '[workspace.dependencies]\nextra', 1))
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, error):
+                    packager.plan(self.repo.root, 'HEAD')
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -707,6 +742,25 @@ class LayerAuditTests(unittest.TestCase):
                     self.archive = original
                 self.addCleanup(shutil.rmtree, report['fetch_dir'])
                 self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+
+    def test_fetch_reports_missing_local_path_dependency(self):
+        # The pinned manifest needs local-helper only through a path
+        # dependency (not a workspace member); the archive lacks it.
+        manifest = (CARGO_TOML + '\n[dependencies]\nlocal-helper = { path = "local-helper" }\n').encode()
+        archive = self.archive.with_name('path-dependency.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/Cargo.toml':
+                    member.size, data = len(manifest), io.BytesIO(manifest)
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertTrue(any('path dependency suifleet-edge/local-helper is missing from the source layout' in e
+                            for e in report['errors']), report['errors'])
 
     def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
         # A checksum-pinned, otherwise coherent archive that carries runtime state.

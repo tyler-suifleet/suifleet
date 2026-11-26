@@ -45,8 +45,8 @@ non-crate source with no credentials into a new directory, verifies its
 SHA-256 before unpacking, re-checks each destination before writing, unpacks
 it as BitBake would, creates loose files exclusively without following links
 (file:// entries and unpack=0 downloads) and checks the resulting
-S: license checksums, the daemon lockfile/version/crate include/workspace
-members/include targets, and the codec's exact pinned file set and provenance.
+S: license checksums, the daemon lockfile/version/crate include, workspace
+members and transitive local path-dependency crates, include targets, and the codec's exact pinned file set and provenance.
 --cargo additionally runs `cargo metadata --offline --locked --no-deps`.
 
 The JSON report maps each recipe to its version, source revision, sources,
@@ -493,10 +493,10 @@ def daemon_errors(recipe, read, exists=None):
     packager = load_packager()
     try:
         version = packager.crate_version(manifest.decode())
-        members = packager.workspace_members(manifest.decode())
+        packager.workspace_members(manifest.decode())
     except ValueError as error:
         errors.append(f'{recipe.path.name}: {src}/Cargo.toml: {error}')
-        version, members = None, []
+        version = None
     if version is not None and version != recipe.get('SUIFLEET_CRATE_VERSION'):
         errors.append(f'{recipe.path.name}: Cargo.toml version {version} differs from SUIFLEET_CRATE_VERSION')
     locked, included = lock_packages(lock.decode()), crate_include(recipe)
@@ -512,10 +512,16 @@ def daemon_errors(recipe, read, exists=None):
         data = read(rel)
         if data is None or hashlib.md5(data).hexdigest() != md5:
             errors.append(f'{recipe.path.name}: license file {rel} does not match md5 {md5}')
-    if exists is not None:
-        for member in members:
-            if not exists(f'{src}/{member}/Cargo.toml'):
-                errors.append(f'{recipe.path.name}: workspace member {src}/{member} is missing from the source layout')
+    if exists is not None and version is not None:
+        def read_manifest(directory):
+            path = f'{src}/{directory}/Cargo.toml'
+            return read(path).decode() if exists(path) else None
+        try:
+            packager.local_crates(manifest.decode(), read_manifest)
+        except packager.MissingCrate as error:
+            errors.append(f'{recipe.path.name}: {error.what} {src}/{error.directory} is missing from the source layout')
+        except ValueError as error:
+            errors.append(f'{recipe.path.name}: {src}: unsupported local crate layout: {error}')
     return errors
 
 

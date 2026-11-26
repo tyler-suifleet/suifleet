@@ -6,7 +6,8 @@ The archive is produced from committed Git objects only (never a working tree):
     git archive --format=tar REVISION -- <paths> | gzip -n -6
 
 Paths are the daemon build closure: the root LICENSE, the Cargo manifest and
-lockfile, the crate sources and examples, every Cargo workspace member and
+lockfile, the crate sources and examples, every Cargo workspace member, every
+local crate reached through `path` dependencies (transitively) and
 each file named by a literal ``include_str!``/``include_bytes!`` in those
 sources, or by a `#[path]` module attribute (resolved transitively). The closure is computed from the revision's
 tree, so a missing workspace member or include target is an error instead of a
@@ -318,6 +319,93 @@ def workspace_members(manifest):
     return members
 
 
+DEPENDENCY_TABLES = ('dependencies', 'dev-dependencies', 'dev_dependencies',
+                     'build-dependencies', 'build_dependencies')
+
+
+def path_dependencies(document):
+    """Return the literal `path` of every local dependency a parsed manifest declares.
+
+    Covers [dependencies], [dev-dependencies], [build-dependencies] (and the
+    underscore spellings Cargo still accepts), their [target.*] forms,
+    [workspace.dependencies], [patch.*] and [replace]. A dependency entry
+    whose `path` is not a string raises ValueError."""
+    groups = [document.get(name) for name in DEPENDENCY_TABLES]
+    targets = document.get('target', {})
+    if not isinstance(targets, dict):
+        raise ValueError('unsupported [target] declaration: not a table')
+    for target in targets.values():
+        if not isinstance(target, dict):
+            raise ValueError('unsupported [target.*] declaration: not a table')
+        groups += [target.get(name) for name in DEPENDENCY_TABLES]
+    workspace = document.get('workspace', {})
+    if isinstance(workspace, dict):
+        groups.append(workspace.get('dependencies'))
+    patch = document.get('patch', {})
+    if not isinstance(patch, dict):
+        raise ValueError('unsupported [patch] declaration: not a table')
+    groups += list(patch.values())
+    groups.append(document.get('replace'))
+    paths = []
+    for group in groups:
+        if group is None:
+            continue
+        if not isinstance(group, dict):
+            raise ValueError('unsupported dependency table: not a table')
+        for name, spec in group.items():
+            if isinstance(spec, dict) and 'path' in spec:
+                if type(spec['path']) is not str or not spec['path']:
+                    raise ValueError(f'unsupported path for dependency {name}: expected a non-empty string')
+                paths.append(spec['path'])
+    return paths
+
+
+class MissingCrate(ValueError):
+    """A workspace member or local path dependency without a Cargo.toml."""
+    def __init__(self, what, directory):
+        super().__init__(f'{what} {directory} has no Cargo.toml at this revision')
+        self.what, self.directory = what, directory
+
+
+def local_crates(manifest, read_manifest):
+    """Return every local crate directory the root manifest's build needs.
+
+    Directories are POSIX paths relative to the root crate: the workspace
+    members plus the transitive closure of local `path` dependencies (Cargo
+    needs those even when they are not listed as members). `read_manifest(dir)`
+    returns that directory's Cargo.toml text, or None when it is absent, which
+    raises MissingCrate (a ValueError). A path dependency that leaves the root crate directory
+    is refused: the archive layout and fetched-layout check cover only it."""
+    def normalize(base, raw):
+        if raw.startswith('/') or '\\' in raw:
+            raise ValueError(f'unsupported local dependency path: {raw}')
+        parts = [p for p in PurePosixPath(base).parts if p != '.']
+        for part in PurePosixPath(raw).parts:
+            if part == '..':
+                if not parts:
+                    raise ValueError(f'local dependency {raw} is outside the {CRATE} source layout')
+                parts.pop()
+            elif part != '.':
+                parts.append(part)
+        return '/'.join(parts)
+
+    found = []
+    pending = [(member, 'workspace member') for member in workspace_members(manifest)]
+    pending += [(normalize('', raw), 'path dependency') for raw in path_dependencies(parse_toml(manifest))]
+    seen = {''}
+    while pending:
+        directory, what = pending.pop(0)
+        if directory in seen:
+            continue
+        seen.add(directory)
+        text = read_manifest(directory)
+        if text is None:
+            raise MissingCrate(what, directory)
+        found.append(directory)
+        pending += [(normalize(directory, raw), 'path dependency') for raw in path_dependencies(parse_toml(text))]
+    return found
+
+
 def include_targets(source_path, data):
     base = PurePosixPath(source_path).parent
     targets = []
@@ -351,11 +439,13 @@ def closure(files, read):
         if name not in files:
             raise ValueError(f'source revision lacks required {name}')
     manifest = read(f'{CRATE}/Cargo.toml').decode()
-    for member in workspace_members(manifest):
-        member_manifest = f'{CRATE}/{member}/Cargo.toml'
-        if member_manifest not in files:
-            raise ValueError(f'workspace member {member} has no Cargo.toml at this revision')
-        add_root(f'{CRATE}/{member}/')
+
+    def read_manifest(directory):
+        path = f'{CRATE}/{directory}/Cargo.toml'
+        return read(path).decode() if path in files else None
+
+    for directory in local_crates(manifest, read_manifest):
+        add_root(f'{CRATE}/{directory}/')
     pending = sorted(p for p in selected if p.endswith('.rs'))
     while pending:
         path = pending.pop()
