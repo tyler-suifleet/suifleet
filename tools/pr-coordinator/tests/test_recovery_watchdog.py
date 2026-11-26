@@ -115,6 +115,35 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(report['projects'][0]['recovery_due_at'],1060)
         self.assertIn('would launch',self.monitor(1060).tick(self.model)['status'])
 
+    def test_source_acceptance_grace_survives_other_completions_and_detail_loss(self):
+        self.model.update(
+            queue={'suifleet': dict(done=20)},
+            workers=[dict(project='suifleet', id='other-worker', role='implementation', ticket='SF-201')],
+            _watchdog_tickets={'suifleet': [dict(key='SF-307', status='review'), dict(key='SF-308', status='review')]},
+        )
+        first = dict(project='suifleet', ticket='SF-307', pr=860, review_job=4956, receipt='a'*64)
+        second = dict(project='suifleet', ticket='SF-308', pr=861, review_job=4957, receipt='b'*64)
+        self.model['pipeline'] = dict(acceptance_gaps=[first])
+        self.assertEqual(self.monitor().tick(self.model)['next_check_at'], 1060)
+        self.model['queue']['suifleet']['done'] += 1
+        self.model.pop('pipeline')
+        self.model['_watchdog_tickets'] = {}
+        self.assertIn('workers active', self.monitor(1050).tick(self.model)['status'])
+        self.model['_watchdog_tickets']['suifleet'] = [
+            dict(key='SF-307', status='review'), dict(key='SF-308', status='review')]
+        self.model['pipeline'] = dict(acceptance_gaps=[None, dict(first, receipt='invalid'), first, second])
+        self.model['queue']['suifleet']['done'] += 1
+        report = self.monitor(1060).tick(self.model)
+        self.assertIn('would launch', report['status'])
+        candidate, = report['candidates']
+        self.assertEqual(candidate['no_completion_seconds'], 0)
+        self.assertEqual(candidate['view']['acceptance_gaps'],
+                         [dict(ticket='SF-307', pr=860, review_job=4956, receipt='a'*64)])
+        self.model['pipeline']['acceptance_gaps'] = [dict(first, receipt='c'*64)]
+        self.assertEqual(self.monitor(1061).tick(self.model)['next_check_at'], 1121)
+        self.model['_watchdog_tickets']['suifleet'][0]['status'] = 'done'
+        self.assertIn('workers active', self.monitor(1121).tick(self.model)['status'])
+
     def test_normal_active_work_does_not_launch_an_idle_recovery_agent(self):
         self.model['workers'] = [dict(project='suifleet', id='job1', role='implementation', ticket='SF-1')]
         self.monitor().tick(self.model)
