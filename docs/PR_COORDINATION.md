@@ -1472,6 +1472,15 @@ merge reconciliation then finishes idempotently. Do not delete these rows or
 replay a push to clear uncertainty. A candidate cannot take a member from an
 active batch or integrate while its worker identity is live or unknown.
 
+A recovery claim using session `recovery-run-<watchdog nonce>` with no
+dispatcher implementation directory can use ordinary independent review if
+retained watchdog receipts bind the run to the claim's
+acquisition and prove a clean exit. The coordinator checks for surviving
+watchdog and claim helpers, active jobs, a dirty worktree, resource leases and
+prior local integration evidence before routing it. Missing or conflicting
+evidence keeps the source held. The regular review, CI and merge gates apply,
+and the watchdog receipts confer no local-test publication authority.
+
 Activation independently checks the local receipt against actual merge parents,
 Git scope/tree, user identity, fixed successful commands and retained log hashes,
 then verifies GitHub's real same-repository merged source. Normal independent
