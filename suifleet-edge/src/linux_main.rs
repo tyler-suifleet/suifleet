@@ -1454,12 +1454,9 @@ async fn execute(
     }
     let resolved = match catalog::resolve(sui, event, &record.fields).await {
         Ok(resolved) => resolved,
+        // The next poll retries admitted work before any updater runs.
+        Err(error) if error.is::<sui_client::RetryableRpcError>() => return Err(error),
         Err(error) => {
-            // A transport failure while reading authenticated metadata leaves
-            // the outcome and discovery position pending for the next poll.
-            if error.downcast_ref::<tonic::Status>().is_some_and(sui_client::retryable) {
-                return Err(error);
-            }
             let mut outcome = Outcome::default();
             record_result(&mut outcome, Err(anyhow::anyhow!("{error:#}")));
             warn!(deployment = event.deployment_id, error = ?outcome.error, "Deployment schema rejected");

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { loader, appRequire } = require('./frontend_test_utils.cjs');
+const ts = appRequire('typescript');
 
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -63,7 +64,16 @@ const uses = {
 };
 for (const [file, variant] of Object.entries(uses)) {
   const source = read(`dapp/src/${file}`);
-  assert.match(source, /import \{ DeviceClientHelp \} from "@\/components\/DeviceClientHelp";/, file);
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest);
+  const importsHelp = parsed.statements.some((statement) => {
+    if (!ts.isImportDeclaration(statement) || statement.moduleSpecifier.text !== '@/components/DeviceClientHelp') return false;
+    const clause = statement.importClause;
+    const bindings = clause?.namedBindings;
+    return !clause?.isTypeOnly && bindings && ts.isNamedImports(bindings) && bindings.elements.some(
+      (binding) => !binding.isTypeOnly && binding.name.text === 'DeviceClientHelp' && !binding.propertyName,
+    );
+  });
+  assert.ok(importsHelp, `${file} does not import DeviceClientHelp`);
   assert.ok(source.includes(`<DeviceClientHelp variant="${variant}" />`), `${file} does not show the ${variant} help`);
 }
 const { createElement } = appRequire('react');

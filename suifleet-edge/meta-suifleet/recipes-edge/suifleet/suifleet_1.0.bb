@@ -13,12 +13,14 @@ SRC_URI = " \
     file://firmware.toml.example \
     file://suifleet-provision.service \
     file://suifleet-provision \
+    file://suifleet-migrate \
     file://suifleet-first-boot-enrollment.service \
     file://suifleet-enrollment.path \
     file://suifleet-signer.service \
     file://suifleet-signer.socket \
     file://signer.toml.example \
 "
+PR = "r1"
 SRCREV = "b9bb2ef6210624d732ab2de2075ea1826e5300c1"
 # Preserve core's unpack root; Scarthgap predates UNPACKDIR.
 SUIFLEET_UNPACKDIR = "${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}"
@@ -39,7 +41,7 @@ export CARGO_PROFILE_RELEASE_STRIP = "false"
 CFLAGS:append = " -fdebug-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor -fmacro-prefix-map=${CARGO_HOME}/bitbake=/usr/src/debug/${PN}/${PV}/vendor"
 
 DEPENDS += "systemd"
-RDEPENDS:${PN} += "ca-certificates"
+RDEPENDS:${PN} += "ca-certificates util-linux-flock"
 
 CARGO_SRC_DIR = "suifleet-edge"
 
@@ -90,6 +92,7 @@ do_install:append() {
         ${SUIFLEET_UNPACKDIR}/suifleet-signer.service ${SUIFLEET_UNPACKDIR}/suifleet-signer.socket \
         ${D}${systemd_system_unitdir}/
     install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-provision ${D}${libexecdir}/suifleet-provision
+    install -D -m 0755 ${SUIFLEET_UNPACKDIR}/suifleet-migrate ${D}${sbindir}/suifleet-migrate
     # /etc/suifleet is read-only to the daemon; config.toml must be root:suifleet 0640.
     install -d -m 0750 -g suifleet ${D}${sysconfdir}/suifleet
     install -m 0640 -g suifleet ${SUIFLEET_UNPACKDIR}/config.toml.example ${D}${sysconfdir}/suifleet/config.toml.example
@@ -97,6 +100,14 @@ do_install:append() {
     install -m 0600 ${SUIFLEET_UNPACKDIR}/firmware.toml.example ${D}${sysconfdir}/suifleet/firmware.toml.example
     # Readable by the signing service only (it names the key or PKCS#11 PIN file).
     install -m 0640 -g suifleet-signer ${SUIFLEET_UNPACKDIR}/signer.toml.example ${D}${sysconfdir}/suifleet/signer.toml.example
+}
+
+# Run before the systemd class reloads/restarts units on an online upgrade.
+# Never inspect or modify identities during image construction.
+pkg_postinst:${PN}() {
+    if [ -z "$D" ]; then
+        ${sbindir}/suifleet-migrate package-upgrade || exit 1
+    fi
 }
 
 FILES:${PN} += "${sysconfdir}/suifleet ${systemd_system_unitdir}/suifleet*.service ${systemd_system_unitdir}/suifleet*.path ${systemd_system_unitdir}/suifleet*.socket"

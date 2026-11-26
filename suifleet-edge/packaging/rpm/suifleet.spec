@@ -6,7 +6,7 @@ License: MIT
 URL: https://github.com/tyler-suifleet/suifleet
 Source0: payload.tar
 ExclusiveArch: x86_64
-Requires: systemd, ca-certificates, coreutils, grep
+Requires: systemd, ca-certificates, coreutils, grep, /usr/bin/flock
 Requires(pre): shadow-utils, systemd, coreutils, glibc-common
 Requires(preun): systemd
 Requires(post): systemd
@@ -62,13 +62,19 @@ for path in /etc/suifleet /var/lib/suifleet; do
     fi
 done
 if [ "$1" -gt 1 ] && [ -d /run/systemd/system ]; then
-    systemctl stop suifleet-first-boot-enrollment.service suifleet-enrollment.path suifleet-signer.socket
-    systemctl stop suifleet.service suifleet-signer.service suifleet-provision.service
+    for unit in suifleet-first-boot-enrollment.service suifleet-enrollment.path \
+                suifleet-signer.socket suifleet.service suifleet-signer.service suifleet-provision.service; do
+        if [ "$(systemctl show -p LoadState --value "$unit")" != not-found ]; then
+            systemctl stop "$unit"
+        fi
+    done
 fi
 install -d -m 0750 -o root -g suifleet /etc/suifleet
 install -d -m 0700 -o suifleet -g suifleet /var/lib/suifleet
 
 %post
+set -eu
+/usr/sbin/suifleet-migrate package-upgrade
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
 fi
@@ -94,4 +100,5 @@ fi
 %config(noreplace) /etc/suifleet/release-trust.toml
 /usr/bin/suifleet
 /usr/libexec/suifleet-provision
+/usr/sbin/suifleet-migrate
 /usr/lib/systemd/system/suifleet*

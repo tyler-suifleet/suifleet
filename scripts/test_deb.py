@@ -185,7 +185,7 @@ def inside(package):
         process.wait(timeout=10)
     print("PASS installed unprivileged signer address/refused export and daemon key-read isolation")
     config = Path("/etc/suifleet/config.toml")
-    config.write_text("# operator configuration: preserve byte for byte\n")
+    config.write_text('# operator configuration: preserve byte for byte\n[device.signer]\nkind = "service"\n')
     config.chmod(0o640)
     journal = Path("/var/lib/suifleet/state.json")
     journal.write_text('{"operator-sentinel":true}\n')
