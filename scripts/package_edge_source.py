@@ -14,6 +14,12 @@ broken release. Ownership, timestamps (the commit time) and modes come from
 ``git archive``; ``gzip -n`` omits the name and time, so rebuilding the same
 revision with the same git/gzip produces byte-identical output.
 
+Before anything is written, the tar stream is checked against the plan: it
+must contain exactly the planned regular files (plus their directories), each
+with the committed blob's bytes and executable bit. A committed
+``export-ignore`` or ``export-subst`` attribute that drops or rewrites a build
+input is therefore an error instead of a silently incomplete archive.
+
 Runtime identities, keys, enrollment configuration and journals must never be
 in the archive; files whose names look like runtime state are refused. Content
 is not pattern-scanned here because the redaction test vectors deliberately
@@ -22,10 +28,12 @@ secret-scanning gates already cover (docs/SECURITY_CI.md).
 """
 import argparse
 import hashlib
+import io
 import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import tarfile
 
 CRATE = 'suifleet-edge'
 ROOTS = (
@@ -174,15 +182,41 @@ def plan(repo, revision, paths=None):
     }
 
 
+def verify_archive(repo, revision, paths, data):
+    """Refuse a tar stream that differs from the planned committed files."""
+    files = tree(repo, revision)
+    expected = set(paths)
+    directories = {p.as_posix() for path in paths for p in PurePosixPath(path).parents if p.as_posix() != '.'}
+    seen = set()
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as tar:
+        for member in tar.getmembers():
+            name = member.name.rstrip('/')
+            if member.isdir() and name in directories:
+                continue
+            if not member.isfile() or name not in expected:
+                raise ValueError(f'git archive emitted an unplanned member: {member.name}')
+            if name in seen:
+                raise ValueError(f'git archive emitted {name} twice')
+            seen.add(name)
+            mode, _, blob = files[name]
+            if tar.extractfile(member).read() != git(repo, 'cat-file', 'blob', blob):
+                raise ValueError(f'git archive bytes for {name} differ from the committed blob (export-subst?)')
+            if bool(member.mode & 0o111) != (mode == '100755'):
+                raise ValueError(f'git archive mode for {name} differs from the committed mode {mode}')
+    missing = sorted(expected - seen)
+    if missing:
+        raise ValueError(f'git archive omitted planned files (export-ignore?): {", ".join(missing)}')
+
+
 def build(repo, revision, output, paths=None):
     """Write the archive with exclusive creation; return its provenance."""
     info = plan(repo, revision, paths)
-    archive = subprocess.Popen(['git', '-C', str(repo), 'archive', '--format=tar', info['source_commit'], '--', *info['paths']],
-                               stdout=subprocess.PIPE)
-    compressed = subprocess.run(['gzip', '-n', GZIP_LEVEL], stdin=archive.stdout, stdout=subprocess.PIPE, check=True).stdout
-    archive.stdout.close()
-    if archive.wait() != 0:
+    archive = subprocess.run(['git', '-C', str(repo), 'archive', '--format=tar', info['source_commit'], '--', *info['paths']],
+                             stdout=subprocess.PIPE)
+    if archive.returncode != 0:
         raise RuntimeError('git archive failed')
+    verify_archive(repo, info['source_commit'], info['paths'], archive.stdout)
+    compressed = subprocess.run(['gzip', '-n', GZIP_LEVEL], input=archive.stdout, stdout=subprocess.PIPE, check=True).stdout
     with Path(output).open('xb') as target:
         target.write(compressed)
     info.update(sha256=hashlib.sha256(compressed).hexdigest(), files=len(info['paths']),

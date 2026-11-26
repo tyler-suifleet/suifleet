@@ -39,6 +39,13 @@ repository, a symlink or submodule, or a runtime identity/state file name
 build. Contents are not pattern-scanned for keys, because the redaction test
 vectors deliberately contain fake ones. Build only from reviewed main, which
 the [security CI](SECURITY_CI.md) secret scanning already covers.
+
+Before writing, the builder reads back the tar stream `git archive` produced.
+It must contain exactly the planned files and their directories, each with the
+committed blob's bytes and executable bit. A committed `export-ignore` or
+`export-subst` attribute that drops or rewrites a build input therefore stops
+the build, instead of yielding an incomplete archive that reports success.
+
 `--paths-from FILE` rebuilds an archive from an existing file list, with the
 same audit. Use it to reproduce a previously published archive, or to keep the
 broader published file set. The SF-295 archives also carry packaging inputs,

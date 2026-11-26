@@ -109,6 +109,26 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.repo = SourceRepo(Path(self.tmp.name) / 'repo')
         self.out = Path(self.tmp.name)
 
+    def test_git_archive_attributes_cannot_drop_or_rewrite_inputs(self):
+        cases = {
+            'omitted planned files (export-ignore?): interfaces/schema.json': 'interfaces/schema.json export-ignore\n',
+            'bytes for suifleet-edge/src/main.rs differ': 'suifleet-edge/src/main.rs export-subst\n',
+        }
+        for label, attributes in cases.items():
+            with self.subTest(label):
+                self.repo.write('.gitattributes', attributes)
+                if 'export-subst' in attributes:
+                    self.repo.write('suifleet-edge/src/main.rs', MAIN_RS + '// $Format:%H$\n')
+                self.repo.commit()
+                output = self.out / 'attributes.tar.gz'
+                with self.assertRaisesRegex(ValueError, label.replace('(', r'\(').replace(')', r'\)').replace('?', r'\?')):
+                    packager.build(self.repo.root, 'HEAD', output)
+                self.assertFalse(output.exists())
+        self.repo.git('rm', '-q', '.gitattributes')
+        self.repo.write('suifleet-edge/src/main.rs', MAIN_RS)
+        self.repo.commit()
+        packager.build(self.repo.root, 'HEAD', self.out / 'clean.tar.gz')
+
     def test_closure_contains_build_inputs_only(self):
         info = packager.plan(self.repo.root, 'HEAD')
         self.assertEqual(info['paths'], [
