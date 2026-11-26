@@ -90,6 +90,12 @@ These static checks always run, on every recipe in the layer:
 - The reader accepts both double- and single-quoted values. An
   assignment-shaped line it can't read is reported if it names a
   source-affecting variable, rather than skipped.
+- Every `require`/`include` target must be a file inside the layer, after
+  following symlinks. An absolute or relative path outside the layer, a path
+  with an unexpandable variable, or a target missing from the layer is
+  reported and never read. BitBake would otherwise find such a file through
+  `BBPATH` in another layer, so a clean audit could depend on metadata that a
+  standalone layer doesn't contain.
 - Each matching `.bbappend` (an exact name, or `name_%.bbappend`) is read after
   its recipe as one set of metadata, as BitBake does. So a variable assigned in
   the append affects the recipe's sources. A `.bbappend` that matches no
