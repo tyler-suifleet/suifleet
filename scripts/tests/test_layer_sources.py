@@ -345,15 +345,11 @@ class LayerAuditTests(unittest.TestCase):
 
 
 class RepositoryLayerTests(unittest.TestCase):
-    # The codec's pre-parse local artifacts are being replaced by SF-295's
-    # published archive; every other finding in the real layer is a regression.
-    KNOWN_UNTIL_SF295 = ('suifleet-walrus-codec_1.0.bb: FILESEXTRAPATHS points outside the layer',
-                         'suifleet-walrus-codec_1.0.bb: file:// source is not in the layer')
-
-    def test_repository_layer_has_no_unexpected_source_findings(self):
+    # SF-295 published every layer source; any finding in the real layer is a regression.
+    def test_repository_layer_has_no_source_findings(self):
         report = audit.check(ROOT / 'suifleet-edge/meta-suifleet')
-        unexpected = [e for e in report['errors'] if not any(k in e for k in self.KNOWN_UNTIL_SF295)]
-        self.assertEqual(unexpected, [])
+        self.assertEqual(report['errors'], [])
+        self.assertTrue(report['ok'])
         daemon = report['recipes']['suifleet']
         self.assertEqual(daemon['pv'], daemon['crate_version'])
 
