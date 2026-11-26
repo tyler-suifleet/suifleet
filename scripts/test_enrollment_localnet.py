@@ -188,7 +188,7 @@ def run(rpc_url, faucet_url, first_boot_only=False, migration_only=False):
                         chain_identifier=chain_id, rpc=rpc_url, package=old_package,
                         upgrade_cap=created(old, "::package::UpgradeCap")[0], registry=old_registry,
                         network="localnet", publisher=aggregator, aggregator=aggregator))
-                    check_migration(root, old_manifest, manifest, policy, operator, claims["c1"],
+                    check_migration(root, old_manifest, policy, operator, claims["c1"],
                                     client, transaction, created)
                     return
 
@@ -382,7 +382,7 @@ def run(rpc_url, faucet_url, first_boot_only=False, migration_only=False):
         walrus.server_close()
 
 
-def check_migration(root, old, manifest, policy, operator, claim, client, transaction, created):
+def check_migration(root, old, policy, operator, claim, client, transaction, created):
     from test_device_migration import CONFIG, KEY, MIGRATE, PENDING, STATE
     from test_device_migration import check_parked, create_legacy_key, legacy_files
 
@@ -431,7 +431,8 @@ def check_migration(root, old, manifest, policy, operator, claim, client, transa
         f'manifest_path = "deployment.json"\nclaim_key_path = "claim.key"\n'
         f'policy_id = "{policy}"\nname = "legacy-device"\nkeypair_path = "{KEY}"\n'
     )
-    trusted = json.dumps(manifest).encode()
+    trusted_manifest = root / "deployment.json"
+    trusted = trusted_manifest.read_bytes()
     (CONFIG / "first-boot.toml").write_text(
         f'policy_id = "{policy}"\noperator = "{operator}"\n'
         f'history_start_checkpoint = 0\nlocations = ["{media}"]\n'
@@ -452,7 +453,7 @@ def check_migration(root, old, manifest, policy, operator, claim, client, transa
     assert json.loads((folder / "enrollment-status.json").read_text())["enrollment"] == "invalid-enrollment-media-or-config"
     assert (folder / "claim.key").read_bytes() == claim[0].read_bytes()
 
-    deployment.write_bytes(trusted)
+    shutil.copyfile(trusted_manifest, deployment)
     migrate("enroll", check=True, timeout=220)
     assert not PENDING.exists() and not (folder / "claim.key").exists()
     enrolled = configparser.ConfigParser()
