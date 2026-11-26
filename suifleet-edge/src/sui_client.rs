@@ -327,7 +327,7 @@ pub fn chain_identifier(genesis_digest: &str) -> anyhow::Result<String> {
     Ok(hex::encode(&digest.inner()[..4]))
 }
 
-fn retryable(error: &tonic::Status) -> bool {
+pub(crate) fn retryable(error: &tonic::Status) -> bool {
     matches!(
         error.code(),
         tonic::Code::Unavailable | tonic::Code::ResourceExhausted | tonic::Code::DeadlineExceeded
@@ -956,7 +956,10 @@ impl SuiClient {
                 return Ok(None);
             }
             Err(e) => {
-                return Err(status(e).context(format!("object {id}")));
+                // Keep the transport code for callers deciding whether the
+                // object read can be retried. Omit response metadata/details.
+                return Err(anyhow::Error::new(tonic::Status::new(e.code(), e.message()))
+                    .context(format!("object {id}")));
             }
         }
         .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
