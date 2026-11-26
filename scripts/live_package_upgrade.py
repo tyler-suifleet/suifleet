@@ -715,6 +715,16 @@ def package_client(network_sui, wallet, *command, json_output=True, check=True, 
     return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
 
 
+def lifecycle_transaction(label, *ptb, client, operator, sign, mutate, gas, funding, evidence):
+    calls = [target for flag, target in zip(ptb, ptb[1:]) if flag == "--move-call"]
+
+    def record(tx):
+        evidence["transactions"][-1]["expected_digest"] = tx["digest"]
+
+    return mutate(label, toolchain.ptb_submitter(client, ptb, sender=operator,
+        calls=calls, sign=sign, persist=record), gas=gas, funding=funding, require_full=True)
+
+
 def delete_deployments(label, package, cleanup, *, client, operator, sign, mutate, gas, evidence):
     deployments = cleanup[:]
     target = f"{package}::deployment_manager::delete_deployment"
@@ -830,7 +840,8 @@ def run(args):
         # Fresh publication can consume most of the run ceiling. Never submit
         # an ordinary PTB with its configured gas budget silently reduced.
         # Compact lifecycle calls explicitly select their documented budgets.
-        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding, require_full=True)
+        return lifecycle_transaction(label, *ptb, client=client, operator=operator, sign=sign,
+            mutate=mutate, gas=ptb_budget if budget is None else budget, funding=funding, evidence=evidence)
 
     def created(result, suffix):
         return [c["objectId"] for c in result["objectChanges"] if c["type"] == "created" and c["objectType"].endswith(suffix)]
