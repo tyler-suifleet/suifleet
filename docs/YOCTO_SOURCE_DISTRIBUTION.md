@@ -55,8 +55,8 @@ The file set is the daemon build closure, computed from that commit's tree:
   `suifleet-edge/`, a non-string target `path` and a `package.build` that is
   neither a string nor a boolean stop the build. Today the only declaration is
   `[[bin]] path = "src/main.rs"`, already under `src/`;
-- each file named by a literal `include_str!`/`include_bytes!` or a `#[path]`
-  module attribute, followed transitively.
+- each file named by a literal `include!`/`include_str!`/`include_bytes!` or a
+  `#[path]` module attribute, followed transitively.
 
 `src/`, `examples/` and each local crate directory are packaged whole, so Rust
 module files there are always present. Outside them only the declared files,
@@ -65,6 +65,9 @@ packaged. An implicit out-of-line module (`mod name;` without a literal
 `#[path]`) in one of those files would make Cargo also read a sibling
 `name.rs` or `name/mod.rs` that the closure does not include. The build stops
 instead: give the module a `#[path]` or move the target under `src/`.
+The same check applies to a file outside those directories that a file inside
+them reaches through a literal include or `#[path]`, such as
+`#[path = "../tools/entry.rs"]` in `src/main.rs`.
 `cfg_attr` paths count as implicit. Inline `mod name { ... }` blocks are fine.
 
 A missing workspace member, local path dependency, declared target file or include target, a path outside the
