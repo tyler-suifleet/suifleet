@@ -99,6 +99,27 @@
     "https://docs.suifleet.io/",
     "https://docs.suifleet.io/assets/style.css"
    ]
+  },
+  {
+   "date": "2026-11-25",
+   "scope": "app",
+   "change": "Console: simpler enrollment with capacity check, redesigned plans and billing with one-step activation, customer wording without test-network labels",
+   "source_revision": "ede676bd541863272a3530e44d4cc7ea171f24c9",
+   "release_sha256": {
+    "app": "7ffdfef8daf4736720b59e2f82f5c8a0a2944ea4670950117ad6ebf2ea14e3dc"
+   },
+   "deployments": {
+    "app": "https://cbf92a69.suifleet-console.pages.dev"
+   },
+   "website_unchanged": true,
+   "docs_unchanged": true,
+   "served_verification": [
+    "https://app.suifleet.io/",
+    "https://app.suifleet.io/billing/",
+    "https://app.suifleet.io/enrollment/",
+    "https://app.suifleet.io/deployment-manifest.json",
+    "https://app.suifleet.io/console-release.json"
+   ]
   }
  ]
 }
