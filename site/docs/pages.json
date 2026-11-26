@@ -80,6 +80,12 @@
       "group": "Device integrators"
     },
     {
+      "source": "docs/CUSTOMER_NODE_SDK.md",
+      "slug": "node-sdk",
+      "title": "Node.js component SDK",
+      "group": "Device integrators"
+    },
+    {
       "source": "docs/CUSTOMER_KEY_ISOLATION.md",
       "slug": "key-isolation",
       "title": "Device signing service",
