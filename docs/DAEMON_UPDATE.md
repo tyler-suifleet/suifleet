@@ -92,6 +92,8 @@ Run this guest check locally because the hosted workflows do not currently run
 it. Set `SUIFLEET_TEST_UPDATE_CANDIDATE` to a separately built compatible
 executable inside the guest to exercise two build profiles.
 
+Use the [package migration procedure](INSTALL_DEVICE_CLIENT.md#migrate-an-enrolled-linux-device-in-place) to move a legacy device to the isolated signer and enroll against a new deployment while retaining its identity and journal.
+
 ## Publishing an update
 
 Deploy the configured component (for example `suifleet-daemon 0.3.0`) to devices, like any component. The artifact is the daemon executable for the target platform. Its recipe must have no lifecycle commands or dependencies. The recipe and artifact digests are verified on chain and in Walrus as for every deployment.
