@@ -3,16 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { TransactionPhase } from "@/hooks/useFleetTransaction";
 import type { UploadProgress as Progress } from "@/lib/walrus";
-import { NETWORK } from "@/lib/constants";
 import { UploadProgress } from "./UploadProgress";
 
 export type DeploymentPhase = "preparing" | "uploading" | TransactionPhase;
 const stages: { phase: DeploymentPhase; label: string }[] = [
   { phase: "preparing", label: "Preparing deployment" },
   { phase: "uploading", label: "Uploading recipe to Walrus" },
-  { phase: "validating", label: `Checking ${NETWORK} and wallet account` },
+  { phase: "validating", label: "Checking the network and wallet account" },
   { phase: "wallet", label: "Wallet approval and submission" },
-  { phase: "confirming", label: `Confirming transaction on ${NETWORK}` },
+  { phase: "confirming", label: "Confirming the transaction" },
 ];
 
 export function DeploymentProgress({ phase, progress, startedAt, catalog = false }: {
@@ -48,7 +47,7 @@ export function DeploymentProgress({ phase, progress, startedAt, catalog = false
     </ol>
     {phase === "uploading" && <UploadProgress progress={progress} label="Uploading recipe to Walrus…" />}
     {phase === "wallet" && <p className="text-sm">Your wallet is preparing or submitting this transaction. Approve or reject when its request appears.</p>}
-    {phase === "confirming" && <p className="text-sm">The wallet returned a transaction. Checking its execution result independently on {NETWORK}.</p>}
+    {phase === "confirming" && <p className="text-sm">The wallet returned a transaction. Checking its execution result independently.</p>}
     {phase === "uploading" && progress?.phase === "processing" && <p className="mt-2 text-sm">Your upload has been sent. Walrus is still processing storage; the wallet request comes next.</p>}
   </dialog>;
 }

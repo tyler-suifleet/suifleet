@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import coordinator as c
@@ -165,3 +165,20 @@ c.main()
                     parent.terminate()
                     parent.wait(timeout=15)
                 log.close()
+
+    def test_expensive_poll_cadence_keeps_completion_independent_and_accounts_for_work(self):
+        from types import SimpleNamespace
+        import ctypes
+        for lane, expected_wait in [('integration',50),('completion',5),('ci',110),('source',290)]:
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as directory:
+                engine=Mock()
+                args=SimpleNamespace(state=Path(directory),project_id='p',parent_pid=123,
+                                     lane=lane,interval=300)
+                with patch.object(ctypes,'CDLL',return_value=SimpleNamespace(prctl=lambda *args:0)), \
+                     patch.object(c.os,'getppid',side_effect=[123,123,0]), \
+                     patch.object(c,'Coordinator',return_value=engine), \
+                     patch.object(c.time,'monotonic',side_effect=[0,10]), \
+                     patch.object(c.time,'sleep') as sleep:
+                    c.run_lane({'projects':[{'id':'p'}]},args)
+                engine.tick.assert_called_once_with(True)
+                sleep.assert_called_once_with(expected_wait)

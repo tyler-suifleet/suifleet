@@ -22,7 +22,7 @@ The service is not a signing oracle. It decodes every request itself, independen
   Signed only for the daemon's main process. With `caller_unit = "suifleet.service"`, the caller must be exactly the process systemd started as that unit's main process:
   - When the daemon is ready, the unit's root `ExecStartPost=+/usr/bin/suifleet --record-main-process` writes systemd's `$MAINPID` and that process's start time to `/run/suifleet-signer/daemon.main` (root-owned directory, 0644). It runs the read-only base binary, never a daemon update.
   - It records only a main process running that same base binary (`/proc/PID/exe` has the recorder's device and inode). Any other main process gets no record, and an earlier record is removed, so the service trusts nobody. The unit keeps running.
-  - Daemon self-update (`[daemon_update]`, SF-026) cannot be combined with `kind = "service"`; the daemon refuses that configuration. The launcher execs whatever its install directory names, and that directory belongs to the daemon user, which components share. So a component could otherwise make its own executable the unit's main process.
+  - The native systemd signer refuses the legacy daemon self-update configuration. Its install directory belongs to the daemon user, which components share. The managed portable profile uses a root-controlled executable directory and a fresh task binding for every trial.
   - A request qualifies only if the peer's PID and start time match the record and the peer is in the unit's cgroup. The service pins the peer with `SO_PEERPIDFD` (Linux 6.5+) and confirms it is still that live process after reading `/proc`, so a reused PID never qualifies.
   - Parent PID is not identity. A component that kills the daemon is reparented to PID 1 inside the unit's cgroup until systemd removes it; it is still not the recorded process. Components cannot change the main PID either (`NotifyAccess=main`).
   - Until the record is written, just after the daemon is ready, a report is refused and stays queued for the next poll.
@@ -75,9 +75,10 @@ features you configure.
    operation. Requests open new connections throughout that daemon's
    lifetime. If either child exits, the launcher shuts down the other and
    exits so the init system can restart the pair. Restart the pair for
-   configuration and binary changes. Keep daemon self-update disabled with
-   the service signer. Platform scripts still own reboot and firmware
-   recovery. See the [OpenRC, SysV, runit and foreground profiles](PORTABLE_LINUX_SERVICE.md).
+   configuration and binary changes. The optional [managed update profile](DAEMON_UPDATE.md#managed-updates-with-the-portable-signer)
+   uses a platform-approved binary and restarts the pair with a fresh task
+   binding. Platform scripts still own reboot and firmware recovery. See the
+   [OpenRC, SysV, runit and foreground profiles](PORTABLE_LINUX_SERVICE.md).
 
 The root launcher executes the trusted binary as root and holds it at a
 startup gate. It opens the child's procfs task directory before creating a
@@ -152,7 +153,7 @@ Protected against component processes:
 Not protected:
 - **Root, and the trusted platform scripts:** root and anything running as root.
 - **A compromised daemon:** it can request status reports, which are bounded to this device's reports, but not arbitrary signatures, and it cannot read the key.
-- **Components influencing the daemon:** components still run as the daemon's user and can interfere with it, for example by killing it or writing its state directory. Killing it gains no signature. Writing the daemon-update launcher state gains none either: the launcher ignores it with the service signer, and the recorder would not record another executable (see above). Component-level user separation, which would let self-update and the service signer coexist, is future work.
+- **Components influencing the daemon:** components still run as the daemon's user and can interfere with it, for example by killing it or writing its state directory. Killing it gains no signature. The native signer recorder only accepts the platform executable. The managed portable launcher keeps executable selection, trial state and signer rebinding under platform control.
 
 Seal sessions (SF-022) have their own intent and validation in this service, and are not handed to the daemon. Any further reusable credential needs the same treatment.
 

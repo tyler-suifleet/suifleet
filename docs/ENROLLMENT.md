@@ -17,7 +17,7 @@ sui client ptb --move-call PKG::enrollment::create_policy @REGISTRY 500 0 --gas-
 # 2. Claim keys, generated offline, one per device's provisioning media.
 scripts/claims.py generate 100 /secure/claims-2026-10
 # 3. One transaction adds every claim and funds each with its enrollment gas.
-eval "$(scripts/claims.py ptb /secure/claims-2026-10 --package PKG --policy POLICY --fund-mist 20000000)"
+eval "$(scripts/claims.py ptb /secure/claims-2026-10 --package PKG --policy POLICY --fund-mist 40000000)"
 ```
 
 **On the device**, at first boot, after `suifleet --provision`:
@@ -142,12 +142,12 @@ enrollment directories without a matching assignment.
 The dApp's **Enrollment** page puts the claim flow above behind names and serial numbers. Operators never copy a blockchain address and approve one transaction per batch chunk, not per device.
 
 **Workflow:**
-1. **Batch policy.** Create a policy with a quota and an expiry, or pick an existing one. The page shows whether it accepts enrollments (open, unexpired, quota left). *Set limits* and *Close policy* are on the same panel.
-2. **Reserve names and serials**, three ways:
+1. **Enrollment batch** (an on-chain enrollment policy). The page selects a batch that accepts enrollments (open, unexpired, quota left); *Create another batch* sets a quota and an expiry. *Set limits* and *Close batch* are under *Change limits or close this batch*.
+2. **Add devices**, three ways:
    - *Import CSV*: a `serial` column (required), `alias` (or `name`) and `group` (group name or object ID). A naming template fills blank aliases: `{n:4}` is the row number zero-padded to 4 digits, `{serial}` the serial.
-   - *Pair one device*: alias, serial and group for a single device.
+   - *Pair one device* (the default): a serial, an optional name (alias; blank uses the serial) and a group for a single device.
    - *Import roster file*: the public `roster.json` from `scripts/claims.py generate --roster` (below), or an exported job.
-3. **Check** rejects, per line, malformed serials or aliases, duplicates inside the roster, and conflicts with the operator's devices or other reservations. Both serials and aliases are compared case-insensitively.
+3. **Checking** happens as you type. It rejects, per line, malformed serials or aliases, duplicates inside the roster, and conflicts with the operator's devices or other reservations. Both serials and aliases are compared case-insensitively.
    - Allowed characters: 1–64 letters, digits, `.`, `_`, `-`, starting alphanumeric.
    - Unknown or ambiguous group names are rejected too.
    - Imported roster and job files get the same checks; only accepted rows, with their own alias, claim and group, are added.
@@ -210,7 +210,7 @@ Keep the archive offline, copy each folder only to that device's private provisi
 - An unconfirmed submission says not to try again until you have checked your wallet activity and refreshed.
 
 **Gas.**
-- *Enrollment sponsorship* is the claim's funding. It pays only the enrollment transaction (0.02 SUI default, at most 0.1 SUI from the page).
+- *Enrollment sponsorship* is the claim's funding. It pays only the enrollment transaction (0.04 SUI default, at most 0.1 SUI from the page). On testnet in November 2026 an enrollment needed a 0.028 SUI gas budget, so claims funded below that cannot enroll.
 - *Ongoing device gas* for status reports is a separate *Fund enrolled devices* action with its own amount.
 - An unused claim's remaining funding stays on the claim address. Fund claims close to the real enrollment cost.
 
@@ -223,7 +223,7 @@ scripts/claims.py generate --roster devices.csv /secure/batch-07 --template 'pi-
 # /secure/batch-07/roster.json: public; import it on the Enrollment page
 ```
 
-It refuses malformed or duplicate rows before writing anything. `scripts/claims.py ptb` prints one funded `add_claims` PTB per 250 claims, if you prefer the CLI to the page for registration. Each command's gas budget scales with its claims (1.01 SUI for a full chunk). The gas coin must hold that budget plus the claims' funding (5 SUI for 250 claims at the default 0.02 SUI).
+It refuses malformed or duplicate rows before writing anything. `scripts/claims.py ptb` prints one funded `add_claims` PTB per 250 claims, if you prefer the CLI to the page for registration. Each command's gas budget scales with its claims (1.01 SUI for a full chunk). The gas coin must hold that budget plus the claims' funding (10 SUI for 250 claims at the default 0.04 SUI).
 
 **Measured capacity, not claimed capacity.**
 - `make test-bulk-enrollment-localnet` registers 260 claims in two transactions on a disposable localnet. 101 devices enroll, and are bound in two transactions.
