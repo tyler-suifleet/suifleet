@@ -130,7 +130,7 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         if (route === '/billing/') {
           // Billing is public so another wallet can inspect a payment request
           // before connecting. No unsigned-out route can submit a payment.
-          await page.locator('main').getByRole('heading', {name:'Capacity plans',exact:true}).waitFor();
+          await page.locator('main').getByRole('heading', {name:/^(Choose a plan|Renew or change plan)$/}).waitFor();
           assert.match(await page.locator('main').textContent(), /Connect a wallet to prepay/);
           assert.equal(await page.getByRole('button', {name:'Approve escrow deposit'}).count(), 0);
         } else if (route !== '/get-started/') {

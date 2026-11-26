@@ -127,14 +127,16 @@ def container_build(args):
         ("suifleet/config.example.toml", (edge / "config.example.toml").read_bytes(), 0o644),
     ]
     service_files = edge / "meta-suifleet/recipes-edge/suifleet/files"
-    for name in (
-        "config.toml.example", "signer.toml.example", "suifleet.service",
-        "suifleet-provision.service", "suifleet-enrollment.path", "suifleet-first-boot-enrollment.service",
-        "suifleet-signer.service", "suifleet-signer.socket",
-    ):
+    enrollment_files = edge / "meta-suifleet-enrollment/recipes-edge/suifleet/files"
+    for name in ("config.toml.example", "signer.toml.example"):
         entries.append((f"suifleet/systemd/{name}", (service_files / name).read_bytes(), 0o644))
+    for name in (
+        "suifleet.service", "suifleet-provision.service", "suifleet-enrollment.path",
+        "suifleet-signer.service", "suifleet-signer.socket", "suifleet-first-boot-enrollment.service",
+    ):
+        entries.append((f"suifleet/systemd/{name}", (enrollment_files / name).read_bytes(), 0o644))
     entries.append(("suifleet/libexec/suifleet-provision",
-                    (service_files / "suifleet-provision").read_bytes(), 0o755))
+                    (enrollment_files / "suifleet-provision").read_bytes(), 0o755))
     write_tarball(tarball, epoch, entries)
 
     # The exact build graph: normal dependencies for TARGET with the features

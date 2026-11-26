@@ -777,6 +777,8 @@ class BatchController:
             receipt = self.c.source_receipt(project, pr, owner)
             if not receipt:
                 return None
+            if recovery_source_held(self.c, project, pr, owner):
+                return None
             self.c.assert_review_owner(project, owner)
         except Exception:
             return None
@@ -1336,6 +1338,62 @@ class BatchController:
         error['candidate_retired'] = True
         self.update(batch, error=canonical(error))
 
+    @staticmethod
+    def affected_sources(ids, members):
+        if (not isinstance(ids, list) or not ids
+                or any(type(number) is not int or number <= 0 for number in ids)
+                or len(set(ids)) != len(ids)
+                or not set(ids) <= {member['pr'] for member in members}):
+            return None
+        return sorted(ids)
+
+    def review_attribution(self, project, batch, candidate, review):
+        from coordinator import feedback, review_result_body, publication_hash
+        if 'affected_source_prs' not in review['result']:
+            return None
+        try:
+            snapshot = json.loads((Path(review['directory']) / 'snapshot.json').read_text())
+            self.verify_manifest(project, batch)
+            if (review.get('project') != project['id'] or review.get('pr') != batch['pr']
+                    or review.get('kind') != 'review'
+                    or snapshot['number'] != batch['pr']
+                    or snapshot['headRefOid'] != batch['head']
+                    or snapshot['baseRefOid'] != batch['base']
+                    or snapshot['_integration_batch'] != self.marker(batch)
+                    or feedback(snapshot) != review['feedback']):
+                return None
+            published = next((item for item in candidate['reviews']
+                              if item['id'] == review.get('review_id')), None)
+            expected_body = review_result_body(review, review['result'])
+            account = project.get('review_github_account')
+            if (not published or published.get('state') != 'CHANGES_REQUESTED'
+                    or not account
+                    or (published.get('author', {}).get('login') or '').casefold() != account.casefold()
+                    or published.get('commit', {}).get('oid') != batch['head']
+                    or published.get('body') != expected_body
+                    or candidate.get('_receipts', {}).get(published['id']) != publication_hash(published)):
+                return None
+        except (OSError, KeyError, ValueError, TypeError, AttributeError, RuntimeError,
+                subprocess.CalledProcessError):
+            return None
+        return self.affected_sources(review['result']['affected_source_prs'], snapshot['_integration_batch']['members'])
+
+    def attribution_requests(self, project, candidate):
+        """Ask independent reviewers of smaller candidates to reproduce legacy findings."""
+        sources = {(m['pr'], m['head']) for m in candidate['_integration_batch']['members']}
+        requests = []
+        for batch in reversed(self.rows(project)):
+            error = self.review_failure(batch)
+            if batch['status'] != 'failed' or not error or error.get('affected_source_prs'):
+                continue
+            prior = {(m['pr'], m['head']) for m in json.loads(batch['members'])}
+            if len(prior) > 1 and sources & prior and not prior <= sources:
+                requests.append(dict(candidate_pr=batch['pr'], review_id=error['review_id'],
+                                     source_prs=sorted(number for number, _ in sources & prior)))
+            if len(requests) == 4:
+                break
+        return requests
+
     def reject_review(self, project, batch, candidate, review):
         from coordinator import feedback
         if (not review or review.get('head') != batch['head']
@@ -1353,6 +1411,12 @@ class BatchController:
                      review_head=review['head'], review_feedback=review['feedback'],
                      result_hash=hashlib.sha256(canonical(review['result']).encode()).hexdigest(),
                      findings=review['result']['evidence'], candidate_retired=False)
+        if len(json.loads(batch['members'])) > 1:
+            affected = self.review_attribution(project, batch, candidate, review)
+            if affected is None:
+                error['attribution_required'] = True
+            else:
+                error.update(affected_source_prs=affected, manifest_digest=batch['manifest_digest'])
         self.update(batch, status='failed', error=canonical(error))
         self.close_review_rejected_candidate(project, batch)
         return True
@@ -1466,50 +1530,56 @@ class BatchController:
         result = {}
         for batch in reversed(self.rows(project)):
             members = json.loads(batch['members'])
-            if batch['status'] == 'failed' and any(m['pr'] == pr['number'] and m['head'] == pr['headRefOid'] for m in members):
-                try:
-                    shared_error = batch_error(batch)
-                except (TypeError, ValueError):
-                    shared_error = {}
-                # This incident fences only the failed candidate's base. A new
-                # main permits recollection with unchanged source heads and fresh
-                # candidate acceptance; the durable receipt remains historical.
-                incident = (self.shared_harness_incident(project, batch, shared_error)
-                            if batch['base'] == pr.get('baseRefOid') else None)
-                if incident:
-                    result['_shared_acceptance_wait'] = incident
+            member = next((m for m in members
+                           if m['pr'] == pr['number'] and m['head'] == pr['headRefOid']), None)
+            if batch['status'] != 'failed' or member is None:
+                continue
+            error = batch_error(batch)
+            # Shared harness attribution only fences its original base.
+            incident = (self.shared_harness_incident(project, batch, error)
+                        if batch['base'] == pr.get('baseRefOid') else None)
+            if incident:
+                result['_shared_acceptance_wait'] = incident
+                break
+            if (len(members) == 1 and error.get('kind') == 'candidate_checks_failed'
+                    and batch['base'] == pr.get('baseRefOid')):
+                checks = error['checks']
+                # These rows were classified from the exact candidate/base
+                # by failed_checks before persistence. Provider failures cannot
+                # be repaired on an unchanged member's source branch. Retain
+                # the failed candidate/selection fence and all acceptance
+                # gates, but do not dispatch another owner repair for it.
+                if checks and all(check.get('name') == 'testnet/package-upgrade'
+                                  and check.get('workflowName') == 'Automatic testnet'
+                                  and check.get('classification') in ('funding', 'infrastructure')
+                                  for check in checks):
                     break
-            if (batch['status'] == 'failed' and len(members) == 1
-                    and members[0]['pr'] == pr['number'] and members[0]['head'] == pr['headRefOid']):
-                try:
-                    error = batch_error(batch)
-                except (TypeError, ValueError):
+                result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
+                                               candidate_base=batch['base'], checks=checks)
+                break
+            if (error.get('kind') != 'candidate_review_changes'
+                    or error.get('review_head') != batch['head']
+                    or type(error.get('review_id')) is not int or error['review_id'] <= 0
+                    or not isinstance(error.get('findings'), str) or not error['findings'].strip()
+                    or not isinstance(error.get('result_hash'), str)
+                    or not re.fullmatch(r'[0-9a-f]{64}', error['result_hash'])):
+                continue
+            context = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
+                           candidate_base=batch['base'], source_head=member['head'],
+                           review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'],
+                           owner=member['owner'])
+            # The sole manifest member already identifies the owner, including
+            # for persisted singleton failures that required attribution.
+            if len(members) > 1:
+                affected = self.affected_sources(error.get('affected_source_prs'), members)
+                digest = manifest_digest(project['id'], batch['id'], batch['base'], batch['head'], members)
+                if (not affected or member['pr'] not in affected
+                        or error.get('manifest_digest') != digest or batch['manifest_digest'] != digest):
                     continue
-                if (error.get('kind') == 'candidate_checks_failed'
-                        and batch['base'] == pr.get('baseRefOid')):
-                    checks = error['checks']
-                    # These rows were classified from the exact candidate/base
-                    # by failed_checks before persistence. Provider failures cannot
-                    # be repaired on an unchanged member's source branch. Retain
-                    # the failed candidate/selection fence and all acceptance
-                    # gates, but do not dispatch another owner repair for it.
-                    if checks and all(check.get('name') == 'testnet/package-upgrade'
-                                      and check.get('workflowName') == 'Automatic testnet'
-                                      and check.get('classification') in ('funding', 'infrastructure')
-                                      for check in checks):
-                        break
-                    result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
-                                                   candidate_base=batch['base'], checks=checks)
-                    break
-                if (error.get('kind') == 'candidate_review_changes'
-                        and error.get('review_head') == batch['head']
-                        and type(error.get('review_id')) is int and error['review_id'] > 0
-                        and isinstance(error.get('findings'), str) and error['findings']
-                        and re.fullmatch(r'[0-9a-f]{64}', error.get('result_hash', ''))):
-                    result['_batch_review_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
-                        candidate_base=batch['base'], source_head=members[0]['head'],
-                        review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'])
-                    break
+                context.update(affected_source_prs=affected,
+                               manifest_digest=error['manifest_digest'])
+            result['_batch_review_failure'] = context
+            break
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
         if row:
@@ -1544,7 +1614,8 @@ class BatchController:
         return result
 
     def select(self, project, candidates, base, maximum):
-        failed = []
+        failed = set()
+        rejected = set()
         for row in self.rows(project):
             if row['status'] != 'failed':
                 continue
@@ -1565,9 +1636,12 @@ class BatchController:
             if (recovery and exact_sources and tuple(recovery) ==
                     (row['manifest_digest'],hashlib.sha256(row['error'].encode()).hexdigest())):
                 continue  # Explicit durable authorization; the failed row is never reset.
-            failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
+            group = frozenset((m['pr'], m['head']) for m in original)
+            failed.add(group)
+            if kind == 'candidate_review_changes':
+                rejected.add(group)
         pool = self.exclude_included_sources(project,
-            [m for m in candidates if ((m['pr'],m['head']),) not in failed], base)
+            [m for m in candidates if frozenset({(m['pr'], m['head'])}) not in failed], base)
         # One acceptance reviewer must be independent of every member author.
         # Split mixed-family pools instead of attributing a fictitious author.
         if pool:
@@ -1576,7 +1650,10 @@ class BatchController:
         selected = pool[:maximum]
         # A failed combination is never submitted again. Split deterministically;
         # singleton failures become explicit owner repair contexts instead.
-        while selected and tuple((m['pr'],m['head']) for m in selected) in failed:
+        while selected:
+            group = frozenset((m['pr'], m['head']) for m in selected)
+            if group not in failed and not any(rejection < group for rejection in rejected):
+                break
             selected = selected[:len(selected)//2]
         return selected
 
@@ -1937,6 +2014,14 @@ def local_scope(git, repository, base, head, owner=None):
         return None
 
 
+def recovery_source_held(coordinator, project, pr, owner):
+    """Revalidate watchdog routing on freshly read integration inputs."""
+    if not owner.get('session', '').startswith('recovery-'):
+        return False
+    local = getattr(coordinator, 'local_infrastructure', None)
+    return local is not None and local.eligible(project, pr, owner)
+
+
 class LocalInfrastructure:
     """User-authorized local validation, distinct from independent approval."""
     def __init__(self, coordinator):
@@ -1961,23 +2046,81 @@ class LocalInfrastructure:
         if not all(SHA.fullmatch(x) for x in (base, head)):
             return False
         self.b.git(project, 'fetch', '--no-tags', 'origin', base, head)
-        return local_scope(lambda *args:self.b.git(project,*args), project['repository'], base, head, owner) is not None
+        scope = local_scope(lambda *args:self.b.git(project,*args), project['repository'], base, head, owner)
+        return scope is not None and not self.recovery_review_allowed(project, pr, owner)
+
+    def recovery_review_allowed(self, project, pr, owner):
+        """A stopped watchdog origin can use ordinary review."""
+        from coordinator import claim_processes, worker_stopped
+        from recovery_watchdog import result_record, survivors
+
+        session = owner.get('session', '')
+        match = re.fullmatch(r'recovery-(run-([0-9a-f]{32}))', session)
+        if not match:
+            return False
+        try:
+            try:
+                (self.c.state/'implementations'/session).lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                return False
+            if self.db.execute(
+                    "SELECT 1 FROM local_integrations WHERE project=? AND pr=? AND "
+                    "(status IN ('testing','publish_pending','published') OR (head=? AND base=?))",
+                    (project['id'], pr['number'], pr['headRefOid'], pr['baseRefOid'])).fetchone():
+                return False
+            current = json.loads(self.c.ticket(project, 'show', owner['key']))
+            if any(current.get(k) != owner.get(k) for k in
+                   ('token', 'session', 'branch', 'agent', 'model', 'worktree', 'spec')):
+                return False
+            directory = self.c.state/'recovery-watchdog'/match[1]
+            process_path, exit_path = directory/'process.json', directory/'exit.json'
+            child_path, result_path = directory/'child.json', directory/'result.json'
+            if directory.is_symlink() or any(p.is_symlink() for p in
+                                            (process_path, exit_path, child_path, result_path)):
+                return False
+            process = json.loads(process_path.read_text())
+            child = json.loads(child_path.read_text())
+            exit_receipt = json.loads(exit_path.read_text())
+            result_record(result_path, time.time())
+            if (type(process['pid']) is not int or process['pid'] <= 0
+                    or type(process['session']) is not int or process['session'] != process['pid']
+                    or not isinstance(process['started'], str) or not process['started'].isdigit()
+                    or int(process['started']) <= 0
+                    or type(child['pid']) is not int or child['pid'] <= 0 or child['pid'] == process['pid']
+                    or type(exit_receipt['returncode']) is not int or exit_receipt['returncode'] != 0):
+                return False
+            claim = self.claim_acquisition(current)
+            if not (process_path.stat().st_mtime <= child_path.stat().st_mtime <= claim
+                    <= result_path.stat().st_mtime <= exit_path.stat().st_mtime <= time.time()):
+                return False
+            self.c.assert_review_owner(project, current)
+            worktree = current.get('worktree')
+            if (not worktree
+                    or self.b.git(project, 'branch', '--show-current', cwd=worktree) != current['branch']
+                    or self.b.git(project, 'rev-parse', 'HEAD', cwd=worktree) != pr['headRefOid']):
+                return False
+            self.worktree_fence(project, pr, current)
+            self.resource_fence(project, current)
+            run = dict(pid=process['pid'], started=process['started'], directory=str(directory), nonce=match[2])
+            return (worker_stopped(process['pid'], process['started']) and not survivors(run)
+                    and not claim_processes(current['token'], process['started']))
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+                subprocess.CalledProcessError):
+            return False
 
     def fenced(self, project, pr, owner):
         self.c.assert_review_owner(project, owner)
-        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND "
-            "status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
-            (project['id'], pr['number'])).fetchone()
-        if active or pr['number'] in self.b.reserved_members(project):
-            raise RuntimeError('local integration has active or uncertain workers/batch')
-        if owner.get('worktree') and self.b.git(project, 'status', '--porcelain', cwd=owner['worktree']):
-            raise RuntimeError('implementation worktree is dirty')
+        if pr['number'] in self.b.reserved_members(project):
+            raise RuntimeError('local integration has an active batch')
+        self.worktree_fence(project, pr, owner)
         # The dispatcher directory is keyed by the immutable owning session.
         from coordinator import claim_processes, worker_stopped
         directory = self.c.state/'implementations'/owner['session']
         path = directory/'process.json'
         if not path.exists():
-            if directory.exists() or owner['session'].startswith(('dispatch-', 'recovery-')):
+            if os.path.lexists(directory) or owner['session'].startswith(('dispatch-', 'recovery-')):
                 raise RuntimeError('implementation process identity is unavailable')
             self.manual_repair_fence(project, pr, owner)
             return
@@ -1985,6 +2128,15 @@ class LocalInfrastructure:
         if (not worker_stopped(process.get('pid'), process.get('started'))
                 or claim_processes(owner['token'], process.get('started'))):
             raise RuntimeError('implementation worker/helpers have not stopped')
+
+    def worktree_fence(self, project, pr, owner):
+        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND "
+            "status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+            (project['id'], pr['number'])).fetchone()
+        if active:
+            raise RuntimeError('local integration has active or uncertain workers')
+        if owner.get('worktree') and self.b.git(project, 'status', '--porcelain', cwd=owner['worktree']):
+            raise RuntimeError('implementation worktree is dirty')
 
     def manual_repair_fence(self, project, pr, owner):
         """Bind manual ownership to a verified stopped coordinator repair.
@@ -2025,15 +2177,9 @@ class LocalInfrastructure:
         # The ticket event binds the lower bound to this exact claim generation.
         # Heartbeats and repair launches are too recent: older helpers could survive.
         try:
-            events = [event for event in owner['events']
-                      if event['kind'] == 'claim' and event['actor'] == owner['session']
-                      and str(event['ticket']).split('::')[-1] == owner['key']
-                      and f"token={owner['token']}" in event['detail'].split('; ')]
-            acquired = float(events[0]['at']) if len(events) == 1 else 0
+            acquired = self.claim_acquisition(owner)
             boot = int(next(line.split()[1] for line in Path('/proc/stat').read_text().splitlines()
                             if line.startswith('btime ')))
-            if not 0 < acquired <= time.time():
-                raise ValueError('invalid claim timestamp')
             # btime has whole-second precision; round down with one second of
             # margin rather than excluding a helper on the acquisition boundary.
             started = str(max(0, int((acquired - boot - 1) * os.sysconf('SC_CLK_TCK'))))
@@ -2041,6 +2187,20 @@ class LocalInfrastructure:
             raise RuntimeError('manual implementation claim acquisition provenance is unavailable') from None
         if not worker_stopped(process['pid'], process['started']) or claim_processes(owner['token'], started):
             raise RuntimeError('manual implementation worker/helpers have not stopped')
+        self.resource_fence(project, owner)
+
+    @staticmethod
+    def claim_acquisition(owner):
+        events = [event for event in owner['events']
+                  if event['kind'] == 'claim' and event['actor'] == owner['session']
+                  and str(event['ticket']).split('::')[-1] == owner['key']
+                  and f"token={owner['token']}" in event['detail'].split('; ')]
+        acquired = float(events[0]['at']) if len(events) == 1 else 0
+        if not 0 < acquired <= time.time():
+            raise ValueError('invalid claim timestamp')
+        return acquired
+
+    def resource_fence(self, project, owner):
         locks = json.loads(self.c.ticket(project, 'locks'))
         now = time.time()
         for lock in locks:
@@ -2051,7 +2211,7 @@ class LocalInfrastructure:
             if not (str(lock.get('ticket') or '').split('::')[-1] == owner['key']
                     or lock.get('session') == owner['session'] or owner['key'] in named):
                 continue
-            raise RuntimeError('manual implementation still holds a resource lease')
+            raise RuntimeError('implementation still holds a resource lease')
 
     def tick(self, project, pr, owner):
         """Return True when this PR belongs to the local lane (including holds)."""
@@ -2470,7 +2630,7 @@ class ObsoleteBatchCI:
             return
         due = []
         for batch in batches:
-            if (batch.get('status') != 'invalidated' or not batch.get('pr')
+            if (batch.get('status') not in ('invalidated', 'failed') or not batch.get('pr')
                     or not re.fullmatch('[0-9a-f]{40}', batch.get('head') or '')
                     or batch.get('branch') != 'integration/batch/' + batch['id']):
                 continue
@@ -2520,7 +2680,7 @@ class ObsoleteBatchCI:
             except Exception as error:
                 pending = True
                 receipts.append({'run': run['id'], 'error_type': type(error).__name__})
-        # Allow delayed workflow delivery for ten minutes after invalidation.
+        # Allow delayed workflow delivery for ten minutes after the terminal update.
         # Settled batches require no more API reads; manual reruns are operator work.
         quiet = self.clock() - batch.get('updated', self.clock()) >= 600
         self.save(project, batch, 'settled' if quiet and not pending else 'retry', {'runs': receipts})

@@ -94,7 +94,8 @@ const hook = loader({
   const oldPublished = offer.published_at_ms;
   offer.published_at_ms = String(now - 31 * 86400000);
   const renewal = await sub.preparePrepay(client, { ...q, observedAt: Number(offer.published_at_ms) }, account.customer_id, addr(22));
-  assert.equal(renewal.getData().commands.at(-1).MoveCall.function, 'renew');
+  // Renewal starts its first period in the same approval: renew, then the permissionless collect.
+  assert.deepEqual(renewal.getData().commands.filter(c => c.MoveCall).slice(-2).map(c => c.MoveCall.function), ['renew', 'collect']);
   offer.published_at_ms = oldPublished;
   result = good(); result.Transaction.events.push({ eventType: `${m.call_package_id}::subscription::PlanChanged`, bcs: protocol.subscription_PlanChangedBcs.serialize({ account_id: account.id, offer_id: offer.id, tier: offer.tier, fee: offer.fee, periods: offer.periods }).toBytes() });
   await sub.verifyPlan(client, 'fixture-digest', account.customer_id, q);

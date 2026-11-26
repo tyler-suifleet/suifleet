@@ -31,8 +31,13 @@ if [ "$1" = configure ]; then
     if [ ! -d /var/lib/suifleet ]; then
         install -d -m 0700 -o suifleet -g suifleet /var/lib/suifleet
     fi
+    if [ -L /etc/suifleet ] || [ ! -d /etc/suifleet ]; then
+        echo 'Refusing unsafe SuiFleet configuration directory' >&2
+        exit 1
+    fi
     chown root:suifleet /etc/suifleet
     chmod 0750 /etc/suifleet
+    /usr/sbin/suifleet-migrate package-upgrade
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
     fi

@@ -98,7 +98,8 @@ function audit() {
 
     if (cold) {
       assert.equal(await page.evaluate(() => window.acceptance.wallets().includes("Sign in with Google")), false);
-      await page.getByText("Public testnet evaluation:", { exact: false }).waitFor();
+      await page.getByText("Network fees are paid in SUI from your wallet.", { exact: false }).waitFor();
+      assert.doesNotMatch(await page.locator("body").innerText(), /testnet/i, "customer-facing pages do not name a test network");
       await layout("cold-signed-out");
       await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
       await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
@@ -107,7 +108,7 @@ function audit() {
       await page.getByText("No fleets yet", { exact: true }).waitFor({ state: "attached" });
       assert.equal(await page.getByText("Restricted fleet content", { exact: true }).count(), 0);
       await page.getByText("How to fund this address", { exact: true }).click();
-      await page.getByRole("link", { name: "official testnet faucet" }).waitFor();
+      await page.getByText("Send SUI to your address from another wallet or an exchange.", { exact: false }).waitFor();
       await page.evaluate(() => window.acceptance.fund());
       await page.getByRole("button", { name: "Refresh account and inventory" }).click();
       await progress.getByText("Funds available", { exact: true }).waitFor();
@@ -197,7 +198,6 @@ function audit() {
     await next.filter({ hasText: "Add SUI to this account" }).waitFor();
     assert.equal(await register.isDisabled(), true);
     await page.getByText("SuiFleet Acceptance Wallet", { exact: true }).waitFor();
-    await page.getByText(`Network: ${manifest.network}`, { exact: true }).waitFor();
     const technical = page.getByText("Technical details", { exact: true });
     await technical.click();
     await page.getByText("0 SUI (0 MIST)", { exact: true }).waitFor();
@@ -225,9 +225,9 @@ function audit() {
     await progress.getByText("Funds available", { exact: true }).waitFor();
     await page.getByText("1 SUI (1,000,000,000 MIST)", { exact: true }).waitFor();
     await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Register device" && !b.disabled));
-    // The signing account and network stay visible next to the action.
+    // The signing account stays visible next to the action; the page refuses a wallet account on another network.
     const signer = await page.getByText("You will sign as", { exact: false }).innerText();
-    assert.ok(signer.includes(address) && signer.includes(manifest.network), signer);
+    assert.ok(signer.includes(address) && !/testnet/i.test(signer), signer);
     await page.getByRole("textbox", { name: "Device name", exact: true }).fill("First Pi");
     await page.getByRole("textbox", { name: /^Device public address/ }).fill("0x" + "2".repeat(64));
     await page.evaluate(() => window.acceptance.reject());

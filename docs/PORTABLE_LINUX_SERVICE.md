@@ -11,8 +11,8 @@ These examples assume Linux with procfs and `fs.suid_dumpable=0`, Python 3.9+
 and a compatible SuiFleet binary and launcher from the same revision. Install
 the appropriate manager through your distribution if you choose to use one.
 Use only one profile per device. Stop and disable existing SuiFleet services
-and sockets before switching profiles. Disable daemon self-update when using
-the service signer.
+and sockets before switching profiles. Use the [managed client-update profile](DAEMON_UPDATE.md#managed-updates-with-the-portable-signer)
+if the portable signer will receive daemon component deployments.
 
 ## Install and provision
 

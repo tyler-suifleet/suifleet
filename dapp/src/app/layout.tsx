@@ -7,7 +7,6 @@ import { dAppKit } from "@/lib/dapp-kit";
 import { usePathname } from "next/navigation";
 import { FleetSelectionProvider, FleetScope, onboardingRoute } from "@/hooks/useFleetSelection";
 import { FleetSwitcher } from "@/components/FleetSwitcher";
-import { NETWORK } from "@/lib/constants";
 import "./globals.css";
 import "@/components/OrganizationSecurity.css";
 import { NAV, MobileNav, Sidebar, isActive } from "@/components/ConsoleNavigation";
@@ -30,7 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="alternate icon" href="/favicon.ico?v=400d0317ed09" sizes="16x16 32x32 48x48 64x64" />
         <meta name="description" content="Deploy software, manage device fleets and review verified update results." />
         <meta property="og:title" content="SuiFleet console" />
-        <meta property="og:description" content="Manage edge fleets on Sui. Public testnet preview." />
+        <meta property="og:description" content="Manage edge fleets on Sui." />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://app.suifleet.io/" />
         <link rel="canonical" href={"https://app.suifleet.io" + pathname} />
@@ -48,8 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </div>
                 <span className="hidden sm:inline text-slate-300 text-xs">|</span>
                 <span className="hidden sm:inline text-slate-500 text-xs">Edge Fleet Management</span>
-                <span className="ml-auto hidden sm:inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium capitalize text-slate-600">{NETWORK}</span>
-                <div className="ml-auto sm:ml-0 shrink-0">
+                <div className="ml-auto shrink-0">
                   <ConnectButton />
                 </div>
               </div>
