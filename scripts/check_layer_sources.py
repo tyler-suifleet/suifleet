@@ -746,11 +746,20 @@ def fetch_recipe(recipe, workdir, cargo=None):
                                                    for p in (s_dir / directory).rglob('*') if p.is_file()])
         packager = load_packager()
         files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if p.is_file()}
-        for rs in sorted(p for p in files if p.endswith('.rs')):
+        # Every .rs file is scanned, and so is every include!/#[path] target
+        # whatever its suffix, because Rust compiles it as code.
+        pending, scanned = sorted(p for p in files if p.endswith('.rs')), set()
+        while pending:
+            rs = pending.pop()
+            if rs in scanned:
+                continue
+            scanned.add(rs)
             try:
-                for target in packager.include_targets(rs, (s_dir / rs).read_bytes()):
+                for target, code in packager.include_references(rs, (s_dir / rs).read_bytes()):
                     if target not in files:
                         errors.append(f'{recipe.path.name}: {rs} references {target}, absent from the source layout')
+                    elif packager.scanned_as_code(target, code) and target not in scanned:
+                        pending.append(target)
             except ValueError as error:
                 errors.append(f'{recipe.path.name}: {error}')
         if cargo:

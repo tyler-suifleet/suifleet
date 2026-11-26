@@ -52,7 +52,7 @@ ROOTS = (
 REQUIRED = ('LICENSE', f'{CRATE}/Cargo.toml', f'{CRATE}/Cargo.lock')
 # Every include macro name, however it is delimited or spaced (`include!(..)`,
 # `include! { .. }`, `std::include_str![..]`).
-INCLUDE_MACRO = re.compile(rb'(?<![A-Za-z0-9_])include(?:_str|_bytes)?\s*!')
+INCLUDE_MACRO = re.compile(rb'(?<![A-Za-z0-9_])include(_str|_bytes)?\s*!')
 # The one argument form followed: a single string literal (plain without
 # escapes, or raw) in any macro delimiter, with an optional trailing comma.
 INCLUDE_ARGUMENT = {
@@ -549,10 +549,13 @@ def _path_attributes(source_path, body):
 
 def literal_references(source_path, data):
     """Every file path a Rust source names through an include macro or a path
-    attribute. The scan is lexical (comments and strings included, which only
-    makes it stricter): each include-macro name must be followed by one string
-    literal in any delimiter, otherwise ValueError, so an unhandled form cannot
-    silently drop a build input."""
+    attribute, as (path bytes, is_code) pairs. `include!` and #[path] targets
+    are Rust code whatever their file name, so their own references must be
+    followed too; `include_str!`/`include_bytes!` targets are data. The scan
+    is lexical (comments and strings included, which only makes it stricter):
+    each include-macro name must be followed by one string literal in any
+    delimiter, otherwise ValueError, so an unhandled form cannot silently drop
+    a build input."""
     references = []
     for match in INCLUDE_MACRO.finditer(data):
         rest = data[match.end():].lstrip()
@@ -562,19 +565,21 @@ def literal_references(source_path, data):
             snippet = data[match.start():match.start() + 60].split(b'\n')[0].decode(errors='replace')
             raise ValueError(f'{source_path}: unsupported include form {snippet!r}; '
                              'use a single string literal without escapes')
-        references.append(_literal(found))
+        references.append((_literal(found), match.group(1) is None))
     for match in ATTRIBUTE.finditer(data):
         end = _bracketed(data, match.end(), b'[', b']')
         if end is None:
             continue
-        references += _path_attributes(source_path, data[match.end():end - 1])
+        references += [(path, True) for path in _path_attributes(source_path, data[match.end():end - 1])]
     return references
 
 
-def include_targets(source_path, data):
+def include_references(source_path, data):
+    """Repository-relative (target, is_code) pairs for every literal reference
+    in a Rust source; see literal_references."""
     base = PurePosixPath(source_path).parent
     targets = []
-    for raw in literal_references(source_path, data):
+    for raw, code in literal_references(source_path, data):
         if not raw:
             raise ValueError(f'{source_path} references an empty path')
         parts = []
@@ -585,8 +590,18 @@ def include_targets(source_path, data):
                 parts.pop()
             elif part != '.':
                 parts.append(part)
-        targets.append('/'.join(parts))
+        targets.append(('/'.join(parts), code))
     return targets
+
+
+def include_targets(source_path, data):
+    return [target for target, _ in include_references(source_path, data)]
+
+
+def scanned_as_code(target, code):
+    """Whether a reference target is itself scanned as Rust source: every
+    include!/#[path] target whatever its suffix, and any .rs file (stricter)."""
+    return code or target.endswith('.rs')
 
 
 def implicit_modules(data):
@@ -638,8 +653,8 @@ def loose_sources(manifest, read_manifest, declared, exists, read, sources):
             errors.append(f'{CRATE}/{rel} declares module(s) {", ".join(names)} without #[path]; outside src/, '
                           'examples/ and local crates only declared and literally included files are packaged, '
                           'so give each module a #[path] attribute or move the target under src/')
-        for target in include_targets(f'{CRATE}/{rel}', data):
-            if target.startswith(f'{CRATE}/') and target.endswith('.rs') and exists(target[len(CRATE) + 1:]):
+        for target, code in include_references(f'{CRATE}/{rel}', data):
+            if target.startswith(f'{CRATE}/') and scanned_as_code(target, code) and exists(target[len(CRATE) + 1:]):
                 pending.append(target[len(CRATE) + 1:])
     return sorted(seen), errors
 
@@ -672,15 +687,18 @@ def closure(files, read):
             raise ValueError(f'Cargo.toml declares build file {CRATE}/{rel}, absent at this revision')
         selected.add(f'{CRATE}/{rel}')
     pending = sorted(p for p in selected if p.endswith('.rs'))
+    scanned = set()
     while pending:
         path = pending.pop()
-        for target in include_targets(path, read(path)):
+        if path in scanned:
+            continue
+        scanned.add(path)
+        for target, code in include_references(path, read(path)):
             if target not in files:
                 raise ValueError(f'{path} includes missing file {target}')
-            if target not in selected:
-                selected.add(target)
-                if target.endswith('.rs'):
-                    pending.append(target)
+            selected.add(target)
+            if scanned_as_code(target, code) and target not in scanned:
+                pending.append(target)
     _, errors = loose_sources(manifest, read_manifest, declared_files(manifest, read_manifest),
                               lambda rel: f'{CRATE}/{rel}' in files, lambda rel: read(f'{CRATE}/{rel}'),
                               [p[len(CRATE) + 1:] for p in files if p.startswith(f'{CRATE}/')])

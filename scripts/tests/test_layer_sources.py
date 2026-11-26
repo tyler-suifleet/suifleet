@@ -355,6 +355,48 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'includes missing file suifleet-edge/tools/absent.rs'):
             packager.plan(self.repo.root, 'HEAD')
 
+    def test_code_includes_are_followed_whatever_their_suffix(self):
+        # The reviewer's reproduction: include! compiles its target as Rust
+        # even when it is not named .rs, so that file's own includes are
+        # build inputs too. #[path] targets are code in the same way.
+        self.repo.write('suifleet-edge/src/main.rs', 'include!("../tools/entry.inc");\nfn main() { f() }\n')
+        self.repo.write('suifleet-edge/tools/entry.inc', 'include!("helper.rs");\n')
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        output = self.out / 'code-include.tar.gz'
+        info = packager.build(self.repo.root, rev, output)
+        with tarfile.open(output) as tar:
+            names = tar.getnames()
+        for rel in ('tools/entry.inc', 'tools/helper.rs'):
+            self.assertIn(f'suifleet-edge/{rel}', info['paths'])
+            self.assertIn(f'suifleet-edge/{rel}', names)
+        self.repo.write('suifleet-edge/src/main.rs', '#[path = "../tools/module.txt"]\nmod entry;\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/module.txt', 'include!("deep.inc");\n')
+        self.repo.write('suifleet-edge/tools/deep.inc', 'pub fn d() {}\n')
+        rev = self.repo.commit()
+        paths = packager.plan(self.repo.root, rev)['paths']
+        for rel in ('tools/module.txt', 'tools/deep.inc'):
+            self.assertIn(f'suifleet-edge/{rel}', paths)
+        # A missing include inside a non-.rs code file is an error.
+        self.repo.write('suifleet-edge/tools/deep.inc', 'include!("absent.rs");\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, 'deep.inc includes missing file suifleet-edge/tools/absent.rs'):
+            packager.plan(self.repo.root, 'HEAD')
+        # Outside src/ the same chain is followed and checked for implicit modules.
+        self.repo.write('suifleet-edge/src/main.rs', 'fn main() {}\n')
+        self.repo.write('suifleet-edge/examples/demo.rs', 'include!("../tools/entry.inc");\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/entry.inc', 'include!("helper.inc");\n')
+        self.repo.write('suifleet-edge/tools/helper.inc', 'mod nested;\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'tools/helper.inc declares module\(s\) nested'):
+            packager.plan(self.repo.root, 'HEAD')
+        # include_str!/include_bytes! targets are data: their text is not scanned.
+        self.repo.write('suifleet-edge/examples/demo.rs', 'fn main() {}\n')
+        self.repo.write('suifleet-edge/src/main.rs', 'const T: &str = include_str!("../tools/template.txt");\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/template.txt', 'include!(concat!("not", "code"));\n')
+        rev = self.repo.commit()
+        self.assertIn('suifleet-edge/tools/template.txt', packager.plan(self.repo.root, rev)['paths'])
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -1054,6 +1096,46 @@ class LayerAuditTests(unittest.TestCase):
         complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
         info = packager.build(self.repo.root, rev, complete)
         self.assertIn('suifleet-edge/tools/entry.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
+    def test_fetch_follows_code_includes_whatever_their_suffix(self):
+        # The reviewer's reproduction: a pinned archive containing a non-.rs
+        # include! target whose own include is absent must not audit clean.
+        files = {'suifleet-edge/src/main.rs': 'include!("../tools/entry.inc");\nfn main() { f() }\n',
+                 'suifleet-edge/tools/entry.inc': 'include!("helper.rs");\n'}
+        archive = self.archive.with_name('code-include.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name in files:
+                    text = files.pop(member.name).encode()
+                    member.size, data = len(text), io.BytesIO(text)
+                tar.addfile(member, data)
+            for name, text in files.items():
+                added = tarfile.TarInfo(name)
+                added.size, added.mode = len(text), 0o644
+                tar.addfile(added, io.BytesIO(text.encode()))
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/tools/entry.inc references suifleet-edge/tools/helper.rs, absent from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # Committed and packaged, the chain audits clean end to end.
+        self.repo.write('suifleet-edge/src/main.rs', 'include!("../tools/entry.inc");\nfn main() { f() }\n')
+        self.repo.write('suifleet-edge/tools/entry.inc', 'include!("helper.rs");\n')
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/tools/helper.rs', info['paths'])
         self.archive = complete
         self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
                           sha=info['sha256'], srcrev=rev)
