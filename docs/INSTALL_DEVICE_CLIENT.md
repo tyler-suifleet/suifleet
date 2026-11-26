@@ -54,7 +54,8 @@ repository. Each device generates its own at first boot or install.
 ## Yocto image and recipe
 
 For an existing OE product, follow the [OpenEmbedded integration guide](CUSTOMER_YOCTO.md)
-to select a pinned standalone layer and add the client to your image.
+to pin the [public meta-suifleet layer](https://github.com/tyler-suifleet/meta-suifleet)
+and add the client to your image.
 The Pi image commands below run from a reviewed core source checkout.
 
 The `meta-suifleet` layer packages the client as the `suifleet` recipe, with
