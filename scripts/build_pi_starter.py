@@ -5,8 +5,8 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import shlex
+import shutil
 import subprocess
 import tempfile
 
@@ -61,7 +61,7 @@ def read_recipe(environment, recipe, manifest):
     search = [Path(path) for path in value('FILESPATH').split(':') if path]
     for name in ('first-boot-enrollment.patch', service):
         selected = next((path / name for path in search if (path / name).is_file()), None)
-        if f'file://{name}' not in urls or selected != ENROLLMENT / name:
+        if f'file://{name}' not in urls or selected is None or selected.resolve() != (ENROLLMENT / name).resolve():
             raise ValueError(f'effective daemon recipe lacks reviewed SF-322 input {name}')
         files[name] = sha(selected)
     return pins, {'archive_url': archive, 'archive_sha256': checksum.group(1), 'enrollment_files': files}

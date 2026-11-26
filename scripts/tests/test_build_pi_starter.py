@@ -34,7 +34,7 @@ class PiStarterTests(unittest.TestCase):
             f'SUIFLEET_LOCK_SHA256="{"b" * 64}"\n'
             'SUIFLEET_CRATE_VERSION="0.2.3"\n'
             f'"SYSTEMD_SERVICE:suifleet"="{service}"\n'
-            f'FILESPATH="{ENROLLMENT}"\n'
+            f'FILESPATH="{ENROLLMENT / ".." / "files"}"\n'
             f'SRC_URI="https://example.test/daemon.tar.gz;name=edge;subdir=source file://{service}"\n'
         )
         recipe = f'SRC_URI[edge.sha256sum] = "{"c" * 64}"'
