@@ -1292,15 +1292,40 @@ class Harness:
 
         # With the claim batch present, output the role cannot verify stops the run
         # before anything is staged or submitted, and is kept for manual recovery.
+        # An interruption that killed the play before its own cleanup also leaves
+        # the staged claim and the SSH account's transfer copy: the refusing run
+        # must still erase them (check mode only reports).
+        staging, transfer = "/run/suifleet-enroll", "/dev/shm/suifleet-claim.RefusedRun"
+
+        def abandon_claim_copies():
+            marker = uuid.uuid4().hex + uuid.uuid4().hex  # a disposable stand-in for the claim, on stdin
+            sh(f"umask 077 && mkdir -p {staging} && cat > {staging}/claim.key", input=marker + "\n")
+            self.exec(container, "sh", "-c", f"umask 077 && mkdir {transfer} && cat > {transfer}/claim.key",
+                      user="deploy", input=marker + "\n")
+            return marker
+
         other = dict(enrolled, device_address="0x" + "ab" * 32)
         for label, text in (("truncated receipt", receipt[:40]), ("receipt for another key", json.dumps(other, separators=(",", ":")) + "\n")):
             sh(f"umask 077 && cat > {partial}", input=text)
+            marker = abandon_claim_copies()
+            if label == "truncated receipt":
+                output, _ = self.ansible(f"check mode refuses a {label}", "site.yml", "--check", "--diff", "--limit", name,
+                                         *vault, expect_rc="nonzero")
+                assert "not a complete receipt" in output, (name, label, "check mode did not refuse")
+                assert sh(f"cat {partial}") == text and absent(record), (name, label, "check mode changed the receipt")
+                assert not absent(f"{staging}/claim.key") and not absent(f"{transfer}/claim.key"), \
+                    (name, label, "check mode erased the abandoned claim copies")
+                print(f"PASS check mode with a {label} refused and left the abandoned claim copies in place")
             output, _ = self.ansible(f"retry refuses a {label}", "site.yml", "--limit", name, *vault, expect_rc="nonzero")
             assert "not a complete receipt" in output, (name, label, "not refused by the receipt check")
             assert ENROLL_TASK not in output, (name, label, "the enrollment command was reached")
             assert sh(f"cat {partial}") == text, (name, label, "the earlier output was changed")
-            assert absent(record) and absent("/run/suifleet-enroll"), (name, label, "record written or claim staged")
-            print(f"PASS retry with a {label} stopped before staging or submitting and kept the file")
+            assert absent(record), (name, label, "record written")
+            assert absent(staging) and absent(transfer), (name, label, "abandoned claim copies left by the refusing run")
+            for root in ("/run", "/dev/shm"):
+                assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, label, root, "claim remains")
+            print(f"PASS retry with a {label} stopped before staging or submitting, kept the file and erased the"
+                  " abandoned staged claim and transfer copy")
 
         self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", partial, input=receipt)
         hidden = self.work / "chain/batch-hidden-for-recovery"

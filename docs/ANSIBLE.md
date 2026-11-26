@@ -227,10 +227,11 @@ restarted once.
   which goes through the remote temporary directory, is never used for the
   claim. Enrollment refuses to send a claim unless modules are pipelined, so
   keep `pipelining = True` and leave `ANSIBLE_KEEP_REMOTE_FILES` unset. The
-  staging directory is erased after enrollment, when it fails, at the start
-  of the next attempt and on every run of an enrolled host (a run interrupted
-  after the record was written but before its cleanup). Every run also erases
-  the SSH account's transfer directories left by a killed run. An interrupted
+  staging directory is erased after enrollment, when it fails, and at the
+  start of every run, before any enrollment check, so a run that refuses the
+  host (for example an unverifiable interrupted receipt) still erases a claim
+  left by a killed run, as does a run of an enrolled host. Every run also
+  erases the SSH account's transfer directories left by a killed run. An interrupted
   run leaves the claim only on those tmpfs mounts until the next run or a reboot. Revoke a claim that was exposed before use.
   tmpfs alone is not enough, because its pages and the memory of the
   processes holding the claim can be swapped out or saved in a crash dump; see

@@ -3,6 +3,54 @@
 # claim key sponsors gas. /etc/suifleet/enrollment.json records the result
 # (public IDs only) and makes this step run once per device. Operators never
 # handle device addresses: the dApp binds each enrolled claim to its serial.
+
+# Erase the role's credential copies left by an interrupted run before any
+# enrollment check, so a refusal below (a configured host without a record,
+# an unverifiable partial receipt, a missing batch) cannot leave them behind.
+# A run interrupted after the record was renamed into place, but before the
+# enrollment block's own cleanup, leaves the staged claim; recorded hosts skip
+# that block. This needs no credential batch and never re-enrolls. Check mode
+# reports it without erasing.
+- name: Erase claim staging left by an interrupted enrollment
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: absent
+
+# A run killed during the claim transfer (stage_claim.yml) can leave the SSH
+# account's private transfer directory on its tmpfs. These tasks run as the
+# SSH account even if the inventory sets ansible_become (stage_claim.yml).
+- name: Read the SSH account's user ID
+  ansible.builtin.command:
+    argv: [id, -u]
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_transfer_uid
+  changed_when: false
+  check_mode: false
+
+- name: Find claim transfer directories left by an interrupted run
+  ansible.builtin.find:
+    paths: "{{ suifleet_claim_transfer_dir }}"
+    patterns: "suifleet-claim.*"
+    file_type: directory
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_transfer_left
+  check_mode: false
+
+- name: Erase claim transfer directories left by an interrupted run
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  become: false
+  vars:
+    ansible_become: false
+  loop: "{{ suifleet_transfer_left.files | selectattr('uid', 'equalto', suifleet_transfer_uid.stdout | int) | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Enroll hosts without an enrollment record
   when: not suifleet_enrollment_record.stat.exists
   vars:
@@ -196,50 +244,6 @@
               ansible.builtin.file:
                 path: "{{ suifleet_enroll_staging }}"
                 state: absent
-
-# A run interrupted after the record was renamed into place, but before the
-# cleanup above, leaves the staged claim behind. Recorded hosts skip the
-# enrollment block, so erase abandoned staging here; this needs no credential
-# batch and never re-enrolls. Check mode reports it without erasing.
-- name: Erase claim staging left by an interrupted enrollment
-  ansible.builtin.file:
-    path: "{{ suifleet_enroll_staging }}"
-    state: absent
-
-# A run killed during the claim transfer (stage_claim.yml) can leave the SSH
-# account's private transfer directory on its tmpfs. These tasks run as the
-# SSH account even if the inventory sets ansible_become (stage_claim.yml).
-- name: Read the SSH account's user ID
-  ansible.builtin.command:
-    argv: [id, -u]
-  become: false
-  vars:
-    ansible_become: false
-  register: suifleet_transfer_uid
-  changed_when: false
-  check_mode: false
-
-- name: Find claim transfer directories left by an interrupted run
-  ansible.builtin.find:
-    paths: "{{ suifleet_claim_transfer_dir }}"
-    patterns: "suifleet-claim.*"
-    file_type: directory
-  become: false
-  vars:
-    ansible_become: false
-  register: suifleet_transfer_left
-  check_mode: false
-
-- name: Erase claim transfer directories left by an interrupted run
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  become: false
-  vars:
-    ansible_become: false
-  loop: "{{ suifleet_transfer_left.files | selectattr('uid', 'equalto', suifleet_transfer_uid.stdout | int) | list }}"
-  loop_control:
-    label: "{{ item.path }}"
 
 - name: Read the enrollment record
   ansible.builtin.slurp:
