@@ -16,6 +16,7 @@
   "recipes-edge/suifleet/files/suifleet-firmware.path",
   "recipes-edge/suifleet/files/suifleet-firmware.service",
   "recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service",
+  "recipes-edge/suifleet/files/suifleet-migrate",
   "recipes-edge/suifleet/files/suifleet-provision",
   "recipes-edge/suifleet/files/suifleet-provision.service",
   "recipes-edge/suifleet/files/suifleet-signer.service",

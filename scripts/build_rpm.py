@@ -65,6 +65,7 @@ def build(bundle, out, release_number):
         payload = {
             "usr/bin/suifleet": (binary, 0o755),
             "usr/libexec/suifleet-provision": ((shipped / "suifleet-provision").read_bytes(), 0o755),
+            "usr/sbin/suifleet-migrate": ((shipped / "suifleet-migrate").read_bytes(), 0o755),
             "usr/share/licenses/suifleet/LICENSE": ((ROOT / "LICENSE").read_bytes(), 0o644),
             "etc/suifleet/release-trust.toml": ((ROOT / "release/trust.toml").read_bytes(), 0o644),
         }
