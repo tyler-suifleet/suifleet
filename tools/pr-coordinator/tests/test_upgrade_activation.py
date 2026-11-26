@@ -69,6 +69,7 @@ class UpgradeActivation(unittest.TestCase):
         self.private_bytes = self.private.read_bytes()
         self.services = Services(self)
         self.events = []
+        self.verified_ranges = []
         self.reject_old = False; self.reject_new = False; self.reject_validation = False
         self.mutate_source = False; self.move_tip = False; self.tip_calls = 0
         fixture = self
@@ -85,6 +86,7 @@ class UpgradeActivation(unittest.TestCase):
                 return fixture.target
             def verify(self,old,target):
                 fixture.events.append(self.role+'-verify')
+                fixture.verified_ranges.append((self.role, old, target))
                 if ((self.role=='old' and fixture.reject_old) or (self.role=='new' and fixture.reject_new)):
                     raise RuntimeError(self.role+' verifier rejected unreviewed merge')
                 if self.role=='old' and fixture.mutate_source:
@@ -149,6 +151,43 @@ class UpgradeActivation(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'review unavailable'):self.upgrade()
         self.assertFalse(self.new_loaded)
         self.assertFalse(self.services.stops)
+
+    def carry_forward(self, change_runtime=False):
+        self.git('branch', 'reviewed-runtime', self.base)
+        self.git('switch', '--orphan', 'content')
+        (self.repo/'content.txt').write_text('content')
+        self.commit('content branch')
+        self.git('merge', '--allow-unrelated-histories', '--no-ff', '--no-commit', 'reviewed-runtime')
+        if change_runtime:
+            (self.source/'coordinator.py').write_text('# changed at the carry-forward merge')
+        self.commit('bring reviewed runtime into the content branch')
+        checkpoint = self.git('rev-parse', 'HEAD')
+        (self.source/'activation.py').write_text('# reviewed supervisor upgrade\n')
+        self.commit('reviewed normal integration')
+        self.target = self.git('rev-parse', 'HEAD')
+        return checkpoint
+
+    def test_exact_carry_forward_checks_the_remaining_commits_with_both_verifiers(self):
+        checkpoint = self.carry_forward()
+        self.upgrade()
+        self.assertEqual(self.verified_ranges, [
+            ('old', checkpoint, self.target), ('new', checkpoint, self.target)])
+
+    def test_altered_carry_forward_requires_ordinary_proof(self):
+        self.carry_forward(change_runtime=True)
+        self.reject_old = True
+        with self.assertRaisesRegex(RuntimeError, 'old verifier rejected'):
+            self.upgrade()
+        self.assertEqual(self.verified_ranges, [('old', self.base, self.target)])
+        self.assertEqual(self.services.stops, [])
+
+    def test_carry_forward_does_not_authorize_an_unreviewed_later_change(self):
+        checkpoint = self.carry_forward()
+        self.reject_old = True
+        with self.assertRaisesRegex(RuntimeError, 'old verifier rejected'):
+            self.upgrade()
+        self.assertEqual(self.verified_ranges, [('old', checkpoint, self.target)])
+        self.assertEqual(self.services.stops, [])
 
     def test_reviewed_main_upgrade_preserves_private_configuration_and_readiness(self):
         result=self.upgrade()
