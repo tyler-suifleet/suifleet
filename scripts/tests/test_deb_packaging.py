@@ -32,8 +32,14 @@ class PackagingTests(unittest.TestCase):
             second = deb.build(binary, root / "second", "0.2.2-1", "amd64", 1793606400)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             subprocess.run(["dpkg-deb", "-x", str(first), str(root / "extract")], check=True)
-            unit = root / "extract/lib/systemd/system/suifleet-first-boot-enrollment.service"
-            self.assertTrue(unit.is_file())
+            units = root / "extract/lib/systemd/system"
+            for name in ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket",
+                         "suifleet-provision.service", "suifleet-enrollment.path",
+                         "suifleet-first-boot-enrollment.service"):
+                with self.subTest(unit=name):
+                    self.assertIn("ConditionPathExists=!/etc/suifleet/migration.pending", (units / name).read_text())
+            migrate = root / "extract/usr/sbin/suifleet-migrate"
+            self.assertEqual(migrate.stat().st_mode & 0o777, 0o755)
             etc = root / "extract/etc/suifleet"
             self.assertEqual([p.name for p in etc.iterdir()], ["release-trust.toml"])
             self.assertFalse((root / "extract/var/lib/suifleet").exists())

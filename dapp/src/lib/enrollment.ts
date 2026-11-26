@@ -35,8 +35,12 @@ import { ALIAS_META_KEY, SERIAL_META_KEY, allEvents, fetchDevices, fetchFleetDev
  * return). These are conservative; measured fleet-scale limits are SF-090.
  */
 export const LIMITS = { claimsPerTx: 250, bindsPerTx: 100, revokesPerTx: 250, transfersPerTx: 250 } as const;
-/** Default enrollment gas each claim sponsors (the daemon caps one enrollment at 0.05 SUI). */
-export const DEFAULT_CLAIM_FUND_MIST = BigInt(20_000_000);
+/**
+ * Default enrollment gas each claim sponsors (the daemon caps one enrollment at 0.05 SUI).
+ * Measured on testnet 2026-11-25: enrollment needed a 0.028 SUI gas budget (0.025 SUI net),
+ * so 0.02 SUI claims could not enroll. 0.04 SUI leaves headroom for gas-price changes.
+ */
+export const DEFAULT_CLAIM_FUND_MIST = BigInt(40_000_000);
 /** Larger batches: generate credentials offline with scripts/claims.py and import its roster. */
 export const BROWSER_CREDENTIAL_LIMIT = 5_000;
 export const MAX_JOB_ENTRIES = 100_000;

@@ -34,14 +34,15 @@ def build(binary, out, version, arch, epoch):
 
         copy(binary, "usr/bin/suifleet", 0o755)
         files = ROOT / "suifleet-edge/meta-suifleet/recipes-edge/suifleet/files"
+        enrollment_files = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files"
         # Firmware helpers are deliberately opt-in source integrations, not part
         # of this application package. No privileged updater is installed.
         for name in ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket",
-                     "suifleet-provision.service", "suifleet-enrollment.path"):
-            copy(files / name, "lib/systemd/system/" + name)
-        copy(ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service",
-             "lib/systemd/system/suifleet-first-boot-enrollment.service")
-        copy(files / "suifleet-provision", "usr/libexec/suifleet-provision", 0o755)
+                     "suifleet-provision.service", "suifleet-enrollment.path",
+                     "suifleet-first-boot-enrollment.service"):
+            copy(enrollment_files / name, "lib/systemd/system/" + name)
+        copy(enrollment_files / "suifleet-provision", "usr/libexec/suifleet-provision", 0o755)
+        copy(enrollment_files / "suifleet-migrate", "usr/sbin/suifleet-migrate", 0o755)
         for name in ("signer.toml.example", "config.toml.example"):
             copy(files / name, "usr/share/doc/suifleet/examples/" + name)
         for name in ("KEY_ISOLATION.md", "INSTALL_DEVICE_CLIENT.md", "DEBIAN_PACKAGING.md"):
@@ -65,7 +66,7 @@ Maintainer: SuiFleet <tyler.jonathan.bush@gmail.com>
 Section: admin
 Priority: optional
 Installed-Size: {size}
-Depends: libc6 (>= 2.35), libgcc-s1, ca-certificates, adduser, systemd (>= 249), init-system-helpers (>= 1.62)
+Depends: libc6 (>= 2.35), libgcc-s1, ca-certificates, adduser, systemd (>= 249), init-system-helpers (>= 1.62), util-linux
 Homepage: https://github.com/tyler-suifleet/suifleet
 Description: edge deployment client and isolated device signer
  Authenticated component delivery with unprivileged execution and a separate

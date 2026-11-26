@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = "x86_64-unknown-linux-gnu"
 PACKAGING = ROOT / "suifleet-edge/packaging/rpm"
 UNITS = ("suifleet.service", "suifleet-signer.service", "suifleet-signer.socket",
-         "suifleet-provision.service", "suifleet-enrollment.path")
+         "suifleet-provision.service", "suifleet-enrollment.path", "suifleet-first-boot-enrollment.service")
 
 
 def digest(data):
@@ -59,19 +59,19 @@ def build(bundle, out, release_number):
     if any(out.iterdir()):
         raise ValueError("RPM output directory must be empty")
     shipped = ROOT / "suifleet-edge/meta-suifleet/recipes-edge/suifleet/files"
+    enrollment_files = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files"
     with tempfile.TemporaryDirectory(prefix="suifleet-rpm-") as temp:
         top = Path(temp)
         (top / "SOURCES").mkdir()
         payload = {
             "usr/bin/suifleet": (binary, 0o755),
-            "usr/libexec/suifleet-provision": ((shipped / "suifleet-provision").read_bytes(), 0o755),
+            "usr/libexec/suifleet-provision": ((enrollment_files / "suifleet-provision").read_bytes(), 0o755),
+            "usr/sbin/suifleet-migrate": ((enrollment_files / "suifleet-migrate").read_bytes(), 0o755),
             "usr/share/licenses/suifleet/LICENSE": ((ROOT / "LICENSE").read_bytes(), 0o644),
             "etc/suifleet/release-trust.toml": ((ROOT / "release/trust.toml").read_bytes(), 0o644),
         }
-        first_boot_unit = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files/suifleet-first-boot-enrollment.service"
-        payload[f"usr/lib/systemd/system/{first_boot_unit.name}"] = (first_boot_unit.read_bytes(), 0o644)
         for name in UNITS:
-            payload[f"usr/lib/systemd/system/{name}"] = ((shipped / name).read_bytes(), 0o644)
+            payload[f"usr/lib/systemd/system/{name}"] = ((enrollment_files / name).read_bytes(), 0o644)
         for name in ("signer.toml.example", "config.toml.example"):
             payload[f"usr/share/doc/suifleet/examples/{name}"] = ((shipped / name).read_bytes(), 0o644)
         for name in ("KEY_ISOLATION.md", "RPM_PACKAGING.md"):

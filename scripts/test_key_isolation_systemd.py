@@ -235,6 +235,113 @@ with socket.socket(socket.AF_UNIX) as conn:
         children = Path(f"/proc/{launcher.pid}/task/{launcher.pid}/children").read_text().split()
         return next(int(pid) for pid in children if argument in Path(f"/proc/{pid}/cmdline").read_bytes())
 
+    if args.managed_update:
+        update_dir = Path("/var/lib/suifleet-client-update")
+        update_dir.mkdir(mode=0o700)
+        write_config(f'[device.signer]\nkind = "service"\nsocket = "{sock}"\n',
+                     '[daemon_update]\nenabled = true\nmanaged = true\n')
+        candidate = update_dir / "candidate"
+        root_state = update_dir / "state.json"
+        base = Path("/usr/bin/suifleet").read_bytes()
+        key_hash = hashlib.sha256(key.read_bytes()).digest()
+
+        def managed_start():
+            return subprocess.Popen(["/workspace/scripts/suifleet-portable-signer",
+                                     "--client-update-dir", update_dir])
+
+        def publish(id, approved, transmitted):
+            candidate.write_bytes(approved)
+            candidate.chmod(0o755)
+            digest = hashlib.sha256(transmitted).hexdigest()
+            blob = f"managed-{id}"
+            sim.update_blobs[blob] = transmitted
+            sim.add(id, event=dict(component_name="suifleet-daemon", version=f"1.0.{int(id, 16)}",
+                                   artifact_sha256=digest), recipe=dict(artifactBlobId=blob))
+            return digest
+
+        def verify_report(id, status):
+            wait(lambda: any(report_id == id for report_id, _ in sim.reports), f"missing update result {id}")
+            assert (id, status) in sim.reports, sim.reports
+            assert journal()["deployments"][id]["status"] == status
+
+        def current_exe(launcher):
+            return os.readlink(f"/proc/{child_pid(launcher, b'--portable-daemon-child')}/exe")
+
+        process = managed_start()
+        try:
+            report("0x921", process)
+            binding = journal()["binding"]
+            same_uid_cannot_write = subprocess.run(["test", "-w", update_dir], **component)
+            assert same_uid_cannot_write.returncode == 1
+            candidate_fixture = os.environ.get("SUIFLEET_TEST_UPDATE_CANDIDATE")
+            approved = Path(candidate_fixture).read_bytes() if candidate_fixture else base + b"SF-299 test candidate"
+            publish("0x922", approved, approved + b"tampered")
+            verify_report("0x922", 2)
+            assert json.loads(root_state.read_text())["result"] == {"deployment": "0x922", "applied": False}
+            assert current_exe(process) == "/usr/bin/suifleet"
+            assert list(update_dir.glob("?" * 64)) == []
+            check("deployment bytes differing from the platform-approved executable were refused")
+
+            digest = publish("0x923", approved, approved)
+            verify_report("0x923", 1)
+            confirmed = str(update_dir / digest)
+            assert current_exe(process) == confirmed
+            assert probe({"op": "address"})["address"] == ADDRESS
+            assert "may not request signatures" in probe({"op": "sign", "tx": ""})["error"]
+            daemon_pid = child_pid(process, b"--portable-daemon-child")
+            assert subprocess.run(["test", "-r", f"/proc/{daemon_pid}/fd"], **component).returncode == 1
+            check("updated executable retains the device identity and only its pinned daemon can sign")
+
+            failed = Path("/bin/false").read_bytes()
+            publish("0x924", failed, failed)
+            verify_report("0x924", 2)
+            assert current_exe(process) == confirmed
+            check("startup exit rolled back to the previous executable without candidate participation")
+
+            # Hold the trial's simulator reads until after killing the trusted
+            # launcher. On restart it must reject the persisted unconfirmed trial.
+            barrier = threading.Event()
+            sim.update_barrier = (root_state, barrier)
+            publish("0x925", approved + b"interrupted", approved + b"interrupted")
+            wait(lambda: json.loads(root_state.read_text()).get("trial"), "no durable trial")
+            process.kill()
+            process.wait(timeout=15)
+            barrier.set()
+            process = managed_start()
+            verify_report("0x925", 2)
+            assert current_exe(process) == confirmed
+            assert journal()["binding"] == binding
+            assert hashlib.sha256(key.read_bytes()).digest() == key_hash
+            assert not sim.errors, sim.errors
+            check("launcher SIGKILL during a durable trial recovered the previous executable, key and journal")
+
+            stop(process)
+            installed = Path("/usr/bin/suifleet")
+            replacement = installed.with_name("suifleet.platform-replacement")
+            replacement.write_bytes(base + b"SF-299 platform replacement")
+            replacement.chmod(0o755)
+            replacement.replace(installed)
+            orphan = update_dir / ("a" * 64)
+            leftover = update_dir / ".update-interrupted"
+            orphan.touch()
+            leftover.touch()
+            process = managed_start()
+            report("0x926", process)
+            assert current_exe(process) == str(installed)
+            assert not json.loads(root_state.read_text()).get("current")
+            assert not Path(confirmed).exists()
+            assert not orphan.exists() and not leftover.exists()
+            assert candidate.is_file()
+            assert journal()["binding"] == binding
+            assert hashlib.sha256(key.read_bytes()).digest() == key_hash
+            assert not sim.errors, sim.errors
+            check("replacing the platform executable reset the managed selection and preserved identity and journal")
+        finally:
+            stop(process)
+        print("EVIDENCE " + json.dumps({"ticket": "SF-299", "checks": "managed portable update",
+                                        "kernel": os.uname().release, "init": Path("/proc/1/comm").read_text().strip()}))
+        return
+
     process = start()
     try:
         report("0x911", process)
@@ -348,18 +455,26 @@ def inside(args):
     sim.allow_reports = True
     sim.fail_execution = False
     sim.truncate_next_artifact = False
+    sim.update_blobs = {}
+    sim.update_barrier = None
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
-        def respond(self, body, status=200):
+        def respond(self, body, status=200, content_range=None):
             self.send_response(status)
             self.send_header("Content-Length", str(len(body)))
+            if content_range:
+                self.send_header("Content-Range", content_range)
             self.end_headers()
             self.wfile.write(body)
 
         def do_POST(self):
+            if sim.update_barrier:
+                path, barrier = sim.update_barrier
+                if json.loads(path.read_text()).get("trial"):
+                    assert barrier.wait(timeout=90), "update fixture barrier timed out"
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             try:
                 response = {"jsonrpc": "2.0", "id": request["id"], "result": sim.rpc(request["method"], request["params"])}
@@ -370,7 +485,20 @@ def inside(args):
 
         def do_GET(self):
             blob = self.path.removeprefix("/v1/blobs/")
-            if blob == "artifact":
+            if blob in sim.update_blobs:
+                payload = sim.update_blobs[blob]
+                if not self.headers["Range"]:
+                    self.respond(payload)
+                    return
+                start, end = self.headers["Range"].removeprefix("bytes=").split("-")
+                start = int(start)
+                count = len(payload)
+                end = min(int(end) if end else count - 1, count - 1)
+                if start > end:
+                    self.respond(b"", 416)
+                else:
+                    self.respond(payload[start:end+1], 206, f"bytes {start}-{end}/{count}")
+            elif blob == "artifact":
                 self.respond(test_ota.ARTIFACT)
             elif blob in sim.recipes:
                 self.respond(json.dumps(sim.recipes[blob]).encode())
@@ -400,7 +528,8 @@ def inside(args):
     else:
         sh("useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet")
         sh("useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet-signer")
-        sh("install", "-m", "0755", "/workspace/suifleet-edge/target/debug/suifleet", "/usr/bin/suifleet")
+        sh("install", "-m", "0755", os.environ.get("SUIFLEET_TEST_DAEMON", "/workspace/suifleet-edge/target/debug/suifleet"),
+           "/usr/bin/suifleet")
         if not args.portable:
             sh("install", "-D", "-m", "0755", str(files / "suifleet-provision"), "/usr/libexec/suifleet-provision")
             for unit in ("suifleet.service", "suifleet-provision.service", "suifleet-signer.service", "suifleet-signer.socket"):
@@ -682,12 +811,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--portable", action="store_true", help="test the non-systemd profile inside a disposable guest")
+    parser.add_argument("--managed-update", action="store_true", help="exercise managed client updates with --portable")
     parser.add_argument("--portable-manager", choices=("openrc", "sysv", "runit", "manual"))
     parser.add_argument("--force-pid-reuse", action="store_true", help="force PID reuse inside a disposable booted VM")
     parser.add_argument("--head", help=argparse.SUPPRESS)
     parser.add_argument("--evidence", help="write evidence JSON here")
     parser.add_argument("--keep", action="store_true", help="keep the container for inspection")
     arguments = parser.parse_args()
+    if arguments.managed_update and (not arguments.inside or not arguments.portable or arguments.portable_manager):
+        parser.error("--managed-update requires --inside --portable with the foreground launcher")
     if arguments.portable and not arguments.inside:
         parser.error("--portable requires --inside in a disposable guest")
     if arguments.portable_manager and not arguments.portable:

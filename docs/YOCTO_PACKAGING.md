@@ -330,6 +330,12 @@ version at run time. The exact release is enforced by `RDEPENDS`,
 
 ## First boot and enrollment
 
+To move an enrolled 0.2.1 device onto the isolated signer and a new deployment,
+install the updated package and follow the [in-place migration procedure](INSTALL_DEVICE_CLIENT.md#migrate-an-enrolled-linux-device-in-place).
+The enrollment companion layer supplies the migration helper and guarded units.
+Its online package hook parks the existing client. Build-time package installation
+never inspects or migrates an identity.
+
 The image contains no private key, device address, deployment manifest,
 enrollment config or journal. It installs only `config.toml.example` and
 `firmware.toml.example`, with root-controlled policy permissions.
