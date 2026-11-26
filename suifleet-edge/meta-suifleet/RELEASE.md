@@ -82,7 +82,8 @@ Node and the offline codec negative case in AArch64 QEMU user mode, which uses
 the host kernel. Keep systemd boot evidence and physical-target acceptance in
 their respective test records. For a local reproduction from the layer root,
 run `python3 ci/sources.py` and `ci/build.sh <series> <new-build-directory> all`.
-The CI job lists Ubuntu host prerequisites. Use a fresh build directory with
+The CI job lists Ubuntu host prerequisites and the pinned Wrynose Python dependency.
+Use a fresh build directory with
 enough build disk for a Rust/LLVM toolchain. Local tests may use read-only
 sstate mirrors, provided the receipt identifies them and lists the tasks run.
 Record the compiler, exact dependency revisions and any skipped checks.

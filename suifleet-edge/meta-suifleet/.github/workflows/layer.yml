@@ -42,8 +42,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential chrpath cpio debianutils diffstat file gawk \
             gcc-multilib git iputils-ping libacl1 locales python3-git python3-jinja2 \
-            python3-pexpect python3-subunit rpcsvc-proto socat texinfo unzip wget xz-utils zstd lz4
+            python3-pexpect python3-subunit python3-venv rpcsvc-proto socat texinfo unzip wget xz-utils zstd lz4
           sudo locale-gen en_US.UTF-8
+      - name: Install pinned Wrynose BitBake Python dependency
+        if: matrix.series == 'wrynose'
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/wrynose-python"
+          "$RUNNER_TEMP/wrynose-python/bin/python" -m pip install --no-deps --require-hashes -r ci/wrynose-host.txt
+          echo "$RUNNER_TEMP/wrynose-python/bin" >> "$GITHUB_PATH"
       - name: Check layer and build packages
         env:
           SERIES: ${{ matrix.series }}

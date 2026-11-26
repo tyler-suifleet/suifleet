@@ -8,6 +8,7 @@
   "ci/packages.py",
   "ci/pins.json",
   "ci/sources.py",
+  "ci/wrynose-host.txt",
   "classes/suifleet-core-fixes.bbclass",
   "conf/layer.conf",
   "export-files.json",
