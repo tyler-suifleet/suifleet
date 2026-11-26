@@ -170,7 +170,16 @@ the restarts therefore converges on the next run. Systemd is also reloaded
 before any unit starts whenever a unit, active or stopped, has unit-file
 changes it has not loaded, so a run that stopped between installing unit
 files and its daemon-reload never starts a unit from the cached definition.
-A service whose main process exits while it is inspected is sampled again
+The provisioning oneshot is covered as well: its pending definition is loaded
+before the identity step starts it. A unit's file paths (fragment and
+drop-ins) are only known once systemd has loaded them, so for a unit that
+needed the reload the health check compares against the digest sampled after
+the reload, and the record stores the verified digests. A drop-in added or
+removed before a run is therefore applied and recorded rather than reported
+as a change during the rollout. systemd (252 and 255 were tested) does not
+report a newly added drop-in as needing a reload unless another unit file of
+that unit changed, so run `systemctl daemon-reload` after adding a drop-in by
+hand; the role then applies and records it. A service whose main process exits while it is inspected is sampled again
 (bounded), and a sample is used only if the main process and invocation are
 unchanged after its executable was read.
 
@@ -504,7 +513,19 @@ The harness checks these phases:
    report a pending reload without being stale, and the retry must reload
    systemd before starting them (the socket comes up with the new mode and no
    unit waits for a reload), then a rerun reports `changed=0`.
-12. Check mode on configured hosts with their SuiFleet units stopped, as an
+12. A provisioning-unit update on the binary-profile host whose units
+   (including the oneshot) are stopped, interrupted after the unit files are
+   installed and before the daemon-reload: the retry must load the installed
+   provisioning unit before starting it (a test-only privileged
+   `ExecStartPost` marker proves which definition ran), identity is
+   preserved, and a rerun reports `changed=0`.
+13. A signing-socket drop-in (`SocketMode=0620`) added to a deb host without a
+   daemon-reload (with the unit fragment reinstalled unchanged, as a package
+   update leaves it), then removed the same way: each run loads the change,
+   recreates the socket with the loaded mode, restarts the signer and the
+   daemon and verifies against the loaded unit files; each rerun reports
+   `changed=0`.
+14. Check mode on configured hosts with their SuiFleet units stopped, as an
    interrupted upgrade leaves them, one host with only the signing socket
    still active and one host's journal not yet initialized: the preview
    succeeds, starts no unit (no socket-activated signer), dispatches no
@@ -512,9 +533,9 @@ The harness checks these phases:
    untouched. The converged and upgrade previews, where every signing service
    is active when the preview reads it, also dispatch no self-check. The real run then starts
    and verifies the hosts, and a rerun reports `changed=0`.
-13. A rolling-restart preview in check mode succeeds without restarting the
+15. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
-14. Rolling restart.
+16. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that
