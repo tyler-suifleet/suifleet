@@ -1,7 +1,6 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NETWORK } from "@/lib/constants";
 export const NAV = [
   { href: "/get-started", label: "Get started", description: "Connect your account, prepare a device and send its first update." },
   { href: "/",            label: "Dashboard", description: "See device health, recent updates and active incidents across your fleet." },
@@ -67,7 +66,7 @@ export function Sidebar() {
         </div>)}
       </nav>
       <div className="border-t border-white/10 px-6 py-5 text-xs text-slate-400">
-        Edge fleet management <span className="mt-1 block capitalize">{NETWORK} workspace</span>
+        Edge fleet management
       </div>
     </aside>
   );

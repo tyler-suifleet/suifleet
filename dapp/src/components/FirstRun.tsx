@@ -65,7 +65,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     retry: false,
     refetchInterval: 60_000,
     queryFn: async () => {
-      if (!account!.chains.includes(`sui:${NETWORK}`)) throw new Error(`This account does not support sui:${NETWORK}. Choose a wallet account on this network.`);
+      if (!account!.chains.includes(`sui:${NETWORK}`)) throw new Error(`This wallet account does not support the network this workspace uses. Choose a wallet account on this network.`);
       await verifyDeployment(client);
       return (await client.getBalance({ owner: account!.address })).balance.balance;
     },
@@ -109,7 +109,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   return <div className="max-w-4xl space-y-6 text-sm text-gray-900">
     <header className="space-y-1">
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
-      <p className="text-gray-700">Public testnet evaluation: test SUI pays network fees only. It does not include device capacity, paid storage or production service. Check availability before making a payment.</p>
+      <p className="text-gray-700">Network fees are paid in SUI from your wallet. Device capacity and storage are purchased separately.</p>
     </header>
 
     {next && <p role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-blue-950">
@@ -121,7 +121,6 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       {account ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">{accountName ?? "Wallet account"}</span>
         <span className="font-mono text-gray-700" title={account.address}>{shortAddress(account.address)}</span>
-        <NetworkBadge />
       </div> : <>
         <p className="text-gray-700">{config.enabled ? "Use Google sign-in or Slush" : "Use Slush"} in the wallet menu—no extension needed. Supported Sui extension wallets also work. If Slush cannot open in your browser or region, choose an available supported wallet; never share recovery words with SuiFleet. Closing or cancelling the menu leaves you signed out; open it again when ready.</p>
         {!config.enabled && <p role="status" className="text-gray-700">{config.reason}</p>}
@@ -168,15 +167,15 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           balance={state.isSuccess ? state.data : undefined} balanceFailed={state.isError}
           deviceBudget={budget?.balance} budgetChecked={budgets.isSuccess} budgetFailed={budgets.isError} />
       </Disclosure>
-      {!account ? <p className="text-gray-700">Sign in to check your balance on <strong>{NETWORK}</strong>.</p> : <>
+      {!account ? <p className="text-gray-700">Sign in to check your SUI balance.</p> : <>
         {state.isPending && <p role="status">Checking deployment and account balance…</p>}
         {state.error && <p role="alert" className="text-red-800">{state.error.message}</p>}
         {state.isSuccess && <div className="flex flex-wrap items-baseline gap-x-3">
           <span className="text-2xl font-semibold" aria-label={`Network fee balance ${displaySui(state.data)}`}>{displaySui(state.data)}</span>
-          <span className="text-gray-700">available for network fees on {NETWORK}</span>
+          <span className="text-gray-700">available for network fees</span>
         </div>}
         {state.isSuccess && (BigInt(state.data) === BigInt(0)
-          ? <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">Fund this address before registering. Send SUI on <strong>{NETWORK}</strong> to <span className="break-all font-mono">{account.address}</span>.</p>
+          ? <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">Fund this address before registering. Send SUI to <span className="break-all font-mono">{account.address}</span>.</p>
           : <p className="text-gray-700">Adding a device costs a small network fee. Your approval app shows the amount before you confirm. This account balance is separate from your device operating budget.</p>)}
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" disabled={state.isFetching} onClick={async () => {
@@ -187,7 +186,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           {state.isFetching && !state.isPending && <span className="text-gray-600">Refreshing…</span>}
         </div>
         <Disclosure summary="How to fund this address">
-          <p>Send SUI on this network to your address from another wallet. For the testnet preview, use the <a className={LINK} href="https://faucet.sui.io/" target="_blank" rel="noopener noreferrer">official testnet faucet</a> to request free test SUI. For a local development network, ask its operator for test funds. Test tokens have no monetary value. Do not send mainnet funds to a test network.</p>
+          <p>Send SUI to your address from another wallet or an exchange. Check the address before sending.</p>
         </Disclosure>
         {firstFleet && <div className="rounded-md border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold">Create your first fleet</h3><p>After funding account fees, use Create default fleet above and review its preview. A new customer has zero device capacity: check Device capacity before registration. If checkout is not configured, ask the operator how capacity can be enabled; an account or device operating budget deposit cannot buy capacity.</p><p>Then choose reporting funds and spending limits on Device and storage budgets. Device reporting uses separate funds; creating a fleet does not fund it. Registration stays unavailable until fleet access and capacity are verified.</p></div>}
         {(!selection.supported || !!fleet) && budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
@@ -201,8 +200,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         </div>}
         <Disclosure summary="Technical details">
           <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[max-content_1fr]">
-            <dt className="text-gray-600">Network</dt><dd>{NETWORK}</dd>
-            <dt className="text-gray-600">Address</dt><dd className="break-all font-mono">{account.address}</dd>
+                        <dt className="text-gray-600">Address</dt><dd className="break-all font-mono">{account.address}</dd>
             {state.isSuccess && <><dt className="text-gray-600">Exact balance</dt><dd>{formatSui(state.data)} ({BigInt(state.data).toLocaleString("en-US")} MIST)</dd></>}
           </dl>
         </Disclosure>
@@ -255,7 +253,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           </label>
           {budget && <BudgetEnrollment budget={budget} selected={fromBudget} onChange={setFromBudget} />}
           <div className="space-y-2 sm:col-span-2">
-            <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
+            <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span>.</p>
             <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending || pending.waiting.length > 0 || !!fleet && fleet.activeDevices >= fleet.deviceLimit}>{mutation.isPending ? "Registering…" : "Register device"}</button>
             {!ready && state.isSuccess && <p className="text-gray-600">{BigInt(state.data) === BigInt(0) ? "Add funds to this account to enable registration." : missingFleet ? fleetNext : capacity && !capacity.administrator ? "Ask a fleet administrator to register this device." : "Check Device capacity before registering this device."}</p>}
           </div>
@@ -318,9 +316,6 @@ function Check() {
   return <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 8.5l3 3 7-7" /></svg>;
 }
 
-function NetworkBadge() {
-  return <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-900">Network: {NETWORK}</span>;
-}
 
 function Disclosure({ summary, children }: { summary: string; children: ReactNode }) {
   return <details className="rounded-md border border-gray-200">

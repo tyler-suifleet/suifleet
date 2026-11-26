@@ -2,10 +2,12 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -141,10 +143,82 @@ class LocalLane(unittest.TestCase):
         self.assertEqual(self.proof()[0], 'published')
 
     def test_live_implementation_is_fenced(self):
-        import os
         from coordinator import process_identity
         self.process.write_text(json.dumps(dict(pid=os.getpid(), started=process_identity(os.getpid()))))
         with self.assertRaises(RuntimeError): self.lane.tick(self.f.project, self.pr, self.owner)
+
+    def recovery_origin(self):
+        self.f.git('checkout', '-qb', self.owner['branch'], self.pr['headRefOid'])
+        run = 'run-' + 'a'*32
+        session = 'recovery-' + run
+        acquired = time.time()-60
+        self.owner.update(session=session, worktree=str(self.f.repo), events=[
+            dict(kind='claim', actor=session, ticket='test::'+self.owner['key'],
+                 detail='Codex; token='+self.owner['token'], at=acquired)])
+        directory = self.f.state/'recovery-watchdog'/run
+        directory.mkdir(parents=True)
+        for filename, offset, content in [
+            ('process', -3, dict(pid=99999999, started='1', session=99999999)),
+            ('child', -2, dict(pid=99999998)),
+            ('result', 1, dict(outcome='waiting', actions=[], verification=[], blockers=[], next_check_at=acquired+600)),
+            ('exit', 2, dict(returncode=0)),
+        ]:
+            path = directory/(filename+'.json')
+            path.write_text(json.dumps(content))
+            os.utime(path, (acquired+offset, acquired+offset))
+        ticket = self.f.ticket
+        self.f.ticket = lambda project, command, *args: '[]' if command == 'locks' else ticket(project, command, *args)
+        return directory
+
+    def test_stopped_watchdog_routes_through_scheduler_and_batch_source_review(self):
+        from test_streaming_source_reviews import StreamingSourceReviews
+        self.recovery_origin()
+        self.pr['_review_mode'] = 'source'
+        with patch('recovery_watchdog.survivors', return_value=[]), tempfile.TemporaryDirectory() as directory:
+            engine = StreamingSourceReviews().engine(directory)
+            self.addCleanup(engine.store.db.close)
+            engine.local_infrastructure = self.lane
+            engine.ticket.return_value = json.dumps(self.owner)
+            self.assertTrue(engine.start_source_review(self.f.project, self.pr, [self.owner]))
+            engine.launch.assert_called_once_with(self.f.project, self.pr, self.owner, 'review')
+            self.assertFalse(self.lane.tick(self.f.project, self.pr, self.owner))
+            with self.assertRaisesRegex(RuntimeError, 'process identity'):
+                self.lane.fenced(self.f.project, self.pr, self.owner)
+            self.f.local_infrastructure = self.lane
+            self.assertIsNone(self.f.controller.source(self.f.project, self.pr, self.owner))
+            with patch.object(self.f, 'source_receipt', return_value=dict(base=self.f.base)):
+                self.assertIsNotNone(self.f.controller.source(self.f.project, self.pr, self.owner))
+                with patch('recovery_watchdog.survivors', return_value=[123]):
+                    self.assertIsNone(self.f.controller.source(self.f.project, self.pr, self.owner))
+        self.assertEqual(self.f.controller.main(self.f.project), self.f.base)
+
+    def test_watchdog_origin_holds_on_missing_invalid_or_conflicting_evidence(self):
+        directory = self.recovery_origin()
+        with patch('recovery_watchdog.survivors', return_value=[]):
+            self.assertFalse(self.lane.eligible(self.f.project, self.pr, self.owner))
+            for name in ('process.json', 'exit.json', 'child.json', 'result.json'):
+                with self.subTest(receipt=name):
+                    path = directory/name
+                    saved = path.rename(directory/(name+'.saved'))
+                    self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+                    path.write_text('{}')
+                    self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+                    saved.replace(path)
+            with patch('coordinator.claim_processes', return_value=[dict(pid=123)]):
+                self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+            with patch.object(self.f, 'ticket', return_value=json.dumps({**self.owner, 'token':'other'})):
+                self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+            self.f.db.execute("INSERT INTO jobs VALUES('test',1,'fix','orphaned')")
+            self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+            self.f.db.execute('DELETE FROM jobs')
+            self.f.db.execute("INSERT INTO local_integrations VALUES('test',1,'old','old','publish_pending','{}')")
+            self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+            self.f.db.execute('DELETE FROM local_integrations')
+            implementation = self.f.state/'implementations'/self.owner['session']
+            with patch.object(Path, 'lstat', autospec=True, side_effect=PermissionError):
+                self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
+            implementation.mkdir()
+            self.assertTrue(self.lane.eligible(self.f.project, self.pr, self.owner))
 
 
 if __name__ == '__main__': unittest.main()

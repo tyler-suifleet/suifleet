@@ -40,6 +40,9 @@ Do not install unverified binaries.
 | Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
 | Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
+| Rocky Linux 10 (x86_64, systemd, Linux ≥6.5) | [RPM packaging](RPM_PACKAGING.md) | Buildable RPM and signed repository staging; public repository pending |
+| Buildroot (BusyBox init) | [Buildroot packaging](BUILDROOT_PACKAGING.md) | Pinned AArch64 glibc and x86-64 glibc and musl profiles |
+| Linux without systemd | [OpenRC, SysV, runit and foreground](PORTABLE_LINUX_SERVICE.md) | Manual install using the portable signer |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
 
 Windows and 32-bit x86 Linux have their own notes in
@@ -51,8 +54,8 @@ repository. Each device generates its own at first boot or install.
 ## Yocto image and recipe
 
 For an existing OE product, follow the [OpenEmbedded integration guide](CUSTOMER_YOCTO.md)
-to select a verified standalone layer commit and add the client to your image.
-The Pi example below runs from a reviewed core checkout.
+to select a pinned standalone layer and add the client to your image.
+The Pi image commands below run from a reviewed core source checkout.
 
 The `meta-suifleet` layer packages the client as the `suifleet` recipe, with
 first-boot key provisioning and systemd services. Build a Raspberry Pi 3 Model
@@ -65,11 +68,12 @@ kas build kas/pi-image.yml:/absolute/path/to/private-access.yml
 ```
 
 The private overlay adds your SSH public key; see [Pi image guide](CUSTOMER_PI_IMAGE.md)
-for it, flashing and first login.
+for the overlay, flashing and first login.
 
 The recipe now pins client 0.2.3, compatible with the committed Seal testnet
 profile. Older evaluation images contain client 0.2.1 and cannot use a manifest
-requiring 0.2.3; rebuild from the updated recipe. Do not lower the manifest's
+requiring 0.2.3. Upgrade the package in place on enrolled devices or rebuild from
+the updated recipe for new installations. Do not lower the manifest's
 client range to use an old image. See [Yocto software build evidence](YOCTO_PACKAGING.md)
 for rebuilt package scope; a new bootable SD image and physical Pi acceptance
 must be recorded separately. `make test-yocto-packaging` checks profile/version
@@ -82,6 +86,62 @@ networking, and prints the address (see
 templates. The signing service stays stopped until `/etc/suifleet/signer.toml`
 exists, and the daemon `suifleet.service` until `/etc/suifleet/config.toml`
 exists.
+
+## Migrate an enrolled Linux device in place
+
+Use the migration-capable Yocto, Debian or RPM package to upgrade a device
+with a file-backed identity at `/etc/suifleet/device.key`. The upgrade creates
+the signer account, moves access to the key to that account, and parks a device
+whose configuration still gives the daemon direct access to the key. Package
+installation leaves the enrolled configuration and journal in place and
+performs no enrollment transactions. Systemd activation stays gated across
+reboots until migration succeeds.
+
+Set aside a maintenance window and back up the configuration and state
+securely. Complete any in-progress platform firmware operation before upgrading
+or migrating. Use the distribution's package manager to install the verified
+migration-capable package. On Yocto, build recipe revision `1.0-r1` or later with the
+[enrollment companion layer](YOCTO_PACKAGING.md) enabled.
+For a device that already uses the signer and needs to change deployments,
+install the migration-capable package and begin with the same `prepare` step.
+
+```sh
+sudo /usr/sbin/suifleet-migrate prepare
+```
+
+This stops SuiFleet and archives the old configuration, including the manifest,
+signer policy, local environment and firmware settings when present. It moves the
+standard `/var/lib/suifleet` state tree to a root-only archive beside it and
+creates an empty active state tree. The archived journal remains bound to the
+old deployment. If you used a custom state path outside that tree, keep that
+path as part of the old deployment's archive and use the default state path in
+the new enrollment template. A mounted state directory must be unmounted or
+relocated by the operator before this command can archive it. Review any
+custom systemd units or drop-ins before migration so that they cannot start a
+legacy process or redirect the packaged client to the retired manifest.
+
+Use the [first-boot enrollment workflow](CUSTOMER_ENROLLMENT.md) for the
+**destination** deployment. Install its trusted `first-boot.toml` and attach
+the private writable media containing the new claim, verified manifest and
+optional configuration template. Review the template and updater settings for
+the destination. Then run:
+
+```sh
+sudo /usr/sbin/suifleet-migrate enroll
+sudo systemctl enable --now suifleet-signer.socket suifleet-enrollment.path
+sudo systemctl start suifleet.service
+```
+
+If you configured the Yocto firmware helper for the destination deployment,
+restart its trigger with `sudo systemctl start suifleet-firmware.path`.
+
+Enrollment reuses the original signing key and installs new Device and
+DeviceCap IDs after verifying the destination deployment and claim. If it fails,
+the device remains parked. Correct the reported issue and retry with the same
+media, especially after an interrupted submission. On success the command
+prints both archive locations. Check `systemctl status suifleet.service` and
+confirm the original device address appears with the new IDs in the destination
+fleet. Retire the old registration separately through the old fleet operator.
 
 ## macOS package
 
@@ -106,55 +166,59 @@ Service control, logs and limits are in [macOS guide](CUSTOMER_MACOS.md).
 
 ## Debian and Ubuntu
 
-There is no published `.deb` download or apt repository yet. Do not run an
-invented `apt install suifleet` command or fetch packages from unofficial mirrors.
-Local-file packages can be built for amd64 and arm64. See
-[Debian packaging](DEBIAN_PACKAGING.md) for build, authenticated-bundle installation
-and configuration instructions. Packages require systemd and Linux 6.5 or later;
-Debian 12 needs a suitable newer/backports kernel, while Ubuntu 24.04 has a
-suitable kernel. Obtain a verified bundle from your operator or use a reviewed
-source checkout. The separate signing service and runtime identity protections
-still apply. [Generic Linux](#generic-linux) remains a manual evaluation option.
-Package publication will provide architecture, supported distribution versions,
-checksums and signature-verification instructions before a download is offered.
+Use a verified local-file package or the signed APT snapshot from your operator.
+See [Debian packaging](DEBIAN_PACKAGING.md) for supported profiles, exact version
+pinning and data retention. Packages require systemd and Linux 6.5 or later for
+the isolated signer.
 
 ## Generic Linux
 
-These source commands require access to the public build inputs; they are an
-optional evaluation path, not a requirement to browse the core repository to
-configure a supplied client. Obtain source from your operator or clone
-`https://github.com/tyler-suifleet/suifleet.git`, select a reviewed revision, and
-run commands from the checkout root. If build inputs are unavailable, ask the
-operator for a verified bundle rather than skipping signature checks.
-
-On another systemd-based Linux, install the same binary, accounts and units as
-the Yocto recipe. From a checkout, with Rust 1.94.0:
+Select and authenticate a [versioned bundle](CUSTOMER_RELEASES.md). Extract
+the manifest-listed inner archive into a staging directory as an unprivileged
+user. These commands assume the extracted `suifleet` directory is in your
+current directory and that the two dedicated system accounts do not yet exist.
+On upgrades reuse those accounts, stop the running units before replacing
+files, and preserve existing configuration, identity and journals.
 
 ```sh
-cargo build --locked --release --manifest-path suifleet-edge/Cargo.toml
-F=suifleet-edge/meta-suifleet/recipes-edge/suifleet/files
+F=suifleet/systemd
 sudo useradd --system --no-create-home --home-dir /var/lib/suifleet --shell /usr/sbin/nologin --user-group suifleet
 sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --user-group suifleet-signer
-sudo install -m 0755 suifleet-edge/target/release/suifleet /usr/bin/suifleet
-sudo install -D -m 0755 "$F/suifleet-provision" /usr/libexec/suifleet-provision
+sudo install -d -m 0750 -o root -g suifleet /etc/suifleet
+sudo install -d -m 0700 -o suifleet -g suifleet /var/lib/suifleet
+sudo install -m 0755 suifleet/bin/suifleet /usr/bin/suifleet
+sudo install -D -m 0755 suifleet/libexec/suifleet-provision /usr/libexec/suifleet-provision
 sudo install -m 0644 "$F"/suifleet*.service "$F"/suifleet*.path "$F"/suifleet*.socket /etc/systemd/system/
-sudo install -d -m 0750 -g suifleet /etc/suifleet
+sudo install -m 0640 -o root -g suifleet-signer "$F/signer.toml.example" /etc/suifleet/signer.toml.example
+sudo install -m 0640 -o root -g suifleet "$F/config.toml.example" /etc/suifleet/config.toml.example
 sudo systemctl daemon-reload
-sudo systemctl enable --now suifleet-provision.service suifleet-enrollment.path suifleet-signer.socket
+sudo systemctl start suifleet-provision.service
 ```
 
-Copy the recipe's templates beside the real files, as the image does:
+Install the authenticated release trust file root-owned (0644). Provision and
+enroll below, then enable the signer socket and enrollment path as described
+under [signing service configuration](#signing-service-configuration-signertoml).
+The daemon binary also implements the signer command. The provisioning helper
+and the systemd service, socket and path definitions are its companion files.
+Platform updater tools are supplied separately by the platform operator.
 
-```sh
-sudo install -m 0640 -g suifleet-signer "$F/signer.toml.example" /etc/suifleet/signer.toml.example
-sudo install -m 0640 -g suifleet "$F/config.toml.example" /etc/suifleet/config.toml.example
-```
-
-They keep the key in the separate signing service
-([signing service](CUSTOMER_KEY_ISOLATION.md)); write `signer.toml` and then
-`config.toml` from them as described below. The privileged firmware path is
-optional; see [OPERATIONS.md](OPERATIONS.md#execution-privileges) before
-enabling `suifleet-firmware.path`.
+The included units require systemd, and their signer configuration requires
+Linux 6.5 or later for caller identity checks. For a source installation on an
+older kernel or a host without systemd, follow the separate
+[portable signer setup](KEY_ISOLATION.md#portable-linux-signer) and its runtime
+requirements. That profile supports [managed client updates](DAEMON_UPDATE.md#managed-updates-with-the-portable-signer)
+with a platform-approved executable. The native systemd signer uses
+platform-managed package updates.
+Keep device keys isolated from the daemon account.
+Follow [key isolation](KEY_ISOLATION.md) for the current signer and PKCS#11
+build requirements. The standard bundles use the current service signer
+and do not enable the optional PKCS#11 feature. For user-owned hardware keys,
+use a build with that feature and validate the operator's token integration.
+Follow the progress of [older-kernel signing](https://github.com/tyler-suifleet/suifleet/issues/818),
+[non-systemd supervision](https://github.com/tyler-suifleet/suifleet/issues/829),
+[isolated-signer self-update](https://github.com/tyler-suifleet/suifleet/issues/831),
+[standalone layer publication](https://github.com/tyler-suifleet/suifleet/issues/820)
+and [older Yocto LTS support](https://github.com/tyler-suifleet/suifleet/issues/835).
 
 ## Find the device address
 
@@ -224,6 +288,11 @@ sudo install -m 0640 -o root -g suifleet-signer signer.toml /etc/suifleet/signer
 
 macOS has no signing service: the daemon reads the key itself (see
 [macOS guide](CUSTOMER_MACOS.md)), so skip this step there.
+
+For a batch of new Linux devices, use [first-boot enrollment](CUSTOMER_ENROLLMENT.md)
+to install the deployment, signer and daemon settings from provisioning media.
+The manual configuration procedure below applies to individual or already
+enrolled clients.
 
 ## Configuration file
 

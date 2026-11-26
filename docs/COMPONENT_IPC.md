@@ -48,7 +48,7 @@ name and operations; topics are exact strings, without wildcards. Component ACLs
 cannot grant `install` or `list`. Operators explicitly listed as administrators
 can manage all components and access their logs/public configuration.
 
-The shipped supervisor still runs components as the daemon user. **Those shared-UID
+The native command supervisor still runs components as the daemon user. **Those shared-UID
 processes are denied component IPC and cannot be made administrators.** Provision
 IPC clients as separate platform-managed Unix services/users with access only to
 the socket, not daemon keys/state/configuration or sibling credentials. This ticket
@@ -56,8 +56,10 @@ does not introduce per-component Unix execution users or turn existing shared-us
 supervision into an isolation boundary. The daemon user, root, operator ACL file
 and daemon-owned socket directory are trusted infrastructure; running untrusted
 code as that user compromises this boundary, including socket integrity. Do not
-use bearer credentials to pretend to isolate same-UID components. The UID mapping
-is a local platform identity; it is not a Sui account or cloud authorization grant.
+use bearer credentials to pretend to isolate same-UID components. For Docker
+components, see [OCI device-local grants](OCI_COMPONENTS.md#device-local-grants-for-descriptor-version-2).
+The UID mapping is a local platform identity; it is not a Sui account or cloud
+authorization grant.
 
 At most 64 component principals, 16 administrators, 128 total subscriptions and
 128 publication topics per component are accepted. Validate configuration before
@@ -76,7 +78,7 @@ no keys, user accounts or enrollment settings are embedded by package builds.
 | `logs` | `component` | Last 8 KiB of the committed supervised component's private log, UTF-8 with replacement. No arbitrary paths or log creation. |
 | `config` | `component` | Public committed configuration record, including version/deployment/effective/defaults. Confidential device-overlay values are never returned. Poll the record to observe configuration changes. |
 | `health` | `component`, `payload` = `healthy`, `degraded` or `broken` | Volatile self-reported health plus server timestamp. Does not assert firmware boot health, change supervisor phase or override signed fleet telemetry. Principal must exist in the configured ACL. |
-| `publish` | `component`, exact `topic`, JSON `payload` | Fanout to configured subscribers, message envelope includes authenticated component name (or `@operator/UID` for administrators). Payload <=4096 serialized bytes. Atomic backpressure if any inbox is full. |
+| `publish` | `component`, exact `topic`, JSON `payload` | Fanout to configured subscribers, message envelope includes authenticated component name (or `@operator/UID` for administrators). Payload <=4096 serialized bytes. Atomic backpressure if any inbox or durable subscription queue is full: error `full`, nothing stored. Other failures stay `request_failed` and do not promise that nothing was stored. |
 | `receive` | `component`, exact `topic` | Destructive nonblocking dequeue, or null. Each principal/topic has 32 messages maximum. With a durable subscription to that filter, its oldest message instead ([MESSAGING.md](MESSAGING.md)). |
 | `stream_create`, `stream_delete`, `stream_append`, `stream_read`, `stream_describe` | `component`, stream name as `topic` | Durable streams (SF-034, [STREAMS.md](STREAMS.md)); need `[streams]` and a matching `streams` glob in the component's ACL. |
 | `stream_export_ack` | `component`, stream name as `topic`, `{sequence}` | Trusted [external exporter](STREAM_EXPORTERS.md) only: explicit operation + stream glob, operator-declared `external_export` required. Persists confirmed remote delivery before retirement. |
@@ -122,6 +124,10 @@ python3 sdk/python/suifleet_ipc.py install --payload '"0xDEPLOYMENT_ID"'
 ```
 
 The Python module provides named methods for all workflows and generic `request`.
+SF-302 adds a TypeScript/Node.js SDK with the same wire contract, typed APIs,
+connect-phase-only reconnects and a bounded outbound buffer: see [NODE_SDK.md](NODE_SDK.md).
+The operation list, administrator-only set and protocol codes shared by the daemon and
+both SDKs are recorded in [`interfaces/ipc-v1.json`](../interfaces/ipc-v1.json).
 Transport exceptions/timeouts have an **unknown mutation outcome**. Never automatically
 retry a destructive operation; inspect `status`, logs and the durable deployment
 outcome before deciding. The SDK does not retry. Only install has existing-deployment
@@ -134,7 +140,8 @@ One UTF-8 JSON object plus LF per connection, at most 65536 bytes including LF.
 Requests have `version: 1`, `operation`, optional `component`/`topic` (default empty)
 and optional `payload` (default null). No pipelining or streaming. Responses contain
 `version: 1`, `ok` and either `data` or `error: "request_failed"` (stream and shadow
-operations return their protocol codes instead, such as `full`, `evicted` or `conflict`). Errors deliberately
+operations return their protocol codes instead, such as `full`, `evicted` or `conflict`;
+`publish` returns `full` for backpressure that stored nothing). Errors deliberately
 do not disclose private command/configuration diagnostics; operators inspect daemon
 logs. A denied/invalid/future-version request has no handler side effects.
 

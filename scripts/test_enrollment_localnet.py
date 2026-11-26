@@ -18,13 +18,23 @@ roles and a PKCS#11 (SoftHSM2) device signer, with the real daemon.
 Needs a disposable localnet (as for the other localnet tests), the daemon
 built with `--features pkcs11`, and softhsm2 + opensc (pkcs11-tool) for the
 PKCS#11 case (make test-enrollment-localnet).
+
+The --migration-only case requires BusyBox and util-linux flock to exercise the
+migration helper with the command set available on a minimal Yocto image.
 """
 import argparse
+import configparser
 import hashlib
+import grp
 import json
 import os
 from pathlib import Path
+import pwd
 import shutil
+import socket
+import socketserver
+import select
+import stat
 import signal
 import subprocess
 import tempfile
@@ -39,7 +49,7 @@ import deployment_manifest as dm
 import test_component as component
 
 ROOT = Path(__file__).resolve().parents[1]
-DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
+DAEMON = Path(os.environ.get("SUIFLEET_ENROLLMENT_BIN", ROOT / "suifleet-edge/target/debug/suifleet"))
 CLOCK = "@0x6"
 SOFTHSM = Path("/usr/lib/softhsm/libsofthsm2.so")
 
@@ -55,7 +65,10 @@ def wait_for(condition, message, process=None, timeout=90):
     raise AssertionError(message)
 
 
-def run(rpc_url, faucet_url):
+def run(rpc_url, faucet_url, first_boot_only=False, migration_only=False):
+    if migration_only:
+        from test_device_migration import require_disposable
+        require_disposable()
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
@@ -88,15 +101,21 @@ def run(rpc_url, faucet_url):
                         command.append("--json")
                     result = subprocess.run(command, text=True, capture_output=True, timeout=300)
                     if result.returncode and check:
-                        raise RuntimeError(f"sui client {args[0]} failed:\n{result.stderr[-3000:]}")
+                        raise RuntimeError(f"sui client {args[0]} failed:\n{(result.stderr or result.stdout)[-3000:]}")
                     if not json_output or result.returncode:
                         return result
                     out = result.stdout
                     return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
 
                 client("-y", "active-address", json_output=False)
-                client("new-env", "--alias", "enroll-test", "--rpc", rpc_url, json_output=False)
-                client("switch", "--env", "enroll-test", json_output=False)
+                # The pinned CLI creates a default local entry. Select it
+                # offline instead of probing the default public testnet.
+                config_path = root / "wallet/client.yaml"
+                config = config_path.read_text()
+                assert 'rpc: "http://127.0.0.1:9000"' in config and "active_env: testnet" in config
+                config_path.write_text(config.replace(
+                    'rpc: "http://127.0.0.1:9000"', f"rpc: {json.dumps(rpc_url)}"
+                ).replace("active_env: testnet", "active_env: local"))
                 operator = client("active-address", json_output=False).stdout.strip().split()[-1]
 
                 def new_address():
@@ -156,6 +175,26 @@ def run(rpc_url, faucet_url):
                     funding += ["--transfer-objects", f"[fees.{index}]", f"@{address}"]
                 transaction("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector{addresses}", *funding)
                 print("PASS: policy created; 4 claim keys added and funded in one transaction")
+
+                if migration_only:
+                    old = client("test-publish", contracts, "--build-env", "testnet",
+                                 "--pubfile-path", root / "Pub.retired.toml", "--gas-budget", "900000000",
+                                 "--silence-warnings")
+                    assert old["effects"]["status"]["status"] == "success"
+                    old_package = next(c["packageId"] for c in old["objectChanges"] if c["type"] == "published")
+                    old_registry = created(old, "::device_registry::DeviceRegistry")[0]
+                    assert old_package != package and old_registry != registry
+                    old_manifest = dm.resolve(SimpleNamespace(
+                        chain_identifier=chain_id, rpc=rpc_url, package=old_package,
+                        upgrade_cap=created(old, "::package::UpgradeCap")[0], registry=old_registry,
+                        network="localnet", publisher=aggregator, aggregator=aggregator))
+                    check_migration(root, old_manifest, policy, operator, claims["c1"],
+                                    client, transaction, created)
+                    return
+
+                if first_boot_only:
+                    check_first_boot(root, manifest, policy, operator, claims, client, transaction, created, package, registry)
+                    return
 
                 def enroll(name, claim, *, device_key=None, signer=None):
                     config = root / f"enroll-{name}.toml"
@@ -343,9 +382,273 @@ def run(rpc_url, faucet_url):
         walrus.server_close()
 
 
+def check_migration(root, old, policy, operator, claim, client, transaction, created):
+    from test_device_migration import CONFIG, KEY, MIGRATE, PENDING, STATE
+    from test_device_migration import check_parked, create_legacy_key, legacy_files
+
+    busybox = shutil.which("busybox")
+    flock = shutil.which("flock")
+    assert busybox and flock, "Install BusyBox and util-linux flock for migration testing"
+    tools = root / "migration-bin"
+    tools.mkdir()
+    # Match the Poky BusyBox applets used by the helper. In particular its
+    # defconfig omits install. flock is an explicit recipe runtime dependency.
+    for applet in ("cat", "chmod", "chown", "id", "mkdir", "mktemp", "mv", "stat", "sync", "touch"):
+        (tools / applet).symlink_to(busybox)
+    (tools / "flock").symlink_to(flock)
+    migration_env = {**os.environ, "PATH": str(tools)}
+
+    def migrate(action, **kwargs):
+        return subprocess.run([busybox, "sh", MIGRATE, action], env=migration_env, **kwargs)
+
+    address = create_legacy_key(DAEMON)
+    key_bytes = KEY.read_bytes()
+    package = old["call_package_id"]
+    registry = old["shared_objects"]["registry"]["id"]
+    registered = transaction(
+        "--move-call", f"{package}::device_registry::register_device", f"@{registry}",
+        '"legacy-device"', f"@{address}", '"aarch64"', CLOCK, "--assign", "device",
+        "--move-call", f"{package}::device_cap::issue_cap", "device",
+        "--move-call", f"{package}::device_registry::activate_device", f"@{registry}",
+        "device", "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
+    old_device = created(registered, "::device_registry::Device")[0]
+    old_cap = created(registered, "::device_cap::DeviceCap")[0]
+    files = legacy_files(old, old_device, old_cap, address)
+    migrate("package-upgrade", check=True)
+    check_parked(files, address, key_bytes)
+    migrate("prepare", check=True)
+    migrate("prepare", check=True)
+    assert stat.S_IMODE(STATE.stat().st_mode) == 0o700
+    assert STATE.stat().st_uid == pwd.getpwnam("suifleet").pw_uid
+    assert STATE.stat().st_gid == grp.getgrnam("suifleet").gr_gid
+    archive = Path((PENDING / "archive").read_text().strip())
+
+    media = root / "enrollment"
+    folder = media / "legacy-device"
+    folder.mkdir(parents=True)
+    shutil.copyfile(claim[0], folder / "claim.key")
+    (folder / "enroll.toml").write_text(
+        f'manifest_path = "deployment.json"\nclaim_key_path = "claim.key"\n'
+        f'policy_id = "{policy}"\nname = "legacy-device"\nkeypair_path = "{KEY}"\n'
+    )
+    trusted_manifest = root / "deployment.json"
+    trusted = trusted_manifest.read_bytes()
+    (CONFIG / "first-boot.toml").write_text(
+        f'policy_id = "{policy}"\noperator = "{operator}"\n'
+        f'history_start_checkpoint = 0\nlocations = ["{media}"]\n'
+        f'manifest_sha256 = "{hashlib.sha256(trusted).hexdigest()}"\n'
+    )
+    config = CONFIG / "config.toml"
+    config.write_text('[device.signer]\nkind = "service"\n')
+    preinstalled = migrate("enroll", capture_output=True, text=True, timeout=30)
+    assert preinstalled.returncode != 0 and "Use first-boot media" in preinstalled.stderr
+    assert config.exists() and PENDING.is_dir()
+    config.unlink()
+
+    deployment = folder / "deployment.json"
+    deployment.write_bytes(json.dumps(old).encode())
+    rejected = migrate("enroll", capture_output=True, text=True, timeout=30)
+    assert rejected.returncode != 0 and PENDING.is_dir() and not (CONFIG / "config.toml").exists()
+    assert not (CONFIG / "signer.toml").exists() and not (CONFIG / "deployment.json").exists()
+    assert json.loads((folder / "enrollment-status.json").read_text())["enrollment"] == "invalid-enrollment-media-or-config"
+    assert (folder / "claim.key").read_bytes() == claim[0].read_bytes()
+
+    shutil.copyfile(trusted_manifest, deployment)
+    migrate("enroll", check=True, timeout=220)
+    assert not PENDING.exists() and not (folder / "claim.key").exists()
+    enrolled = configparser.ConfigParser()
+    enrolled.read(CONFIG / "config.toml")
+    device = enrolled["device"]
+    assert enrolled["device.signer"]["kind"] == '"service"'
+    assert json.loads(device["device_object_id"]) != old_device
+    cap = json.loads(device["device_cap_id"])
+    assert cap != old_cap
+    assert client("object", cap)["owner"] == {"AddressOwner": address}
+    assert (CONFIG / "deployment.json").read_bytes() == trusted
+    assert KEY.read_bytes() == key_bytes and not (STATE / "state.json").exists()
+    assert (archive / "state/state.json").read_bytes() == files[STATE / "state.json"]
+    (archived_config,) = CONFIG.glob("migration.previous.*/config")
+    assert (archived_config / "config.toml").read_bytes() == files[CONFIG / "config.toml"]
+    assert (archived_config / "deployment.json").read_bytes() == files[CONFIG / "deployment.json"]
+    print("PASS: retired-manifest refusal and same-key SF-322 enrollment into a second localnet registry")
+
+
+def check_first_boot(root, manifest, policy, operator, claims, client, transaction, created, package, registry):
+    assert os.geteuid() == 0, "use a disposable root container for service file ownership checks"
+    gids = {name: grp.getgrnam(name).gr_gid for name in ("suifleet", "suifleet-signer")}
+    assert len(set(gids.values())) == 2 and 0 not in gids.values()
+    template = b'[apply]\ncommand = "/usr/bin/false"\n[runtime]\npoll_seconds = 11\n'
+
+    def prepare(name, claim, *, batch=policy, expected_policy=None, deployment=manifest):
+        directory = root / name
+        directory.mkdir(mode=0o750)
+        media = directory / "enrollment"
+        folder = media / name
+        folder.mkdir(parents=True)
+        manifest_bytes = json.dumps(deployment).encode()
+        (folder / "deployment.json").write_bytes(manifest_bytes)
+        (folder / "config.template.toml").write_bytes(template)
+        shutil.copyfile(claim, folder / "claim.key")
+        (folder / "enroll.toml").write_text(
+            f'manifest_path = "deployment.json"\nclaim_key_path = "claim.key"\n'
+            f'policy_id = "{batch}"\nname = "{name}"\nkeypair_path = "{directory / "device.key"}"\n'
+        )
+        (directory / "first-boot.toml").write_text(
+            f'policy_id = "{expected_policy or batch}"\noperator = "{operator}"\n'
+            f'history_start_checkpoint = 0\nlocations = ["{media}"]\n'
+            f'manifest_sha256 = "{hashlib.sha256(manifest_bytes).hexdigest()}"\n'
+            f'template_sha256 = "{hashlib.sha256(template).hexdigest()}"\n'
+        )
+        subprocess.run([str(DAEMON), "--provision", directory / "device.key"], check=True, capture_output=True)
+        return directory, folder
+
+    def command(directory):
+        return [str(DAEMON), "--first-boot-enroll", directory]
+
+    def run_boot(directory, folder, expected):
+        process = subprocess.run(command(directory), capture_output=True, text=True, timeout=220)
+        if expected == "enrolled":
+            assert process.returncode == 0, (process.stdout, process.stderr)
+        else:
+            assert process.returncode != 0, process.stdout
+        actual = json.loads((folder / "enrollment-status.json").read_text())["enrollment"]
+        assert actual == expected, (actual, process.stdout, process.stderr)
+        return process
+
+    def check_install(directory, folder):
+        for file, group in (("deployment.json", "suifleet"), ("signer.toml", "suifleet-signer"), ("config.toml", "suifleet")):
+            info = (directory / file).stat()
+            assert (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, gids[group], 0o640)
+        config = configparser.ConfigParser()
+        config.read(directory / "config.toml")
+        signer = configparser.ConfigParser()
+        signer.read_string("[signer]\n" + (directory / "signer.toml").read_text())
+        assert config["device"]["device_cap_id"] == signer["signer"]["device_cap_id"]
+        assert config["device.signer"]["kind"] == '"service"'
+        assert config["runtime"].getint("poll_seconds") == 11
+        assert not (folder / "claim.key").exists()
+        return {key: json.loads(config["device"][key]) for key in ("device_cap_id", "device_object_id")}
+
+    # Start with the verified endpoint unavailable, then allow connections to
+    # the same isolated node without rewriting any trusted input.
+    endpoint = urlparse(manifest["rpc_url"])
+    online = threading.Event()
+
+    class Proxy(socketserver.BaseRequestHandler):
+        def handle(self):
+            if not online.is_set():
+                return
+            with socket.create_connection((endpoint.hostname, endpoint.port), timeout=8) as node:
+                pair = {self.request: node, node: self.request}
+                while readable := select.select(list(pair), [], [], 20)[0]:
+                    for source in readable:
+                        data = source.recv(65536)
+                        if not data:
+                            return
+                        pair[source].sendall(data)
+
+    class Relay(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+
+    with Relay(("127.0.0.1", 0), Proxy) as relay:
+        threading.Thread(target=relay.serve_forever, daemon=True).start()
+        address = f"http://127.0.0.1:{relay.server_address[1]}"
+        device, media = prepare("offline-recovery", claims["c1"][0],
+                                deployment={**manifest, "rpc_url": address, "rpc_urls": [address]})
+        first_boot = subprocess.Popen(command(device), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            wait_for(lambda: (media / "enrollment-status.json").exists(), "offline status missing", first_boot, timeout=45)
+            assert not (device / "config.toml").exists()
+            assert (media / "claim.key").exists()
+            online.set()
+            out, err = first_boot.communicate(timeout=220)
+            assert first_boot.returncode == 0, (out, err)
+            check_install(device, media)
+        finally:
+            if first_boot.poll() is None:
+                first_boot.kill()
+                first_boot.communicate()
+            relay.shutdown()
+
+    recovered, recovery_media = prepare("reboot-after-submit", claims["c2"][0])
+    # Simulate a stop immediately after chain effects and before any config is
+    # published. The old CLI executes exactly the same sponsored call.
+    prior_policy_version = int(client("object", policy)["version"])
+    result = subprocess.run([str(DAEMON), "--enroll", recovery_media / "enroll.toml"],
+                            capture_output=True, text=True, check=True, timeout=60)
+    previous = json.loads(result.stdout)
+    assert not (recovered / "config.toml").exists()
+    wait_for(lambda: int(client("object", policy)["version"]) > prior_policy_version,
+             "confirmed enrollment did not reach policy state")
+    confirmed_policy_version = client("object", policy)["version"]
+    run_boot(recovered, recovery_media, "enrolled")
+    actual = check_install(recovered, recovery_media)
+    assert actual["device_cap_id"] == previous["device_cap_id"]
+    assert actual["device_object_id"] == previous["device_object_id"]
+
+    # Simulate a stop after claim erasure and before final config publication.
+    kept = (recovered / "config.toml").read_bytes()
+    (recovered / "config.toml").unlink()
+    run_boot(recovered, recovery_media, "enrolled")
+    assert check_install(recovered, recovery_media) == actual
+    assert (recovered / "config.toml").read_bytes() == kept
+    # A filesystem can retain only part of the claim overwrite after a stop.
+    # The installed signer and confirmed cap are sufficient to finish erasure.
+    (recovered / "config.toml").unlink()
+    original_claim = claims["c2"][0].read_bytes()
+    (recovery_media / "claim.key").write_bytes(b"\0" * 8 + original_claim[8:])
+    run_boot(recovered, recovery_media, "enrolled")
+    assert check_install(recovered, recovery_media) == actual
+    assert client("object", policy)["version"] == confirmed_policy_version
+
+    invalid, invalid_media = prepare("invalid-unspent-claim", claims["c4"][0])
+    (invalid_media / "claim.key").write_bytes(b"invalid")
+    run_boot(invalid, invalid_media, "invalid-claim-key")
+    assert not (invalid / "config.toml").exists()
+    assert (invalid_media / "claim.key").read_bytes() == b"invalid"
+
+    shutil.copyfile(claims["c3"][0], recovery_media / "claim.key")
+    subprocess.run(command(recovered), check=True, capture_output=True)
+    assert (recovered / "config.toml").read_bytes() == kept
+    assert (recovery_media / "claim.key").read_bytes() == claims["c3"][0].read_bytes()
+
+    for name, field in (("tampered-manifest", "deployment.json"), ("tampered-template", "config.template.toml")):
+        directory, folder = prepare(name, claims["c3"][0])
+        file = folder / field
+        file.write_bytes(file.read_bytes() + b" ")
+        run_boot(directory, folder, "invalid-enrollment-media-or-config")
+        assert (folder / "claim.key").exists() and not (directory / "deployment.json").exists()
+
+    transaction("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{claims['c3'][1]}")
+    expired = created(transaction("--move-call", f"{package}::enrollment::create_policy", f"@{registry}", "1", "1"),
+                      "::enrollment::EnrollmentPolicy")[0]
+    cases = [
+        ("revoked", "c3", policy, "claim-unavailable-or-consumed"),
+        ("consumed", "c2", policy, "claim-unavailable-or-consumed"),
+        ("expired", "c4", expired, "policy-closed-expired-or-exhausted"),
+        ("foreign-claim", "c4", created(transaction("--move-call", f"{package}::enrollment::create_policy", f"@{registry}", "1", "0"),
+                                        "::enrollment::EnrollmentPolicy")[0], "claim-unavailable-or-consumed"),
+    ]
+    policy_version = client("object", policy)["version"]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(cases)) as pool:
+        checks = []
+        for name, claim, batch, expected in cases:
+            directory, folder = prepare(name, claims[claim][0], batch=batch)
+            checks.append((pool.submit(run_boot, directory, folder, expected), directory, folder))
+        for job, directory, folder in checks:
+            job.result()
+            assert (folder / "claim.key").exists() and not (directory / "config.toml").exists()
+    assert client("object", policy)["version"] == policy_version, "refused or recovered enrollment consumed a claim"
+    print("PASS: first boot, offline recovery, confirmed-submit reboot, interrupted claim erasure, pre-existing config, tampering, invalid/revoked/expired/consumed/foreign claims")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rpc", default="http://127.0.0.1:9000")
     parser.add_argument("--faucet", default="http://127.0.0.1:9123/v2/gas")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--first-boot-only", action="store_true")
+    modes.add_argument("--migration-only", action="store_true")
     args = parser.parse_args()
-    run(args.rpc, args.faucet)
+    run(args.rpc, args.faucet, args.first_boot_only, args.migration_only)

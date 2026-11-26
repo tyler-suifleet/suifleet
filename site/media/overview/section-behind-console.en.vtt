@@ -1,0 +1,13 @@
+WEBVTT
+
+1
+00:00:00.350 --> 00:00:11.465
+Sui saves your approval on a shared network. Walrus stores your
+software files for the period you choose. Private releases are
+encrypted, with access limited to authorized devices.
+
+2
+00:00:12.350 --> 00:00:22.974
+The SuiFleet client on each device checks for approved updates
+on its configured schedule. Connections start from the device,
+so you do not need to open an incoming connection.
