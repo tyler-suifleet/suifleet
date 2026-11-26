@@ -101,7 +101,7 @@
           - "suifleet-enrollment.path="
           - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
           - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
-        stdin: "{{ suifleet_running | to_json }}"
+        stdin: "{{ suifleet_running_loaded.stdout }}"
       register: suifleet_running_after
       changed_when: false
       when: not ansible_check_mode
@@ -139,11 +139,15 @@
         mode: "0755"
       when: not ansible_check_mode
 
+    # The digests just verified: equal to the loaded baseline (changed_since
+    # is false for every unit), including unit files loaded by this run.
     - name: Record the inputs the active units were verified against
+      vars:
+        verified: "{{ suifleet_running_after.stdout | from_json }}"
       ansible.builtin.copy:
         dest: "{{ suifleet_applied_record }}"
-        content: "{{ dict(suifleet_running | dict2items | map(attribute='key')
-                     | zip(suifleet_running | dict2items | map(attribute='value.digest'))) | to_json(sort_keys=true) }}\n"
+        content: "{{ dict(verified | dict2items | map(attribute='key')
+                     | zip(verified | dict2items | map(attribute='value.digest'))) | to_json(sort_keys=true) }}\n"
         owner: root
         group: root
         mode: "0644"

@@ -63,6 +63,27 @@
         suifleet_reload_pending | bool or suifleet_restart_signer | bool
         or suifleet_restart_daemon | bool or suifleet_restart_path | bool
 
+    # The unit files of a unit that needed the reload are only known once it
+    # is loaded (a drop-in added or removed earlier changes the path list on
+    # reload alone), so verification compares against digests sampled now for
+    # those units. The restart decisions above keep the earlier sample.
+    - name: Record the loaded inputs that verification compares against
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', 'running_inputs.py') }}"
+          - --rebase
+          - "{{ suifleet_applied_record }}"
+          - "suifleet-signer.socket="
+          - "suifleet-enrollment.path="
+          - "suifleet-signer.service={{ suifleet_signer_inputs | join(',') }}"
+          - "suifleet.service={{ suifleet_daemon_inputs | join(',') }}"
+        stdin: "{{ suifleet_running | to_json }}"
+      register: suifleet_running_loaded
+      changed_when: false
+      when: not ansible_check_mode
+
     # A running signing service keeps the listening socket it inherited, so it
     # stops before its socket is recreated with the new unit settings and
     # starts again afterwards; the daemon restarts after both.

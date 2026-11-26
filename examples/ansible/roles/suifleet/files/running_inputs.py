@@ -1,6 +1,6 @@
 """Report whether active SuiFleet units still use replaced inputs (SF-304).
 
-Usage: running_inputs.py [--since] APPLIED UNIT=PATH[,PATH...] [UNIT=...]
+Usage: running_inputs.py [--since | --rebase] APPLIED UNIT=PATH[,PATH...] [UNIT=...]
 
 APPLIED is the root-owned JSON record ({unit: digest}) that the role writes
 only after the units were restarted onto, or verified against, those inputs.
@@ -16,6 +16,16 @@ With --since, an earlier report of the same units is read from stdin and each
 unit also reports "changed_since" (its digest differs from that report) and
 "not_restarted" (it was active and stale then and still runs the same
 invocation), which the role's verification requires to be false.
+
+With --rebase, an earlier report taken before a daemon-reload is read from
+stdin and printed again, with the digest of each unit that needed the reload
+replaced by its digest now. The unit files of such a unit (its fragment and
+drop-in paths) are only known once systemd has loaded them: a drop-in added
+or removed before the run changes the path list on reload alone. Restart
+decisions keep the earlier sample (activity, invocation, staleness); later
+verification compares against this loaded baseline. Units that did not need
+the reload keep their earlier digest, so any change after that sample is still
+detected.
 
 "reload_needed" is reported for every unit, active or not: a stopped unit with
 unloaded changes would otherwise start from systemd's cached definition, so
@@ -98,10 +108,17 @@ def check(unit, inputs, applied):
     return report
 
 
+def rebase(previous, current):
+    """The earlier report, with the loaded digest of each unit that needed a reload."""
+    return {unit: dict(before, digest=current[unit]["digest"]) if before["reload_needed"] else before
+            for unit, before in previous.items()}
+
+
 def main():
     arguments = sys.argv[1:]
-    since = arguments[:1] == ["--since"]
-    if since:
+    mode = arguments[0] if arguments[:1] in (["--since"], ["--rebase"]) else None
+    since = mode == "--since"
+    if mode:
         arguments = arguments[1:]
         previous = json.load(sys.stdin)
     try:
@@ -118,6 +135,8 @@ def main():
             current["changed_since"] = before["digest"] != current["digest"]
             current["not_restarted"] = (before["stale"] and before["active"] and current["active"]
                                         and before["invocation"] == current["invocation"])
+    if mode == "--rebase":
+        report = rebase(previous, report)
     print(json.dumps(report, sort_keys=True))
 
 
