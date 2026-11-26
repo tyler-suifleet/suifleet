@@ -5816,6 +5816,25 @@
         "Regression and local combined-main checks pass; verified merged runtime/watchdog installed with service health checks."
       ],
       "validation": "Dispatcher dependency, watchdog and existing recovery/ownership regressions; combined local infrastructure tests and verified installed-source checks."
+    },
+    {
+      "key": "SF-336",
+      "title": "Avoid ARM hosted-runner capacity stalls in macOS CI",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows/ci.yml"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-336 -->\n## Problem\nThe macOS job on SF-311 run 45863622186 was cancelled without starting: GitHub reports no hosted runner was acquired and explicitly cites macOS arm64 capacity constraints. The workflow uses macos-15, which selects that pool. This creates review/acceptance waits unrelated to source correctness.\n\n## Change and acceptance\nUse the supported macos-15-intel standard runner for the existing macOS lifecycle/IPC job. Preserve the job name, baseline Rust, real unit/build/lifecycle/IPC checks, permissions, diagnostic upload and architecture-separated caches. Validate the workflow locally and verify the platform smoke scripts do not assume ARM/Homebrew paths. Do not claim a macOS runtime test ran on Linux. Merge immediately under the user's CI-fix direction; no review/hosted approval wait. No local runtime code is changed, so runtime installation is needed only if a later scoped fix changes it.\n",
+      "acceptance": [
+        "Existing macOS lifecycle and IPC checks use supported Intel hosted runners without changing security or test coverage.",
+        "Focused local validation is recorded; merge without model review or hosted-CI approval wait."
+      ],
+      "validation": "Workflow parse, focused smoke-script checks and exact diff inspection; actual macOS runtime remains hosted evidence."
     }
   ]
 }
