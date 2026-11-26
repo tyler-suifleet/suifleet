@@ -647,6 +647,32 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual((entry['fetched'], entry['fetch_skipped']), (None, 'static source findings'))
         self.assertEqual(list(Path(report['fetch_dir']).iterdir()), [])
 
+    def test_several_recipes_for_one_pn_are_rejected_not_collapsed(self):
+        base = (self.recipe_dir / 'suifleet_1.0.bb').read_text()
+        cases = {
+            'second version': ('suifleet_2.0.bb', base),
+            'explicit PN in another file': ('zz-suifleet_1.0.bb', base + 'PN = "suifleet"\n'),
+        }
+        for label, (name, text) in cases.items():
+            with self.subTest(label):
+                extra = self.recipe_dir / name
+                extra.write_text(text)
+                self.addCleanup(extra.unlink, missing_ok=True)
+                with mock.patch.object(audit, 'fetch_recipe', side_effect=AssertionError('fetched')) as fetch:
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                fetch.assert_not_called()
+                self.assertFalse(report['ok'])
+                self.assertTrue(any(f'{name}: PN \'suifleet\' is also provided by recipes-edge/suifleet/suifleet_1.0.bb' in e
+                                    for e in report['errors']), report['errors'])
+                self.assertEqual(list(report['recipes']), ['suifleet'])
+                entry = report['recipes']['suifleet']
+                self.assertEqual((entry['file'], entry['duplicates']),
+                                 ('recipes-edge/suifleet/suifleet_1.0.bb', [f'recipes-edge/suifleet/{name}']))
+                self.assertEqual(entry['fetch_skipped'], 'static source findings')
+                extra.unlink()
+        self.assertEqual(audit.check(self.layer)['errors'], [])
+
     def test_unpack_refuses_escaping_members_and_links(self):
         for member in ('../escape', '/abs'):
             for kind in ('file', 'symlink'):

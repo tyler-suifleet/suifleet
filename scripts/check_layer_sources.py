@@ -695,13 +695,24 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         appends = [a for a in bbappends if append_matches(a.name, path.name)]
         used.update(appends)
         recipe = Recipe(path, layer, appends)
-        if only and recipe.get('PN') not in only:
+        pn = recipe.get('PN')
+        if only and pn not in only:
             continue
-        recipes[recipe.get('PN')] = recipe
+        if pn in recipes:
+            # Several versions of one PN are all selectable (PREFERRED_VERSION),
+            # but the report, cross-checks and unpack directory are keyed by
+            # PN. Refuse the ambiguity rather than audit only one of them.
+            error = (f'{path.relative_to(layer).as_posix()}: PN {pn!r} is also provided by '
+                     f'{report["recipes"][pn]["file"]}; the audit supports one recipe per PN')
+            report['errors'].append(error)
+            static_errors[pn].append(error)
+            report['recipes'][pn].setdefault('duplicates', []).append(path.relative_to(layer).as_posix())
+            continue
+        recipes[pn] = recipe
         errors, sources = audit_recipe(recipe)
-        static_errors[recipe.get('PN')] = errors
+        static_errors[pn] = errors
         report['errors'] += errors
-        report['recipes'][recipe.get('PN')] = {
+        report['recipes'][pn] = {
             'file': path.relative_to(layer).as_posix(),
             'appends': [a.relative_to(layer).as_posix() for a in appends], 'pv': recipe.get('PV'), 'license': recipe.get('LICENSE'),
             'license_files': dict(license_md5s(recipe)), 'sources': sources,
