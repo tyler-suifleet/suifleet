@@ -87,11 +87,15 @@ def repo_url(config, rel):
 
 
 def recorded_guide_source(production, name):
-    """Resolve historical scripts without relabeling already encoded media."""
+    """Resolve historical inputs for already encoded media."""
     snapshot = production.get('script_snapshot')
     if snapshot is not None and snapshot != 'site/guide/recorded':
         raise BuildError('Invalid guide script snapshot')
-    if snapshot and name in {'site/guide/lessons.json', 'site/guide/narration.json'}:
+    if snapshot and name in {
+        'site/guide/lessons.json',
+        'site/guide/narration.json',
+        'scripts/video-test.Dockerfile',
+    }:
         return ROOT / snapshot / Path(name).name
     return ROOT / name
 
