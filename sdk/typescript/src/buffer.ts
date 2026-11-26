@@ -193,24 +193,30 @@ export class OutboundBuffer {
   async flush(options: FlushOptions = {}): Promise<FlushResult> {
     if (this.uncertain) throw new Error('outbound buffer is blocked by an uncertain delivery; call resolveUncertain');
     if (this.flushing) throw new Error('flush already in progress');
-    // Validate before anything is sent: NaN or Infinity would bypass the retry cap.
-    // Only an omitted (undefined) option takes its default; null is refused.
-    const maxAttempts = options.maxAttempts === undefined ? 5 : options.maxAttempts;
-    const retryDelayMs = options.retryDelayMs === undefined ? 200 : options.retryDelayMs;
-    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new RangeError('maxAttempts must be a positive integer');
-    if (typeof retryDelayMs !== 'number' || !Number.isFinite(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > MAX_TIMER_DELAY_MS) {
-      throw new RangeError(`retryDelayMs must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);
-    }
+    // Take the guard before reading any caller option: a getter may re-enter
+    // flush(), and that nested call must be refused, not send the same head.
     this.flushing = true;
     let sent = 0;
     try {
+      // Read each option exactly once. Validate before anything is sent: NaN or
+      // Infinity would bypass the retry cap. Only an omitted (undefined) option
+      // takes its default; null is refused. Invalid options release the guard.
+      const rawAttempts = options.maxAttempts;
+      const rawDelay = options.retryDelayMs;
+      const signal = options.signal;
+      const maxAttempts = rawAttempts === undefined ? 5 : rawAttempts;
+      const retryDelayMs = rawDelay === undefined ? 200 : rawDelay;
+      if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new RangeError('maxAttempts must be a positive integer');
+      if (typeof retryDelayMs !== 'number' || !Number.isFinite(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > MAX_TIMER_DELAY_MS) {
+        throw new RangeError(`retryDelayMs must be a finite number in [0, ${MAX_TIMER_DELAY_MS}]`);
+      }
       while (this.entries.length > 0) {
         const entry = this.entries[0] as Entry;
         let delay = retryDelayMs;
         for (let attempt = 1; ; attempt++) {
           try {
-            options.signal?.throwIfAborted();
-            const request = options.signal ? { signal: options.signal } : {};
+            signal?.throwIfAborted();
+            const request = signal ? { signal } : {};
             if (entry.item.kind === 'publish') {
               await this.client.request('publish', { topic: entry.item.topic, payload: entry.item.payload, ...request });
             } else {
@@ -236,10 +242,9 @@ export class OutboundBuffer {
             // A not_sent error may come from this same signal (for example, an abort
             // during client connect backoff). Its listener would never fire again,
             // so stop now; the unsent head stays pending.
-            options.signal?.throwIfAborted();
+            signal?.throwIfAborted();
             if (attempt >= maxAttempts) return { sent, pending: this.entries.length, error };
             await new Promise<void>((resolve, reject) => {
-              const signal = options.signal;
               if (signal?.aborted) { reject(signal.reason); return; }
               const abort = () => { clearTimeout(timer); reject(signal?.reason); };
               const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, delay);

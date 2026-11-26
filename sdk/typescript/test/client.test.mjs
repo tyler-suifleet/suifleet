@@ -944,6 +944,36 @@ test('OutboundBuffer.flush refuses invalid maxAttempts and retryDelayMs before a
   await server.close();
 });
 
+test('OutboundBuffer.flush takes its guard before reading options: a re-entrant getter cannot duplicate a send', async () => {
+  const server = await serve((r) => ok({ sequence: r.payload === 'first' ? 0 : 1 }));
+  const buffer = new OutboundBuffer(new Client({ socketPath: server.path }));
+  buffer.append('s', 'first');
+  buffer.append('s', 'second');
+  let nested;
+  const reads = { maxAttempts: 0, retryDelayMs: 0, signal: 0 };
+  const options = {
+    get maxAttempts() { reads.maxAttempts++; nested ??= buffer.flush({ retryDelayMs: 1 }).then(() => 'resolved', (e) => e); return 1; },
+    get retryDelayMs() { reads.retryDelayMs++; return 1; },
+    get signal() { reads.signal++; return undefined; },
+  };
+  const result = await buffer.flush(options);
+  const outcome = await nested;
+  assert.ok(outcome instanceof Error && /flush already in progress/.test(outcome.message), String(outcome));
+  assert.deepEqual(result, { sent: 2, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => r.payload), ['first', 'second']);
+  assert.deepEqual(reads, { maxAttempts: 1, retryDelayMs: 1, signal: 1 });
+  // An invalid option read under the guard still releases it.
+  buffer.append('s', 'third');
+  await assert.rejects(buffer.flush({ get maxAttempts() { return 0; } }), RangeError);
+  assert.deepEqual(await buffer.flush({ retryDelayMs: 1 }), { sent: 1, pending: 0 });
+  // A getter that throws also releases the guard.
+  buffer.append('s', 'fourth');
+  await assert.rejects(buffer.flush({ get maxAttempts() { throw new Error('boom'); } }), /boom/);
+  assert.deepEqual(await buffer.flush({ retryDelayMs: 1 }), { sent: 1, pending: 0 });
+  assert.deepEqual(server.requests.map((r) => r.payload), ['first', 'second', 'third', 'fourth']);
+  await server.close();
+});
+
 test('messages() refuses pollIntervalMs and maxReconnectDelayMs outside the Node timer range before any receive', async () => {
   const warnings = [];
   const onWarning = (warning) => warnings.push(warning.name);
