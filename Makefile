@@ -497,6 +497,7 @@ test-bulk-enrollment-localnet:
 # localnet; install/enroll/upgrade/restart, check mode and idempotence.
 .PHONY: test-ansible
 test-ansible:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_ansible_running_inputs.py
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bin suifleet --example chain_facts
 	python3 scripts/test_ansible.py --move-volume "$${SUIFLEET_MOVE_CACHE:-$(notdir $(CURDIR))_move-cache}" \
 		--dev-image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" \
