@@ -122,6 +122,28 @@
             - suifleet_enrollment_partial.stat.exists
             - suifleet_enrollment_partial.stat.size == 0
           block:
+            - name: Require the batch folder for the lookup
+              ansible.builtin.assert:
+                that:
+                  - suifleet_enrollment_root | length > 0
+                  - suifleet_serial is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
+                  an earlier enrollment attempt printed no receipt. Set
+                  suifleet_enrollment_root and suifleet_serial so the role can look its
+                  enrollment up on chain (enroll.toml and deployment.json; the claim is
+                  not used), or settle it as in docs/ANSIBLE.md#recovery.
+
+            # The lookup reads the batch's deployment.json; the record it
+            # restores is installed beside suifleet_manifest_src. Refuse a
+            # stale or misselected batch before anything runs on the host
+            # (check mode too).
+            - name: Check the batch folder against the configured deployment
+              ansible.builtin.import_tasks: check_batch.yml
+              vars:
+                suifleet_batch_claim: false
+
             - name: Report the pending on-chain lookup
               ansible.builtin.debug:
                 msg: >-
@@ -133,19 +155,6 @@
             - name: Look up the device's enrollment
               when: not ansible_check_mode
               block:
-                - name: Require the batch folder for the lookup
-                  ansible.builtin.assert:
-                    that:
-                      - suifleet_enrollment_root | length > 0
-                      - suifleet_serial is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
-                    quiet: true
-                    fail_msg: >-
-                      {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial:
-                      an earlier enrollment attempt printed no receipt. Set
-                      suifleet_enrollment_root and suifleet_serial so the role can look its
-                      enrollment up on chain (enroll.toml and deployment.json; the claim is
-                      not used), or settle it as in docs/ANSIBLE.md#recovery.
-
                 - name: Create the lookup directory
                   ansible.builtin.file:
                     path: "{{ suifleet_enroll_staging }}"
@@ -272,39 +281,10 @@
                   {{ inventory_hostname }} is not enrolled: set suifleet_enrollment_root and
                   a valid suifleet_serial matching its folder in the credential batch.
 
-            - name: Read the batch folder on the controller
-              delegate_to: localhost
-              become: false
-              ansible.builtin.stat:
-                path: "{{ batch }}/{{ item }}"
-                get_checksum: "{{ item == 'deployment.json' }}"
-                checksum_algorithm: sha256
-              loop: [claim.key, enroll.toml, deployment.json]
-              register: suifleet_batch_files
-              check_mode: false
-
-            - name: Refuse an incomplete batch folder or a different manifest
-              ansible.builtin.assert:
-                that:
-                  - suifleet_batch_files.results | map(attribute='stat.exists') | min
-                  - suifleet_batch_files.results[2].stat.checksum == suifleet_manifest.stat.checksum
-                quiet: true
-                fail_msg: >-
-                  {{ batch }} must contain claim.key, enroll.toml and the same
-                  deployment.json as suifleet_manifest_src.
-
-            - name: Check the enrollment configuration paths
+            - name: Check the batch folder against the configured deployment
+              ansible.builtin.import_tasks: check_batch.yml
               vars:
-                enroll_toml: "{{ lookup('ansible.builtin.file', batch ~ '/enroll.toml') }}"
-              ansible.builtin.assert:
-                that:
-                  - enroll_toml is search('(?m)^manifest_path = "deployment.json"$')
-                  - enroll_toml is search('(?m)^claim_key_path = "claim.key"$')
-                  - enroll_toml is search('(?m)^keypair_path = "/etc/suifleet/device.key"$')
-                quiet: true
-                fail_msg: >-
-                  {{ batch }}/enroll.toml must use the batch-relative deployment.json and
-                  claim.key and the device's own /etc/suifleet/device.key.
+                suifleet_batch_claim: true
 
             - name: Read the staging filesystem type
               ansible.builtin.command:

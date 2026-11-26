@@ -395,13 +395,22 @@ allows it). The role does not check the controller.
   bound to the key and that the registry still trusts it, and prints the same
   receipt as the enrollment command. The role verifies that receipt like any
   other and restores the record from it, keeping the device's key and
-  identity. It never enrolls again.
+  identity. It never enrolls again. The same key can hold an enrollment under
+  another deployment, so before the lookup the role requires the folder's
+  `deployment.json` to be identical to `suifleet_manifest_src` (the manifest
+  it installs beside the restored IDs) and its `enroll.toml` to name that
+  batch-relative manifest and `/etc/suifleet/device.key`, with no `[signer]`
+  table, exactly as for a fresh enrollment. A stale or misselected folder stops
+  the run (check mode too) before anything is copied to the host, keeping the
+  empty file and writing no record.
 
   To restore a record by hand (for example after a truncated receipt, or a
   configured host with no record), first make sure no play targets the host.
   Copy the host's `enroll.toml` and `deployment.json`, but not `claim.key`,
   into `/run/lookup`, a directory the key holder can read, and run this as
-  root:
+  root. The `deployment.json` must describe the fleet's deployment, the one in
+  `suifleet_manifest_src` (only its node URLs may differ, as below): the
+  restored IDs are used with that manifest.
 
   ```sh
   sh -eu <<'EOF'
