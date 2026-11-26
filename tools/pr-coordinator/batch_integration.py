@@ -777,6 +777,8 @@ class BatchController:
             receipt = self.c.source_receipt(project, pr, owner)
             if not receipt:
                 return None
+            if recovery_source_held(self.c, project, pr, owner):
+                return None
             self.c.assert_review_owner(project, owner)
         except Exception:
             return None
@@ -1937,6 +1939,14 @@ def local_scope(git, repository, base, head, owner=None):
         return None
 
 
+def recovery_source_held(coordinator, project, pr, owner):
+    """Revalidate watchdog routing on freshly read integration inputs."""
+    if not owner.get('session', '').startswith('recovery-'):
+        return False
+    local = getattr(coordinator, 'local_infrastructure', None)
+    return local is not None and local.eligible(project, pr, owner)
+
+
 class LocalInfrastructure:
     """User-authorized local validation, distinct from independent approval."""
     def __init__(self, coordinator):
@@ -1961,23 +1971,81 @@ class LocalInfrastructure:
         if not all(SHA.fullmatch(x) for x in (base, head)):
             return False
         self.b.git(project, 'fetch', '--no-tags', 'origin', base, head)
-        return local_scope(lambda *args:self.b.git(project,*args), project['repository'], base, head, owner) is not None
+        scope = local_scope(lambda *args:self.b.git(project,*args), project['repository'], base, head, owner)
+        return scope is not None and not self.recovery_review_allowed(project, pr, owner)
+
+    def recovery_review_allowed(self, project, pr, owner):
+        """A stopped watchdog origin can use ordinary review."""
+        from coordinator import claim_processes, worker_stopped
+        from recovery_watchdog import result_record, survivors
+
+        session = owner.get('session', '')
+        match = re.fullmatch(r'recovery-(run-([0-9a-f]{32}))', session)
+        if not match:
+            return False
+        try:
+            try:
+                (self.c.state/'implementations'/session).lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                return False
+            if self.db.execute(
+                    "SELECT 1 FROM local_integrations WHERE project=? AND pr=? AND "
+                    "(status IN ('testing','publish_pending','published') OR (head=? AND base=?))",
+                    (project['id'], pr['number'], pr['headRefOid'], pr['baseRefOid'])).fetchone():
+                return False
+            current = json.loads(self.c.ticket(project, 'show', owner['key']))
+            if any(current.get(k) != owner.get(k) for k in
+                   ('token', 'session', 'branch', 'agent', 'model', 'worktree', 'spec')):
+                return False
+            directory = self.c.state/'recovery-watchdog'/match[1]
+            process_path, exit_path = directory/'process.json', directory/'exit.json'
+            child_path, result_path = directory/'child.json', directory/'result.json'
+            if directory.is_symlink() or any(p.is_symlink() for p in
+                                            (process_path, exit_path, child_path, result_path)):
+                return False
+            process = json.loads(process_path.read_text())
+            child = json.loads(child_path.read_text())
+            exit_receipt = json.loads(exit_path.read_text())
+            result_record(result_path, time.time())
+            if (type(process['pid']) is not int or process['pid'] <= 0
+                    or type(process['session']) is not int or process['session'] != process['pid']
+                    or not isinstance(process['started'], str) or not process['started'].isdigit()
+                    or int(process['started']) <= 0
+                    or type(child['pid']) is not int or child['pid'] <= 0 or child['pid'] == process['pid']
+                    or type(exit_receipt['returncode']) is not int or exit_receipt['returncode'] != 0):
+                return False
+            claim = self.claim_acquisition(current)
+            if not (process_path.stat().st_mtime <= child_path.stat().st_mtime <= claim
+                    <= result_path.stat().st_mtime <= exit_path.stat().st_mtime <= time.time()):
+                return False
+            self.c.assert_review_owner(project, current)
+            worktree = current.get('worktree')
+            if (not worktree
+                    or self.b.git(project, 'branch', '--show-current', cwd=worktree) != current['branch']
+                    or self.b.git(project, 'rev-parse', 'HEAD', cwd=worktree) != pr['headRefOid']):
+                return False
+            self.worktree_fence(project, pr, current)
+            self.resource_fence(project, current)
+            run = dict(pid=process['pid'], started=process['started'], directory=str(directory), nonce=match[2])
+            return (worker_stopped(process['pid'], process['started']) and not survivors(run)
+                    and not claim_processes(current['token'], process['started']))
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+                subprocess.CalledProcessError):
+            return False
 
     def fenced(self, project, pr, owner):
         self.c.assert_review_owner(project, owner)
-        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND "
-            "status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
-            (project['id'], pr['number'])).fetchone()
-        if active or pr['number'] in self.b.reserved_members(project):
-            raise RuntimeError('local integration has active or uncertain workers/batch')
-        if owner.get('worktree') and self.b.git(project, 'status', '--porcelain', cwd=owner['worktree']):
-            raise RuntimeError('implementation worktree is dirty')
+        if pr['number'] in self.b.reserved_members(project):
+            raise RuntimeError('local integration has an active batch')
+        self.worktree_fence(project, pr, owner)
         # The dispatcher directory is keyed by the immutable owning session.
         from coordinator import claim_processes, worker_stopped
         directory = self.c.state/'implementations'/owner['session']
         path = directory/'process.json'
         if not path.exists():
-            if directory.exists() or owner['session'].startswith(('dispatch-', 'recovery-')):
+            if os.path.lexists(directory) or owner['session'].startswith(('dispatch-', 'recovery-')):
                 raise RuntimeError('implementation process identity is unavailable')
             self.manual_repair_fence(project, pr, owner)
             return
@@ -1985,6 +2053,15 @@ class LocalInfrastructure:
         if (not worker_stopped(process.get('pid'), process.get('started'))
                 or claim_processes(owner['token'], process.get('started'))):
             raise RuntimeError('implementation worker/helpers have not stopped')
+
+    def worktree_fence(self, project, pr, owner):
+        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND "
+            "status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+            (project['id'], pr['number'])).fetchone()
+        if active:
+            raise RuntimeError('local integration has active or uncertain workers')
+        if owner.get('worktree') and self.b.git(project, 'status', '--porcelain', cwd=owner['worktree']):
+            raise RuntimeError('implementation worktree is dirty')
 
     def manual_repair_fence(self, project, pr, owner):
         """Bind manual ownership to a verified stopped coordinator repair.
@@ -2025,15 +2102,9 @@ class LocalInfrastructure:
         # The ticket event binds the lower bound to this exact claim generation.
         # Heartbeats and repair launches are too recent: older helpers could survive.
         try:
-            events = [event for event in owner['events']
-                      if event['kind'] == 'claim' and event['actor'] == owner['session']
-                      and str(event['ticket']).split('::')[-1] == owner['key']
-                      and f"token={owner['token']}" in event['detail'].split('; ')]
-            acquired = float(events[0]['at']) if len(events) == 1 else 0
+            acquired = self.claim_acquisition(owner)
             boot = int(next(line.split()[1] for line in Path('/proc/stat').read_text().splitlines()
                             if line.startswith('btime ')))
-            if not 0 < acquired <= time.time():
-                raise ValueError('invalid claim timestamp')
             # btime has whole-second precision; round down with one second of
             # margin rather than excluding a helper on the acquisition boundary.
             started = str(max(0, int((acquired - boot - 1) * os.sysconf('SC_CLK_TCK'))))
@@ -2041,6 +2112,20 @@ class LocalInfrastructure:
             raise RuntimeError('manual implementation claim acquisition provenance is unavailable') from None
         if not worker_stopped(process['pid'], process['started']) or claim_processes(owner['token'], started):
             raise RuntimeError('manual implementation worker/helpers have not stopped')
+        self.resource_fence(project, owner)
+
+    @staticmethod
+    def claim_acquisition(owner):
+        events = [event for event in owner['events']
+                  if event['kind'] == 'claim' and event['actor'] == owner['session']
+                  and str(event['ticket']).split('::')[-1] == owner['key']
+                  and f"token={owner['token']}" in event['detail'].split('; ')]
+        acquired = float(events[0]['at']) if len(events) == 1 else 0
+        if not 0 < acquired <= time.time():
+            raise ValueError('invalid claim timestamp')
+        return acquired
+
+    def resource_fence(self, project, owner):
         locks = json.loads(self.c.ticket(project, 'locks'))
         now = time.time()
         for lock in locks:
@@ -2051,7 +2136,7 @@ class LocalInfrastructure:
             if not (str(lock.get('ticket') or '').split('::')[-1] == owner['key']
                     or lock.get('session') == owner['session'] or owner['key'] in named):
                 continue
-            raise RuntimeError('manual implementation still holds a resource lease')
+            raise RuntimeError('implementation still holds a resource lease')
 
     def tick(self, project, pr, owner):
         """Return True when this PR belongs to the local lane (including holds)."""
