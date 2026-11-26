@@ -571,7 +571,7 @@ sui client faucet --address 0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d8
 
 **Older CLIs don't work.** The pinned 1.81.1 CLI only redirects to the web faucet, and `POST /v2/gas` answers "CI compatibility is disabled".
 
-**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.84.0 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
+**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.85.1 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
 
 **The web faucet** is the alternative: `https://faucet.sui.io/?address=ADDRESS`.
 
@@ -582,11 +582,27 @@ Live runs use two pinned Sui CLIs with separate jobs ([`scripts/sui_toolchain.py
 | Role | Pin | Supports protocol | Used for |
 |---|---|---|---|
 | Release compiler | `sui` on PATH, Dockerfile `SUI_VERSION` = `testnet-v1.81.1` (`1.81.1-e04cf9aa915c`) | up to 138 | offline `sui move build`, Move tests, the SF-050 lint/security baseline and all package bytecode |
-| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.84.0` (`1.84.0-9dc25070cf2e`); archive sha256 `0f006fb4…62127`, binary sha256 `ac657ec1…35ab0` | up to 142 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
+| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.85.1` (`1.85.1-25e8dad32548`); archive sha256 `c662b7c3…cbfd7d`, binary sha256 `48ceb4f0…19e180` | up to 144 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
 
 The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/src/lib.rs` at each release tag. Neither version string alone proves compatibility; the runs below do.
 
 **Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
+
+**SF-307 protocol-144 CI repair (2026-11-26).**
+[Run 45905675964](https://github.com/tyler-suifleet/suifleet/actions/runs/45905675964)
+(PR #860) stopped at read-only preflight: protocol 144 exceeds the former
+transaction CLI's maximum 142. No signing, faucet or transaction was reached. The
+replacement [testnet-v1.85.1](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.85.1)
+has [maximum protocol 144](https://github.com/MystenLabs/sui/blob/25e8dad32548bef9386a084f45e5ef233817d81b/crates/sui-protocol-config/src/lib.rs).
+The downloaded Linux archive SHA-256 is
+`c662b7c377fbfd3aa9e2b52fd726334f33432028121ce1030024c0d243cbfd7d` (matching the
+GitHub release asset digest) and the extracted binary SHA-256 is
+`48ceb4f0c4b06f9f97a58ae5d1dd797b28162eb64f22671ec08dbd208219e180`; its reported
+version is `sui 1.85.1-25e8dad32548`. A read-only query with that binary and the
+dedicated agent client configuration returned chain `4c78adac`. The regression
+reproduces the old CLI's refusal at 144, accepts 144 with the new pin and rejects
+145. Compiler, framework, fixture keys, verify-before-sign, effects and spend checks
+are unchanged; automatic exact-head/current-base testnet execution is still required.
 
 **SF-278 protocol-142 CI repair (2026-11-16).**
 [Run 43958467064](https://github.com/tyler-suifleet/suifleet/actions/runs/43958467064)
@@ -654,7 +670,7 @@ On 2026-10-30 testnet advanced to protocol 140. [Run 41133167458](https://github
 
 Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). These runs used the dedicated agent wallet, not the CI wallet. The automatic CI run on the PR head records its own evidence.
 
-**Updating the transaction CLI.** When testnet moves past protocol 142, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
+**Updating the transaction CLI.** When testnet moves past protocol 144, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
 
 ## SF-083 fleet budget run
 
