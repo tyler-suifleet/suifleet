@@ -200,6 +200,11 @@ INTERRUPTED_PLAY = """- hosts: suifleet_devices
 ENROLL_CLI_LINE = '"$STAGING/enroll.toml" >> "$partial"\n'
 ENROLL_STOP = "                    echo SF304-STOPPED-BEFORE-PROMOTION >&2; exit 75\n"
 ENROLL_TASK = "TASK [suifleet : Enroll and record the public IDs]"
+LOOKUP_TASK = "TASK [suifleet : Find this key's enrollment on chain]"
+LOOKUP_NONE = "found no enrollment for this device's key"
+# The role's tasks through enrollment, without configuration: the record is
+# promoted, and nothing else is written (used for the on-chain lookup case).
+ENROLL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: {name: suifleet, tasks_from: configure.yml}\n", 1)[0]
 # A test-only stand-in for the enrollment command (used through a copy of the
 # role that runs it instead of suifleet --enroll). It records what its standard
 # output is when it starts, waits until the harness releases it, and fails
@@ -1345,8 +1350,10 @@ class Harness:
         output, _ = self.ansible("retry after an attempt that printed nothing", "site.yml", "--limit", name, *vault,
                                  expect_rc="nonzero")
         assert "printed no receipt" in output and ENROLL_TASK not in output, (name, "the retry was not refused")
+        assert LOOKUP_NONE in output, (name, "the retry did not refuse on the lookup's result", output[-8000:])
         assert sh(f"stat -c %s {partial}").strip() == "0" and absent(lock) and absent(staging), (name, "retry left state")
-        print("PASS retry refused the attempt with an unknown outcome and released the lock")
+        print("PASS retry looked the unenrolled key up on chain, found nothing, refused the attempt with an unknown"
+              " outcome and released the lock")
         # The stand-in submitted nothing, so the claim is unused: the
         # authoritative settlement the recovery steps require is known here.
         self.exec(container, "rm", "-rf", partial, ENROLL_SHIM_PATH, ENROLL_SHIM_DIR)
@@ -1402,14 +1409,10 @@ class Harness:
                       user="deploy", input=marker + "\n")
             return marker
 
-        # The enrollment above committed on chain. An empty file is that same
-        # attempt with its response lost before anything was printed: its
-        # outcome is unknown locally, so the retry must not submit again.
         other = dict(enrolled, device_address="0x" + "ab" * 32)
-        incomplete, unknown = "not a complete receipt", "printed no receipt"
+        incomplete = "not a complete receipt"
         for label, text, refusal in (("truncated receipt", receipt[:40], incomplete),
-                                     ("receipt for another key", json.dumps(other, separators=(",", ":")) + "\n", incomplete),
-                                     ("committed enrollment with no output (empty file)", "", unknown)):
+                                     ("receipt for another key", json.dumps(other, separators=(",", ":")) + "\n", incomplete)):
             sh(f"umask 077 && cat > {partial}", input=text)
             marker = abandon_claim_copies()
             if label != "receipt for another key":
@@ -1430,6 +1433,39 @@ class Harness:
                 assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, label, root, "claim remains")
             print(f"PASS retry with a {label} stopped before staging or submitting, kept the file and erased the"
                   " abandoned staged claim and transfer copy")
+
+        # The enrollment above committed on chain. An empty file is that same
+        # attempt with its response lost before anything was printed: the local
+        # receipt is unavailable. The retry looks the enrollment up on chain
+        # (read-only, without the claim) and restores the same record; it never
+        # stages a claim or submits again.
+        sh(f"umask 077 && : > {partial}")
+        marker = abandon_claim_copies()
+        (self.work / "ctl/enroll-only.yml").write_text(ENROLL_ONLY_PLAY)
+        output, recap = self.ansible("check mode with a committed enrollment that printed nothing",
+                                     "/work/enroll-only.yml", "--check", "--diff", "--limit", name, *vault)
+        assert recap[name]["failed"] == 0 and "Would look up" in output, (name, "check mode did not report the lookup", recap[name])
+        assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, "check mode changed the marker")
+        print("PASS check mode with a committed enrollment that printed nothing reported the on-chain lookup and changed nothing")
+        output, recap = self.ansible("retry looks up a committed enrollment that printed nothing", "/work/enroll-only.yml",
+                                     "--limit", name, *vault)
+        assert recap[name]["failed"] == 0, (name, recap[name], output[-8000:])
+        statuses = {s for block in output.split(ENROLL_TASK)[1:]
+                    for s, h in TASK_RESULT.findall(block.split("\nTASK [", 1)[0]) if h == name}
+        assert statuses <= {"skipping"}, (name, "the enrollment command ran after a lost receipt", statuses)
+        assert LOOKUP_TASK in output, (name, "the on-chain lookup did not run")
+        assert absent(partial) and absent(staging) and absent(transfer), (name, "marker, lookup or claim copies left")
+        for root in ("/run", "/dev/shm"):
+            assert not self.disk_hits(container, [marker], root, one_filesystem=False), (name, root, "claim remains")
+        restored = json.loads(sh(f"cat {record}"))
+        assert restored == enrolled, (name, "the on-chain lookup restored a different record", restored, enrolled)
+        assert sh(f"stat -c '%U:%G %a' {record}").strip() == "root:suifleet 640", name
+        assert sh("cat /etc/suifleet/device.address").strip() == address, (name, "identity changed")
+        assert hashlib.sha256(sh("cat /etc/suifleet/device.key").strip().encode()).hexdigest() == key_sha256, name
+        print("PASS retry after a committed enrollment that printed nothing found it on chain without the claim and"
+              " restored the same record (digest and IDs); no second submission; key and address preserved")
+        # Back to an unpromoted receipt, for the recovery without the batch below.
+        self.exec(container, "rm", "-f", record)
 
         self.exec(container, "install", "-m", "0600", "-o", "root", "-g", "root", "/dev/stdin", partial, input=receipt)
         hidden = self.work / "chain/batch-hidden-for-recovery"
