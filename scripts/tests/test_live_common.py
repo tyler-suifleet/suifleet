@@ -386,6 +386,70 @@ class ReadThrottleTests(unittest.TestCase):
                 sleep.assert_not_called()
 
 
+class PackageLifecycleThrottleTests(unittest.TestCase):
+    def test_lifecycle_build_retries_before_signing_and_submits_once(self):
+        self.check_transaction(CompletedProcess([], 0, json.dumps(effects()), ""), "success", 1_000_000)
+
+    def test_lifecycle_unknown_submission_retains_digest_and_reservation(self):
+        self.check_transaction(ReadThrottleTests.failure, "unknown", 10_000_000)
+
+    def check_transaction(self, submission, status, used):
+        label = "create deployment 4.0.0 + delete completed predecessor"
+        ptb = ("--move-call", "0x1::deployment_manager::share_deployment", "record_4_0_0",
+               "--move-call", "0x1::deployment_manager::delete_deployment", "@0x1234")
+        failure = CompletedProcess([], 1, "", "Encountered errors when building PTB:\n"
+                                   "<title>429</title>429 Too Many Requests\n"
+                                   "Could not build PTB due to previous errors")
+        evidence = {"transactions": []}
+        ledger = Budget(10_000_000, evidence["transactions"])
+        digest = effects()["digest"]
+        sign = Mock(return_value="signature")
+        decoded = {
+            "sender": OPERATOR, "gas_owner": OPERATOR, "gas_budget": 10_000_000,
+            "digest": digest,
+            "commands": [{"kind": "MoveCall", "package": "0x1", "module": "deployment_manager", "function": fn}
+                         for fn in ("share_deployment", "delete_deployment")],
+        }
+
+        def client(*command, **kwargs):
+            return live_package_upgrade.package_client("sui", "wallet.yaml", *command, **kwargs)
+
+        def mutate(*args, **kwargs):
+            return ledger.execute(client, *args, **kwargs)
+
+        # The former direct PTB path stops on the observed diagnostic.
+        with patch.object(live_common.subprocess, "run", return_value=failure) as cli:
+            with self.assertRaisesRegex(RuntimeError, "Could not build PTB"):
+                mutate(label, ["ptb", *ptb], gas=10_000_000, require_full=True)
+            cli.assert_called_once()
+            self.assertEqual(ledger.used, 10_000_000)
+
+        evidence["transactions"].clear()
+        ledger = Budget(10_000_000, evidence["transactions"])
+        submitter = sui_toolchain.ptb_submitter
+        responses = [failure, CompletedProcess([], 0, "unsigned-bytes", ""), submission]
+        with patch.object(sui_toolchain, "ptb_submitter",
+                          side_effect=lambda *a, **kw: submitter(*a, **kw, inspect=Mock(return_value=decoded))), \
+                patch.object(live_common.subprocess, "run", side_effect=responses) as cli, \
+                patch.object(live_common.time, "sleep") as sleep:
+            outcome = self.assertRaisesRegex(RuntimeError, "429") if status == "unknown" else nullcontext()
+            with outcome:
+                live_package_upgrade.lifecycle_transaction(label, *ptb, client=client, operator=OPERATOR,
+                    sign=sign, mutate=mutate, gas=10_000_000, funding=0, evidence=evidence)
+
+        builds = [call.args[0] for call in cli.call_args_list[:2]]
+        self.assertEqual(builds[0], builds[1])
+        self.assertIn("--serialize-unsigned-transaction", builds[0])
+        self.assertEqual(cli.call_args.args[0][4:9],
+                         ["execute-signed-tx", "--tx-bytes", "unsigned-bytes", "--signatures", "signature"])
+        self.assertEqual(cli.call_count, 3)
+        sleep.assert_called_once_with(5)
+        sign.assert_called_once_with("unsigned-bytes")
+        self.assertEqual(evidence["transactions"][0]["expected_digest"], digest)
+        self.assertEqual(evidence["transactions"][0]["status"], status)
+        self.assertEqual(ledger.used, used)
+
+
 class PackageCleanupTests(unittest.TestCase):
     def run_cleanup(self, responses):
         deployment = "0x1234"
