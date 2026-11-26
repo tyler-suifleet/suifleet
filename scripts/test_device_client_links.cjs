@@ -63,7 +63,8 @@ const uses = {
 };
 for (const [file, variant] of Object.entries(uses)) {
   const source = read(`dapp/src/${file}`);
-  assert.match(source, /import \{ DeviceClientHelp \} from "@\/components\/DeviceClientHelp";/, file);
+  // Other named exports (for example GuideLink) may be imported alongside the help.
+  assert.match(source, /import \{ DeviceClientHelp(?:, \w+)* \} from "@\/components\/DeviceClientHelp";/, file);
   assert.ok(source.includes(`<DeviceClientHelp variant="${variant}" />`), `${file} does not show the ${variant} help`);
 }
 const { createElement } = appRequire('react');
