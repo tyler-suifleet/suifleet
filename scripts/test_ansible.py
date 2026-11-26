@@ -171,7 +171,21 @@ PREFLIGHT_CASES = [
      {"suifleet_profile": "deb", "suifleet_allow_untested_distribution": True}, "deb"),
     ("Debian 13 deb refused without opt-in", "Debian", "13.1", "13", {"suifleet_profile": "deb"},
      "tested on Debian 12 and Ubuntu 24.04 only"),
+    # stat (the checksum) resolves a relative path from the working directory and
+    # expands $VAR; copy searches the role's and play's files/ directories. Both
+    # relative candidates exist (see preflight_cases): the path itself is refused.
+    ("relative manifest refused", "Debian", "12.8", "12", {"suifleet_manifest_src": "deployment.json"},
+     "suifleet_manifest_src must be an absolute controller path without $"),
+    ("manifest with $ refused", "Debian", "12.8", "12", {"suifleet_manifest_src": "/chain/$SF304_MANIFEST/deployment.json"},
+     "suifleet_manifest_src must be an absolute controller path without $"),
+    ("relative package refused", "Debian", "12.8", "12", {"suifleet_deb_src": "artifacts/suifleet.deb"},
+     "suifleet_deb_src must be an absolute controller path without $"),
+    ("units with $ refused", "Debian", "12.8", "12",
+     {"suifleet_profile": "systemd-binary", "suifleet_binary_src": "/artifacts/suifleet-1",
+      "suifleet_binary_sha256": "0" * 64, "suifleet_units_src": "/units/$SF304_UNITS"},
+     "suifleet_units_src must be an absolute controller path without $"),
 ]
+SOURCE_REFUSAL = "must be an absolute controller path without $"
 PREFLIGHT_PLAY = """- hosts: localhost
   connection: local
   gather_facts: false
@@ -777,6 +791,11 @@ class Harness:
 
     def preflight_cases(self):
         (self.work / "ctl/preflight.yml").write_text(PREFLIGHT_PLAY)
+        # Two different relative "deployment.json" candidates: the play directory's
+        # own and its files/ (copy's search path), as a relative manifest would see.
+        (self.work / "ctl/files").mkdir(exist_ok=True)
+        (self.work / "ctl/deployment.json").write_text('{"candidate": "play directory"}\n')
+        (self.work / "ctl/files/deployment.json").write_text('{"candidate": "files directory"}\n')
         common = dict(service_mgr="systemd", kernel="6.8.0-generic", architecture="x86_64", pkg_mgr="apt")
         base = dict(suifleet_manifest_src="/chain/deployment.json", suifleet_deb_src="/artifacts/1/" + self.debs["1"].name,
                     suifleet_deb_sha256=sha256(self.debs["1"]), ansible_become=False)
@@ -791,6 +810,12 @@ class Harness:
                 assert f"SELECTED={expected} " in output, (case, output[-2000:])
             else:
                 assert expected in output and "SELECTED=" not in output, (case, output[-2000:])
+                if SOURCE_REFUSAL in expected:  # refused before any controller file is read
+                    for task in ("TASK [suifleet : Authenticate the artifact on the controller]",
+                                 "TASK [suifleet : Read the controller manifest]"):
+                        assert task not in output, (case, "reached", task)
+        shutil.rmtree(self.work / "ctl/files")
+        (self.work / "ctl/deployment.json").unlink()
 
     def interrupted_rollout(self, vault, upgrade, previous):
         """A binary/config rollout stops after its files land, before restarts."""
