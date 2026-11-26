@@ -43,14 +43,14 @@ class BatchReviewRepairs(unittest.TestCase):
         f.approvals[batch['pr']]=review
         return f,candidate,review
 
-    def publish_attribution(self, f, candidate, review, ids):
+    def publish_attribution(self, f, candidate, review, ids, login=None):
         batch = f.row()
         review.update(project=f.project['id'], pr=batch['pr'], directory=str(f.root),
                       review_id='published-review')
         review['result']['affected_source_prs'] = ids
         (f.root / 'snapshot.json').write_text(json.dumps(candidate))
         published = dict(id='published-review', state='CHANGES_REQUESTED',
-                         author={'login': f.project['review_github_account']},
+                         author={'login': login or f.project['review_github_account']},
                          commit={'oid': batch['head']},
                          body=c.review_result_body(review, review['result']))
         f.candidate_prs[batch['pr']].update(
@@ -82,7 +82,8 @@ class BatchReviewRepairs(unittest.TestCase):
 
     def test_composition_attribution_routes_multiple_members(self):
         f, candidate, review = self.fixture(singleton=False, three=True)
-        self.publish_attribution(f, candidate, review, [853, 850])
+        self.publish_attribution(f, candidate, review, [853, 850],
+                                 login=f.project['review_github_account'].swapcase())
         f.tick()
         self.assertEqual({n for n, pr in f.source_prs.items()
                           if '_batch_review_failure' in f.controller.repair_context(f.project, pr)}, {853, 850})
@@ -134,6 +135,25 @@ class BatchReviewRepairs(unittest.TestCase):
         self.assertNotEqual(c.source_feedback(source),c.source_feedback({**source,'_batch_review_failure':context}))
         advanced={**source,'baseRefOid':'d'*40};self.assertEqual(f.controller.repair_context(f.project,advanced)['_batch_review_failure'],context)
         self.assertEqual(f.controller.repair_context(f.project,{**source,'headRefOid':'e'*40}),{})
+
+    def test_singleton_routes_with_unverifiable_attribution_including_persisted_failure(self):
+        f, candidate, review = self.fixture()
+        self.publish_attribution(f, candidate, review, [1])
+        (f.root / 'snapshot.json').unlink()
+        f.tick()
+        batch = f.row()
+        self.assertEqual(batch['status'], 'failed')
+        self.assertEqual(f.candidate_prs[batch['pr']]['state'], 'CLOSED')
+        error = json.loads(batch['error'])
+        self.assertNotIn('attribution_required', error)
+        self.assertNotIn('affected_source_prs', error)
+        source = f.source_prs[1]
+        context = f.controller.repair_context(f.project, source)['_batch_review_failure']
+        self.assertEqual(context['review_id'], review['id'])
+        self.assertEqual(context['source_head'], source['headRefOid'])
+        self.assertTrue(c.matches_repair_claim({**source, '_batch_review_failure': context}, f.owners[0]))
+        f.controller.update(batch, error=canonical({**error, 'attribution_required': True}))
+        self.assertEqual(f.controller.repair_context(f.project, source)['_batch_review_failure'], context)
 
     def test_same_scan_source_snapshots_receive_the_genuine_repair_context(self):
         f,_,_=self.fixture();sources=[f.pr(f.project,1)]

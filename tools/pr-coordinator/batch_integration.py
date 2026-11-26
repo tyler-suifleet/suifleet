@@ -1363,8 +1363,10 @@ class BatchController:
             published = next((item for item in candidate['reviews']
                               if item['id'] == review.get('review_id')), None)
             expected_body = review_result_body(review, review['result'])
+            account = project.get('review_github_account')
             if (not published or published.get('state') != 'CHANGES_REQUESTED'
-                    or published.get('author', {}).get('login') != project.get('review_github_account')
+                    or not account
+                    or (published.get('author', {}).get('login') or '').casefold() != account.casefold()
                     or published.get('commit', {}).get('oid') != batch['head']
                     or published.get('body') != expected_body
                     or candidate.get('_receipts', {}).get(published['id']) != publication_hash(published)):
@@ -1407,11 +1409,12 @@ class BatchController:
                      review_head=review['head'], review_feedback=review['feedback'],
                      result_hash=hashlib.sha256(canonical(review['result']).encode()).hexdigest(),
                      findings=review['result']['evidence'], candidate_retired=False)
-        affected = self.review_attribution(project, batch, candidate, review)
-        if affected is not None:
-            error.update(affected_source_prs=affected, manifest_digest=batch['manifest_digest'])
-        elif len(json.loads(batch['members'])) > 1 or 'affected_source_prs' in review['result']:
-            error['attribution_required'] = True
+        if len(json.loads(batch['members'])) > 1:
+            affected = self.review_attribution(project, batch, candidate, review)
+            if affected is None:
+                error['attribution_required'] = True
+            else:
+                error.update(affected_source_prs=affected, manifest_digest=batch['manifest_digest'])
         self.update(batch, status='failed', error=canonical(error))
         self.close_review_rejected_candidate(project, batch)
         return True
@@ -1559,19 +1562,18 @@ class BatchController:
                     or not isinstance(error.get('result_hash'), str)
                     or not re.fullmatch(r'[0-9a-f]{64}', error['result_hash'])):
                 continue
-            affected = self.affected_sources(error.get('affected_source_prs'), members)
-            legacy_singleton = (len(members) == 1 and 'affected_source_prs' not in error
-                                and not error.get('attribution_required'))
-            if not legacy_singleton:
-                digest = manifest_digest(project['id'], batch['id'], batch['base'], batch['head'], members)
-                if (not affected or member['pr'] not in affected
-                        or error.get('manifest_digest') != digest or batch['manifest_digest'] != digest):
-                    continue
             context = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
                            candidate_base=batch['base'], source_head=member['head'],
                            review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'],
                            owner=member['owner'])
-            if not legacy_singleton:
+            # The sole manifest member already identifies the owner, including
+            # for persisted singleton failures that required attribution.
+            if len(members) > 1:
+                affected = self.affected_sources(error.get('affected_source_prs'), members)
+                digest = manifest_digest(project['id'], batch['id'], batch['base'], batch['head'], members)
+                if (not affected or member['pr'] not in affected
+                        or error.get('manifest_digest') != digest or batch['manifest_digest'] != digest):
+                    continue
                 context.update(affected_source_prs=affected,
                                manifest_digest=error['manifest_digest'])
             result['_batch_review_failure'] = context
