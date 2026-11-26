@@ -397,6 +397,39 @@ class LayerAuditTests(unittest.TestCase):
         self.assertFalse(audit.append_matches('suifleet_2.0.bbappend', 'suifleet_1.0.bb'))
         self.assertTrue(audit.append_matches('suifleet_%.bbappend', 'suifleet_1.0.bb'))
 
+    def test_included_metadata_must_come_from_inside_the_layer(self):
+        host = Path(self.tmp.name) / 'host-only.inc'
+        host.write_text('SUMMARY = "host only"\nHELPER = " https://example.com/unpinned.tar.gz"\n')
+        cases = {
+            f'require {host}': 'resolves outside the layer',
+            f'include {host}': 'resolves outside the layer',
+            'require ../../../host-only.inc': 'resolves outside the layer',
+            'include ${COREBASE}/meta/conf/x.inc': 'cannot be resolved inside the layer',
+            'include not-here.inc': 'BitBake would search BBPATH outside it',
+            'require not-here.inc': 'required file missing',
+        }
+        for line, message in cases.items():
+            with self.subTest(line):
+                self.write_recipe(extra=f'{line}\nSRC_URI:append = "${{HELPER}}"\nHELPER = ""')
+                report = audit.check(self.layer)
+                self.assertTrue(any(message in e and 'suifleet_1.0.bb' in e for e in report['errors']), report['errors'])
+                # The out-of-layer file is never read: its unpinned source is not seen.
+                self.assertFalse(any('unpinned' in e for e in report['errors']), report['errors'])
+        # An in-layer symlink to an outside file is rejected after resolution.
+        link = self.recipe_dir / 'linked.inc'
+        link.symlink_to(host)
+        self.write_recipe(extra='require linked.inc')
+        self.assertTrue(any('require linked.inc resolves outside the layer' in e for e in self.errors()), self.errors())
+        link.unlink()
+        # A valid in-layer include is read normally, including from a subdirectory.
+        (self.recipe_dir / 'inc').mkdir()
+        (self.recipe_dir / 'inc/extra.inc').write_text('HELPER = " https://example.com/unpinned.tar.gz"\n')
+        self.write_recipe(extra='SRC_URI:append = "${HELPER}"\nHELPER = ""\ninclude inc/extra.inc')
+        errors = self.errors()
+        self.assertTrue(any('lacks a SHA-256 pin: https://example.com/unpinned.tar.gz' in e for e in errors), errors)
+        (self.recipe_dir / 'inc/extra.inc').write_text('SUMMARY = "in layer"\n')
+        self.assertEqual(self.errors(), [])
+
     def test_file_sources_must_resolve_inside_the_layer(self):
         outside = Path(self.tmp.name) / 'outside.service'
         outside.write_text('[Unit]\n')

@@ -19,6 +19,9 @@ Static checks (always):
   * double- and single-quoted assignments are read; an assignment-shaped line
     the reader cannot interpret is reported when it names a source-affecting
     variable, never silently skipped;
+  * require/include targets must be files inside the layer (after symlinks);
+    out-of-layer, unexpandable or missing targets are reported and never read,
+    since BitBake would otherwise find them through BBPATH in another layer;
   * each .bbappend (name_%.bbappend or exact name) is parsed after its recipe
     as one metadata set, as BitBake does, and a bbappend that matches no
     recipe in the layer is rejected;
@@ -102,6 +105,7 @@ class Recipe:
         self.flags = {}
         self.overrides = []
         self.unparsed = []
+        self.include_errors = []
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
@@ -144,11 +148,23 @@ class Recipe:
                 continue
             words = line.split()
             if words[0] in ('require', 'include'):
-                # BitBake searches the including file's directory first.
-                target = path.parent / self.expand(words[1])
-                if not target.is_file() and words[0] == 'require':
-                    raise ValueError(f'{self.path.name}: required file missing: {words[1]}')
-                if target.is_file():
+                # BitBake searches the including file's directory first and then
+                # BBPATH, which reaches other layers. A standalone layer's audited
+                # metadata must therefore come from a file found inside the layer:
+                # an out-of-layer, unresolved or missing target is a finding, and
+                # its contents are never read.
+                named = self.expand(words[1])
+                target = (path.parent / named).resolve()
+                where = f'{path.resolve().relative_to(self.layer.resolve()).as_posix()}: {words[0]} {words[1]}'
+                if '${' in named:
+                    self.include_errors.append(f'{where} cannot be resolved inside the layer')
+                elif self.layer.resolve() not in target.parents:
+                    self.include_errors.append(f'{where} resolves outside the layer: {target}')
+                elif not target.is_file():
+                    self.include_errors.append(
+                        f'{where} is not a file in the layer; BitBake would search BBPATH outside it'
+                        if words[0] == 'include' else f'{where}: required file missing')
+                else:
                     self.read(target)
                 continue
             match = ASSIGN.match(line)
@@ -296,6 +312,7 @@ def audit_recipe(recipe):
     if 'AUTOREV' in recipe.text:
         errors.append(f'{where}: AUTOREV is forbidden')
     errors += override_errors(recipe, where)
+    errors += recipe.include_errors
     extra = recipe.get('FILESEXTRAPATHS')
     for directory in filter(None, extra.replace(':', ' ').split()):
         resolved = Path(directory).resolve() if Path(directory).is_absolute() else None
