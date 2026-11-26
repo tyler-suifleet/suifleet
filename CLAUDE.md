@@ -39,3 +39,5 @@ review. Do not provision production credentials or claim deferred checks passed.
 ## CI fixes: immediate integration
 
 Follow AGENTS.md's 2026-11-26 user direction for every CI-related fix: focused local checks, immediate serial merge without model review or hosted-CI approval waits, then install the verified merged revision and restart/verify affected local services. A PR is an audit trail, not a review queue for these fixes. Preserve active workers, claims, user authorship and actual credential/release/hardware/mainnet limits.
+
+Every action-capable orchestration/recovery pass should fill all eligible implementation/review/repair capacity, per AGENTS.md's 2026-11-26 throughput direction. A failed item must not starve independent work. Preserve ownership, existing processes, real dependencies and permission limits; assigned workers stay within their own job.
