@@ -955,9 +955,14 @@ impl SuiClient {
     }
 
     pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Object>> {
+        Ok(self.optional_object_ref(id).await?.map(|(object, _, _)| object))
+    }
+
+    /// An object with the version and digest of the state that was read.
+    async fn optional_object_ref(&self, id: &str) -> anyhow::Result<Option<(Object, u64, String)>> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
-        request.read_mask = Some(mask(&["owner", "object_type", "json", "version"]));
+        request.read_mask = Some(mask(&["owner", "object_type", "json", "version", "digest"]));
         let object = match self
             .read_rpc(|mut rpc| {
                 let request = request.clone();
@@ -976,14 +981,9 @@ impl SuiClient {
             }
         }
         .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
-        self.observe(
-            id,
-            Some(
-                object
-                    .version
-                    .ok_or_else(|| anyhow::anyhow!("object {id} has no version"))?,
-            ),
-        );
+        let version = object.version.ok_or_else(|| anyhow::anyhow!("object {id} has no version"))?;
+        self.observe(id, Some(version));
+        let digest = object.digest.clone().unwrap_or_default();
         let owner = match object.owner.as_ref() {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
                 Owner::Address(o.address.clone().unwrap_or_default())
@@ -997,11 +997,15 @@ impl SuiClient {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Immutable as i32) => Owner::Immutable,
             _ => Owner::Other,
         };
-        Ok(Some(Object {
-            object_type: object.object_type.unwrap_or_default(),
-            owner,
-            fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
-        }))
+        Ok(Some((
+            Object {
+                object_type: object.object_type.unwrap_or_default(),
+                owner,
+                fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
+            },
+            version,
+            digest,
+        )))
     }
     pub async fn object(&self, id: &str) -> anyhow::Result<Object> {
         self.optional_object(id)
@@ -2406,21 +2410,52 @@ impl SuiClient {
         Ok(found)
     }
 
-    /// Read-only proof that `claim` can never sponsor an enrollment under
-    /// `policy` again, and that it sponsored none before: transaction
-    /// `digest` succeeded, deleted the claim's entry in the policy's claim
-    /// table (the derived field ID binds both the policy and the claim) and
-    /// emitted no enrollment, and the entry is still absent. Only a
-    /// revocation (through any entry point) removes an entry without an
-    /// enrollment event, and it aborts unless the claim was still unused.
-    /// Returns the revocation's checkpoint.
+    /// The current registration of `claim` under `policy` (read-only): the
+    /// object version and digest of the claim's entry in the policy's claim
+    /// table. Each registration creates the entry anew, at a higher version
+    /// with its own digest, so the pair identifies this registration, and an
+    /// enrollment or revocation consumes it exactly once. Recorded before an
+    /// enrollment attempt, it binds a later revocation to that attempt.
     #[cfg(target_os = "linux")]
-    pub async fn check_revocation(&self, policy: &str, claim: &str, digest: &str) -> anyhow::Result<u64> {
+    pub async fn claim_registration(&self, policy: &str, claim: &str) -> anyhow::Result<(u64, String)> {
         let claim = Address::from_str(claim).map_err(|e| anyhow::anyhow!("invalid claim address {claim}: {e}"))?;
         let object = self.object(policy).await?;
         let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
         self.validate_enrollment_policy(policy, &operator).await?;
-        let field = claim_field_id(&object.fields, &claim)?;
+        let (table, field) = claim_field_id(&object.fields, &claim)?;
+        let (entry, version, digest) = self
+            .optional_object_ref(&field)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("claim {claim} is not registered under enrollment policy {policy}"))?;
+        check_claim_entry(&entry, &table, &claim)?;
+        anyhow::ensure!(is_digest(&digest), "claim entry {field} has no valid digest");
+        Ok((version, digest))
+    }
+
+    /// Read-only proof that the enrollment attempt sponsored by `claim` at
+    /// its recorded registration (`version` and `entry_digest`, read by
+    /// [`Self::claim_registration`] before the attempt) has not committed,
+    /// and cannot while the claim stays unregistered:
+    /// - transaction `digest` succeeded, is checkpointed, and deleted exactly
+    ///   that registration (the entry ID, which binds the policy and claim,
+    ///   and its input version and digest) without an enrollment event. A
+    ///   registration is consumed once, so the attempt did not consume it,
+    ///   and a revocation of an earlier or later registration of the same
+    ///   claim does not match;
+    /// - the claim is not registered now;
+    /// - the node's history since the revocation holds no enrollment of this
+    ///   key under the policy, so the attempt did not commit through a later
+    ///   registration either (it fails when that history is not retained).
+    ///
+    /// Returns the revocation's checkpoint.
+    #[cfg(target_os = "linux")]
+    pub async fn check_revocation(&self, policy: &str, claim: &str, version: u64, entry_digest: &str, digest: &str) -> anyhow::Result<u64> {
+        let claim = Address::from_str(claim).map_err(|e| anyhow::anyhow!("invalid claim address {claim}: {e}"))?;
+        anyhow::ensure!(is_digest(entry_digest), "invalid claim registration digest {entry_digest}");
+        let object = self.object(policy).await?;
+        let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
+        self.validate_enrollment_policy(policy, &operator).await?;
+        let (_, field) = claim_field_id(&object.fields, &claim)?;
         let mut request = proto::GetTransactionRequest::default();
         request.digest = Some(digest.to_owned());
         request.read_mask = Some(mask(&["digest", "effects.status", "effects.changed_objects", "effects.events_digest", "events.events", "checkpoint"]));
@@ -2434,11 +2469,20 @@ impl SuiClient {
             .into_inner()
             .transaction
             .ok_or_else(|| anyhow::anyhow!("revocation transaction {digest} not found"))?;
-        let checkpoint = revocation_evidence(&executed, digest, &field)
-            .map_err(|e| e.context(format!("transaction {digest} did not revoke claim {claim} from policy {policy}")))?;
+        let checkpoint = revocation_evidence(&executed, digest, &field, version, entry_digest).map_err(|e| {
+            e.context(format!("transaction {digest} did not revoke the attempt's registration of claim {claim} in policy {policy}"))
+        })?;
         anyhow::ensure!(
             self.optional_object(&field).await?.is_none(),
             "claim {claim} is registered in policy {policy} again; it can still enroll"
+        );
+        let later = self
+            .previous_enrollment(policy, &operator, checkpoint)
+            .await
+            .map_err(|e| e.context(format!("cannot read this key's enrollments since the revocation (checkpoint {checkpoint})")))?;
+        anyhow::ensure!(
+            later.is_none(),
+            "this key enrolled under policy {policy} after the revocation; restore the record with --find-enrollment"
         );
         Ok(checkpoint)
     }
@@ -2811,27 +2855,53 @@ fn check_call_transaction(
 /// The ID of `claim`'s entry in an enrollment policy's `claims` table
 /// (`Table<address, bool>`), from the policy's rendered fields.
 #[cfg(target_os = "linux")]
-fn claim_field_id(policy: &Value, claim: &Address) -> anyhow::Result<String> {
+fn claim_field_id(policy: &Value, claim: &Address) -> anyhow::Result<(String, String)> {
     let table = &policy["claims"]["id"];
     let table = table.as_str().or_else(|| table["id"].as_str()).ok_or_else(|| anyhow::anyhow!("enrollment policy has no claim table"))?;
     let table = Address::from_str(table).map_err(|e| anyhow::anyhow!("invalid claim table ID {table}: {e}"))?;
-    Ok(table.derive_dynamic_child_id(&TypeTag::Address, claim.as_bytes()).to_string())
+    Ok((table.to_string(), table.derive_dynamic_child_id(&TypeTag::Address, claim.as_bytes()).to_string()))
 }
 
-/// Checks a transaction's effects for a revocation of the claim whose table
-/// entry is `field`: successful, checkpointed, deleted the entry, and emitted
-/// no enrollment event (an enrollment also deletes it). Events must be
-/// present when the effects commit to any.
+/// A claim table entry: `Field<address, bool>` for `claim`, owned by `table`.
 #[cfg(target_os = "linux")]
-fn revocation_evidence(executed: &proto::ExecutedTransaction, digest: &str, field: &str) -> anyhow::Result<u64> {
+fn check_claim_entry(entry: &Object, table: &str, claim: &Address) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        same_type(&entry.object_type, "0x2::dynamic_field::Field<address,bool>")
+            && matches!(&entry.owner, Owner::Object(owner) if same_id(owner, table))
+            && same_id(entry.fields["name"].as_str().unwrap_or_default(), &claim.to_string())
+            && entry.fields["value"] == Value::Bool(true),
+        "claim {claim} is not registered under the enrollment policy"
+    );
+    Ok(())
+}
+
+/// A base58 object or transaction digest as the node renders it.
+#[cfg(target_os = "linux")]
+fn is_digest(text: &str) -> bool {
+    (32..=44).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_alphanumeric() && !b"0OIl".contains(&b))
+}
+
+/// Checks a transaction's effects for a revocation of one registration of
+/// the claim whose table entry is `field`: successful, checkpointed, deleted
+/// the entry at exactly input `version` and `entry_digest`, and emitted no
+/// enrollment event (an enrollment also deletes it). Events must be present
+/// when the effects commit to any.
+#[cfg(target_os = "linux")]
+fn revocation_evidence(executed: &proto::ExecutedTransaction, digest: &str, field: &str, version: u64, entry_digest: &str) -> anyhow::Result<u64> {
     anyhow::ensure!(executed.digest.as_deref() == Some(digest), "the node returned another transaction");
     execution_digest(executed)?;
     let checkpoint = executed.checkpoint.ok_or_else(|| anyhow::anyhow!("the transaction is not in a checkpoint yet"))?;
     let effects = executed.effects.as_ref().ok_or_else(|| anyhow::anyhow!("missing transaction effects"))?;
     let deleted = proto::changed_object::IdOperation::Deleted as i32;
+    let entry = effects
+        .changed_objects
+        .iter()
+        .find(|c| c.id_operation == Some(deleted) && c.object_id.as_deref().is_some_and(|id| same_id(id, field)))
+        .ok_or_else(|| anyhow::anyhow!("it did not remove the claim from the policy"))?;
     anyhow::ensure!(
-        effects.changed_objects.iter().any(|c| c.id_operation == Some(deleted) && c.object_id.as_deref().is_some_and(|id| same_id(id, field))),
-        "it did not remove the claim from the policy"
+        entry.input_version == Some(version) && entry.input_digest.as_deref() == Some(entry_digest),
+        "it removed another registration of the claim (version {:?}, not the attempt's {version})",
+        entry.input_version
     );
     let events = executed.events.as_ref().map(|e| e.events.as_slice()).unwrap_or_default();
     anyhow::ensure!(effects.events_digest.is_none() || !events.is_empty(), "the node returned no events for the transaction");
@@ -2925,6 +2995,9 @@ mod tests {
     use super::*;
 
     #[cfg(target_os = "linux")]
+    const ENTRY: &str = "4BKqvjVWUYiRY9LeqjtM2TxfoMAoHhXL7yuyhKWGGH2K";
+
+    #[cfg(target_os = "linux")]
     fn revocation(field: &str, deleted: bool, event: Option<&str>) -> proto::ExecutedTransaction {
         let mut executed = proto::ExecutedTransaction::default();
         executed.digest = Some("D".into());
@@ -2935,6 +3008,8 @@ mod tests {
         effects.status = Some(status);
         let mut changed = proto::ChangedObject::default();
         changed.object_id = Some(field.into());
+        changed.input_version = Some(12);
+        changed.input_digest = Some(ENTRY.into());
         changed.id_operation = Some(if deleted { proto::changed_object::IdOperation::Deleted } else { proto::changed_object::IdOperation::None } as i32);
         effects.changed_objects = vec![changed];
         if let Some(event_type) = event {
@@ -2956,33 +3031,79 @@ mod tests {
         let other_claim = Address::from_str(&format!("0x{}", "d".repeat(64))).unwrap();
         let policy = json!({"claims": {"id": format!("0x{}", "a".repeat(64)), "size": "1"}});
         let other_policy = json!({"claims": {"id": {"id": format!("0x{}", "b".repeat(64))}, "size": "1"}});
-        let field = claim_field_id(&policy, &claim).unwrap();
+        let (table, field) = claim_field_id(&policy, &claim).unwrap();
+        assert_eq!(table, format!("0x{}", "a".repeat(64)));
         // Another claim of the same policy, and the same claim in another policy.
-        assert_ne!(field, claim_field_id(&policy, &other_claim).unwrap());
-        assert_ne!(field, claim_field_id(&other_policy, &claim).unwrap());
+        assert_ne!(field, claim_field_id(&policy, &other_claim).unwrap().1);
+        assert_ne!(field, claim_field_id(&other_policy, &claim).unwrap().1);
         assert!(claim_field_id(&json!({"claims": {}}), &claim).is_err());
 
-        assert_eq!(revocation_evidence(&revocation(&field, true, None), "D", &field).unwrap(), 7);
-        assert_eq!(revocation_evidence(&revocation(&field, true, Some("0x1::other::Event")), "D", &field).unwrap(), 7);
+        assert_eq!(revocation_evidence(&revocation(&field, true, None), "D", &field, 12, ENTRY).unwrap(), 7);
+        assert_eq!(revocation_evidence(&revocation(&field, true, Some("0x1::other::Event")), "D", &field, 12, ENTRY).unwrap(), 7);
         for (executed, digest, why) in [
-            (revocation(&claim_field_id(&policy, &other_claim).unwrap(), true, None), "D", "another claim"),
-            (revocation(&claim_field_id(&other_policy, &claim).unwrap(), true, None), "D", "another policy"),
+            (revocation(&claim_field_id(&policy, &other_claim).unwrap().1, true, None), "D", "another claim"),
+            (revocation(&claim_field_id(&other_policy, &claim).unwrap().1, true, None), "D", "another policy"),
             (revocation(&field, false, None), "D", "entry not deleted"),
             (revocation(&field, true, Some("0x5::enrollment::DeviceEnrolled")), "D", "an enrollment"),
             (revocation(&field, true, None), "X", "another digest"),
         ] {
-            assert!(revocation_evidence(&executed, digest, &field).is_err(), "{why}");
+            assert!(revocation_evidence(&executed, digest, &field, 12, ENTRY).is_err(), "{why}");
         }
         let mut failed = revocation(&field, true, None);
         failed.effects.as_mut().unwrap().status.as_mut().unwrap().success = Some(false);
-        assert!(revocation_evidence(&failed, "D", &field).is_err());
+        assert!(revocation_evidence(&failed, "D", &field, 12, ENTRY).is_err());
         let mut pending = revocation(&field, true, None);
         pending.checkpoint = None;
-        assert!(revocation_evidence(&pending, "D", &field).is_err());
+        assert!(revocation_evidence(&pending, "D", &field, 12, ENTRY).is_err());
         // Effects that commit to events the node did not return.
         let mut hidden = revocation(&field, true, None);
         hidden.effects.as_mut().unwrap().events_digest = Some("E".into());
-        assert!(revocation_evidence(&hidden, "D", &field).is_err());
+        assert!(revocation_evidence(&hidden, "D", &field, 12, ENTRY).is_err());
+    }
+
+    /// A revocation of the same claim's entry, but of another registration
+    /// (before the claim was registered again for the attempt, or after the
+    /// attempt consumed the recorded one and the claim was registered again),
+    /// is not evidence about the attempt.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn revocation_evidence_rejects_another_registration_of_the_claim() {
+        let claim = Address::from_str(&format!("0x{}", "c".repeat(64))).unwrap();
+        let policy = json!({"claims": {"id": format!("0x{}", "a".repeat(64)), "size": "1"}});
+        let (_, field) = claim_field_id(&policy, &claim).unwrap();
+        let other = "8LvTVHvvMKzd6dbX5hKkT5rC8HVWq3ofC7v3JHQZn2bW";
+        // Recorded registration 12/ENTRY; the revocation removed an earlier one.
+        assert!(revocation_evidence(&revocation(&field, true, None), "D", &field, 15, ENTRY).is_err(), "stale version");
+        assert!(revocation_evidence(&revocation(&field, true, None), "D", &field, 12, other).is_err(), "other digest");
+        assert!(revocation_evidence(&revocation(&field, true, None), "D", &field, 9, ENTRY).is_err(), "earlier version");
+        let mut unversioned = revocation(&field, true, None);
+        unversioned.effects.as_mut().unwrap().changed_objects[0].input_version = None;
+        unversioned.effects.as_mut().unwrap().changed_objects[0].input_digest = None;
+        assert!(revocation_evidence(&unversioned, "D", &field, 12, ENTRY).is_err(), "no input state");
+        assert!(is_digest(ENTRY) && is_digest(other));
+        assert!(!is_digest("") && !is_digest("0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl") && !is_digest(&"a".repeat(45)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn claim_entry_requires_the_claim_field_of_the_table() {
+        let claim = Address::from_str(&format!("0x{}", "c".repeat(64))).unwrap();
+        let table = format!("0x{}", "a".repeat(64));
+        let entry = |ty: &str, owner: Owner, name: String, value: Value| Object {
+            object_type: ty.into(),
+            owner,
+            fields: json!({"name": name, "value": value}),
+        };
+        let ty = "0x2::dynamic_field::Field<address,bool>";
+        assert!(check_claim_entry(&entry(ty, Owner::Object(table.clone()), claim.to_string(), Value::Bool(true)), &table, &claim).is_ok());
+        for (bad, why) in [
+            (entry("0x2::dynamic_field::Field<address,u64>", Owner::Object(table.clone()), claim.to_string(), Value::Bool(true)), "type"),
+            (entry(ty, Owner::Object(format!("0x{}", "b".repeat(64))), claim.to_string(), Value::Bool(true)), "owner"),
+            (entry(ty, Owner::Object(table.clone()), format!("0x{}", "d".repeat(64)), Value::Bool(true)), "name"),
+            (entry(ty, Owner::Object(table.clone()), claim.to_string(), Value::Bool(false)), "value"),
+        ] {
+            assert!(check_claim_entry(&bad, &table, &claim).is_err(), "{why}");
+        }
     }
 
     #[test]

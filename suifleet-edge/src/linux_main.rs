@@ -137,8 +137,13 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
         return find_enrollment(Path::new(&args[2])).await;
     }
     #[cfg(target_os = "linux")]
-    if args.len() == 5 && args[1] == "--check-revocation" {
-        return check_revocation(Path::new(&args[2]), &args[3], &args[4]).await;
+    if args.len() == 4 && args[1] == "--claim-registration" {
+        return claim_registration(Path::new(&args[2]), &args[3]).await;
+    }
+    #[cfg(target_os = "linux")]
+    if args.len() == 7 && args[1] == "--check-revocation" {
+        let version = args[4].parse::<u64>().map_err(|e| anyhow::anyhow!("invalid registration version {}: {e}", args[4]))?;
+        return check_revocation(Path::new(&args[2]), &args[3], version, &args[5], &args[6]).await;
     }
     if (args.len() == 4 || args.len() == 5) && args[1] == "--verify-release" {
         let (bundle, trust) = (Path::new(&args[2]), Path::new(&args[3]));
@@ -189,7 +194,7 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --find-enrollment ENROLL_TOML | --check-revocation ENROLL_TOML CLAIM DIGEST | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --find-enrollment ENROLL_TOML | --claim-registration ENROLL_TOML CLAIM | --check-revocation ENROLL_TOML CLAIM VERSION ENTRY_DIGEST DIGEST | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     init_tracing();
     if signer_service {
@@ -923,17 +928,35 @@ async fn find_enrollment(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// Read-only settlement of an enrollment attempt that printed no receipt:
-/// proves that transaction DIGEST revoked CLAIM from the enroll.toml's
-/// policy before it sponsored any enrollment, and that the claim is still
-/// absent, so an attempt sponsored by it can never commit. Never reads the
-/// claim key or submits anything.
+/// Read-only: prints the current registration of CLAIM (a public address)
+/// under the enroll.toml's policy as "VERSION ENTRY_DIGEST", the object
+/// version and digest of its claim table entry. Recorded before an
+/// enrollment attempt, it identifies the registration that attempt can
+/// consume. Fails when the claim is not registered. Never reads the claim
+/// key or submits anything.
 #[cfg(target_os = "linux")]
-async fn check_revocation(path: &Path, claim: &str, digest: &str) -> anyhow::Result<()> {
+async fn claim_registration(path: &Path, claim: &str) -> anyhow::Result<()> {
     let (enroll, sui_config, device) = config::EnrollConfig::load(path)?;
     let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
     sui.validate_deployment().await?;
-    let checkpoint = sui.check_revocation(&enroll.policy_id, claim, digest).await?;
+    let (version, digest) = sui.claim_registration(&enroll.policy_id, claim).await?;
+    println!("{version} {digest}");
+    Ok(())
+}
+
+/// Read-only settlement of an enrollment attempt that printed no receipt:
+/// proves that transaction DIGEST revoked the registration of CLAIM recorded
+/// before the attempt (VERSION and ENTRY_DIGEST, from --claim-registration)
+/// from the enroll.toml's policy without an enrollment, that the claim is
+/// still absent, and that this key has not enrolled under the policy since,
+/// so the attempt has not committed and cannot while the claim stays
+/// unregistered. Never reads the claim key or submits anything.
+#[cfg(target_os = "linux")]
+async fn check_revocation(path: &Path, claim: &str, version: u64, entry_digest: &str, digest: &str) -> anyhow::Result<()> {
+    let (enroll, sui_config, device) = config::EnrollConfig::load(path)?;
+    let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
+    sui.validate_deployment().await?;
+    let checkpoint = sui.check_revocation(&enroll.policy_id, claim, version, entry_digest, digest).await?;
     println!("claim {claim} was revoked from policy {} in transaction {digest} (checkpoint {checkpoint}) and cannot enroll", enroll.policy_id);
     Ok(())
 }
