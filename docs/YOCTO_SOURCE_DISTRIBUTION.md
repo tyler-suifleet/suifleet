@@ -430,8 +430,28 @@ It then downloads each non-crate source into a new directory. Downloads send
 no Authorization header and don't read `.netrc`. Git uses an empty credential
 helper, no global or system configuration and no prompts. Each SHA-256 is
 checked before unpacking. Unpacking follows BitBake `subdir=`/`destsuffix=`
-semantics, and members or links that escape the directory are refused. The
-check then verifies the resulting `S`:
+semantics, and members or links that escape the directory are refused.
+
+Resolution through links can't be checked in advance against the filesystem,
+because the archive's own links, or links an earlier source unpacked, change
+what later paths resolve to. Before writing anything, the audit therefore
+validates each archive's complete link graph together with what is already on
+disk. The graph is restricted so that the lexical result is the real one:
+
+- No member is written through a link.
+- No symlink target passes through a link or ends at one (no chains).
+- Every directory a target traverses is a directory of the archive or a real
+  directory already on disk.
+- Hard links, duplicate member names and `..` member components are refused.
+  The published archives contain none of them. Node's three `bin/` symlinks
+  point to regular files.
+
+Files and links are then created through directory descriptors opened with
+`O_NOFOLLOW`, so a link swapped in after validation is never followed. After
+each extraction, every symlink under the recipe's unpack directory is resolved
+again and must stay inside it.
+
+The check then verifies the resulting `S`:
 
 - for every recipe, no runtime identity/state file name anywhere in the fetched
   and unpacked sources;
