@@ -67,7 +67,12 @@ the same or different pins or a controller's artifact changes after its
 preflight check: a mismatching upload is removed and its run stops. A run
 removes other releases' staged files (and abandoned uploads a day old) after
 installing, which makes an overlapping rollout of another release fail at its
-install rather than install other bytes. Restoring only the cache file of
+install rather than install other bytes. Overlapping `site.yml` runs on one
+host do not interleave at all: each holds the host's
+[rollout lock](#recovery) from before its installation through its final
+health check and applied-inputs record, and a second run, of any release or a
+preview, stops before it uploads or changes anything. So a run never restarts,
+verifies or records another run's release as its own. Restoring only the cache file of
 the release already installed restarts nothing; services restart only for an
 installed change or inputs not yet applied. (A `deb` preview cannot ask apt
 about a package it has not uploaded, so it reports that restore as a pending
@@ -641,6 +646,18 @@ allows it). The role does not check the controller.
   ```sh
   rm -r /run/suifleet-enroll.lock
   ```
+- **Rollout lock.** One `site.yml` play at a time runs the role on a host: it
+  holds `/run/suifleet-rollout.lock` from before the installation until the
+  final health check has recorded the applied inputs. Another play (a run or a
+  check-mode preview, of the same or another release) stops on it before it
+  uploads or changes anything. A play killed during a rollout leaves the lock;
+  the next run stops on it. Once no `ansible-playbook` targets the host,
+  remove it as root (a reboot also clears it) and run `site.yml` again, which
+  converges the host to the inventory's pins:
+
+  ```sh
+  rm -r /run/suifleet-rollout.lock
+  ```
 - **Swap refusal.** See [claim storage](#claim-storage): enroll with all
   swap off, including zram and encrypted swap. Nothing was sent.
 - **Crash dump refusal.** See [claim storage](#claim-storage): disable core
@@ -847,9 +864,18 @@ The harness checks these phases:
    digest validation, the installed `deployment.json` stays byte for byte,
    no file is left in `/etc/suifleet`, no service restarts, and a rerun with
    the original manifest reports `changed=0`.
-17. A rolling-restart preview in check mode succeeds without restarting the
+17. On each host, a test-only controller callback pauses a `site.yml` run
+   right after its install task and, while it waits, runs a complete
+   `site.yml` pinning another compatible release (deb `-3`, binary 2) as a
+   check-mode preview and as a real run. Each overlapping play stops on the
+   rollout lock before it uploads or installs anything; the first run then
+   reports `changed=0`, restarts nothing, keeps its release, cache and
+   applied-inputs record, and releases the lock. A planted stale lock stops a
+   preview and a run without changes until it is removed; a rerun then
+   reports `changed=0`.
+18. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
-18. Rolling restart.
+19. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that

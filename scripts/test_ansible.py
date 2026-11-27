@@ -88,7 +88,12 @@ installs only bytes it verified; the cache holds only the verified release;
 rerun changed=0), two rollouts of different releases overlapping on every host
 between one's publication and its install (the other release never writes the
 verified file; the first fails at its install, the host keeps the second
-release, stale staged artifacts are removed; rerun changed=0),
+release, stale staged artifacts are removed; rerun changed=0), a complete
+site.yml rollout of another compatible release (preview and run) started on
+every host right after a site.yml run's install task (it stops on the rollout
+lock before any upload; the first run restarts nothing, keeps its release and
+applied-inputs record, releases the lock; a stale lock stops later runs until
+removed; rerun changed=0),
 rolling-restart preview in check mode (succeeds; no process or
 identity changes), rolling restart. It checks preserved identity and
 enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
@@ -221,12 +226,14 @@ INSTALL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role:
 # A controller callback (test-only) that overlaps two rollouts deterministically:
 # as soon as a host passes one of the tasks named in SF304_OVERLAP_AFTER, it
 # copies any SF304_OVERLAP_PREPARE files, runs a complete install of another
-# rollout on that host (SF304_OVERLAP_ARGS, with SF304_OVERLAP_ENV added) and
-# only then lets the first rollout continue.
+# rollout on that host (SF304_OVERLAP_PLAYBOOK, default the install-only play,
+# with SF304_OVERLAP_ARGS and SF304_OVERLAP_ENV added) and only then lets the
+# first rollout continue.
 OVERLAP_VERIFIED_TASKS = ("Refuse a staged binary that differs from the pinned SHA-256",
                           "Refuse a staged package that differs from the pinned SHA-256")
 OVERLAP_PUBLISHED_TASKS = ("Publish the verified binary under its digest-named path",
                            "Publish the verified package under its digest-named path")
+OVERLAP_INSTALL_NAMES = ("Install the verified binary", "Install or upgrade the package")
 OVERLAP_INSTALL_TASKS = ("TASK [suifleet : Install the verified binary]", "TASK [suifleet : Install or upgrade the package]")
 OVERLAP_CALLBACK = """import json, os, shutil, subprocess
 from ansible.plugins.callback import CallbackBase
@@ -250,7 +257,8 @@ class CallbackModule(CallbackBase):
             shutil.copyfile(source, target)
         env = {k: v for k, v in os.environ.items() if k != "ANSIBLE_CALLBACKS_ENABLED"}
         env.update(json.loads(os.environ.get("SF304_OVERLAP_ENV", "{}")))
-        command = ["ansible-playbook", "-i", "/work/inventory.yml", "/work/install-only.yml", "--limit", host,
+        playbook = os.environ.get("SF304_OVERLAP_PLAYBOOK", "/work/install-only.yml")
+        command = ["ansible-playbook", "-i", "/work/inventory.yml", playbook, "--limit", host,
                    *json.loads(os.environ["SF304_OVERLAP_ARGS"])]
         done = subprocess.run(command, env=env, text=True, capture_output=True)
         with open(base + ".log", "w") as log:
@@ -334,6 +342,8 @@ LOOKUP_WRAPPER = f"""#!/bin/sh
 {STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/lookup-staging")}exec /usr/bin/suifleet "$@"
 """
 LOCK_REFUSAL = "has the enrollment lock"
+ROLLOUT_LOCK = "/run/suifleet-rollout.lock"
+ROLLOUT_LOCK_REFUSAL = "has the rollout lock"
 # Stages each host's claim exactly as enrollment does, then stops before the
 # enrollment and its cleanup run: an interrupted claim transfer.
 CLAIM_INTERRUPT_PLAY = """- hosts: suifleet_devices
@@ -1252,6 +1262,67 @@ class Harness:
               " at its install, the host kept the second release, and stale staged artifacts were removed")
         _, recap = self.ansible("rerun after the overlapping rollouts", "site.yml", *vault, *rollout)
         self.unchanged(recap, "rerun after the overlapping rollouts")
+
+    def overlapping_site_rollouts(self, vault, rollout, previous):
+        """A complete rollout of another compatible release overlaps site.yml after its installation.
+
+        Rollout A (the current release) runs site.yml. On each host, right after
+        A's install task and before A samples its service inputs, restarts or
+        checks anything, a complete site.yml rollout B pinning another
+        compatible release (deb -3, binary 2) runs on that host. B must stop on
+        A's rollout lock before it uploads or installs anything (in check mode
+        and in a real run), so A restarts nothing, verifies and records only
+        its own release, and releases the lock. A lock left by a killed play
+        stops a later run, changing nothing, until it is removed."""
+        overlap = self.write_overlap_callbacks()
+        release_b = ["-e", f"suifleet_deb_src=/artifacts/3/{self.debs['3'].name}", "-e", f"suifleet_deb_sha256={sha256(self.debs['3'])}",
+                     "-e", "suifleet_binary_src=/artifacts/suifleet-2", "-e", f"suifleet_binary_sha256={sha256(self.binaries['2'])}"]
+        caches = {name: self.exec(host["container"], "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout
+                  for name, host in self.hosts.items()}
+        for label, extra in (("check mode", ["--check", "--diff"]), ("run", [])):
+            for path in overlap.iterdir():
+                path.unlink()
+            output, recap = self.ansible(
+                f"site.yml rollout overlapped after its install by a {label} of another release", "site.yml", *vault, *rollout,
+                env=("ANSIBLE_CALLBACK_PLUGINS=/work/callbacks", "ANSIBLE_CALLBACKS_ENABLED=sf304_overlap",
+                     "SF304_OVERLAP_AFTER=" + json.dumps(OVERLAP_INSTALL_NAMES),
+                     "SF304_OVERLAP_PLAYBOOK=/ansible/site.yml",
+                     "SF304_OVERLAP_ARGS=" + json.dumps([*extra, *vault, *release_b])))
+            self.unchanged(recap, f"site.yml rollout overlapped by a {label} of another release")
+            for name, host in self.hosts.items():
+                container = self.hosts[name]["container"]
+                log = (overlap / f"{name}.log").read_text()
+                assert (overlap / f"{name}.rc").read_text() != "0", (name, label, "the overlapping rollout succeeded", log[-4000:])
+                assert ROLLOUT_LOCK_REFUSAL in log, (name, label, "the overlapping rollout was not refused by the lock", log[-4000:])
+                for task in (*OVERLAP_INSTALL_TASKS, "TASK [suifleet : Stage the authenticated binary]", SELF_CHECK_TASK):
+                    assert task not in log, (name, label, "the overlapping rollout ran past the lock", task, log[-4000:])
+                install = OVERLAP_INSTALL_TASKS[1 if host["profile"] == "deb" else 0]
+                assert self.task_statuses(output, install, name) == {"ok"}, (name, label, "the first rollout's install changed")
+                assert self.exec(container, "test", "-e", ROLLOUT_LOCK, check=False).returncode != 0, (name, label, "lock left")
+                assert self.exec(container, "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout == caches[name], \
+                    (name, label, "the overlapping rollout changed the cache")
+                state, _ = self.host_state(name)
+                self.assert_converged(name, state)
+                for field in ("binary_sha256", "package", "main_pid", "signer_pid", "key_sha256", "enrollment_sha256"):
+                    assert state[field] == previous[name][field], (name, label, field, "changed by the overlapping rollout")
+                assert state["applied"] == previous[name]["applied"], (name, label, "the recorded applied inputs changed")
+            print(f"PASS overlapping site.yml {label} of another release stopped on the rollout lock before any upload;"
+                  " the first rollout restarted nothing, verified its own release and released the lock")
+        name = next(iter(self.hosts))
+        container = self.hosts[name]["container"]
+        self.exec(container, "sh", "-c", f"umask 077; mkdir {ROLLOUT_LOCK} && echo stale-killed-play > {ROLLOUT_LOCK}/owner")
+        for label, extra in (("check mode", ["--check", "--diff"]), ("run", [])):
+            output, recap = self.ansible(f"{label} with a stale rollout lock", "site.yml", *extra, "--limit", name,
+                                         *vault, *release_b, expect_rc="nonzero")
+            assert ROLLOUT_LOCK_REFUSAL in output and recap[name]["changed"] == 0, (name, label, recap, output[-4000:])
+            assert self.exec(container, "cat", f"{ROLLOUT_LOCK}/owner").stdout == "stale-killed-play\n", (name, label, "lock changed")
+            state, _ = self.host_state(name)
+            for field in ("binary_sha256", "package", "main_pid", "signer_pid"):
+                assert state[field] == previous[name][field], (name, label, field, "changed under a stale lock")
+        self.exec(container, "rm", "-r", ROLLOUT_LOCK)
+        print("PASS a stale rollout lock stopped check mode and a run without changes until it was removed")
+        _, recap = self.ansible("rerun after the overlapping site.yml rollouts", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the overlapping site.yml rollouts")
 
     def sudo_log_control(self):
         """sudo records the standard input of become commands on every host, so the claim checks can see it."""
@@ -2803,6 +2874,7 @@ class Harness:
         self.binary_path_directory(vault, rollout, after)
         self.same_pin_overlap(vault, rollout, after)
         self.overlapping_releases(vault, rollout, after)
+        self.overlapping_site_rollouts(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")

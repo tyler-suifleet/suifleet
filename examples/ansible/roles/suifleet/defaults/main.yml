@@ -51,6 +51,10 @@ suifleet_enroll_staging: /run/suifleet-enroll
 # Host-wide enrollment lock (a directory on tmpfs /run): one play at a time
 # enrolls a host. A reboot clears a lock left by a killed play.
 suifleet_enroll_lock: /run/suifleet-enroll.lock
+# Host-wide rollout lock (a directory on tmpfs /run): one play at a time runs
+# the role on a host, from installation through the final health check. A
+# reboot clears a lock left by a killed play.
+suifleet_rollout_lock: /run/suifleet-rollout.lock
 # SHA-256 of the manifest an enrollment attempt ran under, kept beside its
 # attempt marker (/etc/suifleet/.enrollment.json.partial) on persistent
 # storage. A receipt is promoted only beside that same manifest, and the
