@@ -27,6 +27,10 @@ Static checks (always):
   * require/include targets must be files inside the layer (after symlinks);
     out-of-layer, unexpandable or missing targets are reported and never read,
     since BitBake would otherwise find them through BBPATH in another layer;
+  * metadata BitBake runs after parsing is refused, since it can rewrite
+    SRC_URI after the reader has read it: anonymous Python functions,
+    addhandler event handlers and inherit/inherit_defer of an in-layer or
+    unexpandable class, in the recipe, its includes and bbappends;
   * each .bbappend (name_%.bbappend or exact name) is parsed after its recipe
     as one metadata set, as BitBake does, and a bbappend that matches no
     recipe in the layer is rejected;
@@ -79,6 +83,9 @@ ASSIGN_LIKE = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(?:\[[^\]]*\]
 REF = re.compile(r'\$\{([A-Za-z0-9_\-]+)\}')
 # The layer's Scarthgap/Wrynose unpack-root idiom; no other inline Python is evaluated.
 UNPACKDIR_EXPR = re.compile(r"""\$\{@d\.getVar\(['"]UNPACKDIR['"]\)\s+or\s+d\.getVar\(['"]WORKDIR['"]\)\}""")
+# BitBake's anonymous Python forms: python () {, python __anonymous () {, with
+# optional fakeroot and spacing. They run at the end of parsing (ast.finalize).
+ANONYMOUS_PYTHON = re.compile(r'^(?:fakeroot\s+)?python(?:\s+__anonymous)?\s*\(\s*\)\s*\{$')
 TARBALL = re.compile(r'\.(tar(\.(gz|xz|bz2|zst))?|tgz|tbz2|txz)$')
 # Every suffix BitBake's FetchMethod.unpack runs an unpack command for (tar and
 # its compressed forms, bare gz/bz2/xz/lz/lzma/zst/Z, zip/jar, rpm/srpm,
@@ -130,6 +137,10 @@ class Recipe:
         self.overrides = []
         self.unparsed = []
         self.include_errors = []
+        # Metadata BitBake runs after parsing (anonymous Python, event handlers,
+        # in-layer classes). It can rewrite SRC_URI and the other pins, and
+        # this reader does not execute it, so audit_recipe refuses it.
+        self.parse_time = []
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
@@ -171,6 +182,15 @@ class Recipe:
             else:
                 self.vars['THISDIR'] = outer
 
+    def rel(self, path):
+        return path.resolve().relative_to(self.layer.resolve()).as_posix()
+
+    def layer_class(self, name):
+        """Whether BitBake could load class name from this layer (classes,
+        classes-recipe or classes-global), whose metadata this reader skips."""
+        return any((self.layer / d / f'{name}.bbclass').exists()
+                   for d in ('classes', 'classes-recipe', 'classes-global'))
+
     def _read(self, path):
         text = path.read_text()
         self.text += text
@@ -181,6 +201,8 @@ class Recipe:
                 block = stripped != '}'
                 continue
             if stripped.endswith('{') and ('()' in stripped or stripped.startswith('python')):
+                if ANONYMOUS_PYTHON.match(stripped):
+                    self.parse_time.append(f'{self.rel(path)}: anonymous Python function ({stripped.rstrip("{").strip()})')
                 block = True
                 continue
             lines.append(stripped)
@@ -188,6 +210,14 @@ class Recipe:
             if not line or line.startswith('#'):
                 continue
             words = line.split()
+            if words[0] == 'addhandler':
+                self.parse_time.append(f'{self.rel(path)}: event handler ({line})')
+                continue
+            if words[0] in ('inherit', 'inherit_defer'):
+                for name in words[1:]:
+                    if '${' in name or self.layer_class(name):
+                        self.parse_time.append(f'{self.rel(path)}: {words[0]} of in-layer or unresolved class {name}')
+                continue
             if words[0] in ('require', 'include'):
                 # BitBake searches the including file's directory first and then
                 # BBPATH, which reaches other layers. A standalone layer's audited
@@ -465,6 +495,8 @@ def audit_recipe(recipe):
         errors.append(f'{where}: AUTOREV is forbidden')
     errors += override_errors(recipe, where)
     errors += recipe.include_errors
+    errors += [f'{where}: {item} runs after parsing and can change source pins the audit '
+               'reads; it is not supported in audited recipes, includes or appends' for item in recipe.parse_time]
     if 'FILESPATH' in recipe.vars:
         # The audit models BitBake's default FILESPATH (FILESEXTRAPATHS, then
         # BP, BPN and files beside the recipe). An explicit search path could
@@ -832,6 +864,9 @@ def unpack_root(workdir, pn):
 
 def unpack_plan(recipe, unpack):
     """Validate every metadata-derived destination before anything is written."""
+    if recipe.parse_time:
+        # SRC_URI as read here may not be what BitBake fetches after running it.
+        raise ValueError(f'metadata that runs after parsing is not supported: {"; ".join(recipe.parse_time)}')
     plan = []
     for url, params in recipe.sources():
         scheme = url.split('://', 1)[0]

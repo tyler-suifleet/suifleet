@@ -1370,6 +1370,61 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual(report['errors'], [])
         self.assertTrue((Path(report['fetch_dir']) / 'suifleet/source/NOTICE').is_file())
 
+    def test_metadata_that_runs_after_parsing_is_refused(self):
+        # BitBake runs anonymous Python and event handlers after parsing, and
+        # they can rewrite SRC_URI. The reader does not execute them, so a
+        # recipe that relies on them must fail before anything is fetched.
+        added = 'https://example.invalid/unpinned.tar.gz'
+        anonymous = 'python () {\n    d.appendVar("SRC_URI", " %s")\n}\n' % added
+        cases = {
+            'recipe anonymous': ('bb', anonymous),
+            'named anonymous': ('bb', anonymous.replace('python () {', 'python __anonymous() {')),
+            'fakeroot anonymous': ('bb', anonymous.replace('python () {', 'fakeroot python(){')),
+            'include anonymous': ('inc', anonymous),
+            'append anonymous': ('bbappend', anonymous),
+            'event handler': ('bb', 'addhandler suifleet_rewrite\n'),
+            'in-layer class': ('bb', 'inherit suifleet-rewrite\n'),
+            'unresolved class': ('bb', 'inherit ${SUIFLEET_CLASS}\n'),
+        }
+        (self.layer / 'classes').mkdir(exist_ok=True)
+        (self.layer / 'classes/suifleet-rewrite.bbclass').write_text(anonymous)
+        self.addCleanup((self.layer / 'classes/suifleet-rewrite.bbclass').unlink)
+        include = self.recipe_dir / 'extra.inc'
+        append = self.recipe_dir / 'suifleet_1.0.bbappend'
+        for label, (where, text) in cases.items():
+            with self.subTest(label):
+                include.unlink(missing_ok=True)
+                append.unlink(missing_ok=True)
+                if where == 'bb':
+                    self.write_recipe(extra=text)
+                elif where == 'inc':
+                    include.write_text(text)
+                    self.write_recipe(extra='require extra.inc\n')
+                else:
+                    append.write_text(text)
+                    self.write_recipe()
+                self.assertTrue(any('runs after parsing' in e for e in self.errors()), self.errors())
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer,
+                                      [append] if append.exists() else ())
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('runs after parsing' in e and 'nothing fetched' in e for e in errors), errors)
+                self.assertFalse((workdir / 'suifleet').exists())
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+                self.assertIsNone(report['recipes']['suifleet']['fetched'])
+        include.unlink(missing_ok=True)
+        append.unlink(missing_ok=True)
+        # Named task functions, inheriting classes from other layers and a
+        # Python function that only mentions anonymous in its name still pass.
+        self.write_recipe(extra='inherit cargo\npython do_verify_lock() {\n    pass\n}\n'
+                                'python do_anonymous_check() {\n    pass\n}\ndo_install() {\n    true\n}\n')
+        self.assertEqual(self.errors(), [])
+
     def test_archives_bitbake_unpacks_in_unmodelled_formats_are_refused(self):
         # BitBake runs unzip (and other extractors) on these names unless
         # unpack=0; the audit must not report the packed file's layout instead.
