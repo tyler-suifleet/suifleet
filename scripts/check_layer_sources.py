@@ -63,7 +63,9 @@ non-crate source with no credentials into a new directory, verifies its
 SHA-256 before unpacking, re-checks each destination before writing, unpacks
 it as BitBake would, creates loose files exclusively without following links
 (file:// entries keep their URL directories, like BitBake; unpack=0
-downloads; archive formats it cannot extract are refused) and checks the resulting
+downloads; archive formats it cannot extract are refused). Every link in a
+Git checkout and in the assembled unpack directory must resolve inside it
+before any source byte is read; it then checks the resulting
 S: license checksums, the daemon lockfile/version/crate include, workspace
 members and transitive local path-dependency crates, include targets, and the codec's exact pinned file set and provenance.
 --cargo additionally runs `cargo metadata --offline --locked --no-deps`.
@@ -1869,6 +1871,13 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 errors.append(f'{recipe.path.name}: fetched {actual}, SRCREV is {rev}')
             if branch_error:
                 errors.append(f'{recipe.path.name}: {branch_error}')
+            # A pinned commit can track symlinks to anything on the review host.
+            # Apply the same unpack-root confinement as archive extraction, and
+            # stop before a later source or check reads through such a link.
+            escaping = links_escaping(unpack)
+            if escaping:
+                return errors + [f'{recipe.path.name}: {redact_url(url)}: links resolve outside the unpack '
+                                 f'directory after checkout: {", ".join(escaping)}'], fetched
             continue
         name = download_name(url, params)
         target = downloads / name
@@ -1892,6 +1901,12 @@ def fetch_recipe(recipe, workdir, cargo=None):
             except ValueError as error:
                 errors.append(f'{recipe.path.name}: {error}')
     errors += fetched_state_errors(recipe, unpack)
+    # Every source is assembled; refuse the tree before reading any manifest,
+    # source or license bytes (or running Cargo) if any link leaves it.
+    escaping = links_escaping(unpack)
+    if escaping:
+        return errors + [f'{recipe.path.name}: links resolve outside the unpack directory: '
+                         f'{", ".join(escaping)}; source checks not run'], fetched
     try:
         s_dir = confined(unpack, os.path.relpath(s_dir, unpack.resolve()), 'S')
     except ValueError as error:

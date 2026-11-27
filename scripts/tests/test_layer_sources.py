@@ -1193,6 +1193,55 @@ class LayerAuditTests(unittest.TestCase):
                 else:
                     self.assertEqual(branch_errors, [])
 
+    def git_fetch_report(self, **patches):
+        url = 'git://github.com/example/suifleet.git;protocol=https;nobranch=1;name=edge;destsuffix=source'
+        self.write_recipe(url=url, extra=f'SRCREV_edge = "{self.repo.git("rev-parse", "HEAD").decode().strip()}"')
+        with mock.patch.multiple(audit, git_remote=mock.Mock(return_value=f'file://{self.repo.root}'), **patches):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        return report
+
+    def test_git_checkout_links_must_stay_inside_the_unpack_directory(self):
+        # A pinned commit can track symlinks. One that leaves the unpack root
+        # would make the checks read the review host's bytes (here a copy of
+        # the expected LICENSE, so following it would pass); it is refused
+        # before any source, manifest or license byte is read.
+        host = Path(self.tmp.name) / 'host-license'
+        host.write_text(LICENSE)
+        never = AssertionError('source bytes read through an escaping link')
+        for name, target in (('absolute', str(host)), ('relative', '../../../../host-license')):
+            with self.subTest(name):
+                (self.repo.root / 'LICENSE').unlink()
+                os.symlink(target, self.repo.root / 'LICENSE')
+                self.repo.commit()
+                report = self.git_fetch_report(daemon_errors=mock.Mock(side_effect=never),
+                                               load_packager=mock.Mock(side_effect=never))
+                self.assertFalse(report['ok'])
+                self.assertTrue(any('links resolve outside the unpack directory after checkout: source/LICENSE' in e
+                                    for e in report['errors']), report['errors'])
+        # An in-tree link (relative, resolving inside the checkout) is allowed.
+        (self.repo.root / 'LICENSE').unlink()
+        self.repo.write('LICENSE', LICENSE)
+        os.symlink('README.md', self.repo.root / 'docs/alias.md')
+        os.symlink('../LICENSE', self.repo.root / 'docs/LICENSE')
+        self.repo.commit()
+        report = self.git_fetch_report()
+        self.assertEqual(report['errors'], [])
+        self.assertTrue(report['ok'])
+        self.assertEqual([f['verified'] for f in report['recipes']['suifleet']['fetched'] if 'revision' in f], [True])
+
+    def test_assembled_tree_links_are_checked_before_source_checks(self):
+        # The final assembled tree is confined again before S is read, even if
+        # each source passed its own check.
+        never = AssertionError('source bytes read through an escaping link')
+        calls = iter([[], ['source/late-link']])
+        report = self.git_fetch_report(links_escaping=mock.Mock(side_effect=lambda root: next(calls)),
+                                       daemon_errors=mock.Mock(side_effect=never),
+                                       load_packager=mock.Mock(side_effect=never))
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('links resolve outside the unpack directory: source/late-link; source checks not run' in e
+                            for e in report['errors']), report['errors'])
+
     def test_git_parameters_the_audit_does_not_model_are_refused(self):
         # subpath/nocheckout/etc. change what BitBake checks out; the audit
         # verifies the whole tree, so it must refuse instead of passing.
