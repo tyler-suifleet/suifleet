@@ -5,6 +5,7 @@ profiles whose builds are recorded in docs/YOCTO_LEGACY_SERIES.md (older
 series) or docs/YOCTO_PACKAGING.md. Blocked series must stay out of it.
 No BitBake runs here; this does not replace the recorded builds.
 """
+import json
 from pathlib import Path
 import re
 import unittest
@@ -70,6 +71,21 @@ class SeriesPolicyTests(unittest.TestCase):
                 self.assertTrue(url.startswith('https://'), (package, name))
                 self.assertRegex(commit or '', '^[0-9a-f]{40}$', (package, name))
             self.assertIn(f'    - {package}', (KAS / qemu).read_text(), qemu)
+
+    def test_standalone_ci_pins_match_core_profiles(self):
+        layer = LAYERS['meta-suifleet'].parents[1]
+        pins = json.loads((layer / 'ci/pins.json').read_text())
+        self.assertEqual(set(pins), set(PROFILES))
+        workflow = (layer / '.github/workflows/layer.yml').read_text()
+        matrix = workflow.split('        series:\n', 1)[1].split('    runs-on:', 1)[0]
+        self.assertEqual(sorted(re.findall(r'^ +- (\S+)$', matrix, re.M)), sorted(PROFILES))
+        for series, (package, _qemu) in PROFILES.items():
+            expected = {
+                name: [url, commit]
+                for name, url, commit, branch in remote_repos((KAS / package).read_text())
+                if name not in {'meta-suifleet', 'meta-raspberrypi'}
+            }
+            self.assertEqual(pins[series], expected, series)
 
     def test_enrollment_layer_is_board_independent_and_in_every_package_profile(self):
         conf = LAYERS['suifleet-enrollment']

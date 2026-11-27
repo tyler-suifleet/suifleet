@@ -7,6 +7,7 @@ database read-only, contacts GitHub only with explicit --refresh-github, and nev
 tokens, claim blobs, prompts, PR bodies/comments or worker logs.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -259,6 +260,7 @@ def project_snapshot(data, mtime):
                   else None)
     return dict(pr=number, title=safe_text(data.get('title'), 120), branch=branch,
                 head=str(data.get('headRefOid') or '')[:12], draft=bool(data.get('isDraft')),
+                closed=data.get('state') in ('CLOSED', 'MERGED'),
                 head_oid=full_head, base_oid=full_base, source_head=full_head,
                 source_fingerprint=source_fingerprint(data), unresolved_threads=unresolved,
                 mergeable=data.get('mergeable') if data.get('mergeable') in ('MERGEABLE', 'CONFLICTING', 'UNKNOWN') else None,
@@ -669,9 +671,17 @@ def pipeline_stage(snapshot, review, *, active=False, batch=None, candidate=Fals
     return 'awaiting-evidence-review', 'source review complete; final acceptance/evidence review is outstanding'
 
 
-def derive_pipeline(snapshots, jobs, tickets, workers, batches, cache, now, batch_projects=()):
-    """Derived PR states are independent of authoritative ticket/issue totals."""
+def derive_pipeline(snapshots, jobs, tickets, workers, batches, cache, now, batch_projects=(),
+                    acceptance_fences=None):
+    """Derived PR states and optional offline recovery hints."""
+    jobs_by_pr = {}
+    for job in jobs:
+        jobs_by_pr.setdefault((job['project'], job['pr']), []).append(job)
     active = {(w['project'], w.get('pr')) for w in workers if w.get('pr')}
+    held_tickets = (acceptance_fences or set()) | {
+        (w['project'], w.get('ticket')) for w in workers if w.get('ticket')}
+    branch_owners = {(row['project'], row['branch']): row for row in tickets.values()
+                     if row.get('project') and row.get('branch')}
     memberships, candidates = {}, {}
     ambiguous = set()
     for row in batches.get('rows', []):
@@ -682,14 +692,15 @@ def derive_pipeline(snapshots, jobs, tickets, workers, batches, cache, now, batc
             if key in memberships:
                 ambiguous.add(key)
             memberships[key] = (row, member['head'])
-    rows = []
+    rows, acceptance_gaps = [], []
     for key, snapshot in sorted(snapshots.items()):
-        owner = next((t for (p, _), t in tickets.items() if p == key[0]
-                      and (short_key(t['key']) == snapshot.get('ticket') or t.get('branch') == snapshot.get('branch'))), None)
+        owner = (tickets.get((key[0], snapshot.get('ticket')))
+                 or branch_owners.get((key[0], snapshot.get('branch'))))
         review = None
-        for job in reversed(jobs):
-            if ((job['project'], job['pr']) != key or job['kind'] != 'review' or job['status'] != 'done'
-                    or not job.get('publication_done') or job.get('head') != snapshot.get('head_oid')):
+        pr_jobs = jobs_by_pr.get(key, [])
+        for job in reversed(pr_jobs):
+            if (job['kind'] != 'review' or job['status'] != 'done'
+                    or job.get('publication_done') != 1 or job.get('head') != snapshot.get('head_oid')):
                 continue
             evidence = cache.get(job['directory'])
             if (not evidence or not snapshot.get('source_fingerprint')
@@ -700,12 +711,12 @@ def derive_pipeline(snapshots, jobs, tickets, workers, batches, cache, now, batc
             try:
                 result = json.loads(job.get('result') or '{}')
                 if not isinstance(result, dict):
-                    continue
+                    break
                 review = {k: result.get(k) for k in ('verdict', 'source_complete', 'acceptance_ready', 'acceptance_complete')}
                 review['base_oid'] = evidence.get('base_oid')
                 break
             except (TypeError, ValueError):
-                continue
+                break  # Do not surface an older receipt when the current one is unreadable.
         member = memberships.get(key)
         batch = candidates.get(key) or (member[0] if member else None)
         if key in active:
@@ -718,11 +729,32 @@ def derive_pipeline(snapshots, jobs, tickets, workers, batches, cache, now, batc
         rows.append(dict(project=key[0], pr=key[1], ticket=short_key(owner['key']) if owner else None,
                          integration=key in candidates, state=stage, reason=reason,
                          title=snapshot.get('title') or '', observed=snapshot.get('mtime')))
+        # A typed false can describe missing software evidence even while CI
+        # runs. The recovery agent must classify the actual outstanding work.
+        if (acceptance_fences is not None and owner and stage in ('awaiting-acceptance', 'awaiting-ci')
+                and not snapshot.get('draft') and not snapshot.get('closed')
+                and snapshot.get('branch') and snapshot['branch'] == owner.get('branch')
+                and owner.get('status') == 'review' and owner.get('session')
+                and owner.get('agent') in ('Codex', 'Claude')
+                and owner.get('remote', {}).get('state') == 'open'
+                and not owner['remote'].get('external_blockers')
+                and (key[0], short_key(owner['key'])) not in held_tickets
+                and not any(j['status'] in JOB_OPEN for j in pr_jobs)
+                and review and review['verdict'] == 'blocked' and review['acceptance_ready'] is False
+                and review['acceptance_complete'] is False
+                and pr_jobs[-1] is job and type(job['id']) is int
+                and isinstance(result.get('evidence'), str) and result['evidence'].strip()):
+            receipt = hashlib.sha256(json.dumps([
+                job['id'], job['head'], snapshot['source_fingerprint'], job['result'],
+                owner['session'], owner['branch'],
+            ]).encode()).hexdigest()
+            acceptance_gaps.append(dict(project=key[0], ticket=short_key(owner['key']),
+                                        pr=key[1], review_job=job['id'], receipt=receipt))
     counts = {}
     for row in rows:
         counts[row['state']] = counts.get(row['state'], 0) + 1
     return dict(rows=rows, counts=counts, total=len(rows), batch_receipts=batches['state'],
-                detail=batches.get('detail'))
+                detail=batches.get('detail'), acceptance_gaps=acceptance_gaps)
 
 
 def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
@@ -807,9 +839,14 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             optional = ', '.join(c if c in columns else f'NULL AS {c}' for c in
                                  ('error', 'created', 'retry_after', 'attempts', 'result', 'publication_done'))
             jobs = [dict(r) for r in db.execute(f'SELECT id,project,pr,family,kind,head,status,directory,pid,started,{optional} FROM jobs ORDER BY id')]
-            merged = set()
+            integrations = {}
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='integrations'").fetchone():
-                merged = {(r[0], r[1]) for r in db.execute('SELECT project,pr FROM integrations WHERE reconciled=1')}
+                integrations = {(r[0], r[1]): r[2]
+                                for r in db.execute('SELECT project,pr,reconciled FROM integrations')}
+            local_publication = set()
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='local_integrations'").fetchone():
+                local_publication = {(r[0], r[1]) for r in db.execute(
+                    "SELECT project,pr FROM local_integrations WHERE status IN ('testing','publish_pending','published')")}
             pauses = []
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='quarantine_backoff'").fetchone():
                 pauses = [dict(r) for r in db.execute('SELECT family,kind,attempts,retry_after FROM quarantine_backoff')]
@@ -820,7 +857,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             authentication=[]
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='worker_authentication'").fetchone():
                 authentication=[dict(r) for r in db.execute('SELECT family,diagnostic,checked FROM worker_authentication WHERE blocked=1')]
-            return jobs, merged, pauses, observations, batch_receipts(db), authentication
+            return jobs, integrations, local_publication, pauses, observations, batch_receipts(db), authentication
         finally:
             db.close()
 
@@ -832,8 +869,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     tickets, refresh, locks = tickets_data or ([], {}, [])
     runs, backoff, redirects, capacities = dispatch_data or ([], [], [], [])
     capacity_for = {r["source"]: r for r in capacities}
-    jobs, merged, pauses, observations, batches, authentication = reviews_data or (
-        [], set(), [], [], {'state': 'unavailable', 'detail': 'review store unavailable', 'rows': []}, [])
+    jobs, integrations, local_publication, pauses, observations, batches, authentication = reviews_data or (
+        [], {}, set(), [], [], {'state': 'unavailable', 'detail': 'review store unavailable', 'rows': []}, [])
+    merged = {key for key, reconciled in integrations.items() if reconciled == 1}
     model['authentication']=authentication
     batches['rows'] = [b for b in batches['rows'] if wanted(b['project'])]
     by_ticket = {}
@@ -1222,8 +1260,19 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     model['queue'] = queue
     model['shared_repairs'] = [r for r in batches.get('shared_repairs',[]) if wanted(r['project'])]
     pipeline_snapshots = visible_pipeline_snapshots(pr_snapshot, paths, config, now, project)
+    # Nonterminal dispatcher records also fence launches whose PID is missing.
+    # Pipeline membership and the latest coordinator job fence batch publication
+    # and review/repair reservations, including uncertain launches.
+    held_sessions = {(run['project'], run['session']) for run in runs}
+    publishing_prs = set(integrations) | local_publication
+    held_tickets = set(seen_keys) | {
+        key for key, owner in by_ticket.items()
+        if (key[0], owner['session']) in held_sessions
+        or (key[0], pr_for(key[0], key[1], owner['branch'])) in publishing_prs
+    }
     model['pipeline'] = derive_pipeline(pipeline_snapshots, jobs, by_ticket, model['workers'], batches, cache, now,
-        batch_projects={p['id'] for p in config.get('projects', []) if p.get('integration_batch', {}).get('enabled') is True})
+        batch_projects={p['id'] for p in config.get('projects', []) if p.get('integration_batch', {}).get('enabled') is True},
+        acceptance_fences=held_tickets if dispatch_data and processes.readable and batches['state'] == 'ok' else None)
     if model['sources'].get('reviews', {}).get('state') != 'ok':
         model['pipeline']['unavailable'] = 'review store unavailable'
     order = {s: i for i, s in enumerate(['ci-failed', 'ci-stale', 'ci-unknown', 'ci-repair-requested', 'uncertain', 'retry', 'quota-wait', 'stale', 'lingering',
