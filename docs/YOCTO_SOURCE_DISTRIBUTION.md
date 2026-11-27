@@ -275,6 +275,14 @@ These static checks always run, on every recipe in the layer:
   expanded and every space-separated file name in it is included in order, so
   a valid first file doesn't hide a missing, unresolvable or out-of-layer
   second one. The fetcher refuses to run while any include finding remains.
+- A variable named in a `require`/`include` operand chooses which metadata is
+  read, so it is source-affecting. That includes every variable it referenced
+  when the include was expanded. BitBake expands the operand with the active
+  overrides, so `SOURCE_SETTINGS:qemuarm64` could select a different file
+  with different sources on that machine. The audit evaluates no overrides,
+  so it reports a conditional override of any such variable, and `--fetch`
+  downloads nothing for that recipe. Unconditional variable-driven includes
+  are read normally.
 - Each matching `.bbappend` (an exact name, or `name_%.bbappend`) is read after
   its recipe as one set of metadata, as BitBake does. So a variable assigned in
   the append affects the recipe's sources. A `.bbappend` that matches no
