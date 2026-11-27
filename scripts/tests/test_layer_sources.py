@@ -10,6 +10,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
+import zipfile
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 ROOT = SCRIPTS.parent
@@ -1311,6 +1312,86 @@ class LayerAuditTests(unittest.TestCase):
                     errors, fetched = audit.fetch_recipe(recipe, workdir)
                 self.assertEqual(fetched, [])
                 self.assertTrue(any('nothing fetched' in e for e in errors), errors)
+
+    def test_local_files_keep_their_url_directories_like_bitbake(self):
+        # BitBake's FetchMethod.unpack copies file://nested/NOTICE to
+        # subdir/nested/NOTICE, so a license reference must use that path.
+        notice = 'nested notice\n'
+        (self.recipe_dir / 'files/nested').mkdir()
+        (self.recipe_dir / 'files/nested/NOTICE').write_text(notice)
+
+        def fetch(license_path):
+            self.write_recipe(extra=f'SRC_URI += "file://nested/NOTICE;subdir=source"\n'
+                                    f'LIC_FILES_CHKSUM = "file://LICENSE;md5={md5(LICENSE)} '
+                                    f'file://{license_path};md5={md5(notice)}"\n')
+            with mock.patch.object(audit, 'download', self.fake_download):
+                report = audit.check(self.layer, fetch=True)
+            self.addCleanup(shutil.rmtree, report['fetch_dir'])
+            return report, Path(report['fetch_dir']) / 'suifleet/source'
+        report, source = fetch('nested/NOTICE')
+        self.assertEqual(report['errors'], [])
+        self.assertTrue((source / 'nested/NOTICE').is_file())
+        self.assertFalse((source / 'NOTICE').exists())
+        # The former false positive: a top-level reference BitBake would not satisfy.
+        report, source = fetch('NOTICE')
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('license file NOTICE does not match' in e for e in report['errors']), report['errors'])
+        self.assertFalse((source / 'NOTICE').exists())
+
+    def test_archives_bitbake_unpacks_in_unmodelled_formats_are_refused(self):
+        # BitBake runs unzip (and other extractors) on these names unless
+        # unpack=0; the audit must not report the packed file's layout instead.
+        packed = Path(self.tmp.name) / 'source.zip'
+        with zipfile.ZipFile(packed, 'w') as archive:
+            archive.writestr('LICENSE', LICENSE)
+        self.archive = packed
+        sha = sha256(packed.read_bytes())
+        self.write_recipe(url=f'{self.url};downloadfilename=source.zip', sha=sha)
+        self.assertTrue(any('format the audit does not extract' in e for e in self.errors()), self.errors())
+        recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+            errors, fetched = audit.fetch_recipe(recipe, workdir)
+        self.assertEqual(fetched, [])
+        self.assertTrue(any('format the audit does not extract' in e and 'nothing fetched' in e for e in errors), errors)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertFalse(report['ok'])
+        self.assertFalse((Path(report['fetch_dir']) / 'suifleet/source/source.zip').exists())
+        for name in ('source.tar.lz', 'source.7z', 'source.deb', 'source.gz', 'source.TAR.GZ', 'source.jar'):
+            with self.subTest(name):
+                self.write_recipe(url=f'{self.url};downloadfilename={name}', sha=sha)
+                self.assertTrue(any('format the audit does not extract' in e for e in self.errors()), self.errors())
+        # unpack=0 is the intentional loose-file case: copied as source.zip, not extracted.
+        self.write_recipe(url=f'{self.url};downloadfilename=source.zip;unpack=0', sha=sha)
+        self.assertFalse(any('format the audit does not extract' in e for e in self.errors()), self.errors())
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        source = Path(report['fetch_dir']) / 'suifleet/source'
+        self.assertTrue(report['recipes']['suifleet']['fetched'][0]['verified'])
+        self.assertTrue((source / 'source.zip').is_file())
+        self.assertFalse((source / 'LICENSE').exists())
+        self.assertFalse(any('format the audit does not extract' in e for e in report['errors']), report['errors'])
+        # Local files are only ever copied, so a local archive needs unpack=0 too.
+        self.write_recipe()
+        shutil.copyfile(packed, self.recipe_dir / 'files/extra.zip')
+        self.write_recipe(extra='SRC_URI += "file://extra.zip"\n')
+        self.assertTrue(any('file:// source extra.zip is an archive' in e for e in self.errors()), self.errors())
+        recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+            errors, fetched = audit.fetch_recipe(recipe, workdir)
+        self.assertTrue(any('is an archive' in e and 'nothing fetched' in e for e in errors), errors)
+        self.write_recipe(extra='SRC_URI += "file://extra.zip;unpack=0;subdir=source"\n')
+        self.assertEqual(self.errors(), [])
+        self.archive = Path(self.tmp.name) / f'suifleet-edge-{self.rev}.tar.gz'
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+        self.assertTrue((Path(report['fetch_dir']) / 'suifleet/source/extra.zip').is_file())
 
     def test_percent_escaped_downloadfilename_is_refused_not_decoded(self):
         # BitBake keeps a downloadfilename literally, so source%2Etar.gz would stay

@@ -44,7 +44,8 @@ paths, resolved through symlinks), then downloads every
 non-crate source with no credentials into a new directory, verifies its
 SHA-256 before unpacking, re-checks each destination before writing, unpacks
 it as BitBake would, creates loose files exclusively without following links
-(file:// entries and unpack=0 downloads) and checks the resulting
+(file:// entries keep their URL directories, like BitBake; unpack=0
+downloads; archive formats it cannot extract are refused) and checks the resulting
 S: license checksums, the daemon lockfile/version/crate include, workspace
 members and transitive local path-dependency crates, include targets, and the codec's exact pinned file set and provenance.
 --cargo additionally runs `cargo metadata --offline --locked --no-deps`.
@@ -77,6 +78,24 @@ REF = re.compile(r'\$\{([A-Za-z0-9_\-]+)\}')
 # The layer's Scarthgap/Wrynose unpack-root idiom; no other inline Python is evaluated.
 UNPACKDIR_EXPR = re.compile(r"""\$\{@d\.getVar\(['"]UNPACKDIR['"]\)\s+or\s+d\.getVar\(['"]WORKDIR['"]\)\}""")
 TARBALL = re.compile(r'\.(tar(\.(gz|xz|bz2|zst))?|tgz|tbz2|txz)$')
+# Every suffix BitBake's FetchMethod.unpack runs an unpack command for (tar and
+# its compressed forms, bare gz/bz2/xz/lz/lzma/zst/Z, zip/jar, rpm/srpm,
+# deb/ipk, 7z) plus squashfs, matched case-insensitively so near misses are
+# refused rather than copied. A source whose local name matches is extracted
+# by BitBake unless unpack=0, so the audit must not copy it as a loose file.
+BITBAKE_UNPACKED = re.compile(r'\.(tar|tgz|tbz2?|txz|tlz|tzst|gz|bz2|xz|lz|lzma|zst|z|zip|jar|rpm|srpm|deb|ipk|7z|squashfs)$', re.I)
+
+
+NOTHING = re.compile(r'(?!)')
+
+
+def unsupported_unpack(name, params, extracts=TARBALL):
+    """An error message when BitBake would unpack name (unpack is not 0) with a
+    method the audit does not reproduce (anything extracts does not match)."""
+    if params.get('unpack', '1') != '0' and BITBAKE_UNPACKED.search(name) and not extracts.search(name):
+        return (f'{name} is an archive BitBake unpacks, in a format the audit does not '
+                'extract; use a supported tarball or unpack=0')
+    return None
 MUTABLE_URL = (
     (re.compile(r'^https://github\.com/[^/]+/[^/]+/archive/(?!([0-9a-f]{40})(\.tar\.gz|\.zip)$)'), 'GitHub archive of a branch/tag'),
     (re.compile(r'^https://codeload\.github\.com/[^/]+/[^/]+/[^/]+/(?![0-9a-f]{40}$)'), 'codeload archive of a branch/tag'),
@@ -488,6 +507,8 @@ def audit_recipe(recipe):
             try:
                 local = download_name(url, params)
                 entry['file'] = local
+                if unsupported_unpack(local, params):
+                    errors.append(f'{where}: {unsupported_unpack(local, params)}: {shown}')
             except ValueError as error:
                 errors.append(f'{where}: {error}')
                 local = None
@@ -511,6 +532,10 @@ def audit_recipe(recipe):
                         errors.append(f'{where}: file:// source is not in the layer: {name}')
                 except ValueError as error:
                     errors.append(f'{where}: {error}')
+                # Local files are only copied by the audit, never extracted.
+                problem = unsupported_unpack(PurePosixPath(recipe.expand(name)).name, params, extracts=NOTHING)
+                if problem:
+                    errors.append(f'{where}: file:// source {problem}')
             continue
         else:
             errors.append(f'{where}: unsupported fetcher {scheme}: {shown}')
@@ -793,8 +818,15 @@ def unpack_plan(recipe, unpack):
         if scheme == 'crate':
             continue
         if scheme == 'file':
-            source = file_source(recipe, recipe.expand(url[len('file://'):]))
-            rel = PurePosixPath(params.get('subdir', ''), source.name).as_posix() if source else None
+            name = recipe.expand(url[len('file://'):])
+            problem = unsupported_unpack(PurePosixPath(name).name, params, extracts=NOTHING)
+            if problem:
+                raise ValueError(f'file:// source {problem}: {url}')
+            source = file_source(recipe, name)
+            # BitBake's FetchMethod.unpack copies file://a/b/c to subdir/a/b/c,
+            # keeping the URL's intermediate directories (without leading or
+            # trailing slashes), so the audit writes the same relative path.
+            rel = PurePosixPath(params.get('subdir', ''), name.strip('/')).as_posix() if source else None
             plan.append((url, params, scheme, rel and (confined(unpack, rel, 'file:// subdir'), rel)))
         elif scheme == 'gitsm':
             raise ValueError(f'gitsm submodule inputs cannot be verified: {redact_url(url)}')
@@ -807,7 +839,9 @@ def unpack_plan(recipe, unpack):
             if unmodelled_https_params(params):
                 raise ValueError(f'https source parameters the audit does not model: '
                                  f'{", ".join(unmodelled_https_params(params))}: {redact_url(url)}')
-            download_name(url, params)
+            problem = unsupported_unpack(download_name(url, params), params)
+            if problem:
+                raise ValueError(f'{problem}: {redact_url(url)}')
             plan.append((url, params, scheme, confined(unpack, params.get('subdir', '') or '.', 'subdir')))
     s_dir = recipe.get('S')
     if not s_dir.startswith(str(unpack) + '/') and s_dir != str(unpack):
