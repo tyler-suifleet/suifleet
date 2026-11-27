@@ -232,6 +232,13 @@ These static checks always run, on every recipe in the layer:
   a flag), `include_all`, `addfragments` and `addpylib`. They can remove or
   replace source pins or load further metadata. The refusal is static, and the
   fetcher repeats it before anything is downloaded.
+- Assignments whose variable name contains a `${...}` reference are refused,
+  in the recipe, its includes and its bbappends. BitBake expands such keys
+  when it finalizes the datastore, so `SRC_${SUFFIX} = "file://x"` with
+  `SUFFIX = "URI"` replaces `SRC_URI`. The reader does not model key
+  expansion. Overrides such as `RDEPENDS:${PN}` keep a literal variable name
+  and are still accepted. The refusal is static, and the fetcher repeats it
+  before anything is downloaded.
 - `conf/layer.conf` may contain only layer registration. BitBake parses it
   into the base configuration that every recipe inherits, so an assignment
   there (for example `SRC_URI:append:pn-suifleet`) changes sources without
