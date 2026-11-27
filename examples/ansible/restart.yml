@@ -2,45 +2,61 @@
 # Rolling daemon restart with health and identity checks. Restarts only the
 # SuiFleet units; it never reboots hosts. In check mode nothing restarts, so
 # the post-restart health checks are skipped instead of failing on the
-# command module's skipped (empty) output.
+# command module's skipped (empty) output. Each host restarts under the role's
+# host rollout lock (rollout_lock.yml), held from before the restart through
+# the health and identity checks: a restart never overlaps a site.yml rollout
+# (or another restart) on the host, and stops before restarting anything if
+# one holds the lock.
 - name: Restart the SuiFleet daemon
   hosts: "{{ suifleet_hosts | default('suifleet_devices') }}"
   serial: "{{ suifleet_restart_batch | default(1) }}"
   max_fail_percentage: 0
   gather_facts: false
   tasks:
-    - name: Read the public device address before the restart
-      ansible.builtin.slurp:
-        src: /etc/suifleet/device.address
-      register: suifleet_address_before
+    - name: Restart under the host's rollout lock
+      block:
+        - name: Take the host's rollout lock or stop
+          ansible.builtin.include_role:
+            name: suifleet
+            tasks_from: rollout_lock.yml
 
-    - name: Restart the daemon
-      ansible.builtin.systemd_service:
-        name: suifleet.service
-        state: restarted
+        - name: Read the public device address before the restart
+          ansible.builtin.slurp:
+            src: /etc/suifleet/device.address
+          register: suifleet_address_before
 
-    - name: Wait for the daemon to be active
-      ansible.builtin.command: systemctl is-active suifleet.service
-      register: suifleet_active
-      until: suifleet_active.stdout == 'active'
-      retries: 30
-      delay: 2
-      changed_when: false
-      when: not ansible_check_mode
+        - name: Restart the daemon
+          ansible.builtin.systemd_service:
+            name: suifleet.service
+            state: restarted
 
-    - name: Check configuration, identity and journal binding as the daemon user
-      ansible.builtin.command:
-        argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
-      changed_when: false
-      when: not ansible_check_mode
+        - name: Wait for the daemon to be active
+          ansible.builtin.command: systemctl is-active suifleet.service
+          register: suifleet_active
+          until: suifleet_active.stdout == 'active'
+          retries: 30
+          delay: 2
+          changed_when: false
+          when: not ansible_check_mode
 
-    - name: Read the public device address after the restart
-      ansible.builtin.slurp:
-        src: /etc/suifleet/device.address
-      register: suifleet_address_after
+        - name: Check configuration, identity and journal binding as the daemon user
+          ansible.builtin.command:
+            argv: [runuser, -u, suifleet, --, /usr/bin/suifleet, --self-check, /etc/suifleet/config.toml]
+          changed_when: false
+          when: not ansible_check_mode
 
-    - name: Refuse a changed identity
-      ansible.builtin.assert:
-        that: suifleet_address_before.content == suifleet_address_after.content
-        quiet: true
-        fail_msg: The device address changed across a restart.
+        - name: Read the public device address after the restart
+          ansible.builtin.slurp:
+            src: /etc/suifleet/device.address
+          register: suifleet_address_after
+
+        - name: Refuse a changed identity
+          ansible.builtin.assert:
+            that: suifleet_address_before.content == suifleet_address_after.content
+            quiet: true
+            fail_msg: The device address changed across a restart.
+      always:
+        - name: Release the host's rollout lock
+          ansible.builtin.include_role:
+            name: suifleet
+            tasks_from: rollout_unlock.yml

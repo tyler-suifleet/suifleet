@@ -71,8 +71,13 @@ install rather than install other bytes. Overlapping `site.yml` runs on one
 host do not interleave at all: each holds the host's
 [rollout lock](#recovery) from before its installation through its final
 health check and applied-inputs record, and a second run, of any release or a
-preview, stops before it uploads or changes anything. So a run never restarts,
-verifies or records another run's release as its own. Restoring only the cache file of
+preview, stops before it uploads or changes anything. A rolling restart
+(`restart.yml`) takes the same lock, so it neither restarts a host during a
+rollout nor lets a rollout start during its restart and checks. So a run never
+restarts, verifies or records another run's release as its own. A preview
+checks the lock only once, when it starts; a real run that starts after that
+check is not excluded, and the preview may then read inputs that run is
+changing. Preview when no rollout or restart targets the hosts. Restoring only the cache file of
 the release already installed restarts nothing; services restart only for an
 installed change or inputs not yet applied. (A `deb` preview cannot ask apt
 about a package it has not uploaded, so it reports that restore as a pending
@@ -178,6 +183,9 @@ Keys, address, enrollment record, configuration and journal are preserved.
 
 **Restart.** `ansible-playbook -i INVENTORY restart.yml` restarts the daemon
 one host at a time. It checks health and that the address did not change.
+Each host restarts under the [rollout lock](#recovery), held from before the
+restart through these checks; a host whose lock another play holds stops the
+restart before anything restarts.
 With `--check` it restarts nothing and skips the post-restart health checks,
 which could only validate a real restart; it still reads the address.
 
@@ -646,12 +654,14 @@ allows it). The role does not check the controller.
   ```sh
   rm -r /run/suifleet-enroll.lock
   ```
-- **Rollout lock.** One `site.yml` play at a time runs the role on a host: it
+- **Rollout lock.** One play at a time changes a host. A `site.yml` play
   holds `/run/suifleet-rollout.lock` from before the installation until the
-  final health check has recorded the applied inputs. Another play (a run or a
-  check-mode preview, of the same or another release) stops on it before it
-  uploads or changes anything. A play killed during a rollout leaves the lock;
-  the next run stops on it. Once no `ansible-playbook` targets the host,
+  final health check has recorded the applied inputs; a `restart.yml` play
+  holds it from before the restart through its health and identity checks.
+  Another play (`site.yml` or `restart.yml`, a run or a check-mode preview, of
+  the same or another release) stops on it before it uploads, restarts or
+  changes anything. A preview looks for the lock only when it starts. A play
+  killed while holding the lock leaves it; the next run stops on it. Once no `ansible-playbook` targets the host,
   remove it as root (a reboot also clears it) and run `site.yml` again, which
   converges the host to the inventory's pins:
 
@@ -873,9 +883,16 @@ The harness checks these phases:
    applied-inputs record, and releases the lock. A planted stale lock stops a
    preview and a run without changes until it is removed; a rerun then
    reports `changed=0`.
-18. A rolling-restart preview in check mode succeeds without restarting the
+18. Across playbooks: while a paused `site.yml` run holds a host's rollout
+   lock after its install, a rolling restart (check mode and real) stops on
+   the lock before restarting anything, and the rollout then reports
+   `changed=0` with the same daemon and signer PIDs. While a paused
+   `restart.yml` holds the lock after restarting the daemon, a `site.yml`
+   check-mode preview and real run stop on it before any upload; the restart
+   then completes its health and identity checks and releases the lock.
+19. A rolling-restart preview in check mode succeeds without restarting the
    daemon or signer (same main PIDs) or changing the identity.
-19. Rolling restart.
+20. Rolling restart.
 
 It checks key, address and enrollment preservation, daemon restarts and journal
 initialization. On chain, each enrollment must be device-signed and paid by that

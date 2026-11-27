@@ -4,59 +4,17 @@
 - name: Preflight
   ansible.builtin.import_tasks: preflight.yml
 
-# One play at a time rolls out to a host. Everything from the installation to
-# the final health check runs under this lock, so an overlapping play (for
-# example one pinning another release) cannot install between this play's
+# One play at a time changes a host (site.yml or restart.yml). Everything from
+# the installation to the final health check runs under the host's rollout lock
+# (rollout_lock.yml), so an overlapping play (for example one pinning another
+# release, or a rolling restart) cannot install or restart between this play's
 # installation and its service and health checks: this play never restarts,
 # checks or records the applied inputs of another play's release. The other
-# play stops before it changes anything. mkdir creates the lock atomically,
-# holding this run's token; only this run removes it. It lives on /run
-# (tmpfs), so a reboot clears a lock that a killed run left behind. Check mode
-# only looks for it.
+# play stops before it changes anything.
 - name: Roll out under the host's rollout lock
   block:
-    - name: Start without the host's rollout lock
-      ansible.builtin.set_fact:
-        suifleet_rollout_locked: false
-        suifleet_rollout_lock_token: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=32) }}"
-
-    # The lock is transient: taking and releasing it is not a change to the host.
-    - name: Take the host's rollout lock
-      ansible.builtin.command:
-        argv:
-          - sh
-          - -c
-          - umask 077; mkdir "$1" || exit 3; printf '%s\n' "$2" > "$1/owner" || { rm -rf "$1"; exit 1; }
-          - sh
-          - "{{ suifleet_rollout_lock }}"
-          - "{{ suifleet_rollout_lock_token }}"
-      register: suifleet_rollout_lock_taken
-      changed_when: false
-      failed_when: suifleet_rollout_lock_taken.rc not in [0, 3]
-      when: not ansible_check_mode
-
-    - name: Record that this run holds the rollout lock
-      ansible.builtin.set_fact:
-        suifleet_rollout_locked: "{{ suifleet_rollout_lock_taken.rc == 0 }}"
-      when: not ansible_check_mode
-
-    - name: Look for another run's rollout lock
-      ansible.builtin.stat:
-        path: "{{ suifleet_rollout_lock }}"
-        get_checksum: false
-      register: suifleet_rollout_lock_seen
-      when: ansible_check_mode
-
-    - name: Stop while another run holds the rollout lock
-      ansible.builtin.assert:
-        that: suifleet_rollout_locked | bool or (ansible_check_mode and not suifleet_rollout_lock_seen.stat.exists)
-        quiet: true
-        fail_msg: >-
-          {{ inventory_hostname }} has the rollout lock {{ suifleet_rollout_lock }}:
-          another play is rolling out to it, or a play stopped while rolling out
-          to it. This run changed nothing. Wait for the other play, then run
-          again. If none is running (no ansible-playbook targets the host), remove
-          the lock as root and run again (docs/ANSIBLE.md#recovery).
+    - name: Take the host's rollout lock or stop
+      ansible.builtin.import_tasks: rollout_lock.yml
 
     - name: Install the Debian package
       ansible.builtin.include_tasks: install_deb.yml
@@ -88,13 +46,4 @@
           ansible.builtin.import_tasks: verify.yml
   always:
     - name: Release the host's rollout lock
-      ansible.builtin.command:
-        argv:
-          - sh
-          - -c
-          - test "$(cat "$1/owner")" = "$2" && rm -rf "$1"
-          - sh
-          - "{{ suifleet_rollout_lock }}"
-          - "{{ suifleet_rollout_lock_token }}"
-      changed_when: false
-      when: suifleet_rollout_locked | default(false) | bool
+      ansible.builtin.import_tasks: rollout_unlock.yml
