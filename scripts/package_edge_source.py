@@ -787,7 +787,7 @@ def implicit_modules(data):
     return [name.decode(errors='replace') for attributes, name in MODULE.findall(text) if not PATH_ATTR.search(attributes)]
 
 
-def loose_sources(manifest, read_manifest, declared, exists, read, sources):
+def loose_sources(manifest, read_manifest, declared, exists, read, sources, crate=CRATE):
     """Rust sources outside the directories packaged whole, and their errors.
 
     `src/`, `examples/` and every local crate directory are packaged
@@ -797,42 +797,46 @@ def loose_sources(manifest, read_manifest, declared, exists, read, sources):
     would also compile a sibling `name.rs` or `name/mod.rs` for each implicit
     `mod name;` in such a file, which the closure does not model, so those
     declarations are refused instead of producing an archive that compiles in
-    the repository and fails after extraction. Paths are relative to the root
-    crate; `exists(rel)` and `read(rel)` (bytes) see the source layout and
-    `sources` lists every file in it. The Rust files of the whole directories
+    the repository and fails after extraction. This includes Rust files a
+    literal reference reaches outside the crate directory (for example
+    `#[path = "../../interfaces/helper.rs"]`), whose child modules would
+    otherwise be silently omitted. Paths are repository-relative; `crate` is
+    the root crate directory, `declared` is relative to it, `exists(path)`
+    and `read(path)` (bytes) see the source layout and `sources` lists the
+    files under the crate directory. The Rust files of the whole directories
     are followed too: a literal #[path] or include from src/ can reach a file
     elsewhere, which is then checked like a declared target.
     Returns (loose .rs files, error messages)."""
-    whole = ['src/', 'examples/', *(f'{d}/' for d in local_crates(manifest, read_manifest))]
+    whole = [f'{crate}/{d}' for d in ['src/', 'examples/', *(f'{d}/' for d in local_crates(manifest, read_manifest))]]
 
-    def packaged_whole(rel):
-        return any(rel.startswith(prefix) for prefix in whole)
+    def packaged_whole(path):
+        return any(path.startswith(prefix) for prefix in whole)
 
     # Declared Cargo targets and the build script are compiler entry points
     # whatever their suffix, so they are scanned as Rust source too.
-    pending = [rel for rel in [*declared, 'build.rs'] if exists(rel)]
-    pending += sorted(rel for rel in sources if rel.endswith('.rs') and packaged_whole(rel))
+    pending = [path for path in (f'{crate}/{rel}' for rel in [*declared, 'build.rs']) if exists(path)]
+    pending += sorted(path for path in sources if path.endswith('.rs') and packaged_whole(path))
     seen, followed, errors = set(), set(), []
     while pending:
-        rel = pending.pop()
-        if rel in seen or rel in followed:
+        path = pending.pop()
+        if path in seen or path in followed:
             continue
-        data = read(rel)
-        if packaged_whole(rel):
+        data = read(path)
+        if packaged_whole(path):
             # Its modules resolve inside the packaged directory; only its
             # literal references can leave it.
-            followed.add(rel)
+            followed.add(path)
             names = []
         else:
-            seen.add(rel)
+            seen.add(path)
             names = implicit_modules(data)
         if names:
-            errors.append(f'{CRATE}/{rel} declares module(s) {", ".join(names)} without #[path]; outside src/, '
+            errors.append(f'{path} declares module(s) {", ".join(names)} without #[path]; outside {crate}/src/, '
                           'examples/ and local crates only declared and literally included files are packaged, '
                           'so give each module a #[path] attribute or move the target under src/')
-        for target, code in include_references(f'{CRATE}/{rel}', data):
-            if target.startswith(f'{CRATE}/') and scanned_as_code(target, code) and exists(target[len(CRATE) + 1:]):
-                pending.append(target[len(CRATE) + 1:])
+        for target, code in include_references(path, data):
+            if scanned_as_code(target, code) and exists(target):
+                pending.append(target)
     return sorted(seen), errors
 
 
@@ -879,9 +883,8 @@ def closure(files, read):
             selected.add(target)
             if scanned_as_code(target, code) and target not in scanned:
                 pending.append(target)
-    _, errors = loose_sources(manifest, read_manifest, declared,
-                              lambda rel: f'{CRATE}/{rel}' in files, lambda rel: read(f'{CRATE}/{rel}'),
-                              [p[len(CRATE) + 1:] for p in files if p.startswith(f'{CRATE}/')])
+    _, errors = loose_sources(manifest, read_manifest, declared, lambda path: path in files, read,
+                              [p for p in files if p.startswith(f'{CRATE}/')])
     if errors:
         raise ValueError(errors[0])
     return audit(selected, files, read)

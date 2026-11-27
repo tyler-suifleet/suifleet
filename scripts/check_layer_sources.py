@@ -525,9 +525,8 @@ def daemon_errors(recipe, read, exists=None, listing=None):
                 if not exists(f'{src}/{rel}'):
                     errors.append(f'{recipe.path.name}: Cargo.toml declares build file {src}/{rel}, '
                                   'missing from the source layout')
-            _, loose = packager.loose_sources(manifest.decode(), read_manifest, declared,
-                                              lambda rel: exists(f'{src}/{rel}'), lambda rel: read(f'{src}/{rel}'),
-                                              [p[len(src) + 1:] for p in listing(src) if p.startswith(f'{src}/')])
+            _, loose = packager.loose_sources(manifest.decode(), read_manifest, declared, exists, read,
+                                              [p for p in listing(src) if p.startswith(f'{src}/')], crate=src)
             errors += [f'{recipe.path.name}: {error}' for error in loose]
         except packager.MissingCrate as error:
             errors.append(f'{recipe.path.name}: {error.what} {src}/{error.directory} is missing from the source layout')

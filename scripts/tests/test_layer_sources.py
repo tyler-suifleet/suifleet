@@ -413,6 +413,42 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.repo.commit()
         self.assertIn('suifleet-edge/tools/helper.rs', packager.plan(self.repo.root, 'HEAD')['paths'])
 
+    def test_implicit_modules_of_targets_outside_the_crate_are_refused(self):
+        # The reviewer's reproduction: a #[path] target outside suifleet-edge/
+        # that declares `mod child;` compiles in the repository, because rustc
+        # finds interfaces/child.rs beside it, but the closure only packages
+        # literal targets, so the archive would silently omit the child.
+        self.repo.write('suifleet-edge/src/main.rs', '#[path = "../../interfaces/helper.rs"]\nmod helper;\n'
+                        'fn main() { helper::child::run() }\n')
+        self.repo.write('interfaces/helper.rs', 'pub mod child;\n')
+        self.repo.write('interfaces/child.rs', 'pub fn run() {}\n')
+        self.repo.commit()
+        output = self.out / 'outside-implicit.tar.gz'
+        with self.assertRaisesRegex(ValueError, r'interfaces/helper.rs declares module\(s\) child without #\[path\]'):
+            packager.build(self.repo.root, 'HEAD', output)
+        self.assertFalse(output.exists())
+        # Reached through an include! of an .rs file from a declared target
+        # outside src/, the same declaration is refused too.
+        self.repo.write('suifleet-edge/src/main.rs', 'fn main() {}\n')
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\n'
+                        'path = "tools/standalone.rs"\n')
+        self.repo.write('suifleet-edge/tools/standalone.rs', 'include!("../../interfaces/helper.rs");\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'interfaces/helper.rs declares module\(s\) child without #\[path\]'):
+            packager.plan(self.repo.root, 'HEAD')
+        # With an explicit #[path] the child is a literal target and packaged.
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML)
+        self.repo.git('rm', '-q', 'suifleet-edge/tools/standalone.rs')
+        self.repo.write('suifleet-edge/src/main.rs', '#[path = "../../interfaces/helper.rs"]\nmod helper;\n'
+                        'fn main() { helper::child::run() }\n')
+        self.repo.write('interfaces/helper.rs', '#[path = "child.rs"]\npub mod child;\n')
+        rev = self.repo.commit()
+        info = packager.build(self.repo.root, rev, output)
+        self.assertIn('interfaces/helper.rs', info['paths'])
+        self.assertIn('interfaces/child.rs', info['paths'])
+        with tarfile.open(output) as tar:
+            self.assertIn('interfaces/child.rs', tar.getnames())
+
     def test_code_includes_are_followed_whatever_their_suffix(self):
         # The reviewer's reproduction: include! compiles its target as Rust
         # even when it is not named .rs, so that file's own includes are
@@ -1298,6 +1334,39 @@ class LayerAuditTests(unittest.TestCase):
             report = audit.check(self.layer, repo=self.repo.root, fetch=True)
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
+
+    def test_fetch_refuses_implicit_modules_outside_the_crate(self):
+        # The reviewer's fetched-layout reproduction: a pinned archive whose
+        # #[path] target outside the crate declares `mod child;` must not
+        # audit clean, whether or not the child happens to be in the archive.
+        files = {'suifleet-edge/src/main.rs': '#[path = "../../interfaces/helper.rs"]\nmod helper;\nfn main() {}\n',
+                 'interfaces/helper.rs': 'pub mod child;\n'}
+        for with_child in (False, True):
+            with self.subTest(with_child=with_child):
+                pending = dict(files, **({'interfaces/child.rs': 'pub fn run() {}\n'} if with_child else {}))
+                archive = self.archive.with_name(f'outside-implicit-{with_child}.tar.gz')
+                with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+                    for member in source.getmembers():
+                        data = source.extractfile(member) if member.isfile() else None
+                        if member.name in pending:
+                            text = pending.pop(member.name).encode()
+                            member.size, data = len(text), io.BytesIO(text)
+                        tar.addfile(member, data)
+                    for name, text in pending.items():
+                        added = tarfile.TarInfo(name)
+                        added.size, added.mode = len(text), 0o644
+                        tar.addfile(added, io.BytesIO(text.encode()))
+                self.write_recipe(sha=sha256(archive.read_bytes()))
+                original, self.archive = self.archive, archive
+                try:
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, fetch=True)
+                finally:
+                    self.archive = original
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                expected = 'interfaces/helper.rs declares module(s) child without #[path]'
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+                self.assertFalse(report['ok'])
 
     def test_fetch_follows_code_includes_whatever_their_suffix(self):
         # The reviewer's reproduction: a pinned archive containing a non-.rs
