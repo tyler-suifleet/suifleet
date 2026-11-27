@@ -1,6 +1,7 @@
 ---
 # Writes the claim (suifleet_claim_file on the controller, plain or Vault)
-# to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner.
+# to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner,
+# in a staging directory owned by root.
 # enroll.yml checks that the staging directory is on tmpfs and erases it
 # afterwards, also when enrollment fails. tmpfs pages and process memory can
 # be swapped out, so swap_policy.yml refuses hosts with any active swap
@@ -142,13 +143,18 @@
     path: "{{ suifleet_enroll_staging }}"
     state: absent
 
-- name: Create the private staging directory
+# Root owns the staging directory; the key holder can enter and read it but
+# not create, rename or replace its entries. enroll.yml stages enroll.toml and
+# deployment.json there as root-owned read-only files, so the inputs the CLI
+# opens are the ones root verified. Only claim.key belongs to the key holder
+# (mode 0600, created empty by root and filled by the key holder below).
+- name: Create the root-owned staging directory
   ansible.builtin.file:
     path: "{{ suifleet_enroll_staging }}"
     state: directory
-    owner: "{{ suifleet_claim_owner }}"
+    owner: root
     group: "{{ suifleet_claim_group }}"
-    mode: "0700"
+    mode: "0750"
 
 - name: Transfer and stage the claim
   block:
@@ -176,7 +182,9 @@
 
     # Root reads the transferred file and the current key holder writes
     # it; the claim moves through a pipe inside this command, never
-    # through sudo's standard input.
+    # through sudo's standard input. Root first creates the empty file,
+    # owned by the key holder with mode 0600, in the root-owned directory
+    # (which the key holder cannot write).
     - name: Stage the single-use claim key in memory-backed storage
       ansible.builtin.command:
         argv:
@@ -185,11 +193,14 @@
           - >-
             set -eu; src="$1/claim.key";
             test -f "$src" && test ! -L "$src";
+            test ! -e "$3" && test ! -L "$3";
+            install -o "$2" -g "$4" -m 0600 /dev/null "$3";
             runuser -u "$2" -- sh -c 'ulimit -c 0 && umask 077 && cat > "$1"' sh "$3" < "$src"
           - sh
           - "{{ suifleet_claim_transfer.stdout }}"
           - "{{ suifleet_claim_owner }}"
           - "{{ suifleet_enroll_staging }}/claim.key"
+          - "{{ suifleet_claim_group }}"
       diff: false
   always:
     - name: Erase the claim transfer directory

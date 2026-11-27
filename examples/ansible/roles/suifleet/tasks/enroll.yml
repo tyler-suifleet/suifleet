@@ -192,13 +192,17 @@
             - name: Look up the device's enrollment
               when: not ansible_check_mode
               block:
+                # Root owns the directory and its files; the key holder runs
+                # the lookup and can read them, but cannot create, replace,
+                # rename or change them, so the lookup reads the inputs root
+                # verified below.
                 - name: Create the lookup directory
                   ansible.builtin.file:
                     path: "{{ suifleet_enroll_staging }}"
                     state: directory
-                    owner: "{{ suifleet_key.stat.pw_name }}"
+                    owner: root
                     group: "{{ suifleet_key.stat.gr_name }}"
-                    mode: "0700"
+                    mode: "0750"
 
                 # check_batch.yml validated both: the canonical configuration
                 # built from enroll.toml's parsed values, and the inventory
@@ -208,9 +212,9 @@
                     content: "{{ item.content | default(omit) }}"
                     src: "{{ item.src | default(omit) }}"
                     dest: "{{ suifleet_enroll_staging }}/{{ item.dest }}"
-                    owner: "{{ suifleet_key.stat.pw_name }}"
+                    owner: root
                     group: "{{ suifleet_key.stat.gr_name }}"
-                    mode: "0600"
+                    mode: "0640"
                   loop:
                     - {dest: enroll.toml, content: "{{ suifleet_enroll_toml }}"}
                     - {dest: deployment.json, src: "{{ suifleet_manifest_src }}"}
@@ -399,15 +403,19 @@
 
                 # check_batch.yml validated both: the canonical configuration
                 # built from enroll.toml's parsed values, and the inventory
-                # manifest (identical to the batch's deployment.json).
+                # manifest (identical to the batch's deployment.json). Both
+                # are root-owned and read-only to the key holder, in the
+                # root-owned staging directory (stage_claim.yml), so the
+                # enrollment command reads the manifest whose SHA-256 is
+                # recorded as the attempt's binding.
                 - name: Stage the enrollment configuration and manifest
                   ansible.builtin.copy:
                     content: "{{ item.content | default(omit) }}"
                     src: "{{ item.src | default(omit) }}"
                     dest: "{{ suifleet_enroll_staging }}/{{ item.dest }}"
-                    owner: "{{ suifleet_key.stat.pw_name }}"
+                    owner: root
                     group: "{{ suifleet_key.stat.gr_name }}"
-                    mode: "0600"
+                    mode: "0640"
                   loop:
                     - {dest: enroll.toml, content: "{{ suifleet_enroll_toml }}"}
                     - {dest: deployment.json, src: "{{ suifleet_manifest_src }}"}

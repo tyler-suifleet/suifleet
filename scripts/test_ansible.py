@@ -232,12 +232,35 @@ ENROLL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: 
 ENROLL_EXEC = "exec /usr/bin/suifleet --enroll"
 ENROLL_SHIM_PATH = "/usr/local/bin/sf304-enroll-shim"
 ENROLL_SHIM_DIR = "/run/sf304-shim"
+# Run as the key holder by the enrollment command and the lookup (stand-in and
+# wrapper below): records the owner, group and mode of the staging directory
+# (the directory of the configuration file in $2) and its entries, and tries to
+# append to, rename and create its inputs. The role stages them root-owned and
+# read-only to the key holder, so every attempt must fail.
+STAGING_PROBE = r"""d=$(dirname "$2")
+{{
+echo "USER $(id -un)"
+stat -c 'STAT %U:%G %a %n' "$d" "$d"/*
+for f in enroll.toml deployment.json; do
+  if (: >> "$d/$f") 2>/dev/null; then echo "WRITABLE $f"; fi
+  if mv "$d/$f" "$d/$f.moved" 2>/dev/null; then echo "RENAMED $f"; fi
+done
+if (: > "$d/planted") 2>/dev/null; then echo "CREATED planted"; fi
+}} > {report}
+"""
 ENROLL_SHIM = f"""#!/bin/sh
-printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
+{STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/staging")}printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
 i=0
 while [ ! -e {ENROLL_SHIM_DIR}/release ] && [ "$i" -lt 900 ]; do sleep 1; i=$((i + 1)); done
 echo SF304-SHIM-FAILED-BEFORE-PRINTING >&2
 exit 1
+"""
+# A test-only wrapper the lookup runs instead of /usr/bin/suifleet (through a
+# copy of the role): it probes the staging directory, then runs the real lookup.
+LOOKUP_EXEC = "                      - /usr/bin/suifleet\n                      - --find-enrollment\n"
+LOOKUP_WRAPPER_PATH = "/usr/local/bin/sf304-lookup-wrapper"
+LOOKUP_WRAPPER = f"""#!/bin/sh
+{STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/lookup-staging")}exec /usr/bin/suifleet "$@"
 """
 LOCK_REFUSAL = "has the enrollment lock"
 # Stages each host's claim exactly as enrollment does, then stops before the
@@ -1364,6 +1387,8 @@ class Harness:
             invoked = sh(f"cat {ENROLL_SHIM_DIR}/invoked").strip()
             assert invoked == f"stdout={partial} size=0", (name, "the command did not start with the role's empty marker", invoked)
             assert not absent(lock) and not absent(f"{staging}/claim.key"), (name, "lock or staged claim missing during the attempt")
+            self.assert_staging_read_only(container, sh(f"cat {ENROLL_SHIM_DIR}/staging"), staging, claim=True,
+                                          label="enrollment command")
             claim = sh(f"sha256sum {staging}/claim.key")
             owner = sh(f"cat {lock}/owner")
             print("PASS the role created the empty attempt marker, as the command's output, before invoking it, under the lock")
@@ -1397,6 +1422,29 @@ class Harness:
         # The stand-in submitted nothing, so the claim is unused: the
         # authoritative settlement the recovery steps require is known here.
         self.exec(container, "rm", "-rf", partial, ENROLL_SHIM_PATH, ENROLL_SHIM_DIR)
+
+    def assert_staging_read_only(self, container, probe, staging, claim, label):
+        """The key holder found its staging directory and inputs root-owned and could not change them."""
+        group = self.exec(container, "stat", "-c", "%G", "/etc/suifleet/device.key").stdout.strip()
+        lines = probe.splitlines()
+        users = [line[len("USER "):] for line in lines if line.startswith("USER ")]
+        assert len(users) == 1 and users[0] != "root", (label, "not run as the key holder", probe)
+        holder = users[0]
+        stats = {}
+        for line in lines:
+            if line.startswith("STAT "):
+                owner, mode, path = line[len("STAT "):].split(" ", 2)
+                stats[path] = f"{owner} {mode}"
+        expected = {staging: f"root:{group} 750", f"{staging}/enroll.toml": f"root:{group} 640",
+                    f"{staging}/deployment.json": f"root:{group} 640"}
+        if claim:
+            expected[f"{staging}/claim.key"] = f"{holder}:{group} 600"
+        assert stats == expected, (label, "staging ownership or modes", stats, expected)
+        changed = [line for line in lines if line.split(" ", 1)[0] in ("WRITABLE", "RENAMED", "CREATED")]
+        assert not changed, (label, "the key holder could change the staged inputs", changed)
+        print(f"PASS the {label} ran as the key holder ({holder}) with a root-owned staging directory (0750) and"
+              f" root-owned enroll.toml and deployment.json (0640) it could not append to, rename or replace, and"
+              f" could create nothing beside{'; only claim.key (0600) was its own' if claim else ''}")
 
     def interrupted_enrollment_record(self, vault, name="deb-ubuntu2404"):
         """Enrollment succeeded on chain and printed its receipt; the host stopped before the record was promoted.
@@ -1516,11 +1564,24 @@ class Harness:
             value = json.loads(value)
             respelled.append(f"'{key}' = '{value}'  # respelled" if key != "keypair_path" else f'"{key}" = """{value}"""')
         enroll_toml.write_text("# noncanonical but equivalent\n" + "\n".join(respelled) + "\n")
+        # The lookup runs through a wrapper that, as the key holder, probes its
+        # staging directory and then runs the real lookup.
+        self.exec(container, "install", "-m", "0755", "/dev/stdin", LOOKUP_WRAPPER_PATH, input=LOOKUP_WRAPPER)
+        self.exec(container, "install", "-d", "-m", "0777", ENROLL_SHIM_DIR)
+        committed = self.examples
+        self.examples = self.variant_examples(
+            "examples-lookup-wrapper",
+            {"enroll.yml": [(LOOKUP_EXEC, LOOKUP_EXEC.replace("/usr/bin/suifleet", LOOKUP_WRAPPER_PATH))]},
+            folder="tasks", source=committed)
         try:
             output, recap = self.ansible("retry looks up a committed enrollment that printed nothing", "/work/enroll-only.yml",
                                          "--limit", name, *vault)
+            probe = sh(f"cat {ENROLL_SHIM_DIR}/lookup-staging")
         finally:
+            self.examples = committed
             enroll_toml.write_text(original_toml)
+            self.exec(container, "rm", "-rf", LOOKUP_WRAPPER_PATH, ENROLL_SHIM_DIR)
+        self.assert_staging_read_only(container, probe, staging, claim=False, label="on-chain lookup")
         assert recap[name]["failed"] == 0, (name, recap[name], output[-8000:])
         statuses = {s for block in output.split(ENROLL_TASK)[1:]
                     for s, h in TASK_RESULT.findall(block.split("\nTASK [", 1)[0]) if h == name}
