@@ -67,6 +67,13 @@ CFG_ATTR = re.compile(rb'\s*cfg_attr\s*\(')
 # An out-of-line module declaration (`mod name;`) with its leading attributes.
 MODULE = re.compile(rb'((?:#\s*\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;')
 PATH_ATTR = re.compile(rb'#\s*\[\s*path\s*=')
+# An inline module block (`mod name {`). rustc resolves a #[path] inside one
+# relative to the module's own directory, and a #[path] on one names a
+# directory, so neither is modelled; both are refused (see literal_references).
+# Blocks are found structurally in a code_mask()ed copy of the source.
+INLINE_MODULE = re.compile(rb'(?<![A-Za-z0-9_])mod\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*\s*\{')
+RAW_STRING = re.compile(rb'r(#*)"')
+ITEM_PREFIX = re.compile(rb'\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:unsafe\s+)?')
 # Runtime identity/state names that must never be distributed.
 FORBIDDEN_NAME = re.compile(
     r'(^|/)(device\.key|signer\.key|config\.toml|firmware\.toml|signer\.toml|'
@@ -566,12 +573,126 @@ def literal_references(source_path, data):
             raise ValueError(f'{source_path}: unsupported include form {snippet!r}; '
                              'use a single string literal without escapes')
         references.append((_literal(found), match.group(1) is None))
+    code = code_mask(data)
+    blocks = inline_module_blocks(code)
     for match in ATTRIBUTE.finditer(data):
         end = _bracketed(data, match.end(), b'[', b']')
         if end is None:
             continue
-        references += [(path, True) for path in _path_attributes(source_path, data[match.end():end - 1])]
+        paths = _path_attributes(source_path, data[match.end():end - 1])
+        in_code = code[match.start():match.start() + 1] == b'#'
+        if paths and in_code and (any(start < match.start() < stop for start, stop in blocks)
+                                  or _annotates_inline_module(code, end)):
+            # rustc resolves a #[path] inside `mod name { .. }` against that
+            # module's directory (name/, or file_stem/name/ in a non-mod.rs
+            # file), and a #[path] on an inline module names a directory.
+            # Neither is modelled, so refuse rather than package the wrong file.
+            raise ValueError(f'{source_path}: #[path] attribute {paths[0].decode(errors="replace")!r} inside or on '
+                             'an inline `mod name { .. }` block is unsupported; declare the #[path] module at file '
+                             'level or move it to an out-of-line module file')
+        references += [(path, True) for path in paths]
     return references
+
+
+def code_mask(data):
+    """`data` with comments, string/byte/raw-string and char literals replaced
+    by spaces, offsets unchanged, so braces and keywords can be matched
+    structurally. Lifetimes and labels are left in place."""
+    out, i, n = bytearray(data), 0, len(data)
+
+    def blank(start, stop):
+        out[start:stop] = b' ' * (stop - start)
+
+    def ident(byte):
+        return byte.isalnum() or byte == b'_' or (byte and byte[0] >= 0x80)
+
+    while i < n:
+        c = data[i:i + 1]
+        if data.startswith(b'//', i):
+            stop = data.find(b'\n', i)
+            stop = n if stop < 0 else stop
+            blank(i, stop)
+            i = stop
+        elif data.startswith(b'/*', i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if data.startswith(b'/*', j):
+                    depth, j = depth + 1, j + 2
+                elif data.startswith(b'*/', j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            blank(i, j)
+            i = j
+        elif c == b'"':
+            j = i + 1
+            while j < n and data[j:j + 1] != b'"':
+                j += 2 if data[j:j + 1] == b'\\' else 1
+            blank(i, min(j + 1, n))
+            i = j + 1
+        elif c == b'r' and not ident(data[i - 1:i] if i else b'') or (
+                c == b'r' and data[i - 1:i] in (b'b', b'c') and not ident(data[i - 2:i - 1] if i > 1 else b'')):
+            raw = RAW_STRING.match(data, i)
+            if raw:
+                stop = data.find(b'"' + raw.group(1), raw.end())
+                stop = n if stop < 0 else stop + 1 + len(raw.group(1))
+                blank(i, stop)
+                i = stop
+            else:
+                i += 1
+        elif c == b"'":
+            if data[i + 1:i + 2] == b'\\':
+                stop = data.find(b"'", i + 3)
+                stop = n if stop < 0 else stop + 1
+                blank(i, stop)
+                i = stop
+            else:
+                lead = data[i + 1] if i + 1 < n else 0
+                width = 1 if lead < 0x80 else 2 if lead < 0xE0 else 3 if lead < 0xF0 else 4
+                if data[i + 1 + width:i + 2 + width] == b"'":
+                    blank(i, i + 2 + width)
+                    i += 2 + width
+                else:
+                    i += 1  # a lifetime or label
+        else:
+            i += 1
+    return bytes(out)
+
+
+def inline_module_blocks(code):
+    """(start, stop) offsets of every inline `mod name { .. }` body in a
+    code_mask()ed source; an unbalanced block extends to the end."""
+    blocks = []
+    for match in INLINE_MODULE.finditer(code):
+        depth, j = 0, match.end() - 1
+        while j < len(code):
+            byte = code[j:j + 1]
+            if byte == b'{':
+                depth += 1
+            elif byte == b'}':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        blocks.append((match.end() - 1, j))
+    return blocks
+
+
+def _annotates_inline_module(code, end):
+    """Whether the item after an attribute ending at `end`, past any further
+    attributes and its visibility, is an inline module block."""
+    i = end
+    while True:
+        while i < len(code) and code[i:i + 1].isspace():
+            i += 1
+        attribute = ATTRIBUTE.match(code, i)
+        if not attribute:
+            break
+        i = _bracketed(code, attribute.end(), b'[', b']')
+        if i is None:
+            return False
+    prefix = ITEM_PREFIX.match(code, i)
+    return bool(INLINE_MODULE.match(code, prefix.end()))
 
 
 def include_references(source_path, data):

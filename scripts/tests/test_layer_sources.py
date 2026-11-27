@@ -430,6 +430,56 @@ class PackageEdgeSourceTests(unittest.TestCase):
         rev = self.repo.commit()
         self.assertIn('suifleet-edge/tools/data.bin', packager.plan(self.repo.root, rev)['paths'])
 
+    def test_path_attributes_in_inline_modules_are_refused(self):
+        # The reviewer's reproduction: rustc resolves this #[path] against
+        # tools/nested/, so archiving tools/child.rs instead built a tree that
+        # compiles in the repository and fails after extraction.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "nested-target"\npath = "tools/entry.rs"\n'
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/entry.rs',
+                        'mod nested {\n    #[path = "child.rs"]\n    mod child;\n    pub fn run() { child::run() }\n}\n'
+                        'fn main() { nested::run() }\n')
+        self.repo.write('suifleet-edge/tools/child.rs', 'pub fn run() {}\n')
+        self.repo.write('suifleet-edge/tools/nested/child.rs', 'pub fn run() {}\n')
+        self.repo.commit()
+        unsupported = r'tools/entry.rs: #\[path\] attribute .child.rs. inside or on an inline'
+        with self.assertRaisesRegex(ValueError, unsupported):
+            packager.plan(self.repo.root, 'HEAD')
+        # Also refused: cfg_attr inside a block, a nested block, braces in
+        # literals and comments that must not close the block early, a #[path]
+        # on an inline module, and inside src/ (followed for its references).
+        for source in ('mod nested { #[cfg_attr(unix, path = "child.rs")] mod child; }\nfn main() {}\n',
+                       'mod a { fn f() {} mod b { #[path = "child.rs"] mod child; } }\nfn main() {}\n',
+                       "mod a {\n const C: char = '}'; const S: &str = \"}}\"; const R: &str = r#\"}\"#;\n"
+                       " // }\n /* } /* } */ } */ fn g<'x>(v: &'x u8) -> &'x u8 { v }\n"
+                       ' #[path = "child.rs"] mod child;\n}\nfn main() {}\n',
+                       '#[path = "nested"]\n#[allow(dead_code)]\npub(crate) mod renamed { }\nfn main() {}\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/tools/entry.rs', source)
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, 'inside or on an inline'):
+                    packager.plan(self.repo.root, 'HEAD')
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML)
+        self.repo.write('suifleet-edge/src/lib.rs', 'mod inner {\n    #[path = "child.rs"]\n    mod child;\n}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'src/lib.rs: #\[path\] attribute'):
+            packager.plan(self.repo.root, 'HEAD')
+        # File-level #[path] modules before and after closed inline blocks
+        # (as in the daemon's sui_client.rs), and ones only named inside a
+        # comment or string in a block, are still packaged file-relative.
+        self.repo.write('suifleet-edge/src/lib.rs', 'pub fn lib() {}\n')
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        for source in ('#[path = "child.rs"]\nmod child;\n#[cfg(test)]\nmod tests {}\nfn main() { child::run() }\n',
+                       "mod done { const C: char = '{'; fn f() {} }\n#[cfg(test)]\n#[path = \"child.rs\"]\nmod child;\n"
+                       'fn main() {}\n',
+                       'mod done {\n    // #[path = "child.rs"] mod old;\n}\n#[path = "child.rs"]\nmod child;\nfn main() {}\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/tools/entry.rs', source)
+                rev = self.repo.commit()
+                paths = packager.plan(self.repo.root, rev)['paths']
+                self.assertIn('suifleet-edge/tools/child.rs', paths)
+                self.assertNotIn('suifleet-edge/tools/nested/child.rs', paths)
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -1217,6 +1267,36 @@ class LayerAuditTests(unittest.TestCase):
             report = audit.check(self.layer, repo=self.repo.root, fetch=True)
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
+
+    def test_fetch_rejects_path_attributes_in_inline_modules(self):
+        # The reviewer's reproduction as a pinned archive: both child.rs files
+        # are present, yet rustc needs the one under tools/nested/. The audit
+        # must refuse the unmodelled resolution instead of reporting clean.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "nested-target"\npath = "tools/entry.rs"\n'
+        entry = ('mod nested {\n    #[path = "child.rs"]\n    mod child;\n    pub fn run() { child::run() }\n}\n'
+                 'fn main() { nested::run() }\n')
+        files = {'suifleet-edge/Cargo.toml': manifest, 'suifleet-edge/tools/entry.rs': entry,
+                 'suifleet-edge/tools/child.rs': 'pub fn run() {}\n'}
+        archive = self.archive.with_name('nested-path.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name in files:
+                    text = files.pop(member.name).encode()
+                    member.size, data = len(text), io.BytesIO(text)
+                tar.addfile(member, data)
+            for name, text in files.items():
+                added = tarfile.TarInfo(name)
+                added.size, added.mode = len(text), 0o644
+                tar.addfile(added, io.BytesIO(text.encode()))
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = "suifleet-edge/tools/entry.rs: #[path] attribute 'child.rs' inside or on an inline"
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        self.assertFalse(report['ok'])
 
     def test_fetch_rejects_runtime_state_in_a_pinned_archive(self):
         # A checksum-pinned, otherwise coherent archive that carries runtime state.
