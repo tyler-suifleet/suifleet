@@ -445,6 +445,24 @@ class PackageEdgeSourceTests(unittest.TestCase):
         unsupported = r'tools/entry.rs: #\[path\] attribute .child.rs. inside or on an inline'
         with self.assertRaisesRegex(ValueError, unsupported):
             packager.plan(self.repo.root, 'HEAD')
+        # The same with a Unicode module identifier: rustc needs tools/café/child.rs
+        # (verified with rustc 1.94.0), which an ASCII-only matcher missed.
+        self.repo.write('suifleet-edge/tools/entry.rs',
+                        'mod café {\n    #[path = "child.rs"]\n    mod child;\n    pub fn run() { child::run() }\n}\n'
+                        'fn main() { café::run() }\n')
+        self.repo.write('suifleet-edge/tools/café/child.rs', 'pub fn run() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, unsupported):
+            packager.plan(self.repo.root, 'HEAD')
+        # Rust's non-ASCII whitespace (here U+2028 and U+0085) would hide a block
+        # or attribute from the byte patterns, so it is refused outright.
+        for source in ('mod\u2028nested { #[path = "child.rs"] mod child; }\nfn main() {}\n',
+                       '#\u0085[path = "child.rs"]\nmod child;\nfn main() {}\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/tools/entry.rs', source)
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, r'tools/entry.rs:1: Unicode whitespace U\+(2028|0085)'):
+                    packager.plan(self.repo.root, 'HEAD')
         # Also refused: cfg_attr inside a block, a nested block, braces in
         # literals and comments that must not close the block early, a #[path]
         # on an inline module, and inside src/ (followed for its references).
@@ -1273,10 +1291,18 @@ class LayerAuditTests(unittest.TestCase):
         # are present, yet rustc needs the one under tools/nested/. The audit
         # must refuse the unmodelled resolution instead of reporting clean.
         manifest = CARGO_TOML + '\n[[bin]]\nname = "nested-target"\npath = "tools/entry.rs"\n'
-        entry = ('mod nested {\n    #[path = "child.rs"]\n    mod child;\n    pub fn run() { child::run() }\n}\n'
-                 'fn main() { nested::run() }\n')
+        base = self.archive
+        for module in ('nested', 'café'):
+            with self.subTest(module):
+                self.archive = base
+                self._check_fetch_rejects_inline_path(manifest, module)
+
+    def _check_fetch_rejects_inline_path(self, manifest, module):
+        entry = (f'mod {module} {{\n    #[path = "child.rs"]\n    mod child;\n    pub fn run() {{ child::run() }}\n}}\n'
+                 f'fn main() {{ {module}::run() }}\n')
         files = {'suifleet-edge/Cargo.toml': manifest, 'suifleet-edge/tools/entry.rs': entry,
-                 'suifleet-edge/tools/child.rs': 'pub fn run() {}\n'}
+                 'suifleet-edge/tools/child.rs': 'pub fn run() {}\n',
+                 f'suifleet-edge/tools/{module}/child.rs': 'pub fn run() {}\n'}
         archive = self.archive.with_name('nested-path.tar.gz')
         with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
             for member in source.getmembers():

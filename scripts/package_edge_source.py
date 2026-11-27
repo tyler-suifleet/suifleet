@@ -64,14 +64,21 @@ ATTRIBUTE = re.compile(rb'#\s*!?\s*\[')
 PATH_KEY = re.compile(rb'\s*path\s*=')
 PATH_VALUE = re.compile(rb'\s*(?:"([^"\\]*)"|r(#*)"(.*?)"\2)\s*$', re.S)
 CFG_ATTR = re.compile(rb'\s*cfg_attr\s*\(')
+# A Rust identifier. Rust accepts Unicode (XID) identifiers; any non-ASCII
+# UTF-8 byte is accepted here, a superset, so a module name is never missed.
+IDENTIFIER = rb'[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*'
+# Rust's non-ASCII whitespace (Pattern_White_Space: U+0085, U+200E, U+200F,
+# U+2028, U+2029) as UTF-8. The byte patterns here only model ASCII
+# whitespace, so sources containing these are refused (literal_references).
+UNICODE_WHITESPACE = re.compile(rb'\xc2\x85|\xe2\x80[\x8e\x8f\xa8\xa9]')
 # An out-of-line module declaration (`mod name;`) with its leading attributes.
-MODULE = re.compile(rb'((?:#\s*\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;')
+MODULE = re.compile(rb'((?:#\s*\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?(' + IDENTIFIER + rb')\s*;')
 PATH_ATTR = re.compile(rb'#\s*\[\s*path\s*=')
 # An inline module block (`mod name {`). rustc resolves a #[path] inside one
 # relative to the module's own directory, and a #[path] on one names a
 # directory, so neither is modelled; both are refused (see literal_references).
 # Blocks are found structurally in a code_mask()ed copy of the source.
-INLINE_MODULE = re.compile(rb'(?<![A-Za-z0-9_])mod\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*\s*\{')
+INLINE_MODULE = re.compile(rb'(?<![A-Za-z0-9_])mod\s+(?:r#)?' + IDENTIFIER + rb'\s*\{')
 RAW_STRING = re.compile(rb'r(#*)"')
 ITEM_PREFIX = re.compile(rb'\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:unsafe\s+)?')
 # Runtime identity/state names that must never be distributed.
@@ -562,7 +569,14 @@ def literal_references(source_path, data):
     is lexical (comments and strings included, which only makes it stricter):
     each include-macro name must be followed by one string literal in any
     delimiter, otherwise ValueError, so an unhandled form cannot silently drop
-    a build input."""
+    a build input. Rust's non-ASCII whitespace is refused anywhere in the
+    source, since the patterns would not see through it."""
+    unicode_space = UNICODE_WHITESPACE.search(data)
+    if unicode_space:
+        point = ord(unicode_space.group().decode())
+        line = data.count(b'\n', 0, unicode_space.start()) + 1
+        raise ValueError(f'{source_path}:{line}: Unicode whitespace U+{point:04X} is unsupported in Rust sources; '
+                         'use ASCII whitespace')
     references = []
     for match in INCLUDE_MACRO.finditer(data):
         rest = data[match.end():].lstrip()
@@ -730,7 +744,7 @@ def implicit_modules(data):
 
     Comments are not stripped, so a commented-out declaration also counts;
     that only makes the refusal below stricter."""
-    return [name.decode() for attributes, name in MODULE.findall(data) if not PATH_ATTR.search(attributes)]
+    return [name.decode(errors='replace') for attributes, name in MODULE.findall(data) if not PATH_ATTR.search(attributes)]
 
 
 def loose_sources(manifest, read_manifest, declared, exists, read, sources):
