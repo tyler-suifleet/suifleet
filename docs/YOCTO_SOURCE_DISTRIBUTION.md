@@ -532,9 +532,11 @@ The check then verifies the resulting `S`:
   program header table inside the file and at least one non-empty `PT_LOAD`
   segment. Every `PT_LOAD` must lie inside the file, have `p_filesz` no larger
   than `p_memsz`, and use a power-of-two alignment congruent with its offset
-  and address. `e_entry` must lie in the file-backed image (`p_vaddr` up to
-  `p_vaddr + p_filesz`) of an executable (`PF_X`) `PT_LOAD`, so an entry
-  point that is unmapped, in `.bss` or in a non-executable segment fails. The archive
+  and address. `e_entry` must be four-byte aligned, and its complete
+  four-byte first instruction must lie in the file-backed image (`p_vaddr` up
+  to `p_vaddr + p_filesz`) of an executable (`PF_X`) `PT_LOAD`. An entry point
+  that is unaligned, unmapped, truncated, in `.bss` or in a non-executable
+  segment fails. The archive
   SHA-256 and license checksum alone would accept an archive without the
   executable.
 
