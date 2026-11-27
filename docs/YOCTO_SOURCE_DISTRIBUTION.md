@@ -411,6 +411,16 @@ one BitBake verifies. The two file paths must also end in the file name itself:
 a trailing `/` or `/.` is refused, because `open()` fails on a regular file
 named that way.
 
+The audit joins `CARGO_SRC_DIR` and each `LIC_FILES_CHKSUM` path to `S`, so
+both must be plain relative paths: no absolute path, `..` component,
+backslash, unexpanded `${...}` or empty value. `LIC_FILES_CHKSUM` entries must
+use the `file://` form; any other scheme or a bare name is refused. These
+checks run statically, in `--repo` mode before anything is read, and again under
+`--fetch`. There each effective manifest, lock, crate directory and license path
+is resolved and must stay inside the unpack directory before it is read or
+listed, or used as Cargo's working directory. The audit therefore never verifies
+a file on the review host in place of the pinned source.
+
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
 the lockfile's crates.io registry crates, versions and checksums. It compares
