@@ -993,6 +993,39 @@ COMMIT_HEX = re.compile(r'[0-9a-f]{40}')
 DAEMON_PINS = {'SUIFLEET_LOCK_SHA256': SHA256_HEX, 'SUIFLEET_CRATE_VERSION': None, 'SRCREV': COMMIT_HEX}
 
 
+CODEC_INSTALL = re.compile(r'^do_install\(\)\s*\{\n(?P<body>.*?)^\}', re.M | re.S)
+CODEC_INSTALL_LOOP = re.compile(r'^\s*for f in (?P<names>[^;\n]+); do\s*$', re.M)
+SHA256_HEX = re.compile(r'[0-9a-f]{64}')
+
+
+def codec_install_files(recipe):
+    """The files the codec recipe's do_install copies from S, or None.
+
+    do_install names them in one literal loop, separately from the
+    SUIFLEET_CODEC_SHA256 flags that do_verify_codec checks, so the audit
+    requires a valid pin for each one rather than trusting the flags alone."""
+    bodies = CODEC_INSTALL.findall(recipe.text)
+    if len(bodies) != 1:
+        return None
+    loops = CODEC_INSTALL_LOOP.findall(bodies[0])
+    if len(loops) != 1 or '$' in loops[0]:
+        return None
+    return loops[0].split()
+
+
+def codec_install_errors(recipe):
+    where, files = recipe.path.name, codec_install_files(recipe)
+    if not files:
+        return [f'{where}: codec do_install has no single literal "for f in ...; do" file list to audit']
+    pins = recipe.flags.get('SUIFLEET_CODEC_SHA256', {})
+    errors = []
+    for name in files:
+        sha = recipe.expand(pins[name]) if name in pins else ''
+        if not SHA256_HEX.fullmatch(sha):
+            errors.append(f'{where}: codec do_install file {name} has no lowercase SHA-256 SUIFLEET_CODEC_SHA256 pin')
+    return errors
+
+
 def pin_errors(recipe):
     """Require the coupled pins of the daemon and codec recipes, keyed by PN.
 
@@ -1013,6 +1046,7 @@ def pin_errors(recipe):
             errors.append(f'{where}: codec recipe lacks required SUIFLEET_CODEC_SOURCE_REV')
         elif not COMMIT_HEX.fullmatch(value):
             errors.append(f'{where}: codec SUIFLEET_CODEC_SOURCE_REV {value!r} is not a full lowercase commit')
+        errors += codec_install_errors(recipe)
     elif recipe.get('SUIFLEET_CODEC_SOURCE_REV'):
         errors.append(f'{where}: SUIFLEET_CODEC_SOURCE_REV is only verified for PN {CODEC_PN!r}, not {pn!r}')
     return errors
@@ -1091,6 +1125,10 @@ def daemon_errors(recipe, read, exists=None, listing=None):
 def codec_errors(recipe, s_dir):
     errors, pins = [], {k: recipe.expand(v) for k, v in recipe.flags.get('SUIFLEET_CODEC_SHA256', {}).items()}
     names = sorted(p.name for p in Path(s_dir).iterdir()) if Path(s_dir).is_dir() else []
+    # do_install copies a fixed file list; each needs a pin and so a fetched file.
+    install = codec_install_errors(recipe)
+    if install:
+        return install
     if names != sorted(pins):
         return [f'{recipe.path.name}: unpacked codec has {names}, recipe pins {sorted(pins)}']
     for name, sha in pins.items():

@@ -2894,9 +2894,15 @@ class CodecFetchedLayoutTests(unittest.TestCase):
         self.s_dir = root / 'codec'
         self.s_dir.mkdir()
 
-    def build(self, schema=1, manifest_files=None, manifest_text=None):
+    INSTALL = ('walrus-device-codec.cjs', 'walrus_wasm_bg.wasm', 'manifest.json',
+               'THIRD_PARTY_LICENSES.txt', 'provenance.json')
+
+    def build(self, schema=1, manifest_files=None, manifest_text=None, drop=(), install=None, pin=None):
         payload = {'walrus-device-codec.cjs': b'bundle\n', 'walrus_wasm_bg.wasm': b'\0asm',
                    'THIRD_PARTY_LICENSES.txt': b'licenses\n'}
+        # drop removes a file together with its pin and manifest entry, so the
+        # rest of the metadata stays coherent.
+        payload = {name: data for name, data in payload.items() if name not in drop}
         for name, data in payload.items():
             (self.s_dir / name).write_bytes(data)
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payload.items()}
@@ -2913,7 +2919,11 @@ class CodecFetchedLayoutTests(unittest.TestCase):
                  f'LIC_FILES_CHKSUM = "file://THIRD_PARTY_LICENSES.txt;md5={md5}"',
                  f'SUIFLEET_CODEC_SOURCE_REV = "{self.REV}"',
                  f'SUIFLEET_CODEC_NODE_VERSION = "{self.NODE}"']
+        hashes.update(pin or {})
         lines += [f'SUIFLEET_CODEC_SHA256[{name}] = "{sha}"' for name, sha in sorted(hashes.items())]
+        loop = install if install is not None else f'    for f in {" ".join(self.INSTALL)}; do'
+        lines += ['do_install() {', '    install -d -m 0755 ${D}${SUIFLEET_CODEC_DIR}', loop,
+                  '        install -m 0644 ${S}/$f ${D}${SUIFLEET_CODEC_DIR}/$f', '    done', '}']
         path = self.layer / 'recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb'
         path.write_text('\n'.join(lines) + '\n')
         return audit.codec_errors(audit.Recipe(path, self.layer), self.s_dir)
@@ -2942,6 +2952,33 @@ class CodecFetchedLayoutTests(unittest.TestCase):
             with self.subTest(files=files):
                 errors = self.build(manifest_files=files)
                 self.assertTrue(any('no "files" object' in e for e in errors), errors)
+
+    def test_every_do_install_file_needs_a_pin_and_a_fetched_file(self):
+        # Removing a required file with its pin and manifest entry leaves the
+        # pins, manifest and fetched files coherent, but do_install would fail.
+        for name in ('walrus_wasm_bg.wasm', 'walrus-device-codec.cjs'):
+            with self.subTest(dropped=name):
+                errors = self.build(drop=(name,))
+                self.assertTrue(any(f'do_install file {name} has no lowercase SHA-256' in e for e in errors), errors)
+                recipe = audit.Recipe(self.layer / 'recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb',
+                                      self.layer)
+                self.assertTrue(any(f'do_install file {name}' in e for e in audit.pin_errors(recipe)))
+
+    def test_do_install_pins_must_be_sha256(self):
+        errors = self.build(pin={'walrus_wasm_bg.wasm': 'F' * 64})
+        self.assertTrue(any('do_install file walrus_wasm_bg.wasm has no lowercase SHA-256' in e for e in errors), errors)
+
+    def test_unauditable_do_install_file_list_is_refused(self):
+        for loop in ('    for f in ${FILES}; do', '    install -m 0644 ${S}/x ${D}/x', ''):
+            with self.subTest(loop=loop):
+                errors = self.build(install=loop)
+                self.assertTrue(any('no single literal "for f in ...; do" file list' in e for e in errors), errors)
+
+    def test_repository_codec_recipe_installs_only_pinned_files(self):
+        path = ROOT / 'suifleet-edge/meta-suifleet/recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb'
+        recipe = audit.Recipe(path, ROOT / 'suifleet-edge/meta-suifleet')
+        self.assertEqual(sorted(audit.codec_install_files(recipe)), sorted(self.INSTALL))
+        self.assertEqual(audit.codec_install_errors(recipe), [])
 
     def test_unreadable_manifest_is_reported_not_raised(self):
         errors = self.build(manifest_text='{not json')
