@@ -1595,6 +1595,46 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(extra='FILESEXTRAPATHS:prepend := "${THISDIR}/files/extra:"')
         self.assertEqual(self.errors(repo=self.repo.root), [])
 
+    def test_higher_priority_directory_candidates_are_rejected(self):
+        # BitBake's local fetcher selects the first FILESPATH candidate that
+        # exists (bb.utils.which), directories included. A directory at
+        # ${BP}/payload therefore wins over files/payload; the audit must not
+        # skip it and report (or unpack) the lower-priority regular file.
+        (self.recipe_dir / 'files/payload').write_text('lower priority\n')
+        self.write_recipe(extra='SRC_URI += "file://payload"')
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+        parsed = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        bp = self.recipe_dir / parsed.get('BP')
+        (bp / 'payload').mkdir(parents=True)
+        (bp / 'payload/inner').write_text('directory content\n')
+        errors = self.errors(repo=self.repo.root)
+        self.assertTrue(any('file:// source payload' in e and 'non-file' in e for e in errors), errors)
+        with self.assertRaisesRegex(ValueError, 'non-file'):
+            audit.file_source(parsed, 'payload')
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        if report.get('fetch_dir'):
+            self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        self.assertFalse((Path(report.get('fetch_dir') or self.tmp.name) / 'suifleet/payload').exists())
+        # A directory as the only candidate is rejected the same way.
+        shutil.rmtree(bp)
+        (self.recipe_dir / 'files/payload').unlink()
+        (self.recipe_dir / 'files/payload').mkdir()
+        self.assertTrue(any('file:// source payload' in e and 'non-file' in e for e in self.errors()), self.errors())
+        (self.recipe_dir / 'files/payload').rmdir()
+        (self.recipe_dir / 'files/payload').write_text('lower priority\n')
+        # A directory in an override location is an override-specific
+        # candidate, exactly like a regular file there.
+        machine = self.recipe_dir / 'files/qemuarm64/payload'
+        machine.mkdir(parents=True)
+        errors = self.errors(repo=self.repo.root)
+        self.assertTrue(any('override-specific candidate' in e and 'qemuarm64' in e for e in errors), errors)
+        with self.assertRaisesRegex(ValueError, 'override-specific'):
+            audit.file_source(audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer), 'payload')
+        shutil.rmtree(self.recipe_dir / 'files/qemuarm64')
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+
     def test_conditional_source_overrides_are_rejected(self):
         cases = (
             'SRC_URI:qemuarm64 = "https://example.com/other.tar.gz;sha256sum=%s"' % ('0' * 64),

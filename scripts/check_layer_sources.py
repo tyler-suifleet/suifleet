@@ -823,7 +823,13 @@ def file_source(recipe, name):
     name. BitBake's base_set_filespath tries every FILESOVERRIDES subdirectory
     of every search directory before the unqualified directories, so such a
     file replaces this one for some MACHINE/DISTRO/arch. The audit does not
-    model per-configuration overrides, so it rejects these candidates."""
+    model per-configuration overrides, so it rejects these candidates.
+
+    BitBake's local fetcher (bb.utils.which) takes the first candidate that
+    exists, directories included, so a directory both counts as an override
+    candidate and, when it comes first, is the selected source. The audit
+    supports only regular files, so a selected directory is rejected rather
+    than skipped in favour of a later same-named file."""
     layer = recipe.layer.resolve()
     directories = search_path(recipe)
     searched = {directory.resolve() for directory in directories}
@@ -834,16 +840,20 @@ def file_source(recipe, name):
             if not sub.is_dir() or sub.resolve() in searched:
                 continue
             candidate = sub / name
-            if candidate.is_file() or candidate.is_symlink():
+            if candidate.exists() or candidate.is_symlink():
                 raise ValueError(f'file:// source {name} has an override-specific candidate {candidate} '
                                  f'that BitBake selects when FILESOVERRIDES contains {sub.name!r}; '
                                  'machine/distro-specific local files are not supported')
     for directory in directories:
         candidate = directory / name
-        if candidate.is_file() or candidate.is_symlink():
+        if candidate.exists() or candidate.is_symlink():
             resolved = candidate.resolve()
-            if layer not in resolved.parents or not resolved.is_file():
+            if layer not in resolved.parents:
                 raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {resolved}')
+            if not resolved.is_file():
+                raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {resolved} '
+                                 '(BitBake selects the first existing candidate, directories included; '
+                                 'only regular local files are supported)')
             return resolved
     return None
 
