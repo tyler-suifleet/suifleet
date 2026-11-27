@@ -283,6 +283,12 @@ These static checks always run, on every recipe in the layer:
   so it reports a conditional override of any such variable, and `--fetch`
   downloads nothing for that recipe. Unconditional variable-driven includes
   are read normally.
+- A `:=` assignment stores the expanded text, but BitBake expanded it with
+  the active overrides. So the audit keeps the variables each `:=` value
+  (including a `:=` flag or `:append :=`) was expanded from. They stay
+  source-affecting wherever the assigned variable is, for example
+  `SOURCE_SETTINGS := "${SOURCE_CHOICE}.inc"` before `include ${SOURCE_SETTINGS}`.
+  A conditional override of `SOURCE_CHOICE` is then reported.
 - Each matching `.bbappend` (an exact name, or `name_%.bbappend`) is read after
   its recipe as one set of metadata, as BitBake does. So a variable assigned in
   the append affects the recipe's sources. A `.bbappend` that matches no
