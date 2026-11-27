@@ -305,7 +305,9 @@ These static checks always run, on every recipe in the layer:
   recipes and bbappends itself, so it requires the `BBFILES +=` recipe
   pattern when the layer has recipes and the bbappend pattern when it has
   bbappends. Without them BitBake would not parse the audited files. A
-  finding there skips the fetch of every recipe.
+  continuation in `layer.conf` that mixes a comment and code, or ends the
+  file, is also a finding, because BitBake then refuses to parse the layer.
+  A finding there skips the fetch of every recipe.
 - The reader follows BitBake's ordering. Plain `:append` and `:prepend` apply
   after every assignment, even one that comes later in the file. `??=` is a
   weak default, used only when nothing else assigns the variable; each later
