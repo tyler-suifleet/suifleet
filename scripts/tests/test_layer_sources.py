@@ -1466,6 +1466,51 @@ class LayerAuditTests(unittest.TestCase):
         (codec / 'suifleet-walrus-codec_1.0.bb').write_text(f'LICENSE = "MIT"\nSUIFLEET_CODEC_SOURCE_REV = "{"e" * 40}"\n')
         self.assertTrue(any('differs from daemon SRCREV' in e for e in self.errors()))
 
+    def test_daemon_is_found_by_pn_and_its_pins_are_required(self):
+        # Removing or blanking a pin must fail the audit, not skip the
+        # Cargo.lock, crate include and layout checks it selects.
+        recipe = self.recipe_dir / 'suifleet_1.0.bb'
+        pinned = recipe.read_text()
+        lock_line = f'SUIFLEET_LOCK_SHA256 = "{sha256(CARGO_LOCK)}"\n'
+        cases = {
+            'missing lock pin': (pinned.replace(lock_line, ''), 'lacks required SUIFLEET_LOCK_SHA256'),
+            'empty lock pin': (pinned.replace(lock_line, 'SUIFLEET_LOCK_SHA256 = ""\n'), 'lacks required SUIFLEET_LOCK_SHA256'),
+            'short lock pin': (pinned.replace(lock_line, f'SUIFLEET_LOCK_SHA256 = "{"a" * 63}"\n'), 'SUIFLEET_LOCK_SHA256'),
+            'uppercase lock pin': (pinned.replace(lock_line, f'SUIFLEET_LOCK_SHA256 = "{sha256(CARGO_LOCK).upper()}"\n'),
+                                   'is not a lowercase'),
+            'missing crate version': (pinned.replace('SUIFLEET_CRATE_VERSION = "0.2.3"\n', 'PV = "0.2.3"\n'),
+                                      'lacks required SUIFLEET_CRATE_VERSION'),
+        }
+        for name, (text, message) in cases.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, pinned)
+                recipe.write_text(text)
+                report = audit.check(self.layer, repo=self.repo.root)
+                self.assertTrue(any(message in e for e in report['errors']), report['errors'])
+                # The repository comparison still runs for the daemon recipe.
+                if 'lock pin' in name:
+                    self.assertTrue(any('Cargo.lock sha256' in e for e in report['errors']), report['errors'])
+        # A layer without the daemon recipe cannot be audited for its pins.
+        recipe.unlink()
+        self.assertTrue(any("no daemon recipe with PN 'suifleet'" in e for e in self.errors()))
+
+    def test_coupled_pins_on_other_recipes_are_refused(self):
+        other = self.layer / 'recipes-edge/other'
+        other.mkdir()
+        (other / 'other_1.0.bb').write_text(f'LICENSE = "MIT"\nSUIFLEET_LOCK_SHA256 = "{"a" * 64}"\n'
+                                            f'SUIFLEET_CODEC_SOURCE_REV = "{self.rev}"\n')
+        errors = self.errors()
+        self.assertTrue(any("SUIFLEET_LOCK_SHA256 is only verified for PN 'suifleet'" in e for e in errors), errors)
+        self.assertTrue(any("SUIFLEET_CODEC_SOURCE_REV is only verified for PN 'suifleet-walrus-codec'" in e
+                            for e in errors), errors)
+        (other / 'other_1.0.bb').unlink()
+        codec = self.layer / 'recipes-edge/suifleet-walrus-codec'
+        codec.mkdir()
+        for value, message in (('', 'lacks required SUIFLEET_CODEC_SOURCE_REV'), ('e' * 39, 'not a full lowercase commit')):
+            with self.subTest(codec_rev=value):
+                (codec / 'suifleet-walrus-codec_1.0.bb').write_text(f'LICENSE = "MIT"\nSUIFLEET_CODEC_SOURCE_REV = "{value}"\n')
+                self.assertTrue(any(message in e for e in self.errors()), self.errors())
+
     def test_runtime_state_in_layer_or_export_list_is_rejected(self):
         (self.recipe_dir / 'files/device.key').write_text('secret')
         (self.layer / 'export-files.json').write_text(json.dumps(['conf/layer.conf', 'journal.db']))

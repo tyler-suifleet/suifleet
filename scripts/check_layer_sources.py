@@ -983,6 +983,41 @@ def license_md5s(recipe):
         yield url[len('file://'):], options.get('md5', '')
 
 
+# The daemon and codec recipes are identified by PN, never by the pins this
+# audit verifies: a recipe that dropped SUIFLEET_LOCK_SHA256 must fail the
+# audit, not silently skip the Cargo.lock and layout checks.
+DAEMON_PN = 'suifleet'
+CODEC_PN = 'suifleet-walrus-codec'
+SHA256_HEX = re.compile(r'[0-9a-f]{64}')
+COMMIT_HEX = re.compile(r'[0-9a-f]{40}')
+DAEMON_PINS = {'SUIFLEET_LOCK_SHA256': SHA256_HEX, 'SUIFLEET_CRATE_VERSION': None, 'SRCREV': COMMIT_HEX}
+
+
+def pin_errors(recipe):
+    """Require the coupled pins of the daemon and codec recipes, keyed by PN.
+
+    Pins set on any other recipe are refused because nothing would verify them."""
+    pn, where, errors = recipe.get('PN'), recipe.path.name, []
+    if pn == DAEMON_PN:
+        for name, pattern in DAEMON_PINS.items():
+            value = recipe.get(name)
+            if not value:
+                errors.append(f'{where}: daemon recipe lacks required {name}')
+            elif pattern and not pattern.fullmatch(value):
+                errors.append(f'{where}: daemon {name} {value!r} is not a lowercase {pattern.pattern} digest')
+    elif recipe.get('SUIFLEET_LOCK_SHA256'):
+        errors.append(f'{where}: SUIFLEET_LOCK_SHA256 is only verified for PN {DAEMON_PN!r}, not {pn!r}')
+    if pn == CODEC_PN:
+        value = recipe.get('SUIFLEET_CODEC_SOURCE_REV')
+        if not value:
+            errors.append(f'{where}: codec recipe lacks required SUIFLEET_CODEC_SOURCE_REV')
+        elif not COMMIT_HEX.fullmatch(value):
+            errors.append(f'{where}: codec SUIFLEET_CODEC_SOURCE_REV {value!r} is not a full lowercase commit')
+    elif recipe.get('SUIFLEET_CODEC_SOURCE_REV'):
+        errors.append(f'{where}: SUIFLEET_CODEC_SOURCE_REV is only verified for PN {CODEC_PN!r}, not {pn!r}')
+    return errors
+
+
 def daemon_errors(recipe, read, exists=None, listing=None):
     """Check coupled daemon pins with `read(relpath)` returning bytes or None.
 
@@ -1341,7 +1376,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
         return errors + [f'{recipe.path.name}: {error}'], fetched
     if not s_dir.is_dir():
         return errors + [f'{recipe.path.name}: S does not exist after unpack: {s_dir.relative_to(unpack)}'], fetched
-    if recipe.get('SUIFLEET_LOCK_SHA256'):
+    if recipe.get('PN') == DAEMON_PN:
         def read(rel):
             path = s_dir / rel
             return path.read_bytes() if path.is_file() else None
@@ -1386,7 +1421,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
                                          'RUSTUP_HOME': os.environ.get('RUSTUP_HOME', str(Path.home() / '.rustup'))})
             if result.returncode:
                 errors.append(f'{recipe.path.name}: cargo metadata failed: {result.stderr.strip().splitlines()[:3]}')
-    elif recipe.flags.get('SUIFLEET_CODEC_SHA256'):
+    elif recipe.get('PN') == CODEC_PN:
         errors += codec_errors(recipe, s_dir)
     else:
         for rel, md5 in license_md5s(recipe):
@@ -1514,6 +1549,7 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
             continue
         recipes[pn] = recipe
         errors, sources = audit_recipe(recipe)
+        errors += pin_errors(recipe)
         static_errors[pn] = errors
         report['errors'] += errors
         report['recipes'][pn] = {
@@ -1531,8 +1567,9 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
             # effective sources this audit cannot see.
             report['errors'].append(f'{path.relative_to(layer).as_posix()}: bbappend matches no recipe in the layer; '
                                     'its effect on sources cannot be audited')
-    daemon = next((r for r in recipes.values() if r.get('SUIFLEET_LOCK_SHA256')), None)
-    codec = next((r for r in recipes.values() if r.get('SUIFLEET_CODEC_SOURCE_REV')), None)
+    daemon, codec = recipes.get(DAEMON_PN), recipes.get(CODEC_PN)
+    if daemon is None and (not only or DAEMON_PN in only):
+        report['errors'].append(f'layer provides no daemon recipe with PN {DAEMON_PN!r}; its pins cannot be audited')
     if daemon and codec and daemon.get('SRCREV') != codec.get('SUIFLEET_CODEC_SOURCE_REV'):
         report['errors'].append(f'codec SUIFLEET_CODEC_SOURCE_REV {codec.get("SUIFLEET_CODEC_SOURCE_REV")} differs from daemon SRCREV {daemon.get("SRCREV")}')
     if repo and daemon:
