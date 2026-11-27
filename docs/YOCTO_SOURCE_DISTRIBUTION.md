@@ -170,7 +170,9 @@ These static checks always run, on every recipe in the layer:
   not use a query string, a fragment or credentials. They may not use a GitHub
   branch/tag archive, a `raw.githubusercontent.com` or codeload URL at a
   non-commit ref, a `releases/latest` redirect or an expiring release-asset
-  host.
+  host. The report never repeats a rejected secret: every URL in it, including
+  failed git command lines, is shown without userinfo, query or fragment
+  (`<redacted>`).
 - Every `crate://` entry has a SHA-256.
 - `file://` entries resolve, after following symlinks, to regular files inside
   the layer, and `FILESEXTRAPATHS` doesn't point outside it. This rejects the
