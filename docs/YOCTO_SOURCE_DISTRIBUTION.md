@@ -344,7 +344,9 @@ These static checks always run, on every recipe in the layer:
   `suifleet-walrus-codec`), not by the pins being verified. The layer must
   provide the daemon recipe, with a lowercase 64-hex `SUIFLEET_LOCK_SHA256`, a
   `SUIFLEET_CRATE_VERSION` and a 40-hex `SRCREV`. The codec recipe, when
-  present, needs a 40-hex `SUIFLEET_CODEC_SOURCE_REV`. A missing or empty pin
+  present, needs a 40-hex `SUIFLEET_CODEC_SOURCE_REV` and a lowercase 64-hex
+  `SUIFLEET_CODEC_SHA256` pin for every file its `do_install` loop copies; that
+  loop must be one literal `for f in ...; do` list. A missing or empty pin
   fails the audit instead of skipping the checks it would select. These pins on
   any other recipe are refused, because nothing would verify them.
 
@@ -392,7 +394,8 @@ check then verifies the resulting `S`:
   the same implicit-module refusal outside the
   directories packaged whole, plus `cargo metadata --offline --locked
   --no-deps` when `--cargo` is set;
-- for the codec, the exact five pinned files, their digests, provenance
+- for the codec, the exact five pinned files (each file `do_install` copies
+  must be pinned, so it must also be fetched), their digests, provenance
   revision, licenses and Node version, plus manifest schema 1 and manifest
   file hashes equal to the recipe pins, as `do_verify_codec` requires.
 
