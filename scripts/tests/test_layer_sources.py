@@ -4149,16 +4149,20 @@ class NodeRecipeTests(unittest.TestCase):
         self.archive = Path(self.tmp.name) / 'node.tar.xz'
 
     @staticmethod
-    def elf(machine, kind=2, phnum=1, p_type=1, filesz=8, phoff=64, version=1, size=None, memsz=None, vaddr=None, align=0):
-        """A minimal ELF64 LE file: header, phnum program headers, then a segment."""
+    def elf(machine, kind=2, phnum=1, p_type=1, filesz=8, phoff=64, version=1, size=None, memsz=None, vaddr=None, align=0,
+            entry=None, flags=5):
+        """A minimal ELF64 LE file: header, phnum program headers, then a segment.
+
+        e_entry defaults to the first byte of the (R+X) segment."""
         def le(value, n):
             return value.to_bytes(n, 'little')
-        header = (b'\x7fELF\x02\x01\x01' + bytes(9) + le(kind, 2) + le(machine, 2) + le(version, 4) + le(0, 8)
-                  + le(phoff, 8) + le(0, 8) + le(0, 4) + le(64, 2) + le(56, 2) + le(phnum, 2) + le(0, 6))
         offset = 64 + 56 * phnum
         memsz = filesz if memsz is None else memsz
         vaddr = offset if vaddr is None else vaddr
-        program = (le(p_type, 4) + le(5, 4) + le(offset, 8) + le(vaddr, 8) + le(vaddr, 8) + le(filesz, 8)
+        entry = vaddr if entry is None else entry
+        header = (b'\x7fELF\x02\x01\x01' + bytes(9) + le(kind, 2) + le(machine, 2) + le(version, 4) + le(entry, 8)
+                  + le(phoff, 8) + le(0, 8) + le(0, 4) + le(64, 2) + le(56, 2) + le(phnum, 2) + le(0, 6))
+        program = (le(p_type, 4) + le(flags, 4) + le(offset, 8) + le(vaddr, 8) + le(vaddr, 8) + le(filesz, 8)
                    + le(memsz, 8) + le(align, 8)) * phnum
         data = header + program + b'\xaa' * 8
         return data if size is None else data[:size]
@@ -4190,7 +4194,8 @@ class NodeRecipeTests(unittest.TestCase):
                 self.assertEqual(report['errors'], [])
         # A larger memory image (.bss) and a congruent page alignment are valid.
         for label, data in {'p_memsz above p_filesz': self.elf(183, memsz=4096),
-                            'page aligned': self.elf(183, vaddr=0x400000 + 120, align=0x1000)}.items():
+                            'page aligned': self.elf(183, vaddr=0x400000 + 120, align=0x1000),
+                            'entry at last file byte': self.elf(183, entry=120 + 7)}.items():
             with self.subTest(label):
                 report = self.fetch({'LICENSE': b'node license\n', 'bin/node': data})
                 self.assertEqual(report['errors'], [])
@@ -4214,7 +4219,13 @@ class NodeRecipeTests(unittest.TestCase):
                  # Review finding: a load segment whose file image exceeds its memory image.
                  'p_filesz above p_memsz': self.elf(183, memsz=4),
                  'alignment not a power of two': self.elf(183, align=3),
-                 'offset and address not congruent': self.elf(183, vaddr=0x10001, align=0x1000)}
+                 'offset and address not congruent': self.elf(183, vaddr=0x10001, align=0x1000),
+                 # Combined review finding: e_entry must be in a file-backed executable PT_LOAD.
+                 'ET_EXEC entry zero outside the segment': self.elf(183, entry=0),
+                 'ET_DYN entry outside the segment': self.elf(183, kind=3, entry=0x10000),
+                 'entry in a read-only segment': self.elf(183, flags=4),
+                 'entry in a writable non-executable segment': self.elf(183, flags=6),
+                 'entry past the file image (.bss)': self.elf(183, memsz=4096, entry=120 + 8)}
         for label, data in cases.items():
             with self.subTest(label):
                 report = self.fetch({'LICENSE': b'node license\n', 'bin/node': data})

@@ -1202,7 +1202,7 @@ NODE_INSTALL_REF = re.compile(r'\$\{S\}/(\S+)')
 ELF_AARCH64 = 183
 
 
-ELF64_EHDR, ELF64_PHDR, PT_LOAD = 64, 56, 1
+ELF64_EHDR, ELF64_PHDR, PT_LOAD, PF_X = 64, 56, 1, 1
 # Package version and epoch: OE publishes the Node package (and resolves the
 # codec's RDEPENDS) from PKGV/PKGE, which default to PV/PE. The audit compares
 # PV/PE, so it refuses anything that could make the package version differ.
@@ -1213,9 +1213,11 @@ def elf_aarch64_problem(data):
     """Why data is not a minimal loadable ELF64 LE AArch64 executable, or None.
 
     Checks the whole 64-byte ELF header, that the program header table and
-    at least one non-empty PT_LOAD segment lie inside the file, and that every
-    PT_LOAD has p_filesz <= p_memsz and a consistent alignment, so a truncated,
-    header-only or unloadable file is not reported as the verified executable."""
+    at least one non-empty PT_LOAD segment lie inside the file, that every
+    PT_LOAD has p_filesz <= p_memsz and a consistent alignment, and that
+    e_entry lies in the file-backed image of an executable (PF_X) PT_LOAD, so a
+    truncated, header-only, unloadable or unrunnable file is not reported as
+    the verified executable."""
     if len(data) < ELF64_EHDR:
         return f'{len(data)} bytes, shorter than the 64-byte ELF64 header'
     # e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT.
@@ -1234,10 +1236,11 @@ def elf_aarch64_problem(data):
         return 'ELF64 header or program header size is wrong'
     if phnum == 0 or phoff < ELF64_EHDR or phoff + phnum * ELF64_PHDR > len(data):
         return 'program header table is missing or extends past the end of the file'
-    loads = 0
+    loads, e_entry, entry_mapped = 0, u(24, 8), False
     for index in range(phnum):
         entry = phoff + index * ELF64_PHDR
-        p_type, p_offset, p_vaddr = u(entry, 4), u(entry + 8, 8), u(entry + 16, 8)
+        p_type, p_flags = u(entry, 4), u(entry + 4, 4)
+        p_offset, p_vaddr = u(entry + 8, 8), u(entry + 16, 8)
         p_filesz, p_memsz, p_align = u(entry + 32, 8), u(entry + 40, 8), u(entry + 48, 8)
         if p_type != PT_LOAD:
             continue
@@ -1251,7 +1254,15 @@ def elf_aarch64_problem(data):
         if p_align > 1 and (p_align & (p_align - 1) or (p_vaddr - p_offset) % p_align):
             return f'PT_LOAD segment {index} alignment {p_align} is not a power of two congruent with its offset and address'
         loads += bool(p_filesz)
-    return None if loads else 'no non-empty PT_LOAD segment'
+        # The kernel starts execution at e_entry (relative to the load bias for
+        # ET_DYN, so in the same address space as p_vaddr); it must be backed by
+        # file bytes of an executable segment, not .bss or a read-only mapping.
+        entry_mapped |= bool(p_flags & PF_X) and p_vaddr <= e_entry < p_vaddr + p_filesz
+    if not loads:
+        return 'no non-empty PT_LOAD segment'
+    if not entry_mapped:
+        return f'e_entry {e_entry:#x} is not inside the file-backed image of an executable PT_LOAD segment'
+    return None
 
 
 def node_package_version_errors(recipe):
