@@ -66,6 +66,40 @@ def sha256(data):
     return hashlib.sha256(data if isinstance(data, bytes) else data.encode()).hexdigest()
 
 
+# SF-307's parse-time availability guards, verbatim from suifleet-node and
+# suifleet-walrus-codec: they only read the datastore and skip the recipe.
+NODE_GUARD = "python () {\n    if d.getVar('HOST_ARCH') != 'aarch64':\n        raise bb.parse.SkipRecipe('the official Node.js linux-arm64 binary is little-endian AArch64; %s is unsupported' % d.getVar('HOST_SYS'))\n    if d.getVar('TCLIBC') != 'glibc':\n        raise bb.parse.SkipRecipe('the official Node.js linux-arm64 binary requires glibc; TCLIBC=%s is unsupported' % d.getVar('TCLIBC'))\n}\n"
+CODEC_GUARD = (
+    'python () {\n'
+    "    if d.getVar('HOST_ARCH') != 'aarch64':\n"
+    "        raise bb.parse.SkipRecipe('the Walrus codec runs only on the Linux AArch64 glibc suifleet-node runtime; %s is unsupported' % d.getVar('HOST_SYS'))\n"
+    "    if d.getVar('TCLIBC') != 'glibc':\n"
+    "        raise bb.parse.SkipRecipe('the Walrus codec runs only on the glibc suifleet-node runtime; TCLIBC=%s is unsupported' % d.getVar('TCLIBC'))\n"
+    '    import os\n'
+    "    local = [entry for entry in (d.getVar('SRC_URI') or '').split() if entry.startswith('file://')]\n"
+    '    # Resolve local inputs exactly as the local fetcher will: its URL decoding,\n'
+    '    # absolute paths, FILESPATH search and (BitBake 2.0) the DL_DIR fallback.\n'
+    '    # Record every candidate as a parse dependency, absent ones included\n'
+    '    # (mtime 0). BitBake caches a skipped recipe with only these __depends, so\n'
+    '    # without them a cached skip would survive after the files are staged.\n'
+    '    missing = []\n'
+    '    if local:\n'
+    '        fetcher = bb.fetch2.Fetch(local, d, cache=False, localonly=True)\n'
+    '        for entry in local:\n'
+    '            ud = fetcher.ud[entry]\n'
+    '            # Renamed from localpaths after BitBake 2.0.\n'
+    "            search = getattr(ud.method, 'localfile_searchpaths', None) or ud.method.localpaths\n"
+    '            searched = search(ud, d)\n'
+    '            for path in searched:\n'
+    '                bb.parse.mark_dependency(d, path)\n'
+    '            if not searched or not os.path.exists(searched[-1]):\n'
+    "                missing.append(entry[len('file://'):].split(';')[0])\n"
+    '    if missing:\n'
+    "        raise bb.parse.SkipRecipe('optional Walrus codec inputs not found: %s. Build them with scripts/package_walrus_codec.py at SUIFLEET_CODEC_SOURCE_REV (docs/YOCTO_PACKAGING.md) or leave suifleet-walrus-codec out of the image' % ', '.join(missing))\n"
+    '}\n'
+)
+
+
 class SourceRepo:
     """A throwaway Git repository shaped like the core checkout."""
 
@@ -1471,6 +1505,87 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(extra='inherit cargo\npython do_verify_lock() {\n    pass\n}\n'
                                 'python do_anonymous_check() {\n    pass\n}\ndo_install() {\n    true\n}\n')
         self.assertEqual(self.errors(), [])
+
+
+    def test_read_only_skip_guards_are_accepted(self):
+        # A guard that only reads the datastore and raises SkipRecipe changes
+        # whether the recipe builds, never its pins: it is reported, not refused,
+        # wherever it appears, and the recipe is still fetched and verified.
+        include = self.recipe_dir / 'extra.inc'
+        append = self.recipe_dir / 'suifleet_1.0.bbappend'
+        self.addCleanup(include.unlink, missing_ok=True)
+        self.addCleanup(append.unlink, missing_ok=True)
+        include.write_text(CODEC_GUARD)
+        append.write_text(NODE_GUARD)
+        self.write_recipe(extra=NODE_GUARD + CODEC_GUARD + 'require extra.inc\n')
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+        entry = report['recipes']['suifleet']
+        self.assertEqual(entry['skip_guards'], [
+            'recipes-edge/suifleet/suifleet_1.0.bb: anonymous Python function (python ())',
+            'recipes-edge/suifleet/suifleet_1.0.bb: anonymous Python function (python ())',
+            'recipes-edge/suifleet/extra.inc: anonymous Python function (python ())',
+            'recipes-edge/suifleet/suifleet_1.0.bbappend: anonymous Python function (python ())'])
+        self.assertTrue(entry['fetched'])
+        # The reader still sees the assignments after each guard.
+        self.write_recipe(extra=CODEC_GUARD + 'SRC_URI += "https://example.invalid/unpinned.tar.gz"\n')
+        self.assertTrue(any('unpinned.tar.gz' in e for e in self.errors()), self.errors())
+
+    def test_anonymous_python_that_could_rewrite_pins_is_refused(self):
+        # Each variant changes one thing in an accepted guard so that it could
+        # write the datastore (or escape the model); all must stay refused and
+        # nothing may be fetched.
+        insert = '    missing = []\n'
+        assert insert in CODEC_GUARD
+        additions = {
+            'setVar': '    d.setVar("SRCREV", "x")\n',
+            'appendVar': '    d.appendVar("SRC_URI", " https://example.invalid/x.tar.gz")\n',
+            'setVarFlag': '    d.setVarFlag("SRC_URI", "sha256sum", "0")\n',
+            'delVar': '    d.delVar("SRC_URI")\n',
+            'renameVar': '    d.renameVar("SRC_URI", "OLD")\n',
+            'method reference': '    f = d.getVar\n',
+            'datastore alias': '    data = d\n',
+            'datastore in container': '    data = [d]\n',
+            'datastore to other helper': '    bb.data.setVar("SRCREV", "x", d)\n',
+            'datastore to lib function': '    oe.utils.rewrite(d)\n',
+            'datastore to local function': '    helper(d)\n',
+            'datastore format escape': '    "{0.__class__}".format(d)\n',
+            'getattr on datastore': '    getattr(d, "setVar")("SRCREV", "x")\n',
+            'fetcher datastore': '    bb.fetch2.Fetch([], d, localonly=True).d.setVar("SRCREV", "x")\n',
+            'non-local fetch': '    bb.fetch2.Fetch(["https://example.invalid/x"], d)\n',
+            'search rebound': '    search = helper\n    search(ud, d)\n',
+            'exec': '    exec("d.setVar(1, 2)")\n',
+            'eval': '    eval("1")\n',
+            'import': '    import oe.utils\n',
+            'from import': '    from bb import data\n',
+            'os process': '    os.system("true")\n',
+            'os environ': '    os.environ["X"] = "1"\n',
+            'other bb name': '    bb.build.exec_func("do_x", d)\n',
+            'dunder attribute': '    x = ().__class__\n',
+            'nested function': '    def f():\n        pass\n',
+            'lambda': '    f = lambda: None\n',
+            'global': '    global SRC_URI\n',
+            'rebind datastore': '    d = None\n',
+            'rebind bb': '    bb = None\n',
+            'syntax error': '    if :\n',
+        }
+        for label, addition in additions.items():
+            with self.subTest(label):
+                self.write_recipe(extra=CODEC_GUARD.replace(insert, insert + addition))
+                errors = self.errors()
+                self.assertTrue(any('not a read-only skip guard' in e for e in errors), errors)
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                self.assertEqual(recipe.guards, [])
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('runs after parsing' in e and 'nothing fetched' in e for e in errors), errors)
+        # An unterminated function is refused too.
+        self.write_recipe(extra='python () {\n    pass\n')
+        self.assertTrue(any('without a closing brace' in e for e in self.errors()), self.errors())
 
     def test_every_include_operand_is_read_and_checked(self):
         # BitBake expands the whole include/require operand and includes every
