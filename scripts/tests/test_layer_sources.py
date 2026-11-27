@@ -1312,6 +1312,23 @@ class LayerAuditTests(unittest.TestCase):
                 self.assertEqual(fetched, [])
                 self.assertTrue(any('nothing fetched' in e for e in errors), errors)
 
+    def test_percent_escaped_downloadfilename_is_refused_not_decoded(self):
+        # BitBake keeps a downloadfilename literally, so source%2Etar.gz would stay
+        # a packed loose file there; the audit must never report it unpacked.
+        name = 'source%2Etar.gz'
+        self.assertEqual(audit.download_name(self.url, {'downloadfilename': name}), name)
+        self.write_recipe(url=f'{self.url};downloadfilename={name}')
+        self.assertTrue(any('does not model' in e and 'percent escape' in e
+                            for e in self.errors(repo=self.repo.root)), self.errors())
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertFalse(report['ok'])
+        self.assertFalse(any(f.get('verified') for f in report['recipes']['suifleet'].get('fetched') or []))
+        self.assertFalse((Path(report['fetch_dir']) / 'suifleet/source/LICENSE').exists())
+        # The URL path, by contrast, is percent-decoded like BitBake's decodeurl.
+        self.assertEqual(audit.download_name('https://example.com/a/source%2Etar.gz', {}), 'source.tar.gz')
+
     def test_https_parameters_the_audit_does_not_model_are_refused(self):
         for extra in ('striplevel=1', 'md5sum=' + '0' * 32, 'localpath=x', 'unpack=yes', 'unpack=false'):
             with self.subTest(extra):

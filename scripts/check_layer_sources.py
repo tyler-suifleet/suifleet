@@ -286,14 +286,23 @@ def unmodelled_https_params(params):
     unmodelled = set(params) - HTTPS_PARAMS
     if params.get('unpack', '1') not in ('0', '1'):
         unmodelled.add(f'unpack={params["unpack"]}')
+    # BitBake uses a downloadfilename value literally (it never percent-decodes
+    # parameters), so an escape would name a file whose suffix differs from the
+    # decoded name. Refuse the ambiguous form instead of guessing either way.
+    if '%' in params.get('downloadfilename', ''):
+        unmodelled.add('downloadfilename with a percent escape')
     return sorted(unmodelled)
 
 
 def download_name(url, params):
     """The local file name BitBake's wget fetcher stores and unpacks: downloadfilename
-    when set (its suffix selects the unpack method), otherwise the URL basename."""
-    name = params.get('downloadfilename', PurePosixPath(urllib.parse.urlsplit(url).path).name)
-    name = urllib.parse.unquote(name)
+    when set, taken literally like BitBake's parameter parser (its suffix selects
+    the unpack method), otherwise the percent-decoded URL basename (BitBake's
+    decodeurl unquotes the path only)."""
+    if 'downloadfilename' in params:
+        name = params['downloadfilename']
+    else:
+        name = urllib.parse.unquote(PurePosixPath(urllib.parse.urlsplit(url).path).name)
     if name in ('', '.', '..') or '/' in name or '\\' in name or '${' in name or '\0' in name:
         raise ValueError(f'source has no usable local file name {name!r}: {redact_url(url)}')
     return name
