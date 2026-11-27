@@ -153,6 +153,10 @@ python3 scripts/check_layer_sources.py --repo . --fetch \
 These static checks always run, on every recipe in the layer:
 
 - No `AUTOREV`. Git sources use `protocol=https` and a 40-hex `SRCREV`.
+- Git sources set either `branch=NAME` or `nobranch=1`, as BitBake requires.
+  Under `--fetch`, the audit checks that the named branch exists on the remote
+  and that `SRCREV` is reachable from it, as BitBake does. A source with
+  several names or branches is refused.
 - `gitsm://` sources are refused. The audit verifies only a top-level commit,
   not the submodules that `gitsm` also fetches. Use a checksum-pinned archive or
   a separate pinned `git://` source for each repository. Under `--fetch` the
