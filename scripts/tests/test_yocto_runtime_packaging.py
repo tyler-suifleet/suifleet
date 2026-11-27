@@ -5,10 +5,14 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
+import textwrap
+import types
 import unittest
+import urllib.parse
 import sys
 
 ROOT = Path(__file__).parents[2]
@@ -320,7 +324,7 @@ class RecipeTests(unittest.TestCase):
         version = NODE_RECIPES[0].stem.split('_')[1]
         self.assertRegex(text, r'SRC_URI = "https://nodejs\.org/dist/v\$\{PV\}/node-v\$\{PV\}-linux-arm64\.tar\.xz;sha256sum=[0-9a-f]{64}"')
         self.assertEqual(var(CODEC, 'SUIFLEET_CODEC_NODE_VERSION'), version)
-        self.assertIn('COMPATIBLE_HOST = "aarch64.*-linux"', text)
+        self.assertIn('COMPATIBLE_HOST = "aarch64-.*-linux"', text)
         self.assertRegex(text, r'LIC_FILES_CHKSUM = "file://LICENSE;md5=[0-9a-f]{32}"')
         self.assertNotIn('npm', re.findall(r'^FILES:\$\{PN\} = "([^"]*)"', text, re.M)[0])
 
@@ -359,6 +363,209 @@ class RecipeTests(unittest.TestCase):
     # The codec bundle must come from the daemon's exact source revision.
     def test_codec_and_daemon_share_source_revision(self):
         self.assertEqual(var(CODEC, 'SUIFLEET_CODEC_SOURCE_REV'), var(DAEMON, 'SRCREV'))
+
+
+
+def anonymous_python(text):
+    """Body of the recipe's single anonymous python function, as Python source."""
+    bodies = re.findall(r'^python \(\) \{\n(.*?)^\}$', text, re.M | re.S)
+    if len(bodies) != 1:
+        raise AssertionError('expected one anonymous python function, found %d' % len(bodies))
+    return textwrap.dedent(bodies[0])
+
+
+class SkipRecipe(Exception):
+    pass
+
+
+class FakeData:
+    def __init__(self, **values):
+        self.values = values
+
+    def getVar(self, name):
+        return self.values.get(name)
+
+
+def which(path, item, history=False):
+    """bb.utils.which: first existing item under a colon-separated search path,
+    with the searched candidates when history is requested."""
+    searched = []
+    for base in (path or '').split(':'):
+        candidate = os.path.join(base, item)
+        searched.append(candidate)
+        if os.path.exists(candidate):
+            return (candidate, searched) if history else candidate
+    return ('', searched) if history else ''
+
+
+class FakeLocal:
+    """Local fetcher of BitBake 2.8+: decoded URL path, absolute paths taken
+    as is, otherwise the FILESPATH candidates (the last one is localpath)."""
+    def localfile_searchpaths(self, ud, d):
+        if ud.decodedurl.startswith('/'):
+            return [ud.decodedurl]
+        return which(d.getVar('FILESPATH'), ud.decodedurl, history=True)[1]
+
+
+class FakeLocalV20:
+    """Local fetcher of BitBake 2.0: as above, then DL_DIR when FILESPATH lacks it."""
+    def localpaths(self, ud, d):
+        if ud.decodedurl.startswith('/'):
+            return [ud.decodedurl]
+        found, searched = which(d.getVar('FILESPATH'), ud.decodedurl, history=True)
+        if not found:
+            searched.append(os.path.join(d.getVar('DL_DIR'), ud.decodedurl))
+        return searched
+
+
+def fake_fetch(method):
+    class Fetch:
+        def __init__(self, urls, d, cache=True, localonly=False):
+            assert not cache and localonly and all(u.startswith('file://') for u in urls)
+            self.ud = {u: types.SimpleNamespace(url=u, method=method,
+                                                decodedurl=urllib.parse.unquote(u.split('://')[1].split(';')[0]))
+                       for u in urls}
+    return Fetch
+
+
+def run_anonymous(text, depends=None, method=None, **values):
+    """Evaluate a recipe's parse-time guard; returns the skip reason or None.
+    Paths passed to bb.parse.mark_dependency are appended to depends."""
+    data = dict(HOST_ARCH='aarch64', HOST_SYS='aarch64-poky-linux', TCLIBC='glibc', FILESPATH='', SRC_URI='')
+    data.update(values)
+    depends = [] if depends is None else depends
+    fake_bb = types.SimpleNamespace(
+        parse=types.SimpleNamespace(SkipRecipe=SkipRecipe,
+                                    mark_dependency=lambda d, path: depends.append(path)),
+        utils=types.SimpleNamespace(which=which),
+        fetch2=types.SimpleNamespace(Fetch=fake_fetch(method or FakeLocal())))
+    try:
+        exec(anonymous_python(text), {'d': FakeData(**data), 'bb': fake_bb})
+    except SkipRecipe as skipped:
+        return str(skipped)
+    return None
+
+
+# SF-307: the optional archive runtime never breaks parsing of the core client.
+class OptionalRuntimeParseTests(unittest.TestCase):
+    LOCAL = ' '.join('file://%s;subdir=codec' % name for name in codec.ARTIFACTS)
+
+    def test_codec_with_all_local_inputs_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in codec.ARTIFACTS:
+                Path(tmp, name).write_text('x')
+            self.assertIsNone(run_anonymous(CODEC, SRC_URI=self.LOCAL, FILESPATH='/nonexistent:' + tmp))
+
+    def test_missing_local_codec_inputs_skip_with_their_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, codec.ARTIFACTS[0]).write_text('x')
+            reason = run_anonymous(CODEC, SRC_URI=self.LOCAL, FILESPATH=tmp)
+        self.assertIsNotNone(reason)
+        self.assertIn('optional Walrus codec inputs not found', reason)
+        self.assertNotIn(codec.ARTIFACTS[0] + ',', reason)
+        for name in codec.ARTIFACTS[1:]:
+            self.assertIn(name, reason)
+        self.assertIn('scripts/package_walrus_codec.py', reason)
+
+    # A cached skip must be invalidated when a missing input appears: BitBake
+    # keeps only __depends for a skipped recipe, so every searched candidate,
+    # absent ones included, must be a parse dependency.
+    def test_missing_local_codec_inputs_are_parse_dependencies(self):
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
+            Path(second, codec.ARTIFACTS[0]).write_text('x')
+            depends = []
+            reason = run_anonymous(CODEC, depends=depends, SRC_URI=self.LOCAL,
+                                   FILESPATH=first + ':' + second)
+            self.assertIn('optional Walrus codec inputs not found', reason)
+            expected = [os.path.join(first, codec.ARTIFACTS[0]), os.path.join(second, codec.ARTIFACTS[0])]
+            for name in codec.ARTIFACTS[1:]:
+                expected += [os.path.join(first, name), os.path.join(second, name)]
+            self.assertEqual(depends, expected)
+
+    # The fetcher decodes URI escapes and takes absolute paths as is.
+    def test_percent_encoded_absolute_inputs_are_resolved_decoded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, 'a dir').mkdir()
+            uri = ' '.join('file://%s/a%%20dir/%s;subdir=codec' % (tmp, n) for n in codec.ARTIFACTS)
+            for name in codec.ARTIFACTS:
+                Path(tmp, 'a dir', name).write_text('x')
+            depends = []
+            self.assertIsNone(run_anonymous(CODEC, depends=depends, SRC_URI=uri, FILESPATH='/nonexistent'))
+            self.assertEqual(depends, [os.path.join(tmp, 'a dir', n) for n in codec.ARTIFACTS])
+            os.unlink(Path(tmp, 'a dir', codec.ARTIFACTS[0]))
+            reason = run_anonymous(CODEC, SRC_URI=uri, FILESPATH='/nonexistent')
+        self.assertIn('a%%20dir/%s' % codec.ARTIFACTS[0], reason)
+        self.assertNotIn(codec.ARTIFACTS[1], reason)
+
+    def test_bitbake_2_0_dl_dir_fallback_is_followed(self):
+        with tempfile.TemporaryDirectory() as files, tempfile.TemporaryDirectory() as dl:
+            for name in codec.ARTIFACTS:
+                Path(dl, name).write_text('x')
+            depends = []
+            self.assertIsNone(run_anonymous(CODEC, depends=depends, method=FakeLocalV20(),
+                                            SRC_URI=self.LOCAL, FILESPATH=files, DL_DIR=dl))
+            self.assertEqual(depends, [p for n in codec.ARTIFACTS
+                                       for p in (os.path.join(files, n), os.path.join(dl, n))])
+            # The same files are not inputs to a fetcher without that fallback.
+            self.assertIn('optional Walrus codec inputs not found',
+                          run_anonymous(CODEC, SRC_URI=self.LOCAL, FILESPATH=files, DL_DIR=dl))
+
+    def test_remote_codec_inputs_are_left_to_the_fetcher(self):
+        remote = 'https://example.invalid/codec.tar.gz;subdir=codec'
+        self.assertIsNone(run_anonymous(CODEC, SRC_URI=remote, FILESPATH='/nonexistent'))
+
+    def test_current_codec_source_parses_without_a_codec_directory(self):
+        # Every local input of the committed recipe is outside the layer, so a
+        # clean checkout must skip rather than fail parsing.
+        source = re.search(r'^SRC_URI = "([^"]*)"', CODEC, re.M | re.S).group(1)
+        files = str(LAYER/'recipes-edge/suifleet-walrus-codec')
+        reason = run_anonymous(CODEC, SRC_URI=' '.join(source.split()), FILESPATH=files)
+        if 'file://' in source:
+            self.assertIn('optional Walrus codec inputs not found', reason)
+        else:
+            self.assertIsNone(reason)
+
+    def test_codec_refuses_other_architectures_and_libcs(self):
+        for arch, host, libc in [('x86_64', 'x86_64-poky-linux', 'glibc'),
+                                 ('arm', 'arm-poky-linux-gnueabi', 'glibc'),
+                                 ('riscv64', 'riscv64-poky-linux', 'glibc')]:
+            reason = run_anonymous(CODEC, HOST_ARCH=arch, HOST_SYS=host, TCLIBC=libc)
+            self.assertIn('only on the Linux AArch64 glibc', reason)
+            self.assertIn(host, reason)
+        reason = run_anonymous(CODEC, HOST_SYS='aarch64-poky-linux-musl', TCLIBC='musl')
+        self.assertIn('TCLIBC=musl is unsupported', reason)
+
+    def test_node_refuses_musl_without_fallback(self):
+        text = NODE_RECIPES[0].read_text()
+        self.assertIsNone(run_anonymous(text))
+        for libc in ['musl', 'newlib', 'baremetal']:
+            self.assertIn('TCLIBC=%s is unsupported' % libc, run_anonymous(text, TCLIBC=libc))
+
+    # The official binary is ELF64 little-endian AArch64. Scarthgap's
+    # aarch64_be tune yields HOST_ARCH aarch64_be and HOST_SYS
+    # aarch64_be-poky-linux; base.bbclass applies re.match(COMPATIBLE_HOST,
+    # HOST_SYS), so both that check and the guard must reject it.
+    def test_node_is_little_endian_aarch64_only(self):
+        text = NODE_RECIPES[0].read_text()
+        pattern = re.search(r'^COMPATIBLE_HOST = "([^"]*)"', text, re.M).group(1)
+        for host in ['aarch64-poky-linux', 'aarch64-poky-linux-musl', 'aarch64-oe-linux']:
+            self.assertTrue(re.match(pattern, host), host)
+        for host in ['aarch64_be-poky-linux', 'aarch64_be-poky-linux-musl', 'x86_64-poky-linux',
+                     'arm-poky-linux-gnueabi', 'riscv64-poky-linux']:
+            self.assertFalse(re.match(pattern, host), host)
+        self.assertIsNone(run_anonymous(text, HOST_ARCH='aarch64', HOST_SYS='aarch64-poky-linux'))
+        reason = run_anonymous(text, HOST_ARCH='aarch64_be', HOST_SYS='aarch64_be-poky-linux')
+        self.assertIn('little-endian AArch64', reason)
+        self.assertIn('aarch64_be-poky-linux is unsupported', reason)
+        # The codec's exact HOST_ARCH check refuses the same target.
+        self.assertIn('aarch64_be-poky-linux is unsupported',
+                      run_anonymous(CODEC, HOST_ARCH='aarch64_be', HOST_SYS='aarch64_be-poky-linux'))
+
+    def test_core_client_does_not_need_the_archive_runtime(self):
+        for name in ['DEPENDS', 'RDEPENDS:${PN}']:
+            for value in re.findall(r'^' + re.escape(name) + r' \+?= "([^"]*)"', DAEMON, re.M):
+                self.assertNotIn('suifleet-node', value)
+                self.assertNotIn('walrus', value)
 
 
 if __name__ == '__main__':
