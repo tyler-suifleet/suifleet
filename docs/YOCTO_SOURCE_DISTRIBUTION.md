@@ -178,7 +178,9 @@ These static checks always run, on every recipe in the layer:
   download under `downloadfilename` when that is set and chooses how to unpack
   it from that name's suffix. A `.bin` local name is copied as a loose file, not
   extracted. The local name must be a plain file name and, like the URL, must not
-  name a commit other than `SRCREV`. Other parameters, such as `striplevel`,
+  name a commit other than `SRCREV`. BitBake uses `downloadfilename` literally
+  (only the URL path is percent-decoded), so a `downloadfilename` containing a
+  percent escape is refused rather than decoded. Other parameters, such as `striplevel`,
   `md5sum` or `localpath`, are refused statically and by the fetcher before
   anything is downloaded.
 - Every `crate://` entry has a SHA-256.
