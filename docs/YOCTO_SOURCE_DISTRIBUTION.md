@@ -249,8 +249,8 @@ These static checks always run, on every recipe in the layer:
   per-configuration overrides, so any such candidate is rejected.
 - Source-affecting variables take no conditional overrides. These are
   `SRC_URI` (and its flags), `SRCREV*`, `PV`, `PE`, `S`, `LICENSE`,
-  `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, every `SUIFLEET_*`
-  variable, and any variable they reference. Only a plain `:append` or
+  `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, `CARGO_MANIFEST_PATH`,
+  `CARGO_LOCK_PATH`, `CARGO_LOCK_SRC_DIR`, every `SUIFLEET_*` variable, and any variable they reference. Only a plain `:append` or
   `:prepend` is accepted. Machine, distro, class, `pn-` and `:remove`
   overrides are rejected, because the reader doesn't evaluate them. So are
   flagged appends and `?=`/`??=` appends. That way the audited assignment is
@@ -398,6 +398,16 @@ These static checks always run, on every recipe in the layer:
   loop must be one literal `for f in ...; do` list. A missing or empty pin
   fails the audit instead of skipping the checks it would select. These pins on
   any other recipe are refused, because nothing would verify them.
+
+The daemon recipe's `do_verify_lock` opens the effective `CARGO_LOCK_PATH`,
+and Cargo builds from `CARGO_MANIFEST_PATH`. The core class defaults derive
+both from `${S}/${CARGO_SRC_DIR}`, which is the directory the audit reads. If
+the layer assigns `CARGO_LOCK_PATH`, `CARGO_MANIFEST_PATH` or
+`CARGO_LOCK_SRC_DIR` (including through `??=`, `:append` or a referenced
+variable), the expanded value must name `${S}/${CARGO_SRC_DIR}/Cargo.lock`,
+`.../Cargo.toml` or that directory exactly. Any other value is refused, even a
+missing file inside `S`, so the audit never certifies a lockfile other than the
+one BitBake verifies.
 
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
