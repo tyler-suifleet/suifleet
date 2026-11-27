@@ -835,6 +835,50 @@ class LayerAuditTests(unittest.TestCase):
                 self.assertEqual(fetched, [])
                 self.assertTrue(errors)
                 self.assertFalse(any(secret in json.dumps(errors) for secret in secrets), errors)
+        # A refused expanded-name assignment reports its file and variable name
+        # but never its value, through both direct helpers and the report.
+        signed = f'https://USERMARK:PASSMARK@example.com/{name}?sig=SIGMARK#FRAGMARK'
+        include = self.recipe_dir / 'extra.inc'
+        append = self.recipe_dir / 'suifleet_1.0.bbappend'
+        self.addCleanup(include.unlink, missing_ok=True)
+        self.addCleanup(append.unlink, missing_ok=True)
+        expanded = {
+            'plain': f'SUFFIX = "URI"\nSRC_${{SUFFIX}} = "{signed}"',
+            'flag': f'SUFFIX = "URI"\nSRC_${{SUFFIX}}[USERMARK] = "{signed}"',
+            'unquoted': f'SUFFIX = "URI"\nSRC_${{SUFFIX}} += {signed}',
+        }
+        for label, text in expanded.items():
+            for where in ('bb', 'inc', 'bbappend'):
+                with self.subTest('expanded name', case=label, where=where):
+                    include.unlink(missing_ok=True)
+                    append.unlink(missing_ok=True)
+                    if where == 'bb':
+                        self.write_recipe(extra=text)
+                    elif where == 'inc':
+                        include.write_text(text + '\n')
+                        self.write_recipe(extra='require extra.inc')
+                    else:
+                        append.write_text(text + '\n')
+                        self.write_recipe()
+                    recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer,
+                                          [append] if append.exists() else ())
+                    audited, _ = audit.audit_recipe(recipe)
+                    self.assertTrue(any('key expansion' in e and 'SRC_${SUFFIX}' in e for e in audited), audited)
+                    workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                    with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                        errors, fetched = audit.fetch_recipe(recipe, workdir)
+                    self.assertEqual(fetched, [])
+                    self.assertTrue(errors)
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, fetch=True)
+                    self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                    self.assertFalse(report['ok'])
+                    for diagnostics in (audited, errors, report):
+                        serialized = json.dumps(diagnostics)
+                        for secret in secrets:
+                            self.assertNotIn(secret, serialized)
+        include.unlink(missing_ok=True)
+        append.unlink(missing_ok=True)
         # A failing git command line carries the remote; the report still
         # redacts it (defence in depth for subprocess diagnostics).
         url = 'git://github.com/example/suifleet.git;protocol=https;nobranch=1;name=edge;destsuffix=source'

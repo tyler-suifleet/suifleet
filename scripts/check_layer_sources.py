@@ -79,7 +79,7 @@ HEX64 = re.compile(r'^[0-9a-f]{64}$')
 ASSIGN = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(?:\[([^\]]+)\])?\s*(\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)\s*(["\'])(.*)\4\s*$', re.S)
 # Anything shaped like an assignment; lines it matches but ASSIGN cannot read are
 # recorded as unparsed so that source-affecting ones are reported, not dropped.
-ASSIGN_LIKE = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(?:\[[^\]]*\])?\s*(\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)')
+ASSIGN_LIKE = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(\[[^\]]*\])?\s*(\?\?=|\?=|:=|\+=|=\+|\.=|=\.|=)')
 REF = re.compile(r'\$\{([A-Za-z0-9_\-]+)\}')
 # The layer's Scarthgap/Wrynose unpack-root idiom; no other inline Python is evaluated.
 UNPACKDIR_EXPR = re.compile(r"""\$\{@d\.getVar\(['"]UNPACKDIR['"]\)\s+or\s+d\.getVar\(['"]WORKDIR['"]\)\}""")
@@ -262,7 +262,12 @@ class Recipe:
             match = ASSIGN.match(line)
             loose = match or ASSIGN_LIKE.match(line)
             if loose and '${' in loose.group(1).partition(':')[0]:
-                self.expanded_keys.append(f'{self.rel(path)}: {line}')
+                # Record only the variable name: the assigned value (and a
+                # flag name) may carry credentials or signed URLs that the
+                # report must never copy.
+                shape = ASSIGN_LIKE.match(line)
+                flag = '[flag]' if shape.group(2) is not None else ''
+                self.expanded_keys.append(f'{self.rel(path)}: {shape.group(1)}{flag} {shape.group(3)} <value omitted>')
                 continue
             if not match:
                 if loose:
