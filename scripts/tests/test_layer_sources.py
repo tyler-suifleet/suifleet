@@ -1989,6 +1989,119 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
                                         for e in report['errors']), report['errors'])
                     self.assertFalse(report['ok'])
 
+    def test_license_and_cargo_paths_are_confined_to_the_unpack_root(self):
+        # LIC_FILES_CHKSUM and CARGO_SRC_DIR are joined to the unpacked S; an
+        # absolute or parent-relative operand (or another URL scheme) would make
+        # the audit verify host files instead of the pinned source layout.
+        # Disposable host-side decoys match what the audit would accept.
+        outside = Path(tempfile.mkdtemp(dir=self.tmp.name, prefix='host-'))
+        (outside / 'LICENSE').write_text(LICENSE)
+        (outside / 'crate').mkdir()
+        (outside / 'crate/Cargo.toml').write_text(CARGO_TOML)
+        (outside / 'crate/Cargo.lock').write_text(CARGO_LOCK)
+        license_cases = {
+            'absolute': f'file://{outside}/LICENSE',
+            'parent traversal': 'file://../../../' + os.path.relpath(outside / 'LICENSE', '/'),
+            'single parent': 'file://../LICENSE',
+            'interior parent': 'file://suifleet-edge/../../LICENSE',
+            'other scheme': f'https://example.com/{outside.name}/LICENSE',
+            'no scheme': 'LICENSE',
+            'empty path': 'file://',
+            'unexpanded': 'file://${TOPDIR}/LICENSE',
+        }
+        cargo_cases = {
+            'absolute': str(outside / 'crate'),
+            'parent traversal': '../../../' + os.path.relpath(outside / 'crate', '/'),
+            'interior parent': 'suifleet-edge/../..',
+            'empty': '',
+        }
+        cases = [('LIC_FILES_CHKSUM', label, f'LIC_FILES_CHKSUM = "{value};md5={md5(LICENSE)}"')
+                 for label, value in license_cases.items()]
+        cases += [('CARGO_SRC_DIR', label, f'CARGO_SRC_DIR = "{value}"') for label, value in cargo_cases.items()]
+        never = AssertionError('ran a subprocess with an unconfined path')
+        for variable, label, extra in cases:
+            with self.subTest(variable=variable, case=label):
+                self.write_recipe(extra=extra)
+                # Statically refused, so --fetch skips the recipe; the report
+                # does not crash on the refused license entry.
+                report = audit.check(self.layer)
+                self.assertTrue(any(variable in e for e in report['errors']), report['errors'])
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+                # Repository mode refuses before reading anything.
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                read = mock.Mock(side_effect=AssertionError('read an unconfined path'))
+                errors = audit.daemon_errors(recipe, read)
+                self.assertTrue(any(variable in e and 'source checks not run' in e for e in errors), errors)
+                read.assert_not_called()
+                # The fetcher itself refuses after unpacking, before any read,
+                # listing or Cargo run, even when called without the static audit.
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', self.fake_download), \
+                        mock.patch.object(audit, 'load_packager', side_effect=never):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir, cargo='cargo-must-not-run')
+                self.assertTrue(fetched and fetched[0]['verified'], fetched)
+                self.assertTrue(any(variable in e and 'source checks not run' in e for e in errors), errors)
+        # A non-daemon recipe's license check is confined as well.
+        sibling = self.recipe_dir / 'suifleet-mirror_1.0.bb'
+        self.addCleanup(sibling.unlink, missing_ok=True)
+        self.write_recipe()
+        for label, value in license_cases.items():
+            with self.subTest('generic recipe', case=label):
+                sibling.write_text(f'''SUMMARY = "fixture sharing the daemon archive"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "{value};md5={md5(LICENSE)}"
+SRC_URI = "{self.url};subdir=source;name=edge"
+SRC_URI[edge.sha256sum] = "{self.info['sha256']}"
+SUIFLEET_UNPACKDIR = "${{@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}}"
+S = "${{SUIFLEET_UNPACKDIR}}/source"
+''')
+                report = audit.check(self.layer)
+                self.assertTrue(any(e.startswith('suifleet-mirror_1.0.bb:') and 'LIC_FILES_CHKSUM' in e
+                                    for e in report['errors']), report['errors'])
+                self.assertIsNone(report['recipes']['suifleet-mirror']['license_files'])
+                recipe = audit.Recipe(sibling, self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertTrue(fetched and fetched[0]['verified'], fetched)
+                self.assertTrue(any('LIC_FILES_CHKSUM' in e for e in errors), errors)
+        # The shipped form still passes the static and fetched checks.
+        sibling.unlink()
+        self.write_recipe()
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertEqual(report['errors'], [])
+
+    def test_source_path_rejects_resolution_outside_the_unpack_root(self):
+        # Lexically plain paths can still resolve elsewhere through a link in
+        # the unpacked tree; confinement is checked on the resolved path.
+        base = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        unpack, outside = base / 'unpack', base / 'outside'
+        (unpack / 'source').mkdir(parents=True)
+        outside.mkdir()
+        (outside / 'LICENSE').write_text(LICENSE)
+        (unpack / 'source/escape').symlink_to(outside, target_is_directory=True)
+        (unpack / 'source/sibling').symlink_to(unpack, target_is_directory=True)
+        s_dir = (unpack / 'source').resolve()
+        with self.assertRaisesRegex(ValueError, 'resolves outside the unpack directory'):
+            audit.source_path(unpack, s_dir, 'escape/LICENSE', 'LIC_FILES_CHKSUM file')
+        for bad in ('/etc/passwd', '../outside/LICENSE', '', 'a/../../b', '${S}/x', 'a\\..\\b'):
+            with self.subTest(bad), self.assertRaisesRegex(ValueError, 'not a plain relative path'):
+                audit.source_path(unpack, s_dir, bad, 'LIC_FILES_CHKSUM file')
+        # A link that stays inside the unpack root is accepted.
+        self.assertEqual(audit.source_path(unpack, s_dir, 'sibling/source', 'path'), s_dir)
+        # The md5 check reports an escaping license path instead of reading it.
+        (self.recipe_dir / 'suifleet_1.0.bb').write_text(
+            recipe_text(self.url, self.info['sha256'], self.rev,
+                        f'LIC_FILES_CHKSUM = "file://escape/LICENSE;md5={md5(LICENSE)}"'))
+        recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        errors = audit.license_file_errors(recipe, s_dir, unpack)
+        self.assertTrue(any('resolves outside the unpack directory' in e and 'not read' in e for e in errors), errors)
+
     def test_fetch_unpacks_by_the_downloadfilename_like_bitbake(self):
         # BitBake stores an https source under downloadfilename and picks the
         # unpack method from that name's suffix, not from the URL path.

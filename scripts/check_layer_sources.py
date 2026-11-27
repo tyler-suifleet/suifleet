@@ -1075,13 +1075,67 @@ def crate_include(recipe):
     return entries
 
 
+def plain_relative(rel, what):
+    """ValueError unless rel is a non-empty relative path with no parent, absolute
+    or unexpanded component, so joining it to a directory cannot leave it."""
+    if (not rel or rel.startswith('/') or '${' in rel or '\0' in rel or '\\' in rel
+            or '..' in PurePosixPath(rel).parts):
+        raise ValueError(f'{what} {rel!r} is not a plain relative path')
+    return rel
+
+
 def license_md5s(recipe):
+    """(path relative to S, md5) for each LIC_FILES_CHKSUM entry.
+
+    Only file:// entries naming a plain relative path are supported; anything
+    else raises ValueError, because the path is later joined to the unpacked
+    S and must not name a host file outside it."""
     for entry in recipe.get('LIC_FILES_CHKSUM').split():
         url, *params = entry.split(';')
         options = dict(p.split('=', 1) for p in params if '=' in p)
         if set(options) - {'md5'}:
             raise ValueError(f'{recipe.path.name}: unsupported LIC_FILES_CHKSUM options {sorted(options)}')
-        yield url[len('file://'):], options.get('md5', '')
+        if not url.startswith('file://'):
+            raise ValueError(f'{recipe.path.name}: LIC_FILES_CHKSUM entry {url!r} is not a file:// path relative to S')
+        yield plain_relative(url[len('file://'):], f'{recipe.path.name}: LIC_FILES_CHKSUM file'), options.get('md5', '')
+
+
+def license_errors(recipe):
+    try:
+        list(license_md5s(recipe))
+    except ValueError as error:
+        return [str(error)]
+    return []
+
+
+def cargo_src_dir(recipe):
+    """The effective CARGO_SRC_DIR; ValueError unless it is a plain relative path."""
+    return plain_relative(recipe.get('CARGO_SRC_DIR', 'suifleet-edge'), f'{recipe.path.name}: CARGO_SRC_DIR')
+
+
+def source_path(unpack, s_dir, rel, what):
+    """s_dir/rel for a metadata-derived rel: lexically plain and, after resolving
+    any symlinks, still inside the unpack root. Raises ValueError otherwise."""
+    plain_relative(rel, what)
+    return confined(unpack, os.path.relpath(Path(s_dir) / rel, Path(unpack).resolve()), what)
+
+
+def license_file_errors(recipe, s_dir, unpack=None):
+    """Compare each LIC_FILES_CHKSUM file under the unpacked S with its md5."""
+    where, errors = recipe.path.name, []
+    try:
+        entries = list(license_md5s(recipe))
+    except ValueError as error:
+        return [str(error)]
+    for rel, md5 in entries:
+        try:
+            path = source_path(unpack or s_dir, s_dir, rel, 'LIC_FILES_CHKSUM file')
+        except ValueError as error:
+            errors.append(f'{where}: {error}; not read')
+            continue
+        if not path.is_file() or hashlib.md5(path.read_bytes()).hexdigest() != md5:
+            errors.append(f'{where}: license file {rel} does not match md5 {md5}')
+    return errors
 
 
 # The daemon and codec recipes are identified by PN, never by the pins this
@@ -1215,13 +1269,10 @@ def node_install_errors(recipe):
     return []
 
 
-def node_errors(recipe, s_dir):
+def node_errors(recipe, s_dir, unpack=None):
     """Check the unpacked Node release for the files suifleet-node installs."""
-    where, errors = recipe.path.name, []
-    for rel, md5 in license_md5s(recipe):
-        path = s_dir / rel
-        if not path.is_file() or hashlib.md5(path.read_bytes()).hexdigest() != md5:
-            errors.append(f'{where}: license file {rel} does not match md5 {md5}')
+    where = recipe.path.name
+    errors = license_file_errors(recipe, s_dir, unpack)
     for rel in NODE_INSTALL_INPUTS:
         if not (s_dir / rel).is_file():
             errors.append(f'{where}: do_install input {rel} is absent from the Node archive')
@@ -1244,7 +1295,10 @@ CARGO_PATHS = {'CARGO_MANIFEST_PATH': 'Cargo.toml', 'CARGO_LOCK_PATH': 'Cargo.lo
 
 def cargo_path_errors(recipe, where):
     errors = []
-    src = recipe.get('CARGO_SRC_DIR', 'suifleet-edge')
+    try:
+        src = cargo_src_dir(recipe)
+    except ValueError as error:
+        return [f'{error}; the audit reads the Cargo manifest and lock only inside S']
     for name, leaf in CARGO_PATHS.items():
         if recipe.raw(name) is None:
             continue
@@ -1266,6 +1320,7 @@ def pin_errors(recipe):
 
     Pins set on any other recipe are refused because nothing would verify them."""
     pn, where, errors = recipe.get('PN'), recipe.path.name, []
+    errors += license_errors(recipe)
     if pn == DAEMON_PN:
         errors += cargo_path_errors(recipe, where)
         for name, pattern in DAEMON_PINS.items():
@@ -1297,7 +1352,13 @@ def daemon_errors(recipe, read, exists=None, listing=None):
     With `exists`, the layout is also audited; `listing(directory)` must then
     return every file path under that directory of the source layout."""
     errors = []
-    src = recipe.get('CARGO_SRC_DIR', 'suifleet-edge')
+    # Every read below joins these metadata operands to the source root; refuse
+    # an absolute or parent-relative operand before reading anything.
+    try:
+        src = cargo_src_dir(recipe)
+        licenses = list(license_md5s(recipe))
+    except ValueError as error:
+        return [f'{error}; source checks not run']
     lock = read(f'{src}/Cargo.lock')
     manifest = read(f'{src}/Cargo.toml')
     if lock is None or manifest is None:
@@ -1337,7 +1398,7 @@ def daemon_errors(recipe, read, exists=None, listing=None):
                          ('registry differs in', registry_wrong), ('checksum differs in', wrong)):
         if items:
             errors.append(f'{recipe.path.name}: {len(items)} crates {label} suifleet-crates.inc, e.g. {items[:3]}; regenerate with bitbake -c update_crates')
-    for rel, md5 in license_md5s(recipe):
+    for rel, md5 in licenses:
         data = read(rel)
         if data is None or hashlib.md5(data).hexdigest() != md5:
             errors.append(f'{recipe.path.name}: license file {rel} does not match md5 {md5}')
@@ -1361,7 +1422,7 @@ def daemon_errors(recipe, read, exists=None, listing=None):
     return errors
 
 
-def codec_errors(recipe, s_dir):
+def codec_errors(recipe, s_dir, unpack=None):
     errors, pins = [], {k: recipe.expand(v) for k, v in recipe.flags.get('SUIFLEET_CODEC_SHA256', {}).items()}
     names = sorted(p.name for p in Path(s_dir).iterdir()) if Path(s_dir).is_dir() else []
     # do_install copies a fixed file list; each needs a pin and so a fetched file.
@@ -1408,10 +1469,7 @@ def codec_errors(recipe, s_dir):
         errors.append(f'{recipe.path.name}: codec provenance licenses differ from LICENSE')
     if manifest.get('node') != recipe.get('SUIFLEET_CODEC_NODE_VERSION'):
         errors.append(f'{recipe.path.name}: codec manifest Node version differs from SUIFLEET_CODEC_NODE_VERSION')
-    for rel, md5 in license_md5s(recipe):
-        path = Path(s_dir) / rel
-        if not path.is_file() or hashlib.md5(path.read_bytes()).hexdigest() != md5:
-            errors.append(f'{recipe.path.name}: license file {rel} does not match md5 {md5}')
+    errors += license_file_errors(recipe, Path(s_dir), unpack)
     return errors
 
 
@@ -1988,29 +2046,53 @@ def fetch_recipe(recipe, workdir, cargo=None):
     if not s_dir.is_dir():
         return errors + [f'{recipe.path.name}: S does not exist after unpack: {s_dir.relative_to(unpack)}'], fetched
     if recipe.get('PN') == DAEMON_PN:
+        # Metadata-derived paths (CARGO_SRC_DIR, license files) are confined
+        # to the unpack root after resolution before anything is read, listed
+        # or handed to Cargo, so the audit never verifies a host-side file.
+        try:
+            src = cargo_src_dir(recipe)
+            crate_dir = source_path(unpack, s_dir, src, 'CARGO_SRC_DIR')
+            for rel in (f'{src}/Cargo.toml', f'{src}/Cargo.lock', *(rel for rel, _ in license_md5s(recipe))):
+                source_path(unpack, s_dir, rel, 'source path')
+        except ValueError as error:
+            return errors + [f'{recipe.path.name}: {error}; source checks not run'], fetched
+        refused = []
+
+        def located(rel):
+            try:
+                return source_path(unpack, s_dir, rel, 'source path')
+            except ValueError as error:
+                refused.append(f'{recipe.path.name}: {error}; not read')
+                return None
+
         def read(rel):
-            path = s_dir / rel
-            return path.read_bytes() if path.is_file() else None
-        errors += daemon_errors(recipe, read, lambda rel: (s_dir / rel).is_file(),
+            path = located(rel)
+            return path.read_bytes() if path is not None and path.is_file() else None
+
+        def exists(rel):
+            path = located(rel)
+            return path is not None and path.is_file()
+        errors += daemon_errors(recipe, read, exists,
                                 lambda directory: [p.relative_to(s_dir).as_posix()
-                                                   for p in (s_dir / directory).rglob('*') if p.is_file()])
+                                                   for p in source_path(unpack, s_dir, directory, 'source path').rglob('*')
+                                                   if p.is_file()])
+        errors += sorted(set(refused))
         packager = load_packager()
         files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if p.is_file()}
         # Every .rs file is scanned, and so is every manifest-declared target
         # or build script and every include!/#[path] target whatever its
         # suffix, because Rust compiles each of them as code.
         roots = {p for p in files if p.endswith('.rs')}
-        src = recipe.get('CARGO_SRC_DIR', 'suifleet-edge')
         try:
-            manifest = (s_dir / src / 'Cargo.toml').read_bytes().decode()
+            manifest = read(f'{src}/Cargo.toml').decode()
 
             def read_manifest(directory):
-                path = s_dir / src / directory / 'Cargo.toml'
-                return path.read_bytes().decode() if path.is_file() else None
+                data = read(f'{src}/{directory}/Cargo.toml')
+                return data.decode() if data is not None else None
             roots |= {f'{src}/{rel}' for rel in packager.declared_files(manifest, read_manifest,
                                                                           lambda rel: f'{src}/{rel}' in files)
                       if f'{src}/{rel}' in files}
-        except (OSError, ValueError, packager.MissingCrate):
+        except (OSError, ValueError, AttributeError, packager.MissingCrate):
             pass  # daemon_errors above already reports an unreadable manifest or layout
         pending, scanned = sorted(roots), set()
         while pending:
@@ -2028,20 +2110,17 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 errors.append(f'{recipe.path.name}: {error}')
         if cargo:
             result = subprocess.run([*cargo.split(), 'metadata', '--offline', '--locked', '--no-deps', '--format-version', '1'],
-                                    cwd=s_dir / recipe.get('CARGO_SRC_DIR', 'suifleet-edge'), capture_output=True, text=True,
+                                    cwd=crate_dir, capture_output=True, text=True,
                                     env={**anonymous_env(Path(workdir)), 'CARGO_HOME': str(Path(workdir) / 'cargo-home'),
                                          'RUSTUP_HOME': os.environ.get('RUSTUP_HOME', str(Path.home() / '.rustup'))})
             if result.returncode:
                 errors.append(f'{recipe.path.name}: cargo metadata failed: {result.stderr.strip().splitlines()[:3]}')
     elif recipe.get('PN') == CODEC_PN:
-        errors += codec_errors(recipe, s_dir)
+        errors += codec_errors(recipe, s_dir, unpack)
     elif recipe.get('PN') == NODE_PN:
-        errors += node_errors(recipe, s_dir)
+        errors += node_errors(recipe, s_dir, unpack)
     else:
-        for rel, md5 in license_md5s(recipe):
-            path = s_dir / rel
-            if not path.is_file() or hashlib.md5(path.read_bytes()).hexdigest() != md5:
-                errors.append(f'{recipe.path.name}: license file {rel} does not match md5 {md5}')
+        errors += license_file_errors(recipe, s_dir, unpack)
     return errors, fetched
 
 
@@ -2211,7 +2290,7 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         report['recipes'][pn] = {
             'file': path.relative_to(layer).as_posix(),
             'appends': [a.relative_to(layer).as_posix() for a in appends], 'pv': recipe.get('PV'), 'license': recipe.get('LICENSE'),
-            'license_files': dict(license_md5s(recipe)), 'skip_guards': recipe.guards, 'sources': sources,
+            'license_files': None if license_errors(recipe) else dict(license_md5s(recipe)), 'skip_guards': recipe.guards, 'sources': sources,
             'source_revision': recipe.get('SRCREV') or recipe.get('SUIFLEET_CODEC_SOURCE_REV') or None,
             'crate_version': recipe.get('SUIFLEET_CRATE_VERSION') or None,
             'lock_sha256': recipe.get('SUIFLEET_LOCK_SHA256') or None,
