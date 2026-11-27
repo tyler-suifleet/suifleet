@@ -1050,9 +1050,10 @@ PACKAGE_VERSION_VARS = ('PKGV', 'PKGE')
 def elf_aarch64_problem(data):
     """Why data is not a minimal loadable ELF64 LE AArch64 executable, or None.
 
-    Checks the whole 64-byte ELF header and that the program header table and
-    at least one non-empty PT_LOAD segment lie inside the file, so a truncated
-    or header-only file is not reported as the verified executable."""
+    Checks the whole 64-byte ELF header, that the program header table and
+    at least one non-empty PT_LOAD segment lie inside the file, and that every
+    PT_LOAD has p_filesz <= p_memsz and a consistent alignment, so a truncated,
+    header-only or unloadable file is not reported as the verified executable."""
     if len(data) < ELF64_EHDR:
         return f'{len(data)} bytes, shorter than the 64-byte ELF64 header'
     # e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT.
@@ -1074,11 +1075,19 @@ def elf_aarch64_problem(data):
     loads = 0
     for index in range(phnum):
         entry = phoff + index * ELF64_PHDR
-        p_type, p_offset, p_filesz = u(entry, 4), u(entry + 8, 8), u(entry + 32, 8)
+        p_type, p_offset, p_vaddr = u(entry, 4), u(entry + 8, 8), u(entry + 16, 8)
+        p_filesz, p_memsz, p_align = u(entry + 32, 8), u(entry + 40, 8), u(entry + 48, 8)
         if p_type != PT_LOAD:
             continue
         if p_offset + p_filesz > len(data):
             return f'PT_LOAD segment {index} extends past the end of the file'
+        # The ELF specification requires a loadable segment's file image to fit
+        # in its memory image, and its file offset and address to agree modulo a
+        # power-of-two alignment; loaders refuse segments that do not.
+        if p_filesz > p_memsz:
+            return f'PT_LOAD segment {index} has p_filesz {p_filesz} larger than p_memsz {p_memsz}'
+        if p_align > 1 and (p_align & (p_align - 1) or (p_vaddr - p_offset) % p_align):
+            return f'PT_LOAD segment {index} alignment {p_align} is not a power of two congruent with its offset and address'
         loads += bool(p_filesz)
     return None if loads else 'no non-empty PT_LOAD segment'
 
