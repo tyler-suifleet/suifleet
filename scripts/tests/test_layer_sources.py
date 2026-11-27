@@ -557,6 +557,41 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'includes missing file suifleet-edge/tools/absent.rs'):
             packager.plan(self.repo.root, 'HEAD')
 
+    def test_raw_identifier_attribute_names_are_packaged(self):
+        # Review 5202: rustc accepts built-in attribute names as raw
+        # identifiers (`#[r#path = ..]`, `#[r#cfg_attr(.., r#path = ..)]`), so a
+        # module outside src/ named that way must reach the archive.
+        self.repo.write('suifleet-edge/extra/helper.inc', 'pub fn f() {}\n')
+        self.repo.write('suifleet-edge/extra/unix.rs', 'pub fn u() {}\n')
+        self.repo.write('suifleet-edge/extra/data.txt', 'x\n')
+        forms = (('#[r#path = "../extra/helper.inc"]\nmod helper;\nfn main() { helper::f() }\n', 'helper.inc'),
+                 ('# [ r#path = "../extra/helper.inc" ]\nmod helper;\nfn main() {}\n', 'helper.inc'),
+                 ('#[r#cfg_attr(unix, r#path = "../extra/unix.rs")]\nmod u;\nfn main() {}\n', 'unix.rs'),
+                 ('#[cfg_attr(unix, r#path = "../extra/unix.rs")]\nmod u;\nfn main() {}\n', 'unix.rs'),
+                 ('const D: &str = r#include_str!("../extra/data.txt");\nfn main() {}\n', 'data.txt'))
+        for index, (source, name) in enumerate(forms):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source)
+                rev = self.repo.commit()
+                output = self.out / f'raw-{index}.tar.gz'
+                info = packager.build(self.repo.root, rev, output)
+                self.assertIn(f'suifleet-edge/extra/{name}', info['paths'])
+                with tarfile.open(output) as tar:
+                    self.assertIn(f'suifleet-edge/extra/{name}', tar.getnames())
+        # A raw path module is not mistaken for an implicit `mod name;` file.
+        self.assertEqual(packager.implicit_modules(b'#[r#path = "../extra/helper.inc"]\nmod helper;\n'), [])
+        # A raw path that is not one string literal is refused, not skipped.
+        self.repo.write('suifleet-edge/src/main.rs', '#[r#path = concat!("../extra/", "helper.inc")]\nmod helper;\n'
+                        'fn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, 'unsupported #\\[path\\]'):
+            packager.plan(self.repo.root, 'HEAD')
+        # And a raw path to a missing file is an error like any other.
+        self.repo.write('suifleet-edge/src/main.rs', '#[r#path = "../extra/absent.inc"]\nmod helper;\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, 'missing file suifleet-edge/extra/absent.inc'):
+            packager.plan(self.repo.root, 'HEAD')
+
     def test_comments_between_include_and_path_tokens_are_seen(self):
         # The reviewer's reproduction: rustc accepts a comment wherever
         # whitespace may appear, so `include_str /* .. */ !(..)` and
@@ -3459,6 +3494,40 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
         complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
         info = packager.build(self.repo.root, rev, complete)
         self.assertIn('suifleet-edge/tools/entry.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
+    def test_fetch_follows_raw_identifier_path_attributes(self):
+        # Review 5202's fetched-layout reproduction: a pinned archive whose
+        # src/main.rs names a module outside src/ with `#[r#path = ..]` that
+        # the archive lacks must be reported, not audited clean.
+        main = '#[r#path = "../extra/helper.inc"]\nmod helper;\nfn main() { helper::f() }\n'
+        archive = self.archive.with_name('raw-path.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/src/main.rs':
+                    member.size, data = len(main), io.BytesIO(main.encode())
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/src/main.rs references suifleet-edge/extra/helper.inc, absent from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # Committed and packaged, the same source audits clean end to end.
+        self.repo.write('suifleet-edge/src/main.rs', main)
+        self.repo.write('suifleet-edge/extra/helper.inc', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/extra/helper.inc', info['paths'])
         self.archive = complete
         self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
                           sha=info['sha256'], srcrev=rev)

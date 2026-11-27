@@ -67,9 +67,11 @@ INCLUDE_ARGUMENT = {
     for opener, closer in ((b'(', b')'), (b'[', b']'), (b'{', b'}'))}
 # An attribute opener (`#[`, `#![`, `# [`); its body is scanned bracket-balanced.
 ATTRIBUTE = re.compile(rb'#\s*!?\s*\[')
-PATH_KEY = re.compile(rb'\s*path\s*=')
+# Built-in attribute names may be spelled as raw identifiers (`r#path`,
+# `r#cfg_attr`), which rustc accepts identically, so both spellings match.
+PATH_KEY = re.compile(rb'\s*(?:r#)?path\s*=')
 PATH_VALUE = re.compile(rb'\s*(?:"([^"\\]*)"|r(#*)"(.*?)"\2)\s*$', re.S)
-CFG_ATTR = re.compile(rb'\s*cfg_attr\s*\(')
+CFG_ATTR = re.compile(rb'\s*(?:r#)?cfg_attr\s*\(')
 # A Rust identifier. Rust accepts Unicode (XID) identifiers; any non-ASCII
 # UTF-8 byte is accepted here, a superset, so a module name is never missed.
 IDENTIFIER = rb'[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*'
@@ -79,7 +81,7 @@ IDENTIFIER = rb'[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*'
 UNICODE_WHITESPACE = re.compile(rb'\xc2\x85|\xe2\x80[\x8e\x8f\xa8\xa9]')
 # An out-of-line module declaration (`mod name;`) with its leading attributes.
 MODULE = re.compile(rb'((?:#\s*\[[^\]]*\]\s*)*)(?<![A-Za-z0-9_])(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?(' + IDENTIFIER + rb')\s*;')
-PATH_ATTR = re.compile(rb'#\s*\[\s*path\s*=')
+PATH_ATTR = re.compile(rb'#\s*\[\s*(?:r#)?path\s*=')
 # An inline module block (`mod name {`). rustc resolves a #[path] inside one
 # relative to the module's own directory, and a #[path] on one names a
 # directory, so neither is modelled; both are refused (see literal_references).
