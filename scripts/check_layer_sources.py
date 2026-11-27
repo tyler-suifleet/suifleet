@@ -823,7 +823,10 @@ def file_source(recipe, name):
     name. BitBake's base_set_filespath tries every FILESOVERRIDES subdirectory
     of every search directory before the unqualified directories, so such a
     file replaces this one for some MACHINE/DISTRO/arch. The audit does not
-    model per-configuration overrides, so it rejects these candidates.
+    model per-configuration overrides, so it rejects these candidates unless
+    they resolve to the same file the unqualified search selects. That holds
+    even when the override subdirectory is itself a search root: its
+    qualified candidate precedes every unqualified root.
 
     BitBake's local fetcher (bb.utils.which) takes the first candidate that
     exists, directories included, so a directory both counts as an override
@@ -832,29 +835,32 @@ def file_source(recipe, name):
     than skipped in favour of a later same-named file."""
     layer = recipe.layer.resolve()
     directories = search_path(recipe)
-    searched = {directory.resolve() for directory in directories}
+    selected = next((directory / name for directory in directories
+                     if (directory / name).exists() or (directory / name).is_symlink()), None)
+    selected_resolved = selected.resolve() if selected is not None else None
     for directory in directories:
         if not directory.is_dir():
             continue
         for sub in sorted(directory.iterdir()):
-            if not sub.is_dir() or sub.resolve() in searched:
+            if not sub.is_dir():
                 continue
             candidate = sub / name
-            if candidate.exists() or candidate.is_symlink():
+            # An override subdirectory can also be a search root (for example
+            # FILESEXTRAPATHS naming files/qemuarm64). Its qualified candidate
+            # still precedes every unqualified root, so it is harmless only
+            # when it resolves to the file the ordinary search selects.
+            if (candidate.exists() or candidate.is_symlink()) and candidate.resolve() != selected_resolved:
                 raise ValueError(f'file:// source {name} has an override-specific candidate {candidate} '
                                  f'that BitBake selects when FILESOVERRIDES contains {sub.name!r}; '
                                  'machine/distro-specific local files are not supported')
-    for directory in directories:
-        candidate = directory / name
-        if candidate.exists() or candidate.is_symlink():
-            resolved = candidate.resolve()
-            if layer not in resolved.parents:
-                raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {resolved}')
-            if not resolved.is_file():
-                raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {resolved} '
-                                 '(BitBake selects the first existing candidate, directories included; '
-                                 'only regular local files are supported)')
-            return resolved
+    if selected is not None:
+        if layer not in selected_resolved.parents:
+            raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {selected_resolved}')
+        if not selected_resolved.is_file():
+            raise ValueError(f'file:// source {name} resolves outside the layer or to a non-file: {selected_resolved} '
+                             '(BitBake selects the first existing candidate, directories included; '
+                             'only regular local files are supported)')
+        return selected_resolved
     return None
 
 

@@ -1635,6 +1635,37 @@ class LayerAuditTests(unittest.TestCase):
         shutil.rmtree(self.recipe_dir / 'files/qemuarm64')
         self.assertEqual(self.errors(repo=self.repo.root), [])
 
+    def test_override_directory_that_is_also_a_search_root_keeps_precedence(self):
+        # files/qemuarm64 is both a FILESEXTRAPATHS root and the qemuarm64
+        # override subdirectory of files/. BitBake tries files/qemuarm64/payload
+        # (qualified) before extra/payload (unqualified, despite being first in
+        # FILESEXTRAPATHS), so the audit must not report extra/payload.
+        extra = self.recipe_dir / 'extra'
+        extra.mkdir()
+        (extra / 'payload').write_text('extra\n')
+        machine = self.recipe_dir / 'files/qemuarm64'
+        machine.mkdir()
+        (machine / 'payload').write_text('machine\n')
+        self.write_recipe(extra='FILESEXTRAPATHS:prepend := "${THISDIR}/extra:${THISDIR}/files/qemuarm64:"\n'
+                                'SRC_URI += "file://payload"')
+        errors = self.errors(repo=self.repo.root)
+        self.assertTrue(any('override-specific candidate' in e and 'qemuarm64' in e for e in errors), errors)
+        parsed = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        with self.assertRaisesRegex(ValueError, 'override-specific'):
+            audit.file_source(parsed, 'payload')
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        if report.get('fetch_dir'):
+            self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        self.assertFalse((Path(report.get('fetch_dir') or self.tmp.name) / 'suifleet/payload').exists())
+        # When the override root is the ordinary selection, every candidate is
+        # the same file, so the source is accepted.
+        (extra / 'payload').unlink()
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+        parsed = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        self.assertEqual(audit.file_source(parsed, 'payload'), (machine / 'payload').resolve())
+
     def test_conditional_source_overrides_are_rejected(self):
         cases = (
             'SRC_URI:qemuarm64 = "https://example.com/other.tar.gz;sha256sum=%s"' % ('0' * 64),
