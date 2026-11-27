@@ -1513,6 +1513,52 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(extra='require first.inc second.inc')
         self.assertEqual(self.errors(), [])
 
+    def test_conditional_override_cannot_select_an_include(self):
+        # BitBake expands an include/require operand with the active overrides,
+        # so SOURCE_SETTINGS:qemuarm64 would read a different file (and its
+        # sources) on that machine. The audit evaluates no overrides, so every
+        # variable an operand references, directly or through other variables,
+        # is source-affecting and a conditional override of it is refused.
+        benign = self.recipe_dir / 'benign.inc'
+        benign.write_text('SUMMARY = "benign"\n')
+        unsafe = self.recipe_dir / 'unsafe.inc'
+        unsafe.write_text('SRC_URI += "http://example.com/unpinned.tar.gz"\n')
+        self.addCleanup(benign.unlink)
+        self.addCleanup(unsafe.unlink)
+        # Positive controls: unconditional variable-driven selection is read
+        # normally, and a machine override of an unrelated variable is accepted.
+        for extra in ('SOURCE_SETTINGS = "benign.inc"\ninclude ${SOURCE_SETTINGS}',
+                      'SOURCE_SETTINGS = "benign.inc"\nUNRELATED:qemuarm64 = "x"\nrequire ${SOURCE_SETTINGS}'):
+            with self.subTest(extra):
+                self.write_recipe(extra=extra)
+                self.assertEqual(self.errors(), [])
+        cases = {
+            'direct': ('SOURCE_SETTINGS = "benign.inc"\nSOURCE_SETTINGS:qemuarm64 = "unsafe.inc"\n'
+                       'include ${SOURCE_SETTINGS}', 'SOURCE_SETTINGS:qemuarm64'),
+            'override before the include, require': ('SOURCE_SETTINGS:qemuarm64 = "unsafe.inc"\n'
+                                                     'SOURCE_SETTINGS = "benign.inc"\nrequire ${SOURCE_SETTINGS}',
+                                                     'SOURCE_SETTINGS:qemuarm64'),
+            'conditional append': ('SOURCE_SETTINGS = "benign.inc"\nSOURCE_SETTINGS:append:qemuarm64 = " unsafe.inc"\n'
+                                   'include ${SOURCE_SETTINGS}', 'SOURCE_SETTINGS:append:qemuarm64'),
+            # Transitive at the point of expansion: SOURCE_SETTINGS referenced
+            # SOURCE_CHOICE when the include ran, even though it is replaced later.
+            'transitive, later reassigned': ('SOURCE_CHOICE = "benign"\nSOURCE_CHOICE:qemuarm64 = "unsafe"\n'
+                                             'SOURCE_SETTINGS = "${SOURCE_CHOICE}.inc"\ninclude ${SOURCE_SETTINGS}\n'
+                                             'SOURCE_SETTINGS = "benign.inc"', 'SOURCE_CHOICE:qemuarm64'),
+        }
+        for label, (extra, message) in cases.items():
+            with self.subTest(label):
+                self.write_recipe(extra=extra)
+                errors = self.errors()
+                self.assertTrue(any(f'conditional override {message}' in e for e in errors), errors)
+                # The finding stops the fetch before any download.
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+                self.assertIsNone(report['recipes']['suifleet']['fetched'])
+                self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+
     def test_unmodelled_directives_are_refused(self):
         # unset removes a variable or flag BitBake would otherwise use; the
         # reader does not model it (nor include_all, addfragments, addpylib),

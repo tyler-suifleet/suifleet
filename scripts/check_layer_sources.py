@@ -154,6 +154,11 @@ class Recipe:
         # audit_recipe refuses them. Overrides such as RDEPENDS:${PN} keep a
         # literal variable name and are not affected.
         self.expanded_keys = []
+        # Variables an include/require operand referenced when it was expanded,
+        # with everything they referenced at that point. They select which
+        # metadata (and so which sources) is read, so they are source-affecting:
+        # a machine/distro override of one could select a different file.
+        self.include_refs = set()
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
@@ -244,6 +249,7 @@ class Recipe:
                 # its contents are never read.
                 operand = line.split(None, 1)[1]
                 where = f'{self.rel(path)}: {words[0]} {operand}'
+                self.include_refs |= self.references(operand)
                 expanded = self.expand(operand)
                 if '${' in expanded:
                     self.include_errors.append(f'{where} cannot be resolved inside the layer')
@@ -333,6 +339,17 @@ class Recipe:
             return match.group(0) if found is None else found
         expanded = REF.sub(lookup, value)
         return expanded if expanded == value else self.expand(expanded, depth + 1)
+
+    def references(self, value):
+        """Every variable value references, directly or through the current
+        unexpanded values of the variables it references."""
+        seen, pending = set(), REF.findall(value)
+        while pending:
+            name = pending.pop()
+            if name not in seen:
+                seen.add(name)
+                pending += REF.findall(self.raw(name) or '')
+        return seen
 
     def get(self, name, default=''):
         return self.expand(self.vars.get(name, default))
@@ -437,6 +454,8 @@ def source_variables(recipe):
     """Source-affecting variables and every variable they reference."""
     pending = [v for v in recipe.vars if v in SOURCE_ROOTS or v.startswith(('SRCREV_', 'SUIFLEET_'))]
     pending += list(SOURCE_ROOTS) + [b for b, *_ in recipe.overrides + recipe.unparsed if b.startswith(('SRCREV_', 'SUIFLEET_'))]
+    # Variables that chose an included file decide which source metadata exists.
+    pending += sorted(recipe.include_refs)
     for variable, flags in recipe.flags.items():
         if variable == 'SRC_URI' or variable.startswith('SUIFLEET_'):
             for value in flags.values():
