@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -2996,6 +2997,107 @@ class CodecFetchedLayoutTests(unittest.TestCase):
         self.assertTrue(any('codec manifest.json is not readable JSON' in e for e in errors), errors)
         errors = self.build(manifest_text='[]')
         self.assertTrue(any('codec manifest.json is not a JSON object' in e for e in errors), errors)
+
+
+class NodeRecipeTests(unittest.TestCase):
+    """suifleet-node, on a copy of the shipped layer: the fetched archive must
+    hold what do_install copies, and its version must satisfy the codec."""
+
+    NODE_RECIPE = 'recipes-devtools/suifleet-node/suifleet-node_22.22.2.bb'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.layer = Path(self.tmp.name) / 'meta-suifleet'
+        shutil.copytree(ROOT / 'suifleet-edge/meta-suifleet', self.layer)
+        self.recipe = self.layer / self.NODE_RECIPE
+        self.archive = Path(self.tmp.name) / 'node.tar.xz'
+
+    @staticmethod
+    def elf(machine, kind=2):
+        return b'\x7fELF\x02\x01\x01' + bytes(9) + kind.to_bytes(2, 'little') + machine.to_bytes(2, 'little') + bytes(44)
+
+    def fetch(self, files):
+        """Fetch the Node recipe offline from a checksum-correct archive of files."""
+        with tarfile.open(self.archive, 'w:xz') as tar:
+            for rel, data in files.items():
+                info = tarfile.TarInfo(f'node-v22.22.2-linux-arm64/{rel}')
+                info.size, info.mode = len(data), 0o755
+                tar.addfile(info, io.BytesIO(data))
+        text = self.recipe.read_text()
+        text = re.sub(r'sha256sum=[0-9a-f]{64}', f'sha256sum={sha256(self.archive.read_bytes())}', text)
+        text = re.sub(r'LICENSE;md5=[0-9a-f]{32}', f'LICENSE;md5={hashlib.md5(files.get("LICENSE", b"")).hexdigest()}', text)
+        self.recipe.write_text(text)
+
+        def download(url, target):
+            shutil.copyfile(self.archive, target)
+            return sha256(self.archive.read_bytes())
+        with mock.patch.object(audit, 'download', download):
+            report = audit.check(self.layer, fetch=True, only=['suifleet-node'])
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        return report
+
+    def test_complete_aarch64_archive_passes(self):
+        for kind in (2, 3):
+            with self.subTest(e_type=kind):
+                report = self.fetch({'LICENSE': b'node license\n', 'bin/node': self.elf(183, kind)})
+                self.assertEqual(report['errors'], [])
+                self.assertTrue(report['recipes']['suifleet-node']['fetched'][0]['verified'])
+
+    def test_checksum_correct_archive_without_the_installed_executable_fails(self):
+        report = self.fetch({'LICENSE': b'node license\n', 'bin/npm': b'#!/bin/sh\n'})
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('do_install input bin/node is absent' in e for e in report['errors']), report['errors'])
+
+    def test_installed_executable_must_be_an_aarch64_elf(self):
+        cases = {'x86-64': self.elf(62), 'shell script': b'#!/bin/sh\n', 'truncated': b'\x7fELF',
+                 '32-bit': b'\x7fELF\x01\x01\x01' + bytes(9) + (2).to_bytes(2, 'little') + (183).to_bytes(2, 'little'),
+                 'relocatable': self.elf(183, kind=1)}
+        for label, data in cases.items():
+            with self.subTest(label):
+                report = self.fetch({'LICENSE': b'node license\n', 'bin/node': data})
+                self.assertTrue(any('not a 64-bit little-endian AArch64 ELF' in e for e in report['errors']), report['errors'])
+
+    def test_do_install_inputs_must_be_the_audited_files(self):
+        original = self.recipe.read_text()
+        cases = {
+            'extra input': original.replace('${S}/LICENSE ', '${S}/LICENSE ${S}/include/node.h '),
+            'missing input': original.replace('    install -m 0644 ${S}/LICENSE ${D}${SUIFLEET_NODE_DIR}/LICENSE\n', ''),
+            'no do_install': original.replace('do_install() {', 'do_other() {'),
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.assertNotEqual(text, original)
+                self.recipe.write_text(text)
+                errors = audit.check(self.layer)['errors']
+                self.assertTrue(any('Node do_install' in e for e in errors), errors)
+        self.recipe.write_text(original)
+        self.assertEqual(audit.check(self.layer)['errors'], [])
+
+    def test_packaged_node_version_must_satisfy_the_codec_dependency(self):
+        renamed = self.recipe.with_name('suifleet-node_22.22.3.bb')
+        self.recipe.rename(renamed)
+        inventory = self.layer / 'export-files.json'
+        inventory.write_text(inventory.read_text().replace('suifleet-node_22.22.2.bb', 'suifleet-node_22.22.3.bb'))
+        errors = audit.check(self.layer)['errors']
+        self.assertTrue(any("PV '22.22.3' does not satisfy the codec dependency suifleet-node (= 22.22.2)" in e
+                            for e in errors), errors)
+        # Auditing only the codec does not load the Node recipe to compare.
+        self.assertEqual(audit.check(self.layer, only=['suifleet-walrus-codec'])['errors'], [])
+
+    def test_epoch_missing_recipe_and_missing_codec_pin_are_refused(self):
+        original = self.recipe.read_text()
+        self.recipe.write_text(original + 'PE = "1"\n')
+        errors = audit.check(self.layer)['errors']
+        self.assertTrue(any("with PE '1' does not satisfy" in e for e in errors), errors)
+        self.recipe.unlink()
+        errors = audit.check(self.layer)['errors']
+        self.assertTrue(any("provides no 'suifleet-node' recipe" in e for e in errors), errors)
+        self.recipe.write_text(original)
+        codec = next(self.layer.glob('recipes-edge/suifleet-walrus-codec/*.bb'))
+        codec.write_text(re.sub(r'^SUIFLEET_CODEC_NODE_VERSION = .*\n', '', codec.read_text(), flags=re.M))
+        errors = audit.check(self.layer)['errors']
+        self.assertTrue(any('lacks required SUIFLEET_CODEC_NODE_VERSION' in e for e in errors), errors)
 
 
 class RepositoryLayerTests(unittest.TestCase):

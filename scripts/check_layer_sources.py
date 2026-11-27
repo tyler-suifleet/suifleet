@@ -988,6 +988,7 @@ def license_md5s(recipe):
 # audit, not silently skip the Cargo.lock and layout checks.
 DAEMON_PN = 'suifleet'
 CODEC_PN = 'suifleet-walrus-codec'
+NODE_PN = 'suifleet-node'
 SHA256_HEX = re.compile(r'[0-9a-f]{64}')
 COMMIT_HEX = re.compile(r'[0-9a-f]{40}')
 DAEMON_PINS = {'SUIFLEET_LOCK_SHA256': SHA256_HEX, 'SUIFLEET_CRATE_VERSION': None, 'SRCREV': COMMIT_HEX}
@@ -1026,6 +1027,49 @@ def codec_install_errors(recipe):
     return errors
 
 
+# suifleet-node's do_install copies exactly these files from S. The fetched
+# audit checks that each exists and that the executable is an AArch64 ELF,
+# because the archive SHA-256 and the license md5 alone do not prove that a
+# checksum-correct archive contains the program the recipe installs.
+NODE_INSTALL_INPUTS = ('LICENSE', 'bin/node')
+NODE_INSTALL_REF = re.compile(r'\$\{S\}/(\S+)')
+ELF_AARCH64 = 183
+
+
+def node_install_errors(recipe):
+    where = recipe.path.name
+    bodies = CODEC_INSTALL.findall(recipe.text)
+    if len(bodies) != 1:
+        return [f'{where}: Node do_install is missing or defined more than once']
+    refs = set(NODE_INSTALL_REF.findall(bodies[0]))
+    if refs != set(NODE_INSTALL_INPUTS):
+        return [f'{where}: Node do_install copies {sorted(refs)} from S; the audit verifies exactly '
+                f'{list(NODE_INSTALL_INPUTS)}']
+    return []
+
+
+def node_errors(recipe, s_dir):
+    """Check the unpacked Node release for the files suifleet-node installs."""
+    where, errors = recipe.path.name, []
+    for rel, md5 in license_md5s(recipe):
+        path = s_dir / rel
+        if not path.is_file() or hashlib.md5(path.read_bytes()).hexdigest() != md5:
+            errors.append(f'{where}: license file {rel} does not match md5 {md5}')
+    for rel in NODE_INSTALL_INPUTS:
+        if not (s_dir / rel).is_file():
+            errors.append(f'{where}: do_install input {rel} is absent from the Node archive')
+    node = s_dir / 'bin/node'
+    if node.is_file():
+        with open(node, 'rb') as handle:
+            header = handle.read(20)
+        # e_ident: magic, ELFCLASS64, ELFDATA2LSB; e_type EXEC/DYN; e_machine AArch64.
+        if (len(header) < 20 or header[:4] != b'\x7fELF' or header[4] != 2 or header[5] != 1
+                or int.from_bytes(header[16:18], 'little') not in (2, 3)
+                or int.from_bytes(header[18:20], 'little') != ELF_AARCH64):
+            errors.append(f'{where}: bin/node is not a 64-bit little-endian AArch64 ELF executable')
+    return errors
+
+
 def pin_errors(recipe):
     """Require the coupled pins of the daemon and codec recipes, keyed by PN.
 
@@ -1049,6 +1093,8 @@ def pin_errors(recipe):
         errors += codec_install_errors(recipe)
     elif recipe.get('SUIFLEET_CODEC_SOURCE_REV'):
         errors.append(f'{where}: SUIFLEET_CODEC_SOURCE_REV is only verified for PN {CODEC_PN!r}, not {pn!r}')
+    if pn == NODE_PN:
+        errors += node_install_errors(recipe)
     return errors
 
 
@@ -1488,6 +1534,8 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 errors.append(f'{recipe.path.name}: cargo metadata failed: {result.stderr.strip().splitlines()[:3]}')
     elif recipe.get('PN') == CODEC_PN:
         errors += codec_errors(recipe, s_dir)
+    elif recipe.get('PN') == NODE_PN:
+        errors += node_errors(recipe, s_dir)
     else:
         for rel, md5 in license_md5s(recipe):
             path = s_dir / rel
@@ -1637,6 +1685,19 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         report['errors'].append(f'layer provides no daemon recipe with PN {DAEMON_PN!r}; its pins cannot be audited')
     if daemon and codec and daemon.get('SRCREV') != codec.get('SUIFLEET_CODEC_SOURCE_REV'):
         report['errors'].append(f'codec SUIFLEET_CODEC_SOURCE_REV {codec.get("SUIFLEET_CODEC_SOURCE_REV")} differs from daemon SRCREV {daemon.get("SRCREV")}')
+    # The codec RDEPENDS on suifleet-node (= SUIFLEET_CODEC_NODE_VERSION); rootfs
+    # assembly fails unless the layer packages exactly that Node version.
+    node = recipes.get(NODE_PN)
+    if codec and (not only or NODE_PN in only):
+        wanted = codec.get('SUIFLEET_CODEC_NODE_VERSION')
+        if not wanted:
+            report['errors'].append(f'{codec.path.name}: codec recipe lacks required SUIFLEET_CODEC_NODE_VERSION')
+        elif node is None:
+            report['errors'].append(f'codec requires suifleet-node (= {wanted}), but the layer provides no {NODE_PN!r} recipe')
+        elif node.get('PE') or node.get('PV') != wanted:
+            report['errors'].append(f'{node.path.name}: suifleet-node PV {node.get("PV")!r}'
+                                    f'{" with PE " + repr(node.get("PE")) if node.get("PE") else ""} does not satisfy '
+                                    f'the codec dependency suifleet-node (= {wanted})')
     if repo and daemon:
         rev = daemon.get('SRCREV')
 
