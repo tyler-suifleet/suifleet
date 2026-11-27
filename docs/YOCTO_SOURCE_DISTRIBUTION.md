@@ -196,7 +196,10 @@ These static checks always run, on every recipe in the layer:
   compressed stream must also decode through its end, as `gzip`, `bzip2` and
   `xz` require: a stream truncated after the tar members (such as a gzip file
   missing its CRC/size trailer) or one with a bad checksum is a finding even
-  though its members can be read. With `unpack=0` it is
+  though its members can be read. An xz file is checked as `xz -dc` checks
+  it: concatenated streams and null stream padding in multiples of four bytes
+  are accepted, while any other bytes after a stream (which Python's `lzma`
+  module silently ignores) are a finding. With `unpack=0` it is
   copied as a loose file, as BitBake copies it. The local name must be a plain file name and, like the URL, must not
   name a commit other than `SRCREV`. BitBake uses `downloadfilename` literally
   (only the URL path is percent-decoded), so a `downloadfilename` containing a
