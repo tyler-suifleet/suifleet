@@ -66,7 +66,9 @@ The file set is the daemon build closure, computed from that commit's tree:
 - each file named by a literal `include!`/`include_str!`/`include_bytes!` or a
   `#[path]` module attribute, followed transitively. Every macro delimiter
   (`(..)`, `[..]`, `{..}`), spacing, path prefix (`std::include!`), raw string
-  and a `path` inside `cfg_attr(..)` is recognized. An include or `#[path]`
+  and a `path` inside `cfg_attr(..)` is recognized, as are the raw-identifier
+  spellings rustc accepts (`#[r#path = ".."]`, `#[r#cfg_attr(.., r#path = ..)]`,
+  `r#include_str!`). An include or `#[path]`
   whose argument is not one string literal without escapes (for example
   `include!(concat!(env!("OUT_DIR"), ..))`) stops the build instead of being
   skipped. Rust allows a comment wherever whitespace may appear, for example
