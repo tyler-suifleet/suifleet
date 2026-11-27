@@ -232,6 +232,16 @@ These static checks always run, on every recipe in the layer:
   a flag), `include_all`, `addfragments` and `addpylib`. They can remove or
   replace source pins or load further metadata. The refusal is static, and the
   fetcher repeats it before anything is downloaded.
+- `conf/layer.conf` may contain only layer registration. BitBake parses it
+  into the base configuration that every recipe inherits, so an assignment
+  there (for example `SRC_URI:append:pn-suifleet`) changes sources without
+  appearing in any recipe. The audit accepts `BBPATH .= ":${LAYERDIR}"`, the
+  two `BBFILES +=` recipe and bbappend patterns, one `BBFILE_COLLECTIONS`
+  entry, and plain `=` assignments of `BBFILE_PATTERN`, `BBFILE_PRIORITY`,
+  `LAYERVERSION`, `LAYERDEPENDS`, `LAYERRECOMMENDS` and `LAYERSERIES_COMPAT`
+  for that collection. Every other statement is refused, including other
+  variables, overrides, inline Python, `include`, `inherit` and Python
+  blocks. A finding there skips the fetch of every recipe.
 - The reader follows BitBake's ordering. Plain `:append` and `:prepend` apply
   after every assignment, even one that comes later in the file. `??=` is a
   weak default, used only when nothing else assigns the variable; each later
