@@ -426,7 +426,11 @@ https source that is not unpacked) is created exclusively without following
 links: an existing file or link at the final name is reported, not written
 through.
 
-It then downloads each non-crate source into a new directory. Downloads send
+It then downloads each non-crate source into a new directory. Every HTTPS
+source is staged in its own fresh download directory, so recipes that share
+one pinned URL and SHA-256 each fetch, verify and unpack it independently, and
+another recipe's fetch of the same file name (even a failed one) never decides
+this source's result. Downloads send
 no Authorization header and don't read `.netrc`. Git uses an empty credential
 helper, no global or system configuration and no prompts. Each SHA-256 is
 checked before unpacking. Unpacking follows BitBake `subdir=`/`destsuffix=`
