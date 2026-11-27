@@ -955,7 +955,7 @@ def closure(files, read, crate=CRATE, licenses=LICENSES):
             if scanned_as_code(target, code) and target not in scanned:
                 pending.append(target)
     _, errors = loose_sources(manifest, read_manifest, declared, lambda path: path in files, read,
-                              [p for p in files if p.startswith(f'{crate}/')])
+                              [p for p in files if p.startswith(f'{crate}/')], crate=crate)
     if errors:
         raise ValueError(errors[0])
     return audit(selected, files, read)

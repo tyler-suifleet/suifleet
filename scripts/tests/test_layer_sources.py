@@ -493,6 +493,33 @@ class PackageEdgeSourceTests(unittest.TestCase):
         for rel in ('tools/standalone.rs', 'tools/helper.rs', 'build.rs', 'src/sub.rs'):
             self.assertIn(f'suifleet-edge/{rel}', paths)
 
+    def test_implicit_modules_in_relocated_crate_targets_are_refused(self):
+        # The source reviewer's reproduction: the same out-of-src [[bin]] with an
+        # implicit sibling module, after the whole crate moves to crates/edge.
+        # The packager must check loose sources under the effective crate
+        # directory, not silently skip them because they are not under
+        # suifleet-edge/.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/standalone.rs"\n'
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        self.repo.write('suifleet-edge/tools/standalone.rs', 'mod helper;\nfn main() { helper::f() }\n')
+        (self.repo.root / 'crates').mkdir()
+        self.repo.git('mv', 'suifleet-edge', 'crates/edge')
+        self.repo.write('crates/edge/src/main.rs', MAIN_RS.replace('../../interfaces', '../../../interfaces'))
+        self.repo.commit()
+        output = Path(self.tmp.name) / 'relocated.tar.gz'
+        with self.assertRaisesRegex(ValueError, r'crates/edge/tools/standalone.rs declares module\(s\) helper without #\[path\]'):
+            packager.plan(self.repo.root, 'HEAD', crate='crates/edge')
+        with self.assertRaisesRegex(ValueError, r'tools/standalone.rs declares module\(s\) helper'):
+            packager.build(self.repo.root, 'HEAD', output, crate='crates/edge')
+        self.assertFalse(output.exists())
+        # With an explicit #[path] the relocated helper is packaged.
+        self.repo.write('crates/edge/tools/standalone.rs', '#[path = "helper.rs"]\nmod helper;\nfn main() {}\n')
+        self.repo.commit()
+        paths = packager.plan(self.repo.root, 'HEAD', crate='crates/edge')['paths']
+        for rel in ('tools/standalone.rs', 'tools/helper.rs'):
+            self.assertIn(f'crates/edge/{rel}', paths)
+
     def test_implicit_modules_reached_from_packaged_directories_are_refused(self):
         # The reviewer's cross-root reproduction: src/main.rs loads a file
         # outside the packaged directories through #[path], and that file's
