@@ -1097,6 +1097,29 @@ def layer_conf_errors(text):
     return errors
 
 
+def layer_registration_errors(text, recipes, appends):
+    """Require the BBFILES registration that makes BitBake parse the audited files.
+
+    The audit globs recipes and appends directly; without the matching
+    registration BitBake would not parse them, so a clean report would describe
+    files a standalone build never uses.
+    """
+    statements = [line.strip() for line in text.replace('\\\n', ' ').splitlines()]
+    registered = set()
+    for line in statements:
+        match = LAYER_CONF_STATEMENT.match(line)
+        if match and match.group(1) == 'BBFILES' and match.group(2) == '+=':
+            registered.add(match.group(3))
+    required = []
+    if recipes:
+        required.append(LAYER_CONF_FIXED[('BBFILES', '+=')][0])
+    if appends:
+        required.append(LAYER_CONF_FIXED[('BBFILES', '+=')][1])
+    return [f'conf/layer.conf: BBFILES += "{value}" is missing; BitBake would not parse the audited '
+            f'{"recipes" if value.endswith(".bb") else "appends"}, so the audit would not describe the build'
+            for value in required if value not in registered]
+
+
 def append_matches(append_name, recipe_name):
     """BitBake's rule: name.bbappend applies to name.bb; '%' matches any suffix."""
     target = append_name[:-len('.bbappend')] + '.bb'
@@ -1111,13 +1134,13 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
     conf = (layer / 'conf' / 'layer.conf').read_text()
     if 'AUTOREV' in conf:
         report['errors'].append('conf/layer.conf: AUTOREV is forbidden')
-    conf_errors = layer_conf_errors(conf)
+    bbappends = sorted(layer.glob('recipes-*/*/*.bbappend'))
+    bbfiles = sorted(layer.glob('recipes-*/*/*.bb'))
+    conf_errors = layer_conf_errors(conf) + layer_registration_errors(conf, bbfiles, bbappends)
     report['errors'] += conf_errors
     series = re.search(r'^LAYERSERIES_COMPAT_\S+\s*=\s*"([^"]*)"', conf, re.M)
     report['series'] = series.group(1).split() if series else []
     recipes, static_errors = {}, {}
-    bbappends = sorted(layer.glob('recipes-*/*/*.bbappend'))
-    bbfiles = sorted(layer.glob('recipes-*/*/*.bb'))
     used = set()
     for path in bbfiles:
         appends = [a for a in bbappends if append_matches(a.name, path.name)]

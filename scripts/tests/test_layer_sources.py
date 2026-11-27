@@ -755,7 +755,10 @@ class LayerAuditTests(unittest.TestCase):
         self.url = f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/{self.archive.name}'
         self.layer = base / 'meta-suifleet'
         (self.layer / 'conf').mkdir(parents=True)
-        (self.layer / 'conf/layer.conf').write_text('LAYERSERIES_COMPAT_meta-suifleet = "scarthgap wrynose"\n')
+        (self.layer / 'conf/layer.conf').write_text(
+            'BBFILES += "${LAYERDIR}/recipes-*/*/*.bb"\n'
+            'BBFILES += "${LAYERDIR}/recipes-*/*/*.bbappend"\n'
+            'LAYERSERIES_COMPAT_meta-suifleet = "scarthgap wrynose"\n')
         self.recipe_dir = self.layer / 'recipes-edge/suifleet'
         (self.recipe_dir / 'files').mkdir(parents=True)
         (self.recipe_dir / 'files/suifleet.service').write_text('[Unit]\n')
@@ -1545,6 +1548,45 @@ class LayerAuditTests(unittest.TestCase):
         conf.write_text(registration)
         self.assertEqual(self.errors(), [])
         self.assertEqual(audit.layer_conf_errors(registration), [])
+
+    def test_missing_bbfiles_registration_is_refused(self):
+        # The audit globs the recipe and append files itself; if layer.conf no
+        # longer registers them, BitBake would not parse them and a clean report
+        # would describe recipes a standalone build never uses.
+        conf = self.layer / 'conf/layer.conf'
+        registration = (Path(audit.__file__).resolve().parents[1]
+                        / 'suifleet-edge/meta-suifleet/conf/layer.conf').read_text()
+        recipe_line = 'BBFILES += "${LAYERDIR}/recipes-*/*/*.bb"\n'
+        append_line = 'BBFILES += "${LAYERDIR}/recipes-*/*/*.bbappend"\n'
+        self.assertIn(recipe_line, registration)
+        self.assertIn(append_line, registration)
+        append = self.recipe_dir / 'suifleet_%.bbappend'
+        cases = {
+            'no registration': (registration.replace(recipe_line, '').replace(append_line, ''), False, ['recipes']),
+            'recipe registration missing': (registration.replace(recipe_line, ''), False, ['recipes']),
+            'append registration missing with an append': (registration.replace(append_line, ''), True, ['appends']),
+        }
+        for label, (text, with_append, missing) in cases.items():
+            with self.subTest(label):
+                conf.write_text(text)
+                if with_append:
+                    append.write_text('# no source change\n')
+                else:
+                    append.unlink(missing_ok=True)
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+                found = [e for e in report['errors'] if e.startswith('conf/layer.conf:') and 'is missing' in e]
+                self.assertEqual([kind for kind in ('recipes', 'appends') if any(f'audited {kind}' in e for e in found)], missing, found)
+                entry = report['recipes']['suifleet']
+                self.assertEqual((entry['fetched'], entry['fetch_skipped']), (None, 'layer configuration findings'))
+        # Without any append, the append registration is not required.
+        append.unlink(missing_ok=True)
+        conf.write_text(registration.replace(append_line, ''))
+        self.assertEqual(self.errors(), [])
+        conf.write_text(registration)
+        self.assertEqual(self.errors(), [])
 
     def test_archives_bitbake_unpacks_in_unmodelled_formats_are_refused(self):
         # BitBake runs unzip (and other extractors) on these names unless
