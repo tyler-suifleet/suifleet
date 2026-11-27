@@ -1109,8 +1109,19 @@ def license_errors(recipe):
 
 
 def cargo_src_dir(recipe):
-    """The effective CARGO_SRC_DIR; ValueError unless it is a plain relative path."""
-    return plain_relative(recipe.get('CARGO_SRC_DIR', 'suifleet-edge'), f'{recipe.path.name}: CARGO_SRC_DIR')
+    """The effective CARGO_SRC_DIR in canonical form; ValueError unless it is a
+    plain relative path below S.
+
+    BitBake and Cargo resolve "./crate", "crate/" and "crate//" to the same
+    directory as "crate", so every spelling is normalized here once. Inventory,
+    include-scan and Git-tree lookups then key on the same names the layout
+    uses, instead of silently missing files under a noncanonical spelling."""
+    what = f'{recipe.path.name}: CARGO_SRC_DIR'
+    rel = plain_relative(recipe.get('CARGO_SRC_DIR', 'suifleet-edge'), what)
+    canonical = PurePosixPath(rel).as_posix()
+    if canonical == '.':
+        raise ValueError(f'{what} {rel!r} names S itself; the audit requires the crate in a subdirectory of S')
+    return canonical
 
 
 def source_path(unpack, s_dir, rel, what):

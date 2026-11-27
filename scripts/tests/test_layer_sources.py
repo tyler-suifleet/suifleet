@@ -2014,6 +2014,8 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
             'parent traversal': '../../../' + os.path.relpath(outside / 'crate', '/'),
             'interior parent': 'suifleet-edge/../..',
             'empty': '',
+            'S itself': '.',
+            'S itself, trailing slash': './',
         }
         cases = [('LIC_FILES_CHKSUM', label, f'LIC_FILES_CHKSUM = "{value};md5={md5(LICENSE)}"')
                  for label, value in license_cases.items()]
@@ -3626,14 +3628,23 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
                 added = tarfile.TarInfo(name)
                 added.size, added.mode = len(text), 0o644
                 tar.addfile(added, io.BytesIO(text.encode()))
-        self.write_recipe(sha=sha256(archive.read_bytes()))
         self.archive = archive
-        with mock.patch.object(audit, 'download', self.fake_download):
-            report = audit.check(self.layer, fetch=True)
-        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        # BitBake and Cargo resolve every one of these spellings to the same
+        # crate directory, so each must find the missing input (the reviewer's
+        # second reproduction used "./suifleet-edge" and audited clean).
+        spellings = ('', 'CARGO_SRC_DIR = "suifleet-edge"', 'CARGO_SRC_DIR = "./suifleet-edge"',
+                     'CARGO_SRC_DIR = "suifleet-edge/"', 'CARGO_SRC_DIR = ".//suifleet-edge/."')
         expected = 'suifleet-edge/tools/entry.inc references suifleet-edge/tools/message.txt, absent from the source layout'
-        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
-        # Committed and packaged, the entry point and its data audit clean.
+        for extra in spellings:
+            with self.subTest(extra=extra):
+                self.write_recipe(extra=extra, sha=sha256(archive.read_bytes()))
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                self.assertFalse(report['ok'])
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # Committed and packaged, the entry point and its data audit clean
+        # under every equivalent spelling, in repository and fetch mode.
         self.repo.write('suifleet-edge/Cargo.toml', manifest)
         self.repo.write('suifleet-edge/tools/entry.inc', entry)
         self.repo.write('suifleet-edge/tools/message.txt', 'hello\n')
@@ -3642,12 +3653,14 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
         info = packager.build(self.repo.root, rev, complete)
         self.assertIn('suifleet-edge/tools/message.txt', info['paths'])
         self.archive = complete
-        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
-                          sha=info['sha256'], srcrev=rev)
-        with mock.patch.object(audit, 'download', self.fake_download):
-            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
-        self.addCleanup(shutil.rmtree, report['fetch_dir'])
-        self.assertEqual(report['errors'], [])
+        for extra in spellings:
+            with self.subTest(extra=extra, complete=True):
+                self.write_recipe(extra=extra, url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                                  sha=info['sha256'], srcrev=rev)
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                self.assertEqual(report['errors'], [])
 
     def test_fetch_rejects_path_attributes_in_inline_modules(self):
         # The reviewer's reproduction as a pinned archive: both child.rs files
