@@ -1456,9 +1456,32 @@ def download(url, target):
     return digest.hexdigest()
 
 
-def safe_extract(archive, destination):
+# The tarfile mode matching the command BitBake's FetchMethod.unpack selects
+# from the local file name: 'tar xz' for .tar.gz/.tgz, 'bzip2 -dc' for
+# .tar.bz2/.tbz2, 'xz -dc' for .tar.xz/.txz. Those commands fail when the
+# bytes use another compression, so the audit must not autodetect one. A
+# plain .tar goes to 'tar x -f', and GNU tar itself detects compression when
+# reading a regular file, so it keeps autodetection.
+TAR_MODES = (
+    (re.compile(r'\.(tar\.gz|tgz)$'), 'r:gz'),
+    (re.compile(r'\.(tar\.bz2|tbz2)$'), 'r:bz2'),
+    (re.compile(r'\.(tar\.xz|txz)$'), 'r:xz'),
+    (re.compile(r'\.tar$'), 'r:*'),
+)
+
+
+def tar_mode(name):
+    for pattern, mode in TAR_MODES:
+        if pattern.search(name):
+            return mode
+    raise ValueError(f'{name}: not a tarball name the audit extracts')
+
+
+def safe_extract(archive, destination, name=None):
+    """Extract archive as BitBake would unpack a file called name (default:
+    the archive's own name), using the decompression that name selects."""
     destination = Path(destination).resolve()
-    with tarfile.open(archive) as tar:
+    with tarfile.open(archive, tar_mode(name or Path(archive).name)) as tar:
         for member in tar.getmembers():
             target = (destination / member.name).resolve()
             if destination not in (target, *target.parents):
@@ -1636,7 +1659,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
         destination.mkdir(parents=True, exist_ok=True)
         if TARBALL.search(name) and params.get('unpack', '1') == '1':
             try:
-                safe_extract(target, destination)
+                safe_extract(target, destination, name)
             except ARCHIVE_DECODE_ERRORS as error:
                 errors.append(f'{recipe.path.name}: {name} could not be decoded as a tarball: '
                               f'{type(error).__name__}: {error}')

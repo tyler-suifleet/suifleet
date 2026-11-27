@@ -2541,6 +2541,61 @@ class LayerAuditTests(unittest.TestCase):
                 self.assertTrue(any(f'{name} could not be decoded as a tarball' in e for e in report['errors']),
                                 report['errors'])
 
+    def test_compression_must_match_the_bitbake_file_name(self):
+        # BitBake picks the decompressor from the local file name (tar -z for
+        # .tar.gz/.tgz, bzip2 -dc for .tar.bz2/.tbz2, xz -dc for .tar.xz/.txz)
+        # and fails on other bytes, so a correctly pinned valid tarball whose
+        # compression differs from its name must fail the complete audit.
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0002', 'archive',
+                                       '--format=tar', self.rev, '--', *self.info['paths']])
+        packed = {
+            'none': raw,
+            'gz': subprocess.run(['gzip', '-n', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout,
+            'bz2': subprocess.run(['bzip2', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout,
+            'xz': subprocess.run(['xz', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout,
+        }
+        names = {'gz': ('source.tar.gz', 'source.tgz'), 'bz2': ('source.tar.bz2', 'source.tbz2'),
+                 'xz': ('source.tar.xz', 'source.txz')}
+
+        def run(name, data):
+            archive = Path(tempfile.mkdtemp(dir=self.tmp.name)) / name
+            archive.write_bytes(data)
+            self.archive = archive
+            self.write_recipe(url=f'{self.url};downloadfilename={name}', sha=sha256(data))
+            self.assertEqual(self.errors(), [])
+            with mock.patch.object(audit, 'download', self.fake_download):
+                report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+            self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+            json.dumps(report)
+            self.assertTrue(report['recipes']['suifleet']['fetched'][0]['verified'])
+            return report
+
+        for compression, aliases in names.items():
+            for name in aliases:
+                with self.subTest(name=name, data=compression):
+                    report = run(name, packed[compression])
+                    self.assertTrue(report['ok'], report['errors'])
+                for other, data in packed.items():
+                    if other == compression:
+                        continue
+                    with self.subTest(name=name, data=other):
+                        report = run(name, data)
+                        self.assertFalse(report['ok'])
+                        self.assertTrue(any(f'{name} could not be decoded as a tarball' in e
+                                            for e in report['errors']), report['errors'])
+        # A plain .tar goes to 'tar x -f', where GNU tar detects the
+        # compression itself, so compressed bytes named .tar still unpack.
+        for other, data in packed.items():
+            with self.subTest(name='source.tar', data=other):
+                report = run('source.tar', data)
+                self.assertTrue(report['ok'], report['errors'])
+        # The tar(1) commands BitBake runs agree with the audit on these bytes.
+        if shutil.which('tar'):
+            mislabelled = Path(tempfile.mkdtemp(dir=self.tmp.name)) / 'source.tar.gz'
+            mislabelled.write_bytes(packed['none'])
+            self.assertNotEqual(subprocess.run(['tar', '-tzf', str(mislabelled)], stdout=subprocess.DEVNULL,
+                                               stderr=subprocess.DEVNULL).returncode, 0)
+
     def test_fetch_reports_checksum_and_layout_defects(self):
         self.write_recipe(sha='f' * 64)
         with mock.patch.object(audit, 'download', self.fake_download):
