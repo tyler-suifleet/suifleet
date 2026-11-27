@@ -462,6 +462,14 @@ allowed. An escaping link stops the recipe before any manifest, source or
 license byte is read or Cargo runs, so the result never depends on files on
 the review host.
 
+Git itself never runs inside the unpack directory. An earlier archive could
+place repository metadata such as `git/.git/config` at a Git source's
+destination, and Git honours repository-local configuration even with an
+isolated `HOME` and no global or system configuration. A Git destination that
+already exists is therefore refused and not fetched. Otherwise the audit
+initializes, fetches, checks out and verifies the branch in a fresh private
+repository outside the unpack tree, then moves it into place.
+
 The check then verifies the resulting `S`:
 
 - for every recipe, no runtime identity/state file name anywhere in the fetched
