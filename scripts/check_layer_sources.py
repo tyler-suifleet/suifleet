@@ -1096,8 +1096,31 @@ def codec_errors(recipe, s_dir):
     for name, sha in pins.items():
         if hashlib.sha256((Path(s_dir) / name).read_bytes()).hexdigest() != sha:
             errors.append(f'{recipe.path.name}: codec file {name} differs from its pin')
-    provenance = json.loads((Path(s_dir) / 'provenance.json').read_text())
-    manifest = json.loads((Path(s_dir) / 'manifest.json').read_text())
+    documents = {}
+    for name in ('provenance.json', 'manifest.json'):
+        try:
+            documents[name] = json.loads((Path(s_dir) / name).read_text())
+        except (OSError, ValueError) as error:
+            errors.append(f'{recipe.path.name}: codec {name} is not readable JSON: {error}')
+            continue
+        if not isinstance(documents[name], dict):
+            errors.append(f'{recipe.path.name}: codec {name} is not a JSON object')
+            del documents[name]
+    if len(documents) != 2:
+        return errors
+    provenance, manifest = documents['provenance.json'], documents['manifest.json']
+    # Mirror do_verify_codec in the recipe, which the build runs on the same files.
+    if manifest.get('schema') != 1:
+        errors.append(f'{recipe.path.name}: codec manifest schema {manifest.get("schema")!r} is not 1, '
+                      'which do_verify_codec requires')
+    files = manifest.get('files')
+    if not isinstance(files, dict):
+        errors.append(f'{recipe.path.name}: codec manifest has no "files" object for do_verify_codec')
+    else:
+        for name, entry in sorted(files.items()):
+            sha = entry.get('sha256') if isinstance(entry, dict) else None
+            if pins.get(name) != sha:
+                errors.append(f'{recipe.path.name}: codec manifest and recipe disagree on {name}')
     if provenance.get('source_revision') != recipe.get('SUIFLEET_CODEC_SOURCE_REV'):
         errors.append(f'{recipe.path.name}: codec provenance revision {provenance.get("source_revision")} differs from SUIFLEET_CODEC_SOURCE_REV')
     if ' & '.join(provenance.get('licenses') or []) != recipe.get('LICENSE'):

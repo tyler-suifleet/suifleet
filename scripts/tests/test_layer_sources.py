@@ -2878,6 +2878,78 @@ class LayerAuditTests(unittest.TestCase):
                         audit.safe_extract(archive, Path(tempfile.mkdtemp(dir=self.tmp.name)))
 
 
+class CodecFetchedLayoutTests(unittest.TestCase):
+    """codec_errors checks a fetched codec as do_verify_codec in the recipe does."""
+
+    REV = 'c' * 40
+    NODE = '22.22.2'
+    LICENSE = 'Apache-2.0 & MIT'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.layer = root / 'layer'
+        (self.layer / 'recipes-edge/suifleet-walrus-codec').mkdir(parents=True)
+        self.s_dir = root / 'codec'
+        self.s_dir.mkdir()
+
+    def build(self, schema=1, manifest_files=None, manifest_text=None):
+        payload = {'walrus-device-codec.cjs': b'bundle\n', 'walrus_wasm_bg.wasm': b'\0asm',
+                   'THIRD_PARTY_LICENSES.txt': b'licenses\n'}
+        for name, data in payload.items():
+            (self.s_dir / name).write_bytes(data)
+        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payload.items()}
+        if manifest_files is None:
+            manifest_files = {name: {'sha256': sha} for name, sha in hashes.items()}
+        manifest = {'schema': schema, 'node': self.NODE, 'files': manifest_files}
+        (self.s_dir / 'manifest.json').write_text(manifest_text if manifest_text is not None else json.dumps(manifest))
+        (self.s_dir / 'provenance.json').write_text(json.dumps(
+            {'source_revision': self.REV, 'licenses': self.LICENSE.split(' & ')}))
+        for name in ('manifest.json', 'provenance.json'):
+            hashes[name] = hashlib.sha256((self.s_dir / name).read_bytes()).hexdigest()
+        md5 = hashlib.md5(payload['THIRD_PARTY_LICENSES.txt']).hexdigest()
+        lines = [f'LICENSE = "{self.LICENSE}"',
+                 f'LIC_FILES_CHKSUM = "file://THIRD_PARTY_LICENSES.txt;md5={md5}"',
+                 f'SUIFLEET_CODEC_SOURCE_REV = "{self.REV}"',
+                 f'SUIFLEET_CODEC_NODE_VERSION = "{self.NODE}"']
+        lines += [f'SUIFLEET_CODEC_SHA256[{name}] = "{sha}"' for name, sha in sorted(hashes.items())]
+        path = self.layer / 'recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb'
+        path.write_text('\n'.join(lines) + '\n')
+        return audit.codec_errors(audit.Recipe(path, self.layer), self.s_dir)
+
+    def test_valid_codec_passes(self):
+        self.assertEqual(self.build(), [])
+
+    def test_manifest_schema_must_be_1(self):
+        for schema in (2, 0, '1', None):
+            with self.subTest(schema=schema):
+                errors = self.build(schema=schema)
+                self.assertTrue(any('codec manifest schema' in e and 'is not 1' in e for e in errors), errors)
+
+    def test_manifest_hashes_must_match_the_recipe_pins(self):
+        wrong = {'walrus-device-codec.cjs': {'sha256': 'f' * 64}}
+        errors = self.build(manifest_files=wrong)
+        self.assertTrue(any('codec manifest and recipe disagree on walrus-device-codec.cjs' in e for e in errors), errors)
+        # A manifest entry for a file the recipe does not pin is refused, as BitBake does.
+        errors = self.build(manifest_files={'other.js': {'sha256': 'f' * 64}})
+        self.assertTrue(any('disagree on other.js' in e for e in errors), errors)
+        errors = self.build(manifest_files={'walrus_wasm_bg.wasm': 'not-an-object'})
+        self.assertTrue(any('disagree on walrus_wasm_bg.wasm' in e for e in errors), errors)
+
+    def test_manifest_without_files_object_is_refused(self):
+        for files in ([], 'x'):
+            with self.subTest(files=files):
+                errors = self.build(manifest_files=files)
+                self.assertTrue(any('no "files" object' in e for e in errors), errors)
+
+    def test_unreadable_manifest_is_reported_not_raised(self):
+        errors = self.build(manifest_text='{not json')
+        self.assertTrue(any('codec manifest.json is not readable JSON' in e for e in errors), errors)
+        errors = self.build(manifest_text='[]')
+        self.assertTrue(any('codec manifest.json is not a JSON object' in e for e in errors), errors)
+
+
 class RepositoryLayerTests(unittest.TestCase):
     # SF-295 published every layer source; any finding in the real layer is a regression.
     def test_repository_layer_has_no_source_findings(self):
