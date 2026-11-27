@@ -229,10 +229,17 @@ These static checks always run, on every recipe in the layer:
   overrides are rejected, because the reader doesn't evaluate them. So are
   flagged appends and `?=`/`??=` appends. That way the audited assignment is
   the one BitBake uses in every configuration.
+- The reader joins lines as BitBake does. It strips each physical line's
+  trailing whitespace, then a final backslash joins the next line with its
+  indentation and nothing inserted, so `file://a\` followed by `file://b` is
+  the single token `file://afile://b`. Lines inside shell or Python function
+  bodies stay raw, as BitBake keeps them. A continuation that mixes a comment
+  and code, or ends the file, is refused, because BitBake refuses to parse it.
 - Metadata that BitBake runs after parsing is refused, because it can rewrite
   `SRC_URI` and the other pins after the reader has read them. This covers
-  anonymous Python functions (`python () {`, `python __anonymous () {`, with or
-  without `fakeroot`), `addhandler` event handlers, and `inherit` or
+  anonymous Python functions (any function with no name or named
+  `__anonymous`, such as `python () {`, `python __anonymous () {` or a bare
+  `() {`, with or without `fakeroot`), `addhandler` event handlers, and `inherit` or
   `inherit_defer` of a class in this layer or of an unexpandable class name.
   The rule applies to the recipe, its includes and its bbappends. The refusal is
   static, and the fetcher repeats it before anything is downloaded. Named task
