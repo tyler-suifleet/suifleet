@@ -191,7 +191,9 @@ These static checks always run, on every recipe in the layer:
   not use a query string, a fragment or credentials. They may not use a GitHub
   branch/tag archive, a `raw.githubusercontent.com` or codeload URL at a
   non-commit ref, a `releases/latest` redirect or an expiring release-asset
-  host. The report never repeats a rejected secret: every URL in it, including
+  host. Hosts and schemes match case-insensitively, ignoring a trailing root
+  dot and any port, so `https://GitHub.com./` is refused like `github.com`;
+  paths stay case-sensitive. The report never repeats a rejected secret: every URL in it, including
   failed git command lines, is shown without userinfo, query or fragment
   (`<redacted>`).
 - https sources may use only `name`, `sha256sum`, `subdir`, `unpack=0` or
