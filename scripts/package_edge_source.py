@@ -3,7 +3,7 @@
 
 The archive is produced from committed Git objects only (never a working tree):
 
-    git archive --format=tar REVISION -- <paths> | gzip -n -6
+    git -c tar.umask=0002 archive --format=tar REVISION -- <paths> | gzip -n -6
 
 Paths are the daemon build closure: the root LICENSE, the Cargo manifest and
 lockfile, the crate sources and examples, every Cargo workspace member, every
@@ -15,12 +15,15 @@ each file named by a literal ``include!``/``include_str!``/``include_bytes!``
 is refused. The closure is computed from the revision's
 tree, so a missing workspace member or include target is an error instead of a
 broken release. Ownership, timestamps (the commit time) and modes come from
-``git archive``; ``gzip -n`` omits the name and time, so rebuilding the same
-revision with the same git/gzip produces byte-identical output.
+``git archive``, with ``tar.umask`` pinned to git's default 0002 (which the
+published archives used) so ambient Git configuration cannot change the
+permission bits; ``gzip -n`` omits the name and
+time, so rebuilding the same revision with the same git/gzip produces
+byte-identical output.
 
 Before anything is written, the tar stream is checked against the plan: it
 must contain exactly the planned regular files (plus their directories), each
-with the committed blob's bytes and executable bit. A committed
+with the committed blob's bytes and exact mode (0664, or 0775 when executable). A committed
 ``export-ignore`` or ``export-subst`` attribute that drops or rewrites a build
 input is therefore an error instead of a silently incomplete archive.
 
@@ -90,6 +93,11 @@ FORBIDDEN_NAME = re.compile(
     r'enrollment(\.[a-z]+)?|\.env|\.netrc|id_(rsa|ecdsa|ed25519)|[^/]*\.(pem|p12|pfx|key)|'
     r'[^/]*journal[^/]*|[^/]*\.sqlite3?|[^/]*\.db)$')
 GZIP_LEVEL = '-6'
+
+
+# git's default tar.umask, which the published archives were built with (0664
+# files, 0775 executables and directories).
+TAR_UMASK = 0o002
 
 
 def git(repo, *args):
@@ -956,6 +964,8 @@ def verify_archive(repo, revision, paths, data):
         for member in tar.getmembers():
             name = member.name.rstrip('/')
             if member.isdir() and name in directories:
+                if member.mode != 0o777 & ~TAR_UMASK:
+                    raise ValueError(f'git archive mode {member.mode:04o} for directory {name} is not {0o777 & ~TAR_UMASK:04o}')
                 continue
             if not member.isfile() or name not in expected:
                 raise ValueError(f'git archive emitted an unplanned member: {member.name}')
@@ -965,8 +975,11 @@ def verify_archive(repo, revision, paths, data):
             mode, _, blob = files[name]
             if tar.extractfile(member).read() != git(repo, 'cat-file', 'blob', blob):
                 raise ValueError(f'git archive bytes for {name} differ from the committed blob (export-subst?)')
-            if bool(member.mode & 0o111) != (mode == '100755'):
-                raise ValueError(f'git archive mode for {name} differs from the committed mode {mode}')
+            # Exact bits, not only the executable flag: the permissions are
+            # part of the reproduced bytes.
+            want = (0o777 if mode == '100755' else 0o666) & ~TAR_UMASK
+            if member.mode != want:
+                raise ValueError(f'git archive mode {member.mode:04o} for {name} is not {want:04o} (committed {mode})')
     missing = sorted(expected - seen)
     if missing:
         raise ValueError(f'git archive omitted planned files (export-ignore?): {", ".join(missing)}')
@@ -975,7 +988,10 @@ def verify_archive(repo, revision, paths, data):
 def build(repo, revision, output, paths=None):
     """Write the archive with exclusive creation; return its provenance."""
     info = plan(repo, revision, paths)
-    archive = subprocess.run(['git', '-C', str(repo), 'archive', '--format=tar', info['source_commit'], '--', *info['paths']],
+    # tar.umask decides the archived permission bits; pin the published value
+    # so an ambient user/system/GIT_CONFIG_* value cannot change the bytes.
+    archive = subprocess.run(['git', '-C', str(repo), '-c', f'tar.umask={TAR_UMASK:04o}', 'archive', '--format=tar',
+                              info['source_commit'], '--', *info['paths']],
                              stdout=subprocess.PIPE)
     if archive.returncode != 0:
         raise RuntimeError('git archive failed')

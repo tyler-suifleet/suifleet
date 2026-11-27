@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
 from pathlib import Path
 import shutil
@@ -190,6 +191,54 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.assertEqual((self.out / 'one.tar.gz').read_bytes()[4:8], b'\0\0\0\0', 'gzip header time must be zero')
         with self.assertRaises(FileExistsError):
             packager.build(self.repo.root, 'HEAD', self.out / 'one.tar.gz')
+
+    def test_ambient_tar_umask_cannot_change_the_archive(self):
+        # tar.umask decides the archived permission bits; user, repository or
+        # GIT_CONFIG_* settings must not change the published bytes.
+        self.repo.write('suifleet-edge/build.sh', '#!/bin/sh\n')
+        (self.repo.root / 'suifleet-edge/build.sh').chmod(0o755)
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML.replace(
+            'version = "0.2.3"\n', 'version = "0.2.3"\nbuild = "build.sh"\n', 1))
+        self.repo.commit()
+        reference = packager.build(self.repo.root, 'HEAD', self.out / 'reference.tar.gz')
+        self.assertIn('suifleet-edge/build.sh', reference['paths'])
+        with tarfile.open(self.out / 'reference.tar.gz') as tar:
+            modes = {m.name.rstrip('/'): m.mode for m in tar.getmembers()}
+        self.assertEqual(modes['LICENSE'], 0o664)
+        self.assertEqual(modes['suifleet-edge/build.sh'], 0o775)
+        self.assertEqual(modes['suifleet-edge'], 0o775)
+        ambient = {
+            'repository config 0022': ({}, '0022'),
+            'repository config 0000': ({}, '0000'),
+            'repository config user with process umask 0077': ({}, 'user'),
+            'GIT_CONFIG_COUNT 0022': ({'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'tar.umask',
+                                       'GIT_CONFIG_VALUE_0': '0022'}, None),
+            'GIT_CONFIG_PARAMETERS 0077': ({'GIT_CONFIG_PARAMETERS': "'tar.umask'='0077'"}, None),
+        }
+        for index, (label, (env, config)) in enumerate(ambient.items()):
+            with self.subTest(label):
+                subprocess.run(['git', '-C', str(self.repo.root), 'config', '--unset-all', 'tar.umask'])
+                if config is not None:
+                    self.repo.git('config', 'tar.umask', config)
+                previous = os.umask(0o077)
+                try:
+                    with mock.patch.dict(os.environ, env):
+                        # The unpinned command really is affected by the setting.
+                        raw = subprocess.check_output(['git', '-C', str(self.repo.root), 'archive', '--format=tar',
+                                                       'HEAD', '--', 'LICENSE'])
+                        with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as tar:
+                            self.assertNotEqual(tar.getmember('LICENSE').mode, 0o664)
+                        result = packager.build(self.repo.root, 'HEAD', self.out / f'ambient-{index}.tar.gz')
+                finally:
+                    os.umask(previous)
+                self.assertEqual(result['sha256'], reference['sha256'])
+
+    def test_archive_with_unexpected_modes_is_refused(self):
+        info = packager.plan(self.repo.root, 'HEAD')
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0022', 'archive',
+                                       '--format=tar', info['source_commit'], '--', *info['paths']])
+        with self.assertRaisesRegex(ValueError, r'mode 0755 for directory|mode 0644 for LICENSE'):
+            packager.verify_archive(self.repo.root, info['source_commit'], info['paths'], raw)
 
     def test_missing_workspace_member_or_include_is_refused(self):
         shutil.rmtree(self.repo.root / 'suifleet-edge/windows-runtime')
