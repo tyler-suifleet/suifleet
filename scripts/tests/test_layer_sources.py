@@ -4195,7 +4195,9 @@ class NodeRecipeTests(unittest.TestCase):
         # A larger memory image (.bss) and a congruent page alignment are valid.
         for label, data in {'p_memsz above p_filesz': self.elf(183, memsz=4096),
                             'page aligned': self.elf(183, vaddr=0x400000 + 120, align=0x1000),
-                            'entry at last file byte': self.elf(183, entry=120 + 7)}.items():
+                            # Review finding: the last complete aligned instruction, not the last byte.
+                            'entry at last aligned instruction': self.elf(183, entry=120 + 4),
+                            'entry in an unaligned segment': self.elf(183, vaddr=122, align=2, entry=124, filesz=6)}.items():
             with self.subTest(label):
                 report = self.fetch({'LICENSE': b'node license\n', 'bin/node': data})
                 self.assertEqual(report['errors'], [])
@@ -4225,7 +4227,12 @@ class NodeRecipeTests(unittest.TestCase):
                  'ET_DYN entry outside the segment': self.elf(183, kind=3, entry=0x10000),
                  'entry in a read-only segment': self.elf(183, flags=4),
                  'entry in a writable non-executable segment': self.elf(183, flags=6),
-                 'entry past the file image (.bss)': self.elf(183, memsz=4096, entry=120 + 8)}
+                 'entry past the file image (.bss)': self.elf(183, memsz=4096, entry=120 + 8),
+                 # Review finding: AArch64 entry must be an aligned, complete instruction.
+                 'entry at last file byte (unaligned)': self.elf(183, entry=120 + 7),
+                 'entry unaligned inside the segment': self.elf(183, entry=120 + 2),
+                 'entry instruction truncated by p_filesz': self.elf(183, filesz=6, entry=120 + 4),
+                 'entry instruction straddles into .bss': self.elf(183, filesz=6, memsz=4096, entry=120 + 4)}
         for label, data in cases.items():
             with self.subTest(label):
                 report = self.fetch({'LICENSE': b'node license\n', 'bin/node': data})

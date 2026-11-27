@@ -1200,6 +1200,8 @@ def codec_install_errors(recipe):
 NODE_INSTALL_INPUTS = ('LICENSE', 'bin/node')
 NODE_INSTALL_REF = re.compile(r'\$\{S\}/(\S+)')
 ELF_AARCH64 = 183
+# Every A64 instruction is four bytes, at a four-byte-aligned address.
+AARCH64_INSN = 4
 
 
 ELF64_EHDR, ELF64_PHDR, PT_LOAD, PF_X = 64, 56, 1, 1
@@ -1215,7 +1217,8 @@ def elf_aarch64_problem(data):
     Checks the whole 64-byte ELF header, that the program header table and
     at least one non-empty PT_LOAD segment lie inside the file, that every
     PT_LOAD has p_filesz <= p_memsz and a consistent alignment, and that
-    e_entry lies in the file-backed image of an executable (PF_X) PT_LOAD, so a
+    e_entry is a four-byte-aligned address whose complete first instruction
+    lies in the file-backed image of an executable (PF_X) PT_LOAD, so a
     truncated, header-only, unloadable or unrunnable file is not reported as
     the verified executable."""
     if len(data) < ELF64_EHDR:
@@ -1257,11 +1260,16 @@ def elf_aarch64_problem(data):
         # The kernel starts execution at e_entry (relative to the load bias for
         # ET_DYN, so in the same address space as p_vaddr); it must be backed by
         # file bytes of an executable segment, not .bss or a read-only mapping.
-        entry_mapped |= bool(p_flags & PF_X) and p_vaddr <= e_entry < p_vaddr + p_filesz
+        # AArch64 instructions are four bytes and four-byte aligned, so the
+        # whole first instruction must be in that file image.
+        entry_mapped |= bool(p_flags & PF_X) and p_vaddr <= e_entry and e_entry + AARCH64_INSN <= p_vaddr + p_filesz
     if not loads:
         return 'no non-empty PT_LOAD segment'
+    if e_entry % AARCH64_INSN:
+        return f'e_entry {e_entry:#x} is not four-byte aligned, as AArch64 instructions must be'
     if not entry_mapped:
-        return f'e_entry {e_entry:#x} is not inside the file-backed image of an executable PT_LOAD segment'
+        return (f'e_entry {e_entry:#x} does not start a complete instruction inside the file-backed image of an '
+                'executable PT_LOAD segment')
     return None
 
 
