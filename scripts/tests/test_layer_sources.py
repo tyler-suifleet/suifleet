@@ -1230,6 +1230,71 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue(report['ok'])
         self.assertEqual([f['verified'] for f in report['recipes']['suifleet']['fetched'] if 'revision' in f], [True])
 
+    def test_git_never_runs_in_metadata_planted_by_an_earlier_archive(self):
+        # An earlier pinned archive in the shared unpack tree can carry
+        # git/.git/config. Git would honour that repository-local config
+        # (core.fsmonitor, hooks, ...) despite the isolated HOME, so the audit
+        # must never run Git in a destination an earlier source populated.
+        plant = Path(self.tmp.name) / 'plant.tar.gz'
+        marker = '[core]\n\tfsmonitor = /nonexistent/planted-marker\n'
+        with tarfile.open(plant, 'w:gz') as tar:
+            for name, data in (('git/.git/config', marker.encode()), ('other/README', b'unrelated\n')):
+                info = tarfile.TarInfo(name)
+                info.size, info.mode = len(data), 0o644
+                tar.addfile(info, io.BytesIO(data))
+        plant_sha = sha256(plant.read_bytes())
+        plant_url = f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/plant.tar.gz'
+        head = self.repo.git('rev-parse', 'HEAD').decode().strip()
+
+        def download(url, target):
+            source = plant if url.startswith(plant_url) else self.archive
+            shutil.copyfile(source, target)
+            return sha256(source.read_bytes())
+
+        calls, real_run = [], subprocess.run
+
+        def recording_run(command, *args, **kwargs):
+            calls.append([str(part) for part in command])
+            return real_run(command, *args, **kwargs)
+
+        def report_for(git_params):
+            self.write_recipe(extra=f'SRC_URI += "{plant_url};name=plant {git_params}"\n'
+                                    f'SRC_URI[plant.sha256sum] = "{plant_sha}"\n'
+                                    f'SRCREV_tool = "{head}"\n')
+            calls.clear()
+            with mock.patch.multiple(audit, download=download,
+                                     git_remote=mock.Mock(return_value=f'file://{self.repo.root}')), \
+                    mock.patch.object(audit.subprocess, 'run', side_effect=recording_run):
+                report = audit.check(self.layer, fetch=True)
+            self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+            return report, Path(report['fetch_dir']).resolve() / 'suifleet'
+
+        git_url = 'git://github.com/example/suifleet.git;protocol=https;nobranch=1;name=tool'
+        # Conflicting destination (the default destsuffix=git): refused, and
+        # Git is never invoked at all for that source.
+        report, unpack = report_for(git_url)
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('git destination git already exists' in e for e in report['errors']), report['errors'])
+        self.assertEqual([c for c in calls if c[:1] == ['git']], [])
+        self.assertNotIn('revision', json.dumps(report['recipes']['suifleet']['fetched']))
+        self.assertEqual((unpack / 'git/.git/config').read_text(), marker)
+        # A fresh destination: Git runs only in a private repository outside
+        # the unpack tree, which is then moved into place.
+        report, unpack = report_for(git_url + ';destsuffix=tool')
+        git_calls = [c for c in calls if c[:1] == ['git']]
+        self.assertTrue(git_calls)
+        for call in git_calls:
+            for part in call:
+                if part.startswith('/'):
+                    path = Path(part).resolve()
+                    self.assertNotIn(unpack, (path, *path.parents), call)
+        self.assertEqual([f['verified'] for f in report['recipes']['suifleet']['fetched'] if 'revision' in f], [True],
+                         report['errors'])
+        self.assertFalse(any('tool' in e for e in report['errors']), report['errors'])
+        self.assertEqual(subprocess.check_output(['git', '-C', str(unpack / 'tool'), 'rev-parse', 'HEAD'],
+                                                 text=True).strip(), head)
+        self.assertNotIn('planted-marker', (unpack / 'tool/.git/config').read_text())
+
     def test_assembled_tree_links_are_checked_before_source_checks(self):
         # The final assembled tree is confined again before S is read, even if
         # each source passed its own check.

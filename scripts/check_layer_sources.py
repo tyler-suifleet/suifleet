@@ -1858,13 +1858,38 @@ def fetch_recipe(recipe, workdir, cargo=None):
         destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
         if scheme == 'git':
             rev = recipe.get(f'SRCREV_{params["name"]}') if 'name' in params else recipe.get('SRCREV')
+            # Git never runs inside the unpack tree: an earlier archive could
+            # have planted repository metadata (git/.git/config, hooks) at the
+            # destination, and Git would honour it despite the isolated HOME
+            # and disabled global/system config. A destination that already
+            # exists is refused; the checkout is made in a fresh private
+            # repository outside the unpack tree and only then moved into place.
+            if os.path.lexists(destination):
+                errors.append(f'{recipe.path.name}: {redact_url(url)}: git destination '
+                              f'{destination.relative_to(unpack.resolve()).as_posix() or "."} already exists '
+                              f'(created by an earlier source); not fetched')
+                continue
             remote = git_remote(url)
             env = anonymous_env(Path(workdir))
-            for command in (['init', '-q', str(destination)], ['-C', str(destination), 'fetch', '-q', '--depth', '1', remote, rev],
-                            ['-C', str(destination), 'checkout', '-q', '--detach', 'FETCH_HEAD']):
+            private = Path(tempfile.mkdtemp(prefix='git-', dir=downloads))
+            env['GIT_CEILING_DIRECTORIES'] = str(downloads)
+            for command in (['init', '-q', str(private)], ['-C', str(private), 'fetch', '-q', '--depth', '1', remote, rev],
+                            ['-C', str(private), 'checkout', '-q', '--detach', 'FETCH_HEAD']):
                 subprocess.run(['git', '-c', 'credential.helper=', *command], env=env, check=True)
-            actual = subprocess.check_output(['git', '-C', str(destination), 'rev-parse', 'HEAD'], env=env, text=True).strip()
-            branch_error = None if params.get('nobranch') == '1' else git_branch_error(destination, remote, params.get('branch', ''), rev, env)
+            actual = subprocess.check_output(['git', '-C', str(private), 'rev-parse', 'HEAD'], env=env, text=True).strip()
+            branch_error = None if params.get('nobranch') == '1' else git_branch_error(private, remote, params.get('branch', ''), rev, env)
+            try:
+                parent = confined(unpack, os.path.relpath(destination.parent, unpack.resolve()), 'unpack destination')
+                parent.mkdir(parents=True, exist_ok=True)
+                # Re-check immediately before the move: rename() would replace
+                # an empty directory created in the meantime.
+                if os.path.lexists(destination) or confined(unpack, os.path.relpath(destination, unpack.resolve()),
+                                                            'unpack destination') != destination:
+                    raise ValueError(f'git destination {destination.relative_to(unpack.resolve()).as_posix()} '
+                                     f'changed before the checkout was moved into place')
+                os.rename(private, destination)
+            except (OSError, ValueError) as error:
+                return errors + [f'{recipe.path.name}: {redact_url(url)}: {error}'], fetched
             fetched.append({'url': redact_url(url), 'revision': actual, 'branch': params.get('branch') if params.get('nobranch') != '1' else None,
                             'verified': actual == rev and branch_error is None})
             if actual != rev:
