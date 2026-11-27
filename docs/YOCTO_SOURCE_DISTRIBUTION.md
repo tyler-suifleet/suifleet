@@ -466,7 +466,10 @@ Git itself never runs inside the unpack directory. An earlier archive could
 place repository metadata such as `git/.git/config` at a Git source's
 destination, and Git honours repository-local configuration even with an
 isolated `HOME` and no global or system configuration. A Git destination that
-already exists is therefore refused and not fetched. Otherwise the audit
+already exists is therefore refused and not fetched. Only the destination's
+parent directory is resolved and confined; the final name is checked and created
+as declared, so an existing symlink there (even a dangling one) counts as an
+existing destination rather than being followed to its target. Otherwise the audit
 initializes, fetches, checks out and verifies the branch in a fresh private
 repository outside the unpack tree, then moves it into place.
 
