@@ -801,6 +801,12 @@ def include_references(source_path, data):
     for raw, code in literal_references(source_path, data):
         if not raw:
             raise ValueError(f'{source_path} references an empty path')
+        # A trailing `/`, or a final `.` or `..` component, names a directory,
+        # so the compiler fails with "Not a directory" even when the
+        # normalized path is a regular file. PurePosixPath would silently
+        # drop that syntax below; refuse it first.
+        if raw.endswith(b'/') or raw.rsplit(b'/', 1)[-1] in (b'.', b'..'):
+            raise ValueError(f'{source_path} references a directory, not a file: {raw.decode()}')
         # The compiler traverses every directory named in the literal path,
         # so `dir/../x` needs `dir` to exist even though it is cancelled. The
         # closure only packages the final target, so such a path would compile

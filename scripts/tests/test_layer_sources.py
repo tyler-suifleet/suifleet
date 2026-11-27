@@ -711,6 +711,34 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.assertIn('suifleet-edge/tools/helper.rs', info['paths'])
         self.assertNotIn('suifleet-edge/tools/anchor/README', info['paths'])
 
+    def test_directory_only_terminal_syntax_is_refused(self):
+        # Review 5204: a trailing `/` or a final `.`/`..` component names a
+        # directory, so rustc fails with "Not a directory" even though the
+        # normalized path is a regular file that the closure would package.
+        self.repo.write('suifleet-edge/extra/helper.inc', 'pub fn f() {}\n')
+        for source in ('#[r#path = "../extra/helper.inc/"]\nmod helper;\nfn main() { helper::f() }\n',
+                       '#[path = "../extra/helper.inc/."]\nmod helper;\nfn main() {}\n',
+                       '#[cfg_attr(unix, path = "../extra/helper.inc//")]\nmod helper;\nfn main() {}\n',
+                       'include!("../extra/helper.inc/");\nfn main() {}\n',
+                       'const D: &str = include_str!("../extra/helper.inc/.");\nfn main() {}\n',
+                       'const D: &[u8] = include_bytes!("../extra/..");\nfn main() {}\n',
+                       'const D: &str = include_str!(".");\nfn main() {}\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source)
+                rev = self.repo.commit()
+                output = self.out / 'directory-syntax.tar.gz'
+                with self.assertRaisesRegex(ValueError, r'src/main.rs references a directory, not a file'):
+                    packager.build(self.repo.root, rev, output)
+                self.assertFalse(output.exists())
+        # Leading `./` and `../`, and `.` inside a file name, keep working.
+        self.repo.write('suifleet-edge/extra/v1.0.inc', 'pub fn g() {}\n')
+        self.repo.write('suifleet-edge/src/main.rs', '#[path = "./../extra/helper.inc"]\nmod helper;\n'
+                        'include!("../extra/v1.0.inc");\nfn main() { helper::f(); g() }\n')
+        rev = self.repo.commit()
+        info = packager.build(self.repo.root, rev, self.out / 'file-syntax.tar.gz')
+        self.assertIn('suifleet-edge/extra/helper.inc', info['paths'])
+        self.assertIn('suifleet-edge/extra/v1.0.inc', info['paths'])
+
     def test_code_includes_are_followed_whatever_their_suffix(self):
         # The reviewer's reproduction: include! compiles its target as Rust
         # even when it is not named .rs, so that file's own includes are
@@ -3636,6 +3664,39 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
                     self.archive = original
                 self.addCleanup(shutil.rmtree, report['fetch_dir'])
                 expected = 'suifleet-edge/src/main.rs references a path that cancels a directory with ".."'
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+                self.assertFalse(report['ok'])
+
+    def test_fetch_refuses_directory_only_terminal_syntax(self):
+        # Review 5204's fetched-layout reproduction: a pinned archive holding
+        # extra/helper.inc must not audit clean for "../extra/helper.inc/" or
+        # "../extra/helper.inc/.", which rustc rejects as "Not a directory".
+        for index, literal in enumerate(('../extra/helper.inc/', '../extra/helper.inc/.')):
+            with self.subTest(literal):
+                pending = {'suifleet-edge/src/main.rs': f'#[r#path = "{literal}"]\nmod helper;\n'
+                           'fn main() { helper::f() }\n',
+                           'suifleet-edge/extra/helper.inc': 'pub fn f() {}\n'}
+                archive = self.archive.with_name(f'directory-syntax-{index}.tar.gz')
+                with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+                    for member in source.getmembers():
+                        data = source.extractfile(member) if member.isfile() else None
+                        if member.name in pending:
+                            text = pending.pop(member.name).encode()
+                            member.size, data = len(text), io.BytesIO(text)
+                        tar.addfile(member, data)
+                    for name, text in pending.items():
+                        added = tarfile.TarInfo(name)
+                        added.size, added.mode = len(text), 0o644
+                        tar.addfile(added, io.BytesIO(text.encode()))
+                self.write_recipe(sha=sha256(archive.read_bytes()))
+                original, self.archive = self.archive, archive
+                try:
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, fetch=True)
+                finally:
+                    self.archive = original
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                expected = f'suifleet-edge/src/main.rs references a directory, not a file: {literal}'
                 self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
                 self.assertFalse(report['ok'])
 
