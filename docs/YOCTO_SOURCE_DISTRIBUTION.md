@@ -407,7 +407,9 @@ the layer assigns `CARGO_LOCK_PATH`, `CARGO_MANIFEST_PATH` or
 variable), the expanded value must name `${S}/${CARGO_SRC_DIR}/Cargo.lock`,
 `.../Cargo.toml` or that directory exactly. Any other value is refused, even a
 missing file inside `S`, so the audit never certifies a lockfile other than the
-one BitBake verifies.
+one BitBake verifies. The two file paths must also end in the file name itself:
+a trailing `/` or `/.` is refused, because `open()` fails on a regular file
+named that way.
 
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
