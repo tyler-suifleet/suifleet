@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Build, inspect and compare two Raspberry Pi starter images without signing."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import tempfile
+
+from deployment_manifest import version
+from inspect_pi_image import inspect, sha
+from release import write_json
+
+ROOT = Path(__file__).resolve().parents[1]
+PROFILE = ROOT / 'kas/pi-starter.yml'
+MACHINE = 'raspberrypi3-64'
+TARGET = 'raspberrypi3-64-starter'
+LAYER = 'meta-suifleet'
+REPOS = ('poky', 'meta-openembedded', 'meta-raspberrypi', 'meta-lts-mixins', LAYER)
+RECIPE = Path(LAYER) / 'recipes-edge/suifleet/suifleet_1.0.bb'
+ENROLLMENT = ROOT / "suifleet-edge/meta-suifleet-enrollment/recipes-edge/suifleet/files"
+IMAGE = f'suifleet-pi-image-{MACHINE}.rootfs'
+OUTPUTS = {
+    '.wic.bz2': 'suifleet-pi-starter.wic.bz2',
+    '.wic.bmap': 'suifleet-pi-starter.wic.bmap',
+    '.spdx.tar.zst': 'sbom.spdx.tar.zst',
+    '.manifest': 'packages.manifest',
+}
+ASSETS = {*OUTPUTS.values(), 'SHA256SUMS', 'deployment-manifest.json', 'provenance.json'}
+
+
+def check_compatibility(manifest, crate_version):
+    if (manifest['network'], manifest['chain_identifier']) != ('testnet', '4c78adac'):
+        raise ValueError('starter image requires the Sui testnet deployment manifest')
+    bounds = manifest['supported_clients']['edge']
+    if not version(bounds['min']) <= version(crate_version) < version(bounds['max_exclusive']):
+        raise ValueError(f'Edge {crate_version} is outside [{bounds["min"]}, {bounds["max_exclusive"]})')
+    return bounds
+
+
+def read_recipe(environment, recipe, manifest):
+    def value(name):
+        match = re.search(rf'^"{re.escape(name)}"="([^"\n]*)"$', environment, re.M)
+        if not match:
+            match = re.search(rf'^{re.escape(name)}="([^"\n]*)"$', environment, re.M)
+        if not match:
+            raise ValueError(f'effective daemon recipe lacks {name}')
+        return match.group(1)
+
+    pins = {
+        'source_revision': value('SRCREV'),
+        'lock_sha256': value('SUIFLEET_LOCK_SHA256'),
+        'crate_version': value('SUIFLEET_CRATE_VERSION'),
+    }
+    check_compatibility(manifest, pins['crate_version'])
+    urls = shlex.split(value('SRC_URI'))
+    archive, = (url.split(';', 1)[0] for url in urls if ';name=edge;' in url)
+    checksum = re.search(r'^SRC_URI\[edge\.sha256sum\] = "([0-9a-f]{64})"$', recipe, re.M)
+    if not checksum:
+        raise ValueError('effective daemon archive lacks a SHA-256 pin')
+    service = 'suifleet-first-boot-enrollment.service'
+    if service not in value('SYSTEMD_SERVICE:suifleet').split():
+        raise ValueError('effective daemon recipe does not register first-boot enrollment')
+    files = {}
+    search = [Path(path) for path in value('FILESPATH').split(':') if path]
+    for name in ('first-boot-enrollment.patch', service):
+        selected = next((path / name for path in search if (path / name).is_file()), None)
+        if f'file://{name}' not in urls or selected is None or selected.resolve() != (ENROLLMENT / name).resolve():
+            raise ValueError(f'effective daemon recipe lacks reviewed SF-322 input {name}')
+        files[name] = sha(selected)
+    return pins, {'archive_url': archive, 'archive_sha256': checksum.group(1), 'enrollment_files': files}
+
+
+def git(directory, *args):
+    return subprocess.check_output(['git', '-C', directory, *args], text=True).strip()
+
+
+def inspect_output(work, deploy, pins):
+    # Match the filesystem tools that created this image. Ubuntu 22.04's
+    # e2fsprogs predates the orphan_file feature used by the pinned Yocto tools.
+    data = json.loads((deploy / (IMAGE + '.testdata.json')).read_text())
+    sysroot = work / 'build' / data['RECIPE_SYSROOT_NATIVE']
+    with tempfile.TemporaryDirectory(dir=work, prefix='inspect-') as scratch:
+        evidence = inspect(deploy / (IMAGE + '.wic.bz2'), Path(scratch), sysroot / 'usr/bin',
+                           debugfs=sysroot / 'sbin/debugfs', e2fsck=sysroot / 'sbin/e2fsck',
+                           pins=pins, starter=True)
+    evidence.pop('image')
+    return evidence
+
+
+def build(work, manifest, preflight_only):
+    work.mkdir()
+    # Separate checkouts, build directories and default sstate caches.
+    env = os.environ | {
+        'KAS_WORK_DIR': str(work),
+        'KAS_BUILD_DIR': str(work / 'build'),
+        'KAS_TARGET': 'suifleet-pi-image',
+        'KAS_MACHINE': MACHINE,
+        'KAS_DISTRO': 'poky',
+    }
+    for name in ('KAS_REPO_REF_DIR', 'SSTATE_DIR', 'SSTATE_MIRRORS', 'DL_DIR',
+                 'BB_ENV_PASSTHROUGH_ADDITIONS', 'BBPATH', 'TMPDIR'):
+        env.pop(name, None)
+    args = ['kas', 'build', str(PROFILE)]
+    subprocess.run(['kas', 'checkout', str(PROFILE)], env=env, cwd=ROOT, check=True)
+    revisions = {repo: git(work / repo, 'rev-parse', 'HEAD') for repo in REPOS}
+    recipe = subprocess.check_output(
+        ['kas', 'shell', str(PROFILE), '-c', 'bitbake -e suifleet'],
+        env=env, cwd=ROOT, text=True,
+    )
+    pins, sources = read_recipe(recipe, (work / RECIPE).read_text(), manifest)
+    if preflight_only:
+        return
+    subprocess.run(args, env=env, cwd=ROOT, check=True)
+    deploy = work / 'build/tmp/deploy/images' / MACHINE
+    return deploy, revisions, pins, sources, inspect_output(work, deploy, pins)
+
+
+def prepare_bundle(out, deploy, second, commit, pins, manifest_path, provenance):
+    for suffix in ('.wic.bz2', '.manifest'):
+        name = IMAGE + suffix
+        if sha(deploy / name) != sha(second / name):
+            raise ValueError(f'independent builds differ for {suffix}')
+    out.mkdir()
+    for suffix, name in OUTPUTS.items():
+        shutil.copyfile(deploy / (IMAGE + suffix), out / name)
+    shutil.copyfile(manifest_path, out / 'deployment-manifest.json')
+    write_json(out / 'provenance.json', provenance)
+    files = sorted(out.iterdir())
+    (out / 'SHA256SUMS').write_text(''.join(f'{sha(path)}  {path.name}\n' for path in files))
+    files.append(out / 'SHA256SUMS')
+    write_json(out / 'release.json', {
+        'schema': 1,
+        'name': 'suifleet-pi-starter',
+        'version': pins['crate_version'],
+        'commit': commit,
+        'target': TARGET,
+        'files': [{'path': path.name, 'size': path.stat().st_size, 'sha256': sha(path)} for path in files],
+    })
+
+
+def build_candidate(work, manifest_path, out):
+    manifest = json.loads(manifest_path.read_text())
+    deploy, revisions, pins, sources, evidence = build(work, manifest, False)
+    out.mkdir()
+    for suffix in OUTPUTS:
+        name = IMAGE + suffix
+        shutil.copyfile(deploy / name, out / name)
+    shutil.copyfile(manifest_path, out / 'deployment-manifest.json')
+    write_json(out / 'build.json', {
+        'schema': 1,
+        'commit': git(ROOT, 'rev-parse', 'HEAD'),
+        'target': TARGET,
+        'repositories': revisions,
+        'daemon_sources': pins | sources,
+        'kas': subprocess.check_output(['kas', '--version'], text=True).strip(),
+        'edge_compatibility': check_compatibility(manifest, pins['crate_version']),
+        'inspection': evidence,
+    })
+
+
+def compare_candidates(first, second, out):
+    provenance = json.loads((first / 'build.json').read_text())
+    manifest_path = first / 'deployment-manifest.json'
+    for name in ('build.json', 'deployment-manifest.json'):
+        if (first / name).read_bytes() != (second / name).read_bytes():
+            raise ValueError(f'independent build metadata differs for {name}')
+    if (provenance['commit'], provenance['target']) != (git(ROOT, 'rev-parse', 'HEAD'), TARGET):
+        raise ValueError('candidate commit or target does not match the checkout')
+    prepare_bundle(out, first, second, provenance['commit'], provenance['daemon_sources'],
+                   manifest_path, provenance | {
+                       'independent_image_digests_match': True,
+                       'qemu_boot_tested': False,
+                       'physical_boot_tested': False,
+                   })
+
+
+def verify_unsigned(bundle, commit, release_version):
+    expected = ASSETS | {'release.json'}
+    entries = list(bundle.iterdir())
+    if {path.name for path in entries} != expected or any(
+        path.is_symlink() or not path.is_file() for path in entries
+    ):
+        raise ValueError('unexpected unsigned bundle contents')
+    manifest = json.loads((bundle / 'release.json').read_text())
+    files = manifest.pop('files')
+    if manifest != {
+        'schema': 1, 'name': 'suifleet-pi-starter', 'version': release_version,
+        'commit': commit, 'target': TARGET,
+    }:
+        raise ValueError('unsigned bundle identity does not match the release ref')
+    if len(files) != len(ASSETS) or {item['path'] for item in files} != ASSETS:
+        raise ValueError('unexpected unsigned manifest file list')
+    for item in files:
+        path = bundle / item['path']
+        if item != {'path': path.name, 'size': path.stat().st_size, 'sha256': sha(path)}:
+            raise ValueError(f'unsigned bundle file verification failed for {path.name}')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--manifest', type=Path, help='public testnet deployment-manifest.json')
+    parser.add_argument('--work', type=Path, help='new build directory')
+    parser.add_argument('--out', type=Path, help='new directory for build outputs or the unsigned bundle')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--preflight-only', action='store_true')
+    mode.add_argument('--single-build', action='store_true')
+    mode.add_argument('--compare', nargs=2, type=Path, metavar=('FIRST', 'SECOND'))
+    mode.add_argument('--verify-unsigned', type=Path, metavar='BUNDLE')
+    parser.add_argument('--commit')
+    parser.add_argument('--version')
+    args = parser.parse_args()
+    if args.verify_unsigned:
+        if not args.commit or not args.version:
+            parser.error('--verify-unsigned requires --commit and --version')
+        verify_unsigned(args.verify_unsigned, args.commit, args.version)
+        return
+    if not args.preflight_only and (args.out is None or args.out.exists()):
+        parser.error('--out must name a new directory')
+    if args.compare:
+        compare_candidates(*args.compare, args.out)
+        return
+    if args.manifest is None or args.work is None:
+        parser.error('building requires --manifest and --work')
+    if git(ROOT, 'status', '--porcelain'):
+        parser.error('build from a clean committed checkout')
+    args.work.mkdir(parents=True)
+    manifest_path = args.work / 'deployment-manifest.json'
+    shutil.copyfile(args.manifest, manifest_path)
+    work = args.work.resolve()
+    if args.preflight_only:
+        build(work / 'first', json.loads(manifest_path.read_text()), True)
+    elif args.single_build:
+        build_candidate(work / 'first', manifest_path, args.out)
+    else:
+        first, second = work / 'candidate-first', work / 'candidate-second'
+        build_candidate(work / 'first', manifest_path, first)
+        build_candidate(work / 'second', manifest_path, second)
+        compare_candidates(first, second, args.out)
+
+
+if __name__ == '__main__':
+    main()

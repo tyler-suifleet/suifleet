@@ -1,0 +1,35 @@
+name: Standalone Yocto layer export
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/yocto-export.yml'
+      - 'kas/packaging*.yml'
+      - 'scripts/export_yocto_layer.py'
+      - 'scripts/tests/test_yocto*.py'
+      - 'suifleet-edge/meta-suifleet/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/yocto-export.yml'
+      - 'kas/packaging*.yml'
+      - 'scripts/export_yocto_layer.py'
+      - 'scripts/tests/test_yocto*.py'
+      - 'suifleet-edge/meta-suifleet/**'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check export inventory, series pins and byte reproducibility
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_yocto*.py'
+          python3 scripts/export_yocto_layer.py --revision HEAD --output "$RUNNER_TEMP/layer-a.tar.gz"
+          python3 scripts/export_yocto_layer.py --revision HEAD --output "$RUNNER_TEMP/layer-b.tar.gz"
+          cmp "$RUNNER_TEMP/layer-a.tar.gz" "$RUNNER_TEMP/layer-b.tar.gz"

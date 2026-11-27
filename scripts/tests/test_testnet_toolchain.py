@@ -80,7 +80,7 @@ class ToolIdentity(unittest.TestCase):
     def test_exact_pins_accepted_with_provenance(self):
         found = self.check(tools())
         self.assertEqual(found['build']['max_protocol'], 138)
-        self.assertEqual(found['network']['max_protocol'], 142)
+        self.assertEqual(found['network']['max_protocol'], 144)
         self.assertEqual(found['network']['sha256'], tc.NETWORK['binary_sha256'])
 
     def test_path_substitution_is_refused(self):
@@ -123,13 +123,25 @@ class ProtocolPreflight(unittest.TestCase):
             tc.preflight({'build': dict(tc.BUILD), 'network': old}, facts, '4c78adac')
         result = tc.preflight(self.TOOLS, facts, '4c78adac')
         self.assertEqual(result['protocol_version'], 142)
-        self.assertEqual(result['network_cli_max_protocol'], 142)
+        self.assertEqual(result['network_cli_max_protocol'], 144)
+        self.assertEqual(result['build_cli_max_protocol'], 138)
+        self.assertTrue(result['build_cli_offline'])
+
+    def test_protocol144_refuses_previous_cli_and_accepts_pinned_cli(self):
+        # Run 45905675964 (SF-307 PR #860) stopped at read-only preflight.
+        facts = {'chain_identifier': '4c78adac', 'protocol_version': 144}
+        old = dict(tc.NETWORK, version='sui 1.84.0-9dc25070cf2e', max_protocol=142)
+        with self.assertRaisesRegex(tc.Incompatible, r'144 exceeds.*support \(142\)'):
+            tc.preflight({'build': dict(tc.BUILD), 'network': old}, facts, '4c78adac')
+        result = tc.preflight(self.TOOLS, facts, '4c78adac')
+        self.assertEqual(result['protocol_version'], 144)
+        self.assertEqual(result['network_cli_max_protocol'], 144)
         self.assertEqual(result['build_cli_max_protocol'], 138)
         self.assertTrue(result['build_cli_offline'])
 
     def test_newer_protocol_refused_before_writes(self):
-        with self.assertRaisesRegex(tc.Incompatible, '143 exceeds'):
-            tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'protocol_version': 143}, '4c78adac')
+        with self.assertRaisesRegex(tc.Incompatible, '145 exceeds'):
+            tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'protocol_version': 145}, '4c78adac')
 
     def test_protocol_140_refuses_previous_transaction_cli(self):
         # Reproduce run 41133167458: stop before any wallet mutation.

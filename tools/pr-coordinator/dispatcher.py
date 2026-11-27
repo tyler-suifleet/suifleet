@@ -95,9 +95,16 @@ def dependency_wait(result, key):
 
     Anything else (free-form blocked text, hardware/production authorization,
     errors or extra conditions) is not resumable automatically."""
-    wait = result.get('dependency_wait') if isinstance(result, dict) else None
-    if (result.get('verdict') != 'blocked' or not isinstance(result.get('evidence'), str)
-            or not result['evidence'].strip() or not isinstance(wait, dict)):
+    if not isinstance(result, dict):
+        return None
+    wait = result.get('dependency_wait')
+    evidence = result.get('evidence')
+    # Older workers wrote diagnostic objects/lists. Explicit wait intent still
+    # carries the authority; diagnostics are not a resume permission and their
+    # serialization must not silently disable the existing ownership fences.
+    has_evidence = (isinstance(evidence, str) and bool(evidence.strip())
+                    or isinstance(evidence, (dict, list)) and bool(evidence))
+    if (result.get('verdict') != 'blocked' or not has_evidence or not isinstance(wait, dict)):
         return None
     if set(wait) != {'tickets', 'integration'} or wait['integration'] != 'merged_main':
         return None
@@ -2039,7 +2046,7 @@ When local implementation acceptance is ready, push, mark PR Ready and ticket Re
 {CI_HANDOFF}
 Write {directory/'result.json'} as JSON with verdict review_ready, actual model, and nonempty evidence including PR/head/tests/limits.
 Then EXIT: the existing PR coordinator handles independent review/feedback/merge, and this dispatcher assigns your successor.
-On a real blocker write verdict blocked with evidence and leave the claim reserved; do not silently return success.
+On a real blocker write verdict blocked with nonempty STRING evidence and leave the claim reserved; do not silently return success.
 Specification snapshot: {json.dumps(claim['spec'])}
 '''
 

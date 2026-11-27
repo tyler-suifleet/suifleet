@@ -1,0 +1,62 @@
+name: Standalone OpenEmbedded layer
+on:
+  pull_request:
+    branches: [main, kirkstone, scarthgap, wrynose]
+  push:
+    branches: [main, kirkstone, scarthgap, wrynose]
+  workflow_dispatch:
+    inputs:
+      runtime:
+        description: Also run AArch64 user-mode package smoke
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-openembedded
+  cancel-in-progress: false
+
+jobs:
+  layer:
+    name: Layer and packages (${{ matrix.series }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        series:
+          - kirkstone
+          - scarthgap
+          - wrynose
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Verify anonymous source archives and crate inventory
+        run: python3 ci/sources.py
+      - name: Install OpenEmbedded host prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential chrpath cpio debianutils diffstat file gawk \
+            gcc-multilib git iputils-ping libacl1 locales python3-git python3-jinja2 \
+            python3-pexpect python3-subunit python3-venv rpcsvc-proto socat texinfo unzip wget xz-utils zstd lz4
+          sudo locale-gen en_US.UTF-8
+      - name: Install pinned Wrynose BitBake Python dependency
+        if: matrix.series == 'wrynose'
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/wrynose-python"
+          "$RUNNER_TEMP/wrynose-python/bin/python" -m pip install --no-deps --require-hashes -r ci/wrynose-host.txt
+          echo "$RUNNER_TEMP/wrynose-python/bin" >> "$GITHUB_PATH"
+      - name: Check layer and build packages
+        env:
+          SERIES: ${{ matrix.series }}
+          LANG: en_US.UTF-8
+        run: ci/build.sh "$SERIES" "$RUNNER_TEMP/oe" all
+      - name: Smoke test packages under QEMU user mode
+        if: github.event_name == 'workflow_dispatch' && inputs.runtime
+        run: |
+          sudo apt-get install -y qemu-user
+          python3 ci/packages.py "$RUNNER_TEMP/oe/build" --runtime

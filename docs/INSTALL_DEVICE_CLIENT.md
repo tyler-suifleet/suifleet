@@ -37,7 +37,7 @@ Do not install unverified binaries.
 
 | Platform | How to get it | Status |
 |---|---|---|
-| Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
+| Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) and [starter image build and verification](CUSTOMER_PI_IMAGE.md#reusable-testnet-starter-image) | Image builds and QEMU boot recorded; physical Pi acceptance pending (physical-target validation is still pending) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
 | Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
 | Rocky Linux 10 (x86_64, systemd, Linux ≥6.5) | [RPM packaging](RPM_PACKAGING.md) | Buildable RPM and signed repository staging; public repository pending |
@@ -53,9 +53,10 @@ repository. Each device generates its own at first boot or install.
 
 ## Yocto image and recipe
 
-Get the software layer from the public
-[meta-suifleet repository](https://github.com/tyler-suifleet/meta-suifleet).
-The Pi image commands below run from the core source checkout.
+For an existing OE product, follow the [OpenEmbedded integration guide](CUSTOMER_YOCTO.md)
+to pin the [public meta-suifleet layer](https://github.com/tyler-suifleet/meta-suifleet)
+and add the client to your image.
+The Pi image commands below run from a reviewed core source checkout.
 
 The `meta-suifleet` layer packages the client as the `suifleet` recipe, with
 first-boot key provisioning and systemd services. Build a Raspberry Pi 3 Model
@@ -68,10 +69,7 @@ kas build kas/pi-image.yml:/absolute/path/to/private-access.yml
 ```
 
 The private overlay adds your SSH public key; see [Pi image guide](CUSTOMER_PI_IMAGE.md)
-for it, flashing and first login. To add only the client to your own image,
-add the standalone layer to `BBLAYERS` and `suifleet` to the image's
-packages; [Yocto guide](CUSTOMER_YOCTO.md) lists the pinned inputs and
-package-only builds.
+for the overlay, flashing and first login.
 
 The recipe now pins client 0.2.3, compatible with the committed Seal testnet
 profile. Older evaluation images contain client 0.2.1 and cannot use a manifest

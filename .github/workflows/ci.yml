@@ -254,7 +254,8 @@ jobs:
     # then the shipped LaunchDaemon (installed as root) and kernel-authenticated
     # IPC across distinct users, against the local simulator. No secrets.
     name: macOS runtime (launchd)
-    runs-on: macos-15
+    # Explicit Intel pool avoids the hosted ARM capacity cancellations.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

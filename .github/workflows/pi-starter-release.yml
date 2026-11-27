@@ -1,0 +1,213 @@
+# Deliberate release only. Yocto builds run outside the protected release environment.
+name: Raspberry Pi starter release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-starter-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: startsWith(github.ref, 'refs/tags/pi-starter-v')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require protected release signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rules=$(gh api "repos/$GITHUB_REPOSITORY/environments/release" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers | length] | add // 0')
+          test "$rules" -gt 0
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Verify the release ref and snapshot the deployment manifest
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^pi-starter-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git fetch --no-tags origin refs/heads/main
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
+          curl --fail --silent --show-error --proto '=https' --max-time 30 \
+            https://app.suifleet.io/deployment-manifest.json -o "$RUNNER_TEMP/deployment-manifest.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pi-starter-network
+          path: ${{ runner.temp }}/deployment-manifest.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  build:
+    needs: preflight
+    strategy:
+      matrix:
+        replica: [first, second]
+    # Select a dedicated large GitHub-hosted Linux runner that can build one image in six hours.
+    runs-on: ${{ vars.PI_STARTER_BUILD_RUNNER }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pi-starter-network
+          path: ${{ runner.temp }}/network
+      - name: Install build and inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential chrpath cpio debianutils diffstat e2fsprogs file gawk \
+            iputils-ping libacl1 locales mtools python3-pip python3-pexpect \
+            python3-venv socat texinfo unzip wget xz-utils zstd
+          python3 -m venv "$RUNNER_TEMP/kas"
+          "$RUNNER_TEMP/kas/bin/pip" install 'kas==4.7'
+          echo "$RUNNER_TEMP/kas/bin" >> "$GITHUB_PATH"
+      - name: Build and inspect one image
+        run: |
+          python3 scripts/build_pi_starter.py --single-build \
+            --manifest "$RUNNER_TEMP/network/deployment-manifest.json" \
+            --work "$RUNNER_TEMP/pi-build" --out "$RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pi-starter-candidate-${{ matrix.replica }}
+          path: ${{ runner.temp }}/candidate/
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  compare:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: pi-starter-candidate-*
+          path: ${{ runner.temp }}/candidates
+      - name: Compare build evidence and assemble the unsigned bundle
+        run: |
+          python3 scripts/build_pi_starter.py \
+            --compare "$RUNNER_TEMP/candidates/pi-starter-candidate-first" \
+                      "$RUNNER_TEMP/candidates/pi-starter-candidate-second" \
+            --out "$RUNNER_TEMP/bundle"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-pi-starter
+          path: ${{ runner.temp }}/bundle/
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  sign:
+    needs: compare
+    runs-on: ubuntu-22.04
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-pi-starter
+          path: ${{ runner.temp }}/bundle
+      - name: Verify the release ref and unsigned bundle
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^pi-starter-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git fetch --no-tags origin "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA"
+          git fetch --no-tags origin refs/heads/main
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
+          python3 scripts/build_pi_starter.py --verify-unsigned "$RUNNER_TEMP/bundle" \
+            --commit "$GITHUB_SHA" --version "${GITHUB_REF_NAME#pi-starter-v}"
+      - name: Build the pinned SF-039 signing tools
+        run: |
+          docker build -f docker/release.Dockerfile \
+            --build-arg USER_UID="$(id -u)" --build-arg USER_GID="$(id -g)" \
+            -t suifleet-pi-release docker/
+          docker run --rm -v "$PWD:/workspace" -w /workspace/suifleet-edge suifleet-pi-release \
+            cargo build --locked --release --example sign_release --bin suifleet
+      - name: Sign and verify the bundle
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY_ID: ${{ vars.RELEASE_SIGNING_KEY_ID }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY"
+          test -n "$RELEASE_SIGNING_KEY_ID"
+          key_dir=$(mktemp -d)
+          trap 'shred -u "$key_dir/key" 2>/dev/null; rmdir "$key_dir"' EXIT
+          umask 077
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key_dir/key"
+          unset RELEASE_SIGNING_KEY
+          docker run --rm --network none -v "$PWD:/workspace:ro" -v "$key_dir:/key:ro" \
+            -v "$RUNNER_TEMP/bundle:/bundle" -w /workspace/suifleet-edge \
+            -e KEY_ID="$RELEASE_SIGNING_KEY_ID" suifleet-pi-release bash -ec '
+              ./target/release/examples/sign_release sign /key/key "$KEY_ID" /bundle
+              ./target/release/suifleet --verify-release /bundle ../release/trust.toml raspberrypi3-64-starter'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-pi-starter
+          path: ${{ runner.temp }}/bundle/
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  publish:
+    needs: sign
+    runs-on: ubuntu-22.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: signed-pi-starter
+          path: bundle
+      - name: Verify the signed download and tag
+        run: |
+          git fetch --no-tags origin "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA"
+          git fetch --no-tags origin refs/heads/main
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
+          docker build -f docker/release.Dockerfile \
+            --build-arg USER_UID="$(id -u)" --build-arg USER_GID="$(id -g)" \
+            -t suifleet-pi-release docker/
+          docker run --rm -v "$PWD:/workspace" -v "$PWD/bundle:/bundle:ro" \
+            -w /workspace/suifleet-edge suifleet-pi-release cargo run --locked --release \
+            --bin suifleet -- --verify-release /bundle ../release/trust.toml raspberrypi3-64-starter
+          jq -e --arg commit "$GITHUB_SHA" --arg version "${GITHUB_REF_NAME#pi-starter-v}" '
+            .commit == $commit and .version == $version and .name == "suifleet-pi-starter" and
+            ([.files[].path] | sort) == ["SHA256SUMS","deployment-manifest.json","packages.manifest",
+                "provenance.json","sbom.spdx.tar.zst","suifleet-pi-starter.wic.bmap","suifleet-pi-starter.wic.bz2"]
+          ' bundle/release.json
+      - name: Require immutable releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_IMMUTABILITY_READ_TOKEN }}
+        run: test "$(gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)" = true
+      - name: Publish signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --latest=false \
+            --title "Raspberry Pi starter $GITHUB_REF_NAME" \
+            --notes "Verify the SF-039 signature before use. Build checks and limits are in provenance.json." \
+            bundle/release.json bundle/release.sig.json bundle/SHA256SUMS \
+            bundle/deployment-manifest.json bundle/packages.manifest bundle/provenance.json \
+            bundle/sbom.spdx.tar.zst bundle/suifleet-pi-starter.wic.bmap bundle/suifleet-pi-starter.wic.bz2
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .immutable)" = true

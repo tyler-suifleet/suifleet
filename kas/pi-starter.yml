@@ -1,0 +1,10 @@
+header:
+  version: 14
+  includes:
+    - pi-image.yml
+target: suifleet-pi-image
+local_conf_header:
+  starter: |
+    SUIFLEET_PI_REQUIRE_OPERATOR_KEY = "0"
+    WKS_FILE = "suifleet-pi-starter.wks"
+    INHERIT += "create-spdx"
