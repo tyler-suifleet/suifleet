@@ -1484,8 +1484,9 @@ def tar_mode(name):
 COMPRESSION_MAGIC = ((b'\x1f\x8b', 'gz'), (b'BZh', 'bz2'), (b'\xfd7zXZ\x00', 'xz'))
 
 
-def verify_xz_stream(archive):
-    """Decode an .xz file as 'xz -dc' (XZ Utils) does.
+def verify_xz_stream(archive, out=None):
+    """Decode an .xz file as 'xz -dc' (XZ Utils) does, writing the decoded
+    bytes of every stream to out when given.
 
     lzma.open ignores any bytes after a complete stream that fail to decode as
     another stream, and rejects the legal null stream padding after one, so it
@@ -1510,10 +1511,14 @@ def verify_xz_stream(archive):
                 if padding % 4:
                     raise lzma.LZMAError(f'xz stream padding of {padding} bytes is not a multiple of four')
                 padding, decoder = 0, lzma.LZMADecompressor(lzma.FORMAT_XZ)
-            decoder.decompress(pending, 1 << 20)
+            decoded = decoder.decompress(pending, 1 << 20)
             pending = b''
-            while not decoder.eof and not decoder.needs_input:
-                decoder.decompress(b'', 1 << 20)
+            while True:
+                if out is not None:
+                    out.write(decoded)
+                if decoder.eof or decoder.needs_input:
+                    break
+                decoded = decoder.decompress(b'', 1 << 20)
             if decoder.eof:
                 pending, decoder, streams = decoder.unused_data, None, streams + 1
     if decoder is not None:
@@ -1524,24 +1529,33 @@ def verify_xz_stream(archive):
         raise lzma.LZMAError(f'xz stream padding of {padding} bytes is not a multiple of four')
 
 
-def verify_compressed_stream(archive, mode):
+def stream_compression(archive, mode):
+    """The compression the unpack command for mode applies to archive: the one
+    the name selects, or for a plain .tar the one GNU tar detects ('' if none)."""
+    compression = mode.partition(':')[2]
+    if compression == '*':
+        with open(archive, 'rb') as data:
+            head = data.read(6)
+        compression = next((kind for magic, kind in COMPRESSION_MAGIC if head.startswith(magic)), '')
+    return compression
+
+
+def verify_compressed_stream(archive, mode, out=None):
     """Decode the whole compressed stream through its end-of-stream marker.
 
     tarfile stops reading once it has the members it needs, so a stream cut
     short after the tar end-of-archive blocks (for example a gzip file missing
     its CRC/size trailer) still extracts. The decompressors BitBake runs (gzip,
     bzip2, xz) read to EOF and fail on such a stream, so the audit must too.
-    Raises tarfile.ReadError on any truncation, checksum or format failure."""
-    compression = mode.partition(':')[2]
-    if compression == '*':
-        with open(archive, 'rb') as data:
-            head = data.read(6)
-        compression = next((kind for magic, kind in COMPRESSION_MAGIC if head.startswith(magic)), '')
+    For xz the decoded tar is written to out when given, so extraction reads
+    exactly what 'xz -dc' produces. Raises tarfile.ReadError on any
+    truncation, checksum or format failure."""
+    compression = stream_compression(archive, mode)
     if not compression:
         return
     try:
         if compression == 'xz':
-            verify_xz_stream(archive)
+            verify_xz_stream(archive, out)
             return
         with {'gz': gzip.open, 'bz2': bz2.open}[compression](archive) as stream:
             while stream.read(1 << 20):
@@ -1557,37 +1571,52 @@ def safe_extract(archive, destination, name=None):
     compressed stream must decode completely, as it must for BitBake."""
     destination = Path(destination).resolve()
     mode = tar_mode(name or Path(archive).name)
-    verify_compressed_stream(archive, mode)
-    with tarfile.open(archive, mode) as tar:
-        for member in tar.getmembers():
-            target = (destination / member.name).resolve()
-            if destination not in (target, *target.parents):
-                raise ValueError(f'{archive.name}: member escapes the unpack directory: {member.name}')
-            if member.issym() or member.islnk():
-                base = target.parent if member.issym() else destination
-                link = (base / member.linkname).resolve()
-                if member.linkname.startswith('/') or destination not in (link, *link.parents):
-                    raise ValueError(f'{archive.name}: link escapes the unpack directory: {member.name}')
-            elif not (member.isfile() or member.isdir()):
-                raise ValueError(f'{archive.name}: unsupported member type: {member.name}')
-        links = []
-        for member in tar.getmembers():
-            target = destination / member.name
-            if member.issym() or member.islnk():
-                links.append((member, target))
-            elif member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with tar.extractfile(member) as source, open(target, 'wb') as out:
-                    shutil.copyfileobj(source, out)
-                target.chmod(member.mode & 0o755 | 0o600)
-        for member, target in links:
+    with tempfile.TemporaryFile() as decoded:
+        if stream_compression(archive, mode) == 'xz':
+            # lzma.open, which tarfile uses for xz, stops at null stream padding
+            # and ignores every later stream, while 'xz -dc' decodes them all.
+            # Extract the tar that the xz-compatible decoder produced instead.
+            verify_compressed_stream(archive, mode, decoded)
+            decoded.seek(0)
+            opened = tarfile.open(fileobj=decoded, mode='r:')
+        else:
+            verify_compressed_stream(archive, mode)
+            opened = tarfile.open(archive, mode)
+        with opened as tar:
+            extract_members(tar, archive, destination)
+
+
+def extract_members(tar, archive, destination):
+    """Check every member of the open tar stays inside destination, then extract."""
+    for member in tar.getmembers():
+        target = (destination / member.name).resolve()
+        if destination not in (target, *target.parents):
+            raise ValueError(f'{archive.name}: member escapes the unpack directory: {member.name}')
+        if member.issym() or member.islnk():
+            base = target.parent if member.issym() else destination
+            link = (base / member.linkname).resolve()
+            if member.linkname.startswith('/') or destination not in (link, *link.parents):
+                raise ValueError(f'{archive.name}: link escapes the unpack directory: {member.name}')
+        elif not (member.isfile() or member.isdir()):
+            raise ValueError(f'{archive.name}: unsupported member type: {member.name}')
+    links = []
+    for member in tar.getmembers():
+        target = destination / member.name
+        if member.issym() or member.islnk():
+            links.append((member, target))
+        elif member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            if member.issym():
-                target.symlink_to(member.linkname)
-            else:
-                os.link(destination / member.linkname, target)
+            with tar.extractfile(member) as source, open(target, 'wb') as out:
+                shutil.copyfileobj(source, out)
+            target.chmod(member.mode & 0o755 | 0o600)
+    for member, target in links:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if member.issym():
+            target.symlink_to(member.linkname)
+        else:
+            os.link(destination / member.linkname, target)
 
 
 def confined(root, rel, what):

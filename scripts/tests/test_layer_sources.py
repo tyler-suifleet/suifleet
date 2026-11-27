@@ -2695,6 +2695,52 @@ class LayerAuditTests(unittest.TestCase):
                                             and 'through its end' in e for e in report['errors']),
                                         report['errors'])
 
+    def test_xz_members_after_stream_padding_are_extracted_and_audited(self):
+        # tarfile's xz reader (lzma.open) stops at null stream padding and
+        # silently drops every later stream; 'xz -dc' decodes them all, so
+        # BitBake unpacks members the audit would never see. Split the tar
+        # between members, compress the halves separately and join them with
+        # legal padding: the audit must extract and check the second half too.
+        if not shutil.which('xz'):
+            self.skipTest('xz is required to build and cross-check the archive')
+        buffer = io.BytesIO()
+        with tarfile.open(self.archive) as source, tarfile.open(fileobj=buffer, mode='w', format=tarfile.GNU_FORMAT) as tar:
+            for member in source.getmembers():
+                tar.addfile(member, source.extractfile(member) if member.isfile() else None)
+            first = buffer.tell()
+            info = tarfile.TarInfo('suifleet-edge/examples/device.key')
+            info.size = 6
+            tar.addfile(info, io.BytesIO(b'secret'))
+        raw = buffer.getvalue()
+        halves = [subprocess.run(['xz', '-c'], input=part, stdout=subprocess.PIPE, check=True).stdout
+                  for part in (raw[:first], raw[first:])]
+        data = halves[0] + b'\0' * 4 + halves[1]
+        archive = Path(tempfile.mkdtemp(dir=self.tmp.name)) / 'source.tar.xz'
+        archive.write_bytes(data)
+
+        # Same inventory as 'xz -dc | tar -xf -'.
+        reference = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        decoded = subprocess.run(['xz', '-dc', str(archive)], stdout=subprocess.PIPE, check=True).stdout
+        subprocess.run(['tar', '-xf', '-', '-C', str(reference)], input=decoded, check=True)
+        extracted = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        audit.safe_extract(archive, extracted)
+
+        def inventory(root):
+            return sorted(p.relative_to(root).as_posix() for p in root.rglob('*'))
+        self.assertIn('suifleet-edge/examples/device.key', inventory(reference))
+        self.assertEqual(inventory(extracted), inventory(reference))
+        self.assertEqual((extracted / 'suifleet-edge/examples/device.key').read_bytes(), b'secret')
+
+        # And the full fetch audit applies its checks to the member after the padding.
+        self.archive = archive
+        self.write_recipe(url=f'{self.url};downloadfilename=source.tar.xz', sha=sha256(data))
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertIn('suifleet_1.0.bb: runtime identity/state-like file in fetched source: '
+                      'source/suifleet-edge/examples/device.key', report['errors'])
+        self.assertFalse(report['ok'])
+
     def test_fetch_reports_checksum_and_layout_defects(self):
         self.write_recipe(sha='f' * 64)
         with mock.patch.object(audit, 'download', self.fake_download):
