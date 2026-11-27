@@ -1106,6 +1106,59 @@ class Harness:
         self.unchanged(recap, "rerun after the metadata correction")
         return after
 
+    def binary_path_directory(self, vault, rollout, previous):
+        """A directory, or a symlink to one, at /usr/bin/suifleet stops the host before any upload.
+
+        The copy module treats a directory destination as a target directory:
+        it would write the cache file inside it, report success and leave no
+        executable at the binary path. Check mode and real runs must both fail
+        at the guard, upload and install nothing and leave the running services
+        alone; once the path is restored, a rerun reports changed=0."""
+        guard = "TASK [suifleet : Refuse a directory at the binary install path]"
+        aside, target = "/usr/bin/.suifleet-sf304-aside", "/var/tmp/suifleet-sf304-dir"
+        hosts = [name for name, host in self.hosts.items() if host["profile"] == "systemd-binary"]
+        assert hosts, "no systemd-binary host"
+        cache = {}
+        for name in hosts:
+            container = self.hosts[name]["container"]
+            self.exec(container, "mv", "--", "/usr/bin/suifleet", aside)
+            self.exec(container, "mkdir", "/usr/bin/suifleet")
+            cache[name] = self.exec(container, "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout
+        cases = (("check mode with a directory at the binary path", ("--check", "--diff"), None),
+                 ("real run with a directory at the binary path", (), None),
+                 ("real run with a symlink to a directory at the binary path", (), target))
+        for phase, extra, link in cases:
+            for name in hosts:
+                container = self.hosts[name]["container"]
+                if link:
+                    self.exec(container, "sh", "-c", f"rmdir /usr/bin/suifleet && mkdir {target} && ln -s {target} /usr/bin/suifleet")
+            output, recap = self.ansible(phase, "site.yml", *extra, "--limit", ",".join(hosts), *vault, *rollout,
+                                         expect_rc="nonzero")
+            for name in hosts:
+                container = self.hosts[name]["container"]
+                assert recap[name]["failed"] == 1 and recap[name]["unreachable"] == 0, (phase, name, recap[name])
+                assert self.task_statuses(output, guard, name) == {"fatal"}, (phase, name, "guard did not refuse the path")
+                assert not self.task_statuses(output, "TASK [suifleet : Stage the authenticated binary]", name), \
+                    (phase, name, "upload ran after the guard")
+                assert not self.exec(container, "ls", "-A", "/usr/bin/suifleet/").stdout.strip(), \
+                    (phase, name, "something was written inside the directory")
+                assert self.exec(container, "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout == cache[name], \
+                    (phase, name, "cache changed")
+                for field, unit in (("main_pid", "suifleet.service"), ("signer_pid", "suifleet-signer.service")):
+                    pid = self.exec(container, "systemctl", "show", "-p", "MainPID", "--value", unit).stdout.strip()
+                    assert pid == previous[name][field], (phase, name, unit, "service changed")
+            print(f"PASS {phase}: the host stopped at the guard; nothing uploaded, installed or restarted")
+        for name in hosts:
+            container = self.hosts[name]["container"]
+            self.exec(container, "sh", "-c", f"rm -f /usr/bin/suifleet && rmdir {target} && mv -- {aside} /usr/bin/suifleet")
+        _, recap = self.ansible("rerun after restoring the binary path", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after restoring the binary path")
+        for name in hosts:
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            for field in ("main_pid", "signer_pid", "binary_sha256", "key_sha256", "enrollment_sha256"):
+                assert state[field] == previous[name][field], (name, field, "changed by the directory refusal")
+
     def same_pin_overlap(self, vault, rollout, previous):
         """Two rollouts with the same pins overlap; the second's controller artifact changes after its preflight.
 
@@ -2747,6 +2800,7 @@ class Harness:
         after = self.stopped_host_preview(vault, rollout, after)
         after = self.cache_only_restore(vault, rollout)
         after = self.cache_miss_metadata_drift(vault, rollout, after)
+        self.binary_path_directory(vault, rollout, after)
         self.same_pin_overlap(vault, rollout, after)
         self.overlapping_releases(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
