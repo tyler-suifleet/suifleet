@@ -79,6 +79,7 @@ import bz2
 import gzip
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -315,6 +316,40 @@ MUTABLE_URL = (
     (re.compile(r'/releases/latest(/|$)'), 'latest-release redirect'),
     (re.compile(r'^https://(objects|release-assets|github-releases)\.githubusercontent\.com/'), 'expiring release-asset URL'),
 )
+
+
+DNS_LABEL = re.compile(r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$')
+
+
+def authority_error(parsed):
+    """Why a network source URL's authority (host and port) cannot be fetched,
+    or None. A checksum alone does not make a URL fetchable: an empty host, a
+    malformed host or a nonnumeric or out-of-range port must be refused here,
+    statically, rather than surface as a fetch failure or pass unchecked.
+    Accepts DNS names (ASCII/punycode labels, optional root dot), IPv4
+    addresses and bracketed IPv6 literals. Raises nothing; urllib's port
+    parser raises ValueError, which is reported as a finding."""
+    netloc = parsed.netloc.rsplit('@', 1)[-1]
+    if netloc.startswith('['):
+        literal = netloc[1:].split(']', 1)[0]
+        try:
+            ipaddress.IPv6Address(literal)
+        except ValueError:
+            return 'invalid bracketed IPv6 host'
+    host = parsed.hostname
+    if not host:
+        return 'missing host'
+    if not netloc.startswith('['):
+        name = host[:-1] if host.endswith('.') else host
+        if not name or len(name) > 253 or not all(DNS_LABEL.match(label) for label in name.split('.')):
+            return 'invalid host name'
+    try:
+        port = parsed.port
+    except ValueError:
+        return 'invalid port'
+    if port == 0:
+        return 'invalid port'
+    return None
 
 
 def policy_url(parsed):
@@ -918,9 +953,18 @@ def audit_recipe(recipe):
         scheme = url.split('://', 1)[0]
         shown = redact_url(url)
         entry = {'url': shown, 'type': scheme}
-        parsed = urllib.parse.urlsplit(url.replace('git://', 'https://', 1) if scheme in ('git', 'gitsm') else url)
+        try:
+            parsed = urllib.parse.urlsplit(url.replace('git://', 'https://', 1) if scheme in ('git', 'gitsm') else url)
+        except ValueError:
+            # e.g. an unterminated IPv6 bracket. Report it (redacted) and skip
+            # every other check of this source; the static finding blocks fetching.
+            errors.append(f'{where}: unparseable source URL {shown}; not fetched')
+            sources.append(entry)
+            continue
         if parsed.username or parsed.password or '@' in parsed.netloc:
             errors.append(f'{where}: credentials in source URL {shown}')
+        if scheme in ('git', 'gitsm', 'https', 'http', 'ftp') and authority_error(parsed):
+            errors.append(f'{where}: source URL has an unfetchable authority ({authority_error(parsed)}): {shown}')
         if scheme in ('git', 'gitsm'):
             name = params.get('name')
             rev = recipe.get(f'SRCREV_{name}') if name else srcrev

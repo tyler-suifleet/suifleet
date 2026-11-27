@@ -1323,6 +1323,57 @@ class LayerAuditTests(unittest.TestCase):
                 self.write_recipe(**kwargs)
                 self.assertTrue(any(message in e for e in self.errors()), self.errors())
 
+    def test_source_urls_without_a_fetchable_authority_are_refused_with_a_report(self):
+        # A valid checksum cannot make a URL fetchable: an empty or malformed
+        # host, or a nonnumeric/out-of-range port, must be a static finding that
+        # blocks fetching, and an unparseable URL must not crash the report.
+        name = self.archive.name
+        cases = {
+            'missing host': f'https:///immutable/{name}',
+            'missing host with port': f'https://:443/immutable/{name}',
+            'nonnumeric port': f'https://example.invalid:bad/immutable/{name}',
+            'port out of range': f'https://example.invalid:70000/immutable/{name}',
+            'port zero': f'https://example.invalid:0/immutable/{name}',
+            'invalid host name': f'https://exa_mple..com/immutable/{name}',
+            'invalid bracketed IPv6': f'https://[not-ipv6]/immutable/{name}',
+            'unterminated IPv6 bracket': f'https://[invalid/{name}',
+            'git missing host': 'git:///example/suifleet.git;protocol=https;nobranch=1',
+            'git nonnumeric port': 'git://github.com:bad/example/suifleet.git;protocol=https;nobranch=1',
+            'git unterminated bracket': 'git://[invalid/example/suifleet.git;protocol=https;nobranch=1',
+        }
+        fetched = []
+        for label, url in cases.items():
+            for fetch in (False, True):
+                with self.subTest(label, fetch=fetch):
+                    self.write_recipe(url=url, extra=f'SRCREV_edge = "{self.rev}"')
+                    with mock.patch.object(audit, 'download', lambda *a, **k: fetched.append(a)), \
+                            mock.patch.object(audit, 'fetch_recipe', lambda *a, **k: fetched.append(a) or ([], [])):
+                        report = audit.check(self.layer, fetch=fetch)
+                    if fetch:
+                        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                        self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+                    self.assertFalse(report['ok'])
+                    self.assertTrue(any('unfetchable authority' in e or 'unparseable source URL' in e
+                                        for e in report['errors']), report['errors'])
+                    json.dumps(report)
+        self.assertEqual(fetched, [])
+        # Ordinary authorities (explicit port, root dot, IP literals) stay accepted.
+        for url in (f'https://example.com:8443/immutable/{name}', f'https://example.com./immutable/{name}',
+                    f'https://192.0.2.1/immutable/{name}', f'https://[2001:db8::1]:443/immutable/{name}'):
+            with self.subTest('accepted', url=url):
+                self.write_recipe(url=url)
+                self.assertFalse(any('authority' in e or 'unparseable' in e for e in self.errors()), self.errors())
+
+    def test_unparseable_source_url_via_command_line_still_emits_a_json_report(self):
+        self.write_recipe(url=f'https://[invalid/{self.archive.name}')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check_layer_sources.py'), '--layer', str(self.layer)],
+                                capture_output=True, text=True, env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'})
+        self.assertEqual(result.returncode, 1, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('unparseable source URL' in e for e in report['errors']), report['errors'])
+        self.assertNotIn('Traceback', result.stderr)
+
     def test_mutable_source_hosts_match_case_insensitively(self):
         # DNS hostnames and schemes are case-insensitive and a trailing root
         # dot or the default port names the same host, so each spelling of a
