@@ -301,6 +301,8 @@ ATTEMPT_CLAIM = "/etc/suifleet/.enrollment.json.partial.claim"
 REVOCATION_REFUSAL = "does not settle it"
 SETTLED = "can never enroll the device, so the role removed"
 REUSED_CLAIM = "which an earlier attempt used"
+STALE_REGISTRATION = "removed another registration of the claim"
+REGISTERED_AGAIN = "is registered in policy"
 POLICY_REFUSAL = "from an attempt under enrollment policy"
 DEPLOYMENT_REFUSAL = "from an attempt that did not run under the configured deployment"
 RECORD_DEPLOYMENT_REFUSAL = "enrolled under a deployment other than the configured one"
@@ -479,6 +481,37 @@ def sha256(path):
 
 
 # ── Inside the chain container ────────────────────────────────────────────
+def chain_client(wallet):
+    """The localnet operator's Sui CLI, with its wallet in the chain directory."""
+    def client(*args, json_output=True):
+        command = ["sui", "client", "--client.config", str(wallet / "client.yaml"), *map(str, args)]
+        if json_output:
+            command.append("--json")
+        result = subprocess.run(command, text=True, capture_output=True, timeout=300)
+        if result.returncode:
+            raise RuntimeError(f"sui client {args[0]} failed:\n{result.stderr[-3000:]}")
+        if not json_output:
+            return result.stdout
+        text = result.stdout
+        return json.loads(text[min(i for i in (text.find("{"), text.find("[")) if i >= 0):])
+    return client
+
+
+def chain_claim(out, action):
+    """Revokes or registers again the settle serial's claim under the batch's policy; prints the digest.
+
+    Runs as the dev user in the chain container, after chain setup, so the
+    harness can order these transactions around the attempt it settles."""
+    out = Path(out)
+    setup = json.loads((out / "setup.json").read_text())
+    client = chain_client(out / "wallet")
+    package, policy, claim = setup["package"], setup["policy"], setup["settle"]["claim"]
+    call = {"revoke": ("revoke_claim", f"@{claim}"), "register": ("add_claims", f"vector[@{claim}]")}[action]
+    result = client("ptb", "--move-call", f"{package}::enrollment::{call[0]}", f"@{policy}", call[1], "--gas-budget", "200000000")
+    assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+    print(json.dumps({"digest": result["digest"]}))
+
+
 def chain_setup(out, serials, settle_serial):
     """Runs as the dev user in the network-none chain container."""
     import deployment_manifest as dm
@@ -495,18 +528,7 @@ def chain_setup(out, serials, settle_serial):
         raise SystemExit("localnet did not become ready")
     wallet = out / "wallet"
     wallet.mkdir(mode=0o700)
-
-    def client(*args, json_output=True):
-        command = ["sui", "client", "--client.config", str(wallet / "client.yaml"), *map(str, args)]
-        if json_output:
-            command.append("--json")
-        result = subprocess.run(command, text=True, capture_output=True, timeout=300)
-        if result.returncode:
-            raise RuntimeError(f"sui client {args[0]} failed:\n{result.stderr[-3000:]}")
-        if not json_output:
-            return result.stdout
-        text = result.stdout
-        return json.loads(text[min(i for i in (text.find("{"), text.find("[")) if i >= 0):])
+    client = chain_client(wallet)
 
     client("-y", "active-address", json_output=False)
     # The generated config's "local" environment is this node; selecting it
@@ -567,10 +589,14 @@ def chain_setup(out, serials, settle_serial):
         assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
         return result["digest"]
     # Revocations for settling an attempt that printed no receipt (see
-    # overlapping_enrollment): only the revocation of the attempt's own claim
-    # under the attempt's policy settles it. The same claim registered and
-    # revoked under the other policy, and another claim revoked under the
-    # attempt's policy, must not. The serial then gets a new, funded claim.
+    # overlapping_enrollment): only the revocation of the registration of the
+    # attempt's own claim that the attempt recorded, under the attempt's
+    # policy, settles it. The same claim registered and revoked under the
+    # other policy, another claim revoked under the attempt's policy, and a
+    # revocation of the attempt's claim before it was registered again (the
+    # stale revocation below, two separate transactions) must not. The
+    # attempt's own revocation is submitted after the attempt (chain_claim).
+    # The serial then gets a new, funded claim.
     settled = claims[settle_serial]
     spare = "0x" + os.urandom(32).hex()
     settle = dict(serial=settle_serial, claim=settled)
@@ -578,7 +604,8 @@ def chain_setup(out, serials, settle_serial):
                                         "--move-call", f"{package}::enrollment::revoke_claim", f"@{other_policy}", f"@{settled}")
     settle["other_claim_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector[@{spare}]",
                                        "--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{spare}")
-    settle["revoke_digest"] = ptb("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{settled}")
+    settle["stale_revoke_digest"] = ptb("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{settled}")
+    settle["reregister_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector[@{settled}]")
     replacement = out / "replacement"
     (out / "replacement.csv").write_text(f"serial,alias\n{settle_serial},line-{settle_serial.lower()}\n")
     run(sys.executable, str(ROOT / "scripts/claims.py"), "generate", "--roster", str(out / "replacement.csv"), str(replacement),
@@ -2196,15 +2223,21 @@ exit 3
         self.settle_revoked_attempt(vault, name)
 
     def settle_revoked_attempt(self, vault, name):
-        """Settles the attempt above, which printed nothing, by a revocation of its own claim.
+        """Settles the attempt above, which printed nothing, by a revocation of its own claim's registration.
 
-        The attempt recorded its claim before running the command. Chain setup
-        revoked that claim under the attempt's policy, the same claim under the
-        other policy, and another claim under the attempt's policy. Only the
-        first settles the attempt: the role verifies on chain that the
-        transaction removed exactly the recorded claim from the recorded policy
-        without an enrollment, then removes the marker and binding. The revoked
-        claim is refused afterwards; the serial is reissued with a new claim."""
+        The attempt recorded its claim, and the registration of that claim it
+        could consume (the claim table entry's object version and digest),
+        before running the command. Chain setup revoked the same claim under
+        the other policy, another claim under the attempt's policy, and the
+        attempt's claim itself before registering it again for the attempt
+        (a stale revocation). None of those settles the attempt. The
+        revocation submitted now does, but not while the claim is registered
+        again, and a revocation of that later registration does not either:
+        the role verifies on chain that the transaction removed exactly the
+        recorded registration from the recorded policy without an enrollment,
+        that the claim is absent, and that the key has not enrolled since,
+        then removes the marker and binding. The revoked claim is refused
+        afterwards; the serial is reissued with a new claim."""
         container = self.hosts[name]["container"]
         partial, record = "/etc/suifleet/.enrollment.json.partial", "/etc/suifleet/enrollment.json"
         lock, staging = "/run/suifleet-enroll.lock", "/run/suifleet-enroll"
@@ -2218,29 +2251,54 @@ exit 3
         def absent(path):
             return self.exec(container, "test", "-e", path, check=False).returncode != 0
 
-        assert sh(f"cat {ATTEMPT_CLAIM}") == settle["claim"] + "\n", (name, "the attempt did not record its claim")
+        def chain_claim(action):
+            done = self.exec(self.chain, "python3", "/workspace/scripts/test_ansible.py", "--chain-claim", "/chain",
+                             "--action", action, user="1001:1001")
+            return json.loads(done.stdout.strip().splitlines()[-1])["digest"]
+
+        attempt_record = sh(f"cat {ATTEMPT_CLAIM}")
+        lines = attempt_record.splitlines()
+        assert len(lines) == 2 and attempt_record.endswith("\n") and lines[0] == settle["claim"], \
+            (name, "the attempt did not record its claim", attempt_record)
+        assert re.fullmatch(r"[0-9]{1,20} [1-9A-HJ-NP-Za-km-z]{32,44}", lines[1]), (name, "no registration recorded", attempt_record)
         assert sh(f"stat -c '%U:%G %a' {ATTEMPT_CLAIM}").strip() == "root:root 600", name
         binding = sh(f"cat {ATTEMPT_DEPLOYMENT}")
-        print("PASS the attempt recorded its claim's public address beside its marker before submitting anything")
-        for label, digest in (("another claim of the attempt's policy", settle["other_claim_digest"]),
-                              ("the attempt's claim under another policy", settle["other_policy_digest"]),
-                              ("a transaction that revoked no claim", self.setup["policy_digest"])):
+        print("PASS the attempt recorded its claim's public address and registration beside its marker before submitting"
+              " anything")
+
+        def refused(label, digest, why=None):
             output, _ = self.ansible(f"a revocation of {label} does not settle the attempt", "site.yml", "--limit", name,
                                      *vault, "-e", f"suifleet_revocation_digest={digest}", expect_rc="nonzero")
             assert LOOKUP_NONE in output and REVOCATION_REFUSAL in output, (name, label, "not refused", output[-8000:])
+            assert why is None or why in output, (name, label, "refused for another reason", why, output[-8000:])
             assert SETTLED not in output and ENROLL_TASK not in output, (name, label, "settled or enrolled")
             assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, label, "marker or record changed")
             assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == binding, (name, label, "binding changed")
-            assert sh(f"cat {ATTEMPT_CLAIM}") == settle["claim"] + "\n", (name, label, "claim record changed")
+            assert sh(f"cat {ATTEMPT_CLAIM}") == attempt_record, (name, label, "claim record changed")
             assert absent(lock) and absent(staging), (name, label, "lock or staging left")
             print(f"PASS a revocation of {label} did not settle the attempt: marker, binding and claim record kept")
-        output, _ = self.ansible("the revocation of the attempt's claim settles it", "site.yml", "--limit", name, *vault,
-                                 "-e", f"suifleet_revocation_digest={settle['revoke_digest']}", expect_rc="nonzero")
+
+        refused("another claim of the attempt's policy", settle["other_claim_digest"])
+        refused("the attempt's claim under another policy", settle["other_policy_digest"])
+        refused("no claim (a transaction that revoked no claim)", self.setup["policy_digest"])
+        # The reviewer's case: the claim was revoked, then registered again,
+        # and the attempt used the new registration. The old revocation, of
+        # the same claim under the same policy, says nothing about it.
+        refused("an earlier registration of the attempt's claim (revoked before it was registered again)",
+                settle["stale_revoke_digest"], why=STALE_REGISTRATION)
+        revoke_digest = chain_claim("revoke")
+        chain_claim("register")
+        refused("the attempt's registration while the claim is registered again", revoke_digest, why=REGISTERED_AGAIN)
+        later_digest = chain_claim("revoke")
+        refused("a later registration of the attempt's claim", later_digest, why=STALE_REGISTRATION)
+        settle["revoke_digest"], settle["later_revoke_digest"] = revoke_digest, later_digest
+        output, _ = self.ansible("the revocation of the attempt's registration settles it", "site.yml", "--limit", name,
+                                 *vault, "-e", f"suifleet_revocation_digest={revoke_digest}", expect_rc="nonzero")
         assert SETTLED in output and ENROLL_TASK not in output, (name, "not settled", output[-8000:])
         assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "marker or binding kept")
-        assert sh(f"cat {ATTEMPT_CLAIM}") == settle["claim"] + "\n", (name, "the revoked claim's record was not kept")
+        assert sh(f"cat {ATTEMPT_CLAIM}") == attempt_record, (name, "the revoked claim's record was not kept")
         assert absent(lock) and absent(staging), (name, "lock or staging left")
-        print("PASS the verified revocation of the attempt's own claim settled it: marker and binding removed, the"
+        print("PASS the verified revocation of the attempt's own registration settled it: marker and binding removed, the"
               " claim record kept")
         output, _ = self.ansible("a retry with the revoked claim is refused", "site.yml", "--limit", name, *vault,
                                  expect_rc="nonzero")
@@ -3388,7 +3446,12 @@ def main():
     parser.add_argument("--serials", help=argparse.SUPPRESS)
     parser.add_argument("--settle-serial", help=argparse.SUPPRESS)
     parser.add_argument("--records", help=argparse.SUPPRESS)
+    parser.add_argument("--chain-claim", help=argparse.SUPPRESS)
+    parser.add_argument("--action", choices=("revoke", "register"), help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.chain_claim:
+        chain_claim(args.chain_claim, args.action)
+        return
     if args.chain_setup:
         chain_setup(args.chain_setup, args.serials.split(","), args.settle_serial)
         return

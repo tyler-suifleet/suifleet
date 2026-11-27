@@ -872,13 +872,21 @@ The harness checks these phases:
    claim, lock or marker or reaching the enrollment command. After the
    failure the empty marker remains, the lock and staging are gone, and a
    retry stops on the marker. The attempt must have recorded its claim's
-   address before the command ran. The chain setup revoked that claim under
-   the attempt's policy, registered and revoked the same claim under the
-   second policy, and registered and revoked another claim under the
-   attempt's policy. Retries given the second and third revocations, or a
-   transaction that revoked no claim, as `suifleet_revocation_digest` stop
-   with the marker, binding and claim record unchanged. The first settles the
-   attempt: the marker and binding are removed and the claim record is kept.
+   address and registration before the command ran. The chain setup
+   registered and revoked the same claim under the second policy,
+   registered and revoked another claim under the attempt's policy, and
+   revoked the attempt's claim under its policy and then registered it again
+   (in separate transactions) before the attempt. Retries given those three
+   revocations, or a transaction that revoked no claim, as
+   `suifleet_revocation_digest` stop with the marker, binding and claim
+   record unchanged; the stale revocation stops because it removed another
+   registration of the claim. The harness then revokes the attempt's
+   registration, registers the claim again (a retry with that revocation
+   stops: the claim is registered again) and revokes that later registration
+   (a retry with the later revocation stops: another registration). The
+   revocation of the attempt's registration then settles the attempt: the
+   claim is absent and the key has not enrolled since. The marker and
+   binding are removed and the claim record is kept.
    A retry with the revoked claim still in the batch is refused before any
    marker exists; the serial then gets a new, funded claim (Vault-encrypted)
    and enrolls with it below. Then a test-only copy stops the enrollment right after
