@@ -130,6 +130,11 @@ build. Contents are not pattern-scanned for keys, because the redaction test
 vectors deliberately contain fake ones. Build only from reviewed main, which
 the [security CI](SECURITY_CI.md) secret scanning already covers.
 
+Workspace members must be literal paths. Globs, `..` components and absolute
+paths are refused. Spellings Cargo accepts, such as `./member/`, are
+normalized to the canonical directory before the manifest lookup, so the
+member is archived once under its canonical path.
+
 Before writing, the builder reads back the tar stream `git archive` produced.
 It must contain exactly the planned files and their directories, each with the
 committed blob's bytes and exact mode. A committed `export-ignore` or
