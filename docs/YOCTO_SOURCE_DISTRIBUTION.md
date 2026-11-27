@@ -421,6 +421,12 @@ is resolved and must stay inside the unpack directory before it is read or
 listed, or used as Cargo's working directory. The audit therefore never verifies
 a file on the review host in place of the pinned source.
 
+BitBake and Cargo treat `./suifleet-edge`, `suifleet-edge/` and
+`suifleet-edge` as the same directory, so the audit normalizes `CARGO_SRC_DIR`
+before it uses the value. Every lookup then uses the same names as the source
+layout, including manifest-declared targets without an `.rs` suffix. A value
+that names `S` itself (`.` or `./`) is refused.
+
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
 the lockfile's crates.io registry crates, versions and checksums. It compares
