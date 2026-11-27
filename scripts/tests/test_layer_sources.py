@@ -1528,6 +1528,8 @@ class LayerAuditTests(unittest.TestCase):
         # Positive controls: unconditional variable-driven selection is read
         # normally, and a machine override of an unrelated variable is accepted.
         for extra in ('SOURCE_SETTINGS = "benign.inc"\ninclude ${SOURCE_SETTINGS}',
+                      'SOURCE_CHOICE = "benign"\nSOURCE_SETTINGS := "${SOURCE_CHOICE}.inc"\n'
+                      'UNRELATED:qemuarm64 = "x"\ninclude ${SOURCE_SETTINGS}',
                       'SOURCE_SETTINGS = "benign.inc"\nUNRELATED:qemuarm64 = "x"\nrequire ${SOURCE_SETTINGS}'):
             with self.subTest(extra):
                 self.write_recipe(extra=extra)
@@ -1545,6 +1547,19 @@ class LayerAuditTests(unittest.TestCase):
             'transitive, later reassigned': ('SOURCE_CHOICE = "benign"\nSOURCE_CHOICE:qemuarm64 = "unsafe"\n'
                                              'SOURCE_SETTINGS = "${SOURCE_CHOICE}.inc"\ninclude ${SOURCE_SETTINGS}\n'
                                              'SOURCE_SETTINGS = "benign.inc"', 'SOURCE_CHOICE:qemuarm64'),
+            # BitBake's := expansion already sees active overrides, so an
+            # immediately expanded alias still depends on its selector even
+            # though the stored value no longer references it.
+            'immediate alias': ('SOURCE_CHOICE = "benign"\nSOURCE_CHOICE:qemuarm64 = "unsafe"\n'
+                                'SOURCE_SETTINGS := "${SOURCE_CHOICE}.inc"\ninclude ${SOURCE_SETTINGS}',
+                                'SOURCE_CHOICE:qemuarm64'),
+            'chained immediate aliases': ('SOURCE_CHOICE = "benign"\nSOURCE_CHOICE:qemuarm64 = "unsafe"\n'
+                                          'SOURCE_STEM := "${SOURCE_CHOICE}"\nSOURCE_SETTINGS = "${SOURCE_STEM}.inc"\n'
+                                          'SOURCE_ALIAS := "${SOURCE_SETTINGS}"\nrequire ${SOURCE_ALIAS}',
+                                          'SOURCE_CHOICE:qemuarm64'),
+            'immediate append': ('SOURCE_CHOICE = ""\nSOURCE_CHOICE:qemuarm64 = "unsafe.inc"\n'
+                                 'SOURCE_SETTINGS = "benign.inc"\nSOURCE_SETTINGS:append := " ${SOURCE_CHOICE}"\n'
+                                 'include ${SOURCE_SETTINGS}', 'SOURCE_CHOICE:qemuarm64'),
         }
         for label, (extra, message) in cases.items():
             with self.subTest(label):
@@ -1558,6 +1573,26 @@ class LayerAuditTests(unittest.TestCase):
                 self.assertFalse(report['ok'])
                 self.assertIsNone(report['recipes']['suifleet']['fetched'])
                 self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+
+    def test_immediate_expansion_keeps_source_provenance(self):
+        # A source-affecting variable assigned with := stores the expanded
+        # text, but BitBake expanded it with the active overrides, so the
+        # variables it was expanded from stay source-affecting.
+        self.write_recipe(extra='NOTE_CHOICE = "a"\nSUIFLEET_NOTE := "${NOTE_CHOICE}"\nUNRELATED:qemuarm64 = "x"')
+        self.assertEqual(self.errors(), [])
+        cases = {
+            'variable': 'NOTE_CHOICE = "a"\nNOTE_CHOICE:qemuarm64 = "b"\nSUIFLEET_NOTE := "${NOTE_CHOICE}"',
+            'through a lazy variable': ('NOTE_CHOICE = "a"\nNOTE_CHOICE:qemuarm64 = "b"\nNOTE_STEM = "${NOTE_CHOICE}"\n'
+                                        'SUIFLEET_NOTE := "${NOTE_STEM}"'),
+            'flag': 'NOTE_CHOICE = "a"\nNOTE_CHOICE:qemuarm64 = "b"\nSUIFLEET_NOTE[doc] := "${NOTE_CHOICE}"',
+        }
+        for label, extra in cases.items():
+            with self.subTest(label):
+                self.write_recipe(extra=extra)
+                errors = self.errors()
+                self.assertTrue(any('conditional override NOTE_CHOICE:qemuarm64' in e for e in errors), errors)
+        self.write_recipe()
+        self.assertEqual(self.errors(), [])
 
     def test_unmodelled_directives_are_refused(self):
         # unset removes a variable or flag BitBake would otherwise use; the

@@ -159,6 +159,12 @@ class Recipe:
         # metadata (and so which sources) is read, so they are source-affecting:
         # a machine/distro override of one could select a different file.
         self.include_refs = set()
+        # For each variable (or the variable owning a flag/append) assigned
+        # with :=, every variable the value referenced when it was expanded.
+        # The stored value is already expanded, but BitBake's immediate
+        # expansion sees the active machine/distro overrides, so the result
+        # still depends on those variables and inherits their provenance.
+        self.immediate_refs = {}
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
@@ -299,7 +305,7 @@ class Recipe:
                 if op == '?=':
                     flags.setdefault(flag, value)
                 elif op == ':=':
-                    flags[flag] = self.expand(value)
+                    flags[flag] = self.immediate(name, value)
                 elif op in ('+=', '.='):
                     flags[flag] = old + (' ' if op == '+=' else '') + value
                 elif op in ('=+', '=.'):
@@ -310,7 +316,7 @@ class Recipe:
             if override:
                 # The operator only joins the text: SRC_URI:append += "x" adds " x";
                 # := expands the text now and still applies it at the end.
-                value = self.expand(value) if op == ':=' else value
+                value = self.immediate(base, value) if op == ':=' else value
                 text = (' ' + value if op == '+=' else value + ' ' if op == '=+' else value)
                 self.deferred.setdefault(base, []).append((override, text))
                 continue
@@ -325,7 +331,7 @@ class Recipe:
             elif op == '?=':
                 self.vars.setdefault(base, value)
             elif op == ':=':
-                self.vars[base] = self.expand(value)
+                self.vars[base] = self.immediate(base, value)
             else:
                 self.vars[base] = value
 
@@ -340,15 +346,23 @@ class Recipe:
         expanded = REF.sub(lookup, value)
         return expanded if expanded == value else self.expand(expanded, depth + 1)
 
+    def immediate(self, name, value):
+        """Expand value now for a := assignment to name, recording which
+        variables the expansion depended on."""
+        self.immediate_refs.setdefault(name, set()).update(self.references(value))
+        return self.expand(value)
+
     def references(self, value):
-        """Every variable value references, directly or through the current
-        unexpanded values of the variables it references."""
+        """Every variable value references, directly, through the current
+        unexpanded values of the variables it references, or through what
+        those variables referenced when they were immediately expanded."""
         seen, pending = set(), REF.findall(value)
         while pending:
             name = pending.pop()
             if name not in seen:
                 seen.add(name)
                 pending += REF.findall(self.raw(name) or '')
+                pending += sorted(self.immediate_refs.get(name, ()))
         return seen
 
     def get(self, name, default=''):
@@ -458,6 +472,9 @@ def source_variables(recipe):
     pending += sorted(recipe.include_refs)
     for variable, flags in recipe.flags.items():
         if variable == 'SRC_URI' or variable.startswith('SUIFLEET_'):
+            # Also walk the variable itself, which carries the provenance of
+            # any flag assigned with := (see Recipe.immediate).
+            pending.append(variable)
             for value in flags.values():
                 pending += REF.findall(value)
     seen = set()
@@ -466,6 +483,8 @@ def source_variables(recipe):
         if name not in seen:
             seen.add(name)
             pending += REF.findall(recipe.vars.get(name, ''))
+            # A := value is stored expanded; keep what it was expanded from.
+            pending += sorted(recipe.immediate_refs.get(name, ()))
     return seen
 
 
