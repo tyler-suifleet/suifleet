@@ -340,6 +340,13 @@ These static checks always run, on every recipe in the layer:
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit
   named in an archive filename equals `SRCREV`.
+- The daemon and codec recipes are found by PN (`suifleet` and
+  `suifleet-walrus-codec`), not by the pins being verified. The layer must
+  provide the daemon recipe, with a lowercase 64-hex `SUIFLEET_LOCK_SHA256`, a
+  `SUIFLEET_CRATE_VERSION` and a 40-hex `SRCREV`. The codec recipe, when
+  present, needs a 40-hex `SUIFLEET_CODEC_SOURCE_REV`. A missing or empty pin
+  fails the audit instead of skipping the checks it would select. These pins on
+  any other recipe are refused, because nothing would verify them.
 
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
