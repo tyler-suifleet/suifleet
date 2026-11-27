@@ -411,7 +411,9 @@ check then verifies the resulting `S`:
   `bin/node` a 64-bit little-endian AArch64 ELF executable: a complete 64-byte
   ELF64 header (`EV_CURRENT`, `ET_EXEC`/`ET_DYN`, standard header sizes), a
   program header table inside the file and at least one non-empty `PT_LOAD`
-  segment, with no `PT_LOAD` past the end of the file. The archive
+  segment. Every `PT_LOAD` must lie inside the file, have `p_filesz` no larger
+  than `p_memsz`, and use a power-of-two alignment congruent with its offset
+  and address. The archive
   SHA-256 and license checksum alone would accept an archive without the
   executable.
 
