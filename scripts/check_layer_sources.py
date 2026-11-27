@@ -909,17 +909,25 @@ def crate_source(url, params):
 
 
 def lock_packages(lock):
-    """Return {(name, version): (registry, checksum)} for packages in Cargo.lock;
-    a source other than the crates.io index is reported as unsupported."""
-    packages = {}
+    """Return ({(name, version): (registry, checksum)}, unsupported) for Cargo.lock.
+
+    Cargo package identity includes the source, so two rows may share a name and
+    version. Only crates.io index rows enter the mapping; every row from another
+    source, and any repeated crates.io coordinate, is listed in `unsupported`
+    while reading, so no row can be overwritten before it is refused."""
+    packages, unsupported = {}, []
     for block in lock.split('[[package]]')[1:]:
         fields = dict(re.findall(r'^(\w+) = "([^"]*)"', block, re.M))
         source = fields.get('source')
+        key = (fields.get('name', ''), fields.get('version', ''))
         if source == CRATES_IO_LOCK_SOURCE:
-            packages[(fields['name'], fields['version'])] = (CRATES_IO, fields.get('checksum', ''))
+            if key in packages:
+                unsupported.append(f'{key[0]} {key[1]} (duplicate crates.io entry)')
+            else:
+                packages[key] = (CRATES_IO, fields.get('checksum', ''))
         elif source:
-            packages[(fields['name'], fields['version'])] = ('unsupported:' + source, '')
-    return packages
+            unsupported.append(f'{key[0]} {key[1]} ({redact_url(source)})')
+    return packages, unsupported
 
 
 def crate_include(recipe):
@@ -977,10 +985,10 @@ def daemon_errors(recipe, read, exists=None, listing=None):
         version = None
     if version is not None and version != recipe.get('SUIFLEET_CRATE_VERSION'):
         errors.append(f'{recipe.path.name}: Cargo.toml version {version} differs from SUIFLEET_CRATE_VERSION')
-    locked, included = lock_packages(lock.decode()), crate_include(recipe)
-    if any(registry.startswith('unsupported:') for registry, _ in locked.values()):
-        errors.append(f'{recipe.path.name}: Cargo.lock has sources other than the crates.io registry '
-                      'that the crate include cannot pin')
+    (locked, unsupported), included = lock_packages(lock.decode()), crate_include(recipe)
+    if unsupported:
+        errors.append(f'{recipe.path.name}: Cargo.lock has {len(unsupported)} packages from sources other than '
+                      f'the crates.io registry that the crate include cannot pin, e.g. {unsupported[:3]}')
     for key, (registry, _) in sorted(included.items()):
         if registry.startswith('unsupported:'):
             errors.append(f'{recipe.path.name}: suifleet-crates.inc entry {key[0]} {key[1]}: {registry[len("unsupported:"):]}')

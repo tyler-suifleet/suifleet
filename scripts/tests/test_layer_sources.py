@@ -1349,10 +1349,53 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual(self.errors(repo=self.repo.root), [])
 
     def test_lock_sources_other_than_crates_io_are_refused(self):
-        self.assertEqual(audit.lock_packages(CARGO_LOCK)[('anyhow', '1.0.102')][0], 'crates.io')
+        self.assertEqual(audit.lock_packages(CARGO_LOCK), ({('anyhow', '1.0.102'): ('crates.io', 'a' * 64)}, []))
         other = CARGO_LOCK.replace('registry+https://github.com/rust-lang/crates.io-index',
-                                   'registry+https://example.invalid/index')
-        self.assertTrue(audit.lock_packages(other)[('anyhow', '1.0.102')][0].startswith('unsupported:'))
+                                   'registry+https://user:token@example.invalid/index')
+        packages, unsupported = audit.lock_packages(other)
+        self.assertEqual(packages, {})
+        self.assertEqual(unsupported, ['anyhow 1.0.102 (registry+https://<redacted>@example.invalid/index)'])
+
+    def test_lock_row_from_another_registry_is_refused_beside_the_crates_io_row(self):
+        # Cargo package identity includes the source: an alternate-registry row
+        # with the same name and version as the crates.io row must be refused
+        # by the full audit, whichever order the rows appear in, even when the
+        # recipe's lock digest, SRCREV and archive match the committed lock.
+        alternate = ('\n[[package]]\nname = "anyhow"\nversion = "1.0.102"\n'
+                     'source = "registry+https://example.invalid/index"\n'
+                     f'checksum = "{"c" * 64}"\n')
+        head, tail = CARGO_LOCK.split('\n[[package]]', 1)
+        locks = {
+            'alternate first': head + alternate + '\n[[package]]' + tail,
+            'alternate last': CARGO_LOCK + alternate,
+            'duplicate crates.io row': CARGO_LOCK + alternate.replace(
+                'registry+https://example.invalid/index', 'registry+https://github.com/rust-lang/crates.io-index'),
+        }
+        expected = {'alternate first': 'anyhow 1.0.102 (registry+https://example.invalid/index)',
+                    'alternate last': 'anyhow 1.0.102 (registry+https://example.invalid/index)',
+                    'duplicate crates.io row': 'anyhow 1.0.102 (duplicate crates.io entry)'}
+        for label, lock in locks.items():
+            with self.subTest(label):
+                self.repo.write('suifleet-edge/Cargo.lock', lock)
+                rev = self.repo.commit()
+                archive = Path(self.tmp.name) / f'suifleet-edge-{rev}.tar.gz'
+                info = packager.build(self.repo.root, rev, archive)
+                url = f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/{archive.name}'
+                self.write_recipe(url=url, sha=info['sha256'], srcrev=rev,
+                                  extra=f'SUIFLEET_LOCK_SHA256 = "{sha256(lock)}"')
+                report = audit.check(self.layer, repo=self.repo.root)
+                self.assertFalse(report['ok'], report['errors'])
+                self.assertFalse(any('Cargo.lock sha256' in e for e in report['errors']), report['errors'])
+                self.assertTrue(any('sources other than the crates.io registry' in e and expected[label] in e
+                                    for e in report['errors']), report['errors'])
+        # The unmodified lock at a fresh revision is clean again.
+        self.repo.write('suifleet-edge/Cargo.lock', CARGO_LOCK)
+        rev = self.repo.commit()
+        archive = Path(self.tmp.name) / f'suifleet-edge-{rev}.tar.gz'
+        info = packager.build(self.repo.root, rev, archive)
+        self.write_recipe(url=f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/{archive.name}',
+                          sha=info['sha256'], srcrev=rev)
+        self.assertEqual(self.errors(repo=self.repo.root), [])
 
     def test_coupled_pins_must_agree(self):
         self.write_recipe(extra='PV = "1.0"')
