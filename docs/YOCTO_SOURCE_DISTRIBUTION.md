@@ -173,6 +173,14 @@ These static checks always run, on every recipe in the layer:
   host. The report never repeats a rejected secret: every URL in it, including
   failed git command lines, is shown without userinfo, query or fragment
   (`<redacted>`).
+- https sources may use only `name`, `sha256sum`, `subdir`, `unpack=0` or
+  `unpack=1` and `downloadfilename`. Like BitBake, the audit saves the
+  download under `downloadfilename` when that is set and chooses how to unpack
+  it from that name's suffix. A `.bin` local name is copied as a loose file, not
+  extracted. The local name must be a plain file name and, like the URL, must not
+  name a commit other than `SRCREV`. Other parameters, such as `striplevel`,
+  `md5sum` or `localpath`, are refused statically and by the fetcher before
+  anything is downloaded.
 - Every `crate://` entry has a SHA-256.
 - `file://` entries resolve, after following symlinks, to regular files inside
   the layer, and `FILESEXTRAPATHS` doesn't point outside it. This rejects the
