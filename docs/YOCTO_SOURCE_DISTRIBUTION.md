@@ -241,6 +241,15 @@ These static checks always run, on every recipe in the layer:
   inline `sha256sum` or a `name=` parameter replace the generated
   `NAME-VERSION.sha256sum` flag, so another registry, any parameter and a
   duplicate entry are refused.
+- Patches are refused in every audited recipe. BitBake's `do_patch` applies
+  any `file://` or https entry whose local name ends in `.patch` or `.diff`,
+  optionally followed by `.gz`, `.bz2`, `.xz` or `.Z`, after unpacking, and
+  `apply=yes` does the same for any name. The audit binds and scans only the
+  unpacked tree, so a patch could change compiler inputs under the original
+  `SRCREV` while the report still certified the pinned source. The recipe's
+  post-patch check covers only `Cargo.lock` and the crate version. Publish a
+  change as a new pinned source instead. `apply` is not a modelled parameter
+  for any fetcher.
 - `file://` entries resolve, after following symlinks, to regular files inside
   the layer, and `FILESEXTRAPATHS` doesn't point outside it. This rejects the
   pre-parse `${TOPDIR}` codec artifacts. No symlink in the layer may leave it.
