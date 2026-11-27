@@ -798,6 +798,29 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(url=git.replace('protocol=https', 'protocol=ssh'))
         self.assertTrue(any('protocol=https' in e for e in self.errors()))
 
+    def test_gitsm_sources_are_refused_and_never_fetched(self):
+        # gitsm would also fetch submodules that the audit never verifies, so a
+        # fully pinned gitsm source must still fail, statically and under --fetch.
+        url = 'gitsm://github.com/example/suifleet.git;protocol=https;nobranch=1;name=edge'
+        self.write_recipe(url=url, extra=f'SRCREV_edge = "{self.rev}"')
+        self.assertTrue(any('gitsm sources are not supported' in e for e in self.errors()), self.errors())
+        with mock.patch.object(audit.subprocess, 'run', side_effect=AssertionError('git ran')), \
+                mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+        # The fetcher itself refuses gitsm too, before creating anything.
+        recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        workdir = Path(self.tmp.name) / 'gitsm-fetch'
+        workdir.mkdir()
+        with mock.patch.object(audit.subprocess, 'run', side_effect=AssertionError('git ran')), \
+                mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+            errors, fetched = audit.fetch_recipe(recipe, workdir)
+        self.assertEqual(fetched, [])
+        self.assertTrue(any('gitsm submodule inputs cannot be verified' in e and 'nothing fetched' in e
+                            for e in errors), errors)
+
     def test_local_artifacts_outside_layer_are_rejected(self):
         self.write_recipe(extra='FILESEXTRAPATHS:prepend := "${TOPDIR}/artifacts:"\nSRC_URI += "file://codec.cjs"')
         errors = self.errors()

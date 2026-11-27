@@ -408,6 +408,12 @@ def audit_recipe(recipe):
                 errors.append(f'{where}: git source must use protocol=https: {url}')
             if not HEX40.match(rev or ''):
                 errors.append(f'{where}: git source needs a 40-hex SRCREV, got {rev!r}')
+            if scheme == 'gitsm':
+                # gitsm also fetches every submodule named by .gitmodules at the
+                # pinned gitlinks. The audit verifies only the top-level commit,
+                # so it cannot vouch for those inputs; refuse instead of passing.
+                errors.append(f'{where}: gitsm sources are not supported (submodule inputs cannot be verified); '
+                              f'publish a checksum-pinned archive or list each repository as a pinned git source: {url}')
         elif scheme in ('https', 'http', 'ftp'):
             sha = checksum_for(recipe, params)
             entry['sha256'] = sha
@@ -667,7 +673,9 @@ def unpack_plan(recipe, unpack):
             source = file_source(recipe, recipe.expand(url[len('file://'):]))
             rel = PurePosixPath(params.get('subdir', ''), source.name).as_posix() if source else None
             plan.append((url, params, scheme, rel and (confined(unpack, rel, 'file:// subdir'), rel)))
-        elif scheme in ('git', 'gitsm'):
+        elif scheme == 'gitsm':
+            raise ValueError(f'gitsm submodule inputs cannot be verified: {url}')
+        elif scheme == 'git':
             plan.append((url, params, scheme, confined(unpack, params.get('destsuffix', 'git'), 'destsuffix')))
         else:
             name = PurePosixPath(urllib.parse.urlsplit(url).path).name
@@ -701,7 +709,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
             continue
         # Re-resolve: an earlier archive may have created a symlink on the path.
         destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
-        if scheme in ('git', 'gitsm'):
+        if scheme == 'git':
             rev = recipe.get(f'SRCREV_{params["name"]}') if 'name' in params else recipe.get('SRCREV')
             remote = 'https://' + url.split('://', 1)[1]
             env = anonymous_env(Path(workdir))
