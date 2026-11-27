@@ -1565,10 +1565,12 @@ def verify_compressed_stream(archive, mode, out=None):
                                 f'{type(error).__name__}: {error}') from error
 
 
-def safe_extract(archive, destination, name=None):
+def safe_extract(archive, destination, name=None, root=None):
     """Extract archive as BitBake would unpack a file called name (default:
     the archive's own name), using the decompression that name selects. The
-    compressed stream must decode completely, as it must for BitBake."""
+    compressed stream must decode completely, as it must for BitBake. Every
+    link under root (default: destination) must still resolve inside root
+    afterwards; fetch passes the recipe's whole unpack directory."""
     destination = Path(destination).resolve()
     mode = tar_mode(name or Path(archive).name)
     with tempfile.TemporaryFile() as decoded:
@@ -1583,40 +1585,154 @@ def safe_extract(archive, destination, name=None):
             verify_compressed_stream(archive, mode)
             opened = tarfile.open(archive, mode)
         with opened as tar:
-            extract_members(tar, archive, destination)
+            extract_members(tar, archive, destination, root)
 
 
-def extract_members(tar, archive, destination):
-    """Check every member of the open tar stays inside destination, then extract."""
-    for member in tar.getmembers():
-        target = (destination / member.name).resolve()
-        if destination not in (target, *target.parents):
-            raise ValueError(f'{archive.name}: member escapes the unpack directory: {member.name}')
-        if member.issym() or member.islnk():
-            base = target.parent if member.issym() else destination
-            link = (base / member.linkname).resolve()
-            if member.linkname.startswith('/') or destination not in (link, *link.parents):
-                raise ValueError(f'{archive.name}: link escapes the unpack directory: {member.name}')
-        elif not (member.isfile() or member.isdir()):
+def member_parts(archive, name):
+    """The path components of a tar member name ('.' components dropped);
+    ValueError for an absolute name or one with a '..' component."""
+    if name.startswith('/') or '\0' in name:
+        raise ValueError(f'{archive.name}: member escapes the unpack directory: {name}')
+    parts = tuple(part for part in PurePosixPath(name).parts if part != '.')
+    if '..' in parts:
+        raise ValueError(f'{archive.name}: member escapes the unpack directory: {name}')
+    return parts
+
+
+def link_graph_errors(archive, members, destination):
+    """Validate every member path and symlink target before anything is written.
+
+    Resolution through links cannot be checked against the filesystem in
+    advance, because the archive's own links (or links an earlier source
+    unpacked) change what later paths resolve to. The check is therefore
+    lexical over the archive's complete link graph plus what already exists
+    on disk, and the graph is restricted so that the lexical answer is the
+    real one: no member is written through a link, and no symlink target
+    passes through or ends at a link. Every directory a target traverses must
+    be a directory of this archive or a real directory already on disk, so a
+    later source cannot turn it into a link. Hard links are not needed by any
+    published layout and are refused."""
+    seen, links, files, directories = set(), set(), set(), {()}
+    entries = []
+    for member in members:
+        parts = member_parts(archive, member.name)
+        if not parts:
+            if not member.isdir():
+                raise ValueError(f'{archive.name}: member has no name: {member.name!r}')
+            continue
+        if parts in seen:
+            raise ValueError(f'{archive.name}: duplicate member: {member.name}')
+        seen.add(parts)
+        if member.islnk():
+            raise ValueError(f'{archive.name}: hard link members are not supported: {member.name}')
+        if not (member.issym() or member.isfile() or member.isdir()):
             raise ValueError(f'{archive.name}: unsupported member type: {member.name}')
-    links = []
-    for member in tar.getmembers():
-        target = destination / member.name
-        if member.issym() or member.islnk():
-            links.append((member, target))
-        elif member.isdir():
-            target.mkdir(parents=True, exist_ok=True)
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with tar.extractfile(member) as source, open(target, 'wb') as out:
-                shutil.copyfileobj(source, out)
-            target.chmod(member.mode & 0o755 | 0o600)
-    for member, target in links:
-        target.parent.mkdir(parents=True, exist_ok=True)
+        (links if member.issym() else files if member.isfile() else directories).add(parts)
+        directories.update(parts[:i] for i in range(len(parts)))
+        entries.append((member, parts))
+
+    def on_disk_link(parts):
+        return (destination.joinpath(*parts)).is_symlink() if parts else False
+
+    def real_directory(parts):
+        if parts in links or parts in files or on_disk_link(parts):
+            return False
+        if parts in directories:
+            return True
+        path = destination.joinpath(*parts)
+        return path.is_dir() and not path.is_symlink()
+
+    for member, parts in entries:
+        for i in range(1, len(parts)):
+            if parts[:i] in links or on_disk_link(parts[:i]):
+                raise ValueError(f'{archive.name}: member is written through a link: {member.name}')
+        if not member.issym():
+            continue
+        if not member.linkname or member.linkname.startswith('/') or '\0' in member.linkname:
+            raise ValueError(f'{archive.name}: link escapes the unpack directory: {member.name}')
+        current = list(parts[:-1])
+        components = [part for part in PurePosixPath(member.linkname).parts if part != '.']
+        for index, part in enumerate(components):
+            if part == '..':
+                if not current:
+                    raise ValueError(f'{archive.name}: link escapes the unpack directory: {member.name}')
+                current.pop()
+                continue
+            current.append(part)
+            if index < len(components) - 1 and not real_directory(tuple(current)):
+                raise ValueError(f'{archive.name}: link target passes through a link or a path that is '
+                                 f'not a directory of the archive: {member.name} -> {member.linkname}')
+        if tuple(current) in links or on_disk_link(tuple(current)):
+            raise ValueError(f'{archive.name}: chained link: {member.name} -> {member.linkname}')
+    return entries
+
+
+def open_parent(destination, parts):
+    """A directory fd for destination/parts[:-1], creating missing directories
+    and never following a link on the way."""
+    fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, 0o755, dir_fd=fd)
+            except FileExistsError:
+                pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def links_escaping(root):
+    """Every symlink under root (not following links) whose full resolution
+    leaves root."""
+    root = Path(root).resolve()
+    escaping = []
+    for directory, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            path = Path(directory) / name
+            if path.is_symlink():
+                resolved = Path(os.path.realpath(path))
+                if root not in (resolved, *resolved.parents):
+                    escaping.append(path.relative_to(root).as_posix())
+    return escaping
+
+
+def extract_members(tar, archive, destination, root=None):
+    """Validate the archive's members and link graph, extract without following
+    any link, then confirm every link under root (default destination) still
+    resolves inside it."""
+    destination = Path(destination).resolve()
+    entries = link_graph_errors(archive, tar.getmembers(), destination)
+    symlinks = []
+    for member, parts in entries:
         if member.issym():
-            target.symlink_to(member.linkname)
-        else:
-            os.link(destination / member.linkname, target)
+            symlinks.append((member, parts))
+            continue
+        fd = open_parent(destination, parts + (('',) if member.isdir() else ()))
+        try:
+            if member.isdir():
+                continue
+            out = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                          member.mode & 0o755 | 0o600, dir_fd=fd)
+            with os.fdopen(out, 'wb') as handle, tar.extractfile(member) as source:
+                shutil.copyfileobj(source, handle)
+                os.fchmod(handle.fileno(), member.mode & 0o755 | 0o600)
+        finally:
+            os.close(fd)
+    for member, parts in symlinks:
+        fd = open_parent(destination, parts)
+        try:
+            os.symlink(member.linkname, parts[-1], dir_fd=fd)
+        finally:
+            os.close(fd)
+    escaping = links_escaping(root or destination)
+    if escaping:
+        raise ValueError(f'{archive.name}: links resolve outside the unpack directory after extraction: '
+                         f'{", ".join(escaping)}')
 
 
 def confined(root, rel, what):
@@ -1765,7 +1881,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
         destination.mkdir(parents=True, exist_ok=True)
         if TARBALL.search(name) and params.get('unpack', '1') == '1':
             try:
-                safe_extract(target, destination, name)
+                safe_extract(target, destination, name, unpack)
             except ARCHIVE_DECODE_ERRORS as error:
                 errors.append(f'{recipe.path.name}: {name} could not be decoded as a tarball: '
                               f'{type(error).__name__}: {error}')

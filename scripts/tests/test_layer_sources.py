@@ -3511,6 +3511,110 @@ class LayerAuditTests(unittest.TestCase):
                         audit.safe_extract(archive, Path(tempfile.mkdtemp(dir=self.tmp.name)))
 
 
+    def link_archive(self, *entries):
+        """A .tar.gz of (name, kind, data_or_linkname) entries in order."""
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode='w:gz') as tar:
+            for name, kind, value in entries:
+                info = tarfile.TarInfo(name)
+                if kind == 'dir':
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                elif kind in ('sym', 'hard'):
+                    info.type, info.linkname = (tarfile.SYMTYPE if kind == 'sym' else tarfile.LNKTYPE), value
+                    tar.addfile(info)
+                else:
+                    info.size = len(value)
+                    tar.addfile(info, io.BytesIO(value))
+        archive = Path(tempfile.mkdtemp(dir=self.tmp.name)) / 'links.tar.gz'
+        archive.write_bytes(data.getvalue())
+        return archive
+
+    def test_chained_and_traversing_links_are_refused_before_anything_is_written(self):
+        # Each link here is lexically inside the unpack directory when checked
+        # alone; together (or through a link earlier in the archive) they leave it.
+        cases = {
+            'chain whose parts each look confined': (
+                [('a/b/s', 'sym', '../../c'), ('c', 'dir', None), ('l', 'sym', 'a/b/s/../..')], 'passes through a link'),
+            'link to a link': ([('t', 'file', b't'), ('one', 'sym', 't'), ('two', 'sym', 'one')], 'chained link'),
+            'link to a later link': ([('two', 'sym', 'one'), ('one', 'sym', '.')], 'chained link'),
+            'member written through an archive link': ([('hop', 'sym', '.'), ('hop/x', 'file', b'x')], 'written through a link'),
+            'member written through a link to a parent': ([('d', 'dir', None), ('d/up', 'sym', '..'), ('d/up/d/up/x', 'file', b'x')],
+                                                          'written through a link'),
+            'target through a missing directory': ([('l', 'sym', 'later/..')], 'not a directory of the archive'),
+            'target through a regular file': ([('f', 'file', b'f'), ('l', 'sym', 'f/..')], 'not a directory of the archive'),
+            'hard link': ([('f', 'file', b'f'), ('h', 'hard', 'f')], 'hard link members are not supported'),
+            'duplicate member': ([('d', 'dir', None), ('d', 'sym', '.')], 'duplicate member'),
+            'dot-dot member': ([('d/../x', 'file', b'x')], 'escapes'),
+            'empty link target': ([('l', 'sym', '')], 'escapes'),
+        }
+        for label, (entries, message) in cases.items():
+            with self.subTest(label):
+                archive = self.link_archive(*entries)
+                outer = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                destination = outer / 'pn'
+                destination.mkdir()
+                with self.assertRaisesRegex(ValueError, message):
+                    audit.safe_extract(archive, destination)
+                self.assertEqual(list(destination.iterdir()), [])
+                self.assertEqual([p.name for p in outer.iterdir()], ['pn'])
+
+    def test_links_unpacked_earlier_are_part_of_the_graph(self):
+        root = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        outside = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        unpack = root / 'pn'
+        unpack.mkdir()
+        (unpack / 'up').symlink_to('.')
+        (unpack / 'away').symlink_to(outside)
+        for entries, message in (([('up/up/x', 'file', b'x')], 'written through a link'),
+                                 ([('away/x', 'file', b'x')], 'written through a link'),
+                                 ([('l', 'sym', 'up/..')], 'passes through a link'),
+                                 ([('l', 'sym', 'up')], 'chained link')):
+            with self.subTest(entries=entries):
+                with self.assertRaisesRegex(ValueError, message):
+                    audit.safe_extract(self.link_archive(*entries), unpack)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(sorted(p.name for p in unpack.iterdir()), ['away', 'up'])
+        # A later source cannot complete an earlier dangling link: the link
+        # target must traverse real directories, and every link under the
+        # recipe's unpack directory is re-resolved after each extraction.
+        fresh = Path(tempfile.mkdtemp(dir=self.tmp.name)) / 'pn'
+        (fresh / 'sub').mkdir(parents=True)
+        (fresh / 'sub/x').symlink_to('..')
+        (fresh / 'l').symlink_to('sub/x/..')
+        with self.assertRaisesRegex(ValueError, 'resolve outside the unpack directory after extraction: l'):
+            audit.safe_extract(self.link_archive(('f', 'file', b'f')), fresh / 'sub', root=fresh)
+
+    def test_writes_never_follow_a_link_swapped_in_after_validation(self):
+        destination = Path(tempfile.mkdtemp(dir=self.tmp.name)) / 'pn'
+        destination.mkdir()
+        outside = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        archive = self.link_archive(('d', 'dir', None), ('d/x', 'file', b'x'))
+        real = audit.link_graph_errors
+
+        def swap(*args):
+            entries = real(*args)
+            (destination / 'd').symlink_to(outside)
+            return entries
+        with mock.patch.object(audit, 'link_graph_errors', swap), self.assertRaises(OSError):
+            audit.safe_extract(archive, destination)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_confined_links_like_the_published_node_archive_unpack(self):
+        destination = Path(tempfile.mkdtemp(dir=self.tmp.name)) / 'pn'
+        destination.mkdir()
+        top = 'node-v1-linux-arm64'
+        archive = self.link_archive(
+            (f'{top}/', 'dir', None), (f'{top}/bin/', 'dir', None),
+            (f'{top}/bin/npm', 'sym', '../lib/node_modules/npm/bin/npm-cli.js'),
+            (f'{top}/lib/node_modules/npm/bin/npm-cli.js', 'file', b'cli'),
+            (f'./{top}/here', 'sym', './bin/../lib'))
+        audit.safe_extract(archive, destination)
+        self.assertEqual((destination / top / 'bin/npm').read_bytes(), b'cli')
+        self.assertEqual(os.readlink(destination / top / 'bin/npm'), '../lib/node_modules/npm/bin/npm-cli.js')
+        self.assertTrue((destination / top / 'here/node_modules').is_dir())
+
+
 class CodecFetchedLayoutTests(unittest.TestCase):
     """codec_errors checks a fetched codec as do_verify_codec in the recipe does."""
 
