@@ -145,15 +145,22 @@ handler that can store a core dump while they enroll
 ([claim storage](#claim-storage)). Use a controller with
 ansible-core 2.16 or later. The examples use only
 `ansible.builtin` modules. The tested controller is pinned in
-[`requirements-controller.txt`](../examples/ansible/requirements-controller.txt):
+[`requirements-controller.txt`](../examples/ansible/requirements-controller.txt)
+for CPython 3.12 on x86_64 Linux; create the virtual environment with that
+interpreter, then activate it so `ansible-playbook` resolves to the pinned
+copy rather than any other Ansible on your `PATH`:
 
 ```sh
 cd examples/ansible
-python3 -m venv ~/.venvs/suifleet-ansible
-~/.venvs/suifleet-ansible/bin/pip install --require-hashes -r requirements-controller.txt
+python3.12 -m venv ~/.venvs/suifleet-ansible
+. ~/.venvs/suifleet-ansible/bin/activate
+pip install --require-hashes -r requirements-controller.txt
 ansible-playbook -i ~/fleet/inventory.yml site.yml --check --diff   # preview
 ansible-playbook -i ~/fleet/inventory.yml site.yml                  # install, enroll, start
 ```
+
+Run later `ansible-playbook` commands in a shell where this environment is
+active (`. ~/.venvs/suifleet-ansible/bin/activate`).
 
 After enrollment, run the Enrollment page's pending transactions again. They
 bind each enrolled claim to its serial, alias and group. Then fund device gas
