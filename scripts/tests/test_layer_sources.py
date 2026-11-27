@@ -1338,6 +1338,38 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue(any('license file NOTICE does not match' in e for e in report['errors']), report['errors'])
         self.assertFalse((source / 'NOTICE').exists())
 
+    def test_local_file_parameters_the_audit_does_not_model_are_refused(self):
+        # BitBake's FetchData.setup_localpath uses an explicit localpath instead
+        # of the layer-relative file, so the audit must not vouch for the
+        # in-layer NOTICE while BitBake reads a different (here missing) path.
+        (self.recipe_dir / 'files/NOTICE').write_text('notice\n')
+        for params in (f';localpath={self.tmp.name}/missing/NOTICE', ';downloadfilename=OTHER',
+                       ';striplevel=1', ';unpack=yes'):
+            with self.subTest(params):
+                self.write_recipe(extra=f'SRC_URI += "file://NOTICE{params}"\n')
+                self.assertTrue(any('file:// source parameters the audit does not model' in e
+                                    for e in self.errors()), self.errors())
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('file:// source parameters the audit does not model' in e
+                                    and 'nothing fetched' in e for e in errors), errors)
+                self.assertFalse((workdir / 'suifleet').exists())
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+        # The modelled parameters still pass: subdir and unpack=0/1.
+        self.write_recipe(extra='SRC_URI += "file://NOTICE;subdir=source;unpack=1"\n')
+        self.assertEqual(self.errors(), [])
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+        self.assertTrue((Path(report['fetch_dir']) / 'suifleet/source/NOTICE').is_file())
+
     def test_archives_bitbake_unpacks_in_unmodelled_formats_are_refused(self):
         # BitBake runs unzip (and other extractors) on these names unless
         # unpack=0; the audit must not report the packed file's layout instead.

@@ -8,7 +8,9 @@ Static checks (always):
     ref, and no expiring release-asset redirect hosts;
   * every crate:// entry has a SHA-256;
   * file:// sources resolve, after symlinks, to regular files inside the layer
-    (no FILESEXTRAPATHS outside it, no symlink leaving the layer);
+    (no FILESEXTRAPATHS outside it, no symlink leaving the layer) and use
+    only the subdir and unpack=0/1 parameters (an explicit localpath would
+    make BitBake read a different file);
   * source-affecting variables (SRC_URI, SRCREV*, PV, S, LIC_FILES_CHKSUM,
     SUIFLEET_* and everything they reference) take no conditional overrides:
     only a plain :append/:prepend is accepted, so the audited assignment is the
@@ -313,6 +315,21 @@ def unmodelled_https_params(params):
     return sorted(unmodelled)
 
 
+# file:// SRC_URI parameters the audit reproduces: the unpack subdir and
+# unpack=0/1. Anything else (localpath, downloadfilename, striplevel, ...) can
+# make BitBake select or place a different file than the layer-relative one the
+# audit checks (FetchData.setup_localpath honours an explicit localpath), so it
+# is refused rather than verified against a source the recipe would not use.
+FILE_PARAMS = frozenset({'subdir', 'unpack'})
+
+
+def unmodelled_file_params(params):
+    unmodelled = set(params) - FILE_PARAMS
+    if params.get('unpack', '1') not in ('0', '1'):
+        unmodelled.add(f'unpack={params["unpack"]}')
+    return sorted(unmodelled)
+
+
 def download_name(url, params):
     """The local file name BitBake's wget fetcher stores and unpacks: downloadfilename
     when set, taken literally like BitBake's parameter parser (its suffix selects
@@ -524,6 +541,9 @@ def audit_recipe(recipe):
             continue
         elif scheme == 'file':
             name = url[len('file://'):]
+            if unmodelled_file_params(params):
+                errors.append(f'{where}: file:// source parameters the audit does not model: '
+                              f'{", ".join(unmodelled_file_params(params))}: {shown}')
             if name.startswith('/') or '..' in PurePosixPath(name).parts:
                 errors.append(f'{where}: file:// source escapes the layer: {name}')
             else:
@@ -818,6 +838,9 @@ def unpack_plan(recipe, unpack):
         if scheme == 'crate':
             continue
         if scheme == 'file':
+            if unmodelled_file_params(params):
+                raise ValueError(f'file:// source parameters the audit does not model: '
+                                 f'{", ".join(unmodelled_file_params(params))}: {url}')
             name = recipe.expand(url[len('file://'):])
             problem = unsupported_unpack(PurePosixPath(name).name, params, extracts=NOTHING)
             if problem:
