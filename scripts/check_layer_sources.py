@@ -1854,9 +1854,22 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 except ValueError as error:
                     errors.append(f'{recipe.path.name}: {error}')
             continue
-        # Re-resolve: an earlier archive may have created a symlink on the path.
-        destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
         if scheme == 'git':
+            # Resolve only the parent: the final component must be inspected and
+            # created as declared. Resolving it too would follow a (dangling)
+            # symlink an earlier archive left there, so the existence check and
+            # the move would act on the link target instead of the declared path.
+            rel = PurePosixPath(os.path.relpath(destination, unpack.resolve()))
+            if rel.name in ('', '.', '..'):
+                errors.append(f'{recipe.path.name}: {redact_url(url)}: git destination {rel.as_posix()!r} '
+                              f'has no directory name; not fetched')
+                continue
+            try:
+                parent = confined(unpack, rel.parent.as_posix(), 'unpack destination')
+            except ValueError as error:
+                errors.append(f'{recipe.path.name}: {redact_url(url)}: {error}; not fetched')
+                continue
+            destination = parent / rel.name
             rev = recipe.get(f'SRCREV_{params["name"]}') if 'name' in params else recipe.get('SRCREV')
             # Git never runs inside the unpack tree: an earlier archive could
             # have planted repository metadata (git/.git/config, hooks) at the
@@ -1879,12 +1892,12 @@ def fetch_recipe(recipe, workdir, cargo=None):
             actual = subprocess.check_output(['git', '-C', str(private), 'rev-parse', 'HEAD'], env=env, text=True).strip()
             branch_error = None if params.get('nobranch') == '1' else git_branch_error(private, remote, params.get('branch', ''), rev, env)
             try:
-                parent = confined(unpack, os.path.relpath(destination.parent, unpack.resolve()), 'unpack destination')
                 parent.mkdir(parents=True, exist_ok=True)
                 # Re-check immediately before the move: rename() would replace
-                # an empty directory created in the meantime.
-                if os.path.lexists(destination) or confined(unpack, os.path.relpath(destination, unpack.resolve()),
-                                                            'unpack destination') != destination:
+                # an empty directory created in the meantime, and the parent
+                # must still resolve to the same confined directory.
+                if os.path.lexists(destination) or confined(unpack, rel.parent.as_posix(),
+                                                            'unpack destination') != parent:
                     raise ValueError(f'git destination {destination.relative_to(unpack.resolve()).as_posix()} '
                                      f'changed before the checkout was moved into place')
                 os.rename(private, destination)
@@ -1904,6 +1917,8 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 return errors + [f'{recipe.path.name}: {redact_url(url)}: links resolve outside the unpack '
                                  f'directory after checkout: {", ".join(escaping)}'], fetched
             continue
+        # Re-resolve: an earlier archive may have created a symlink on the path.
+        destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
         name = download_name(url, params)
         # Each source gets its own fresh staging directory. A name-keyed shared
         # directory would let another recipe's fetch of the same file (or an

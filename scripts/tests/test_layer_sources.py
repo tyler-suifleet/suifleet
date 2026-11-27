@@ -1242,6 +1242,10 @@ class LayerAuditTests(unittest.TestCase):
                 info = tarfile.TarInfo(name)
                 info.size, info.mode = len(data), 0o644
                 tar.addfile(info, io.BytesIO(data))
+            # A dangling in-tree symlink at a later Git destination.
+            link = tarfile.TarInfo('dangling')
+            link.type, link.linkname = tarfile.SYMTYPE, 'dangling-target'
+            tar.addfile(link)
         plant_sha = sha256(plant.read_bytes())
         plant_url = f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/plant.tar.gz'
         head = self.repo.git('rev-parse', 'HEAD').decode().strip()
@@ -1278,6 +1282,15 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual([c for c in calls if c[:1] == ['git']], [])
         self.assertNotIn('revision', json.dumps(report['recipes']['suifleet']['fetched']))
         self.assertEqual((unpack / 'git/.git/config').read_text(), marker)
+        # A dangling symlink at the declared destination is the existing entry:
+        # it is refused as declared, not followed to its absent target.
+        report, unpack = report_for(git_url + ';destsuffix=dangling')
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('git destination dangling already exists' in e for e in report['errors']), report['errors'])
+        self.assertEqual([c for c in calls if c[:1] == ['git']], [])
+        self.assertNotIn('revision', json.dumps(report['recipes']['suifleet']['fetched']))
+        self.assertTrue((unpack / 'dangling').is_symlink())
+        self.assertFalse(os.path.lexists(unpack / 'dangling-target'))
         # A fresh destination: Git runs only in a private repository outside
         # the unpack tree, which is then moved into place.
         report, unpack = report_for(git_url + ';destsuffix=tool')
