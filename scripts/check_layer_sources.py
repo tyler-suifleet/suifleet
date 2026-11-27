@@ -2479,7 +2479,12 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
             tree = read
             if fetch:
                 try:
-                    required = load_packager().plan(repo, rev)['paths']
+                    # The effective recipe layout, as the pin and layout checks
+                    # and do_verify_lock use it: a relocated CARGO_SRC_DIR or
+                    # license file yields that layout's closure.
+                    licenses = tuple(rel for rel, _ in license_md5s(daemon))
+                    required = load_packager().plan(repo, rev, crate=cargo_src_dir(daemon),
+                                                    licenses=licenses)['paths']
                 except (OSError, ValueError, subprocess.CalledProcessError) as error:
                     report['errors'].append(f'{daemon.path.name}: cannot derive the build closure at SRCREV {rev}: '
                                             f'{error}')

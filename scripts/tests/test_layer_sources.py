@@ -3663,6 +3663,49 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
 
+    def test_fetch_and_repo_closure_follows_relocated_cargo_src_dir(self):
+        # The source reviewer's reproduction: the whole crate moves to
+        # crates/edge and the recipe sets CARGO_SRC_DIR to match. The combined
+        # --repo --fetch audit must derive the closure for that layout, as the
+        # repo-only and fetch-only audits and do_verify_lock already do,
+        # instead of requiring suifleet-edge/Cargo.toml.
+        (self.repo.root / 'crates').mkdir()
+        self.repo.git('mv', 'suifleet-edge', 'crates/edge')
+        self.repo.write('crates/edge/src/main.rs', MAIN_RS.replace('../../interfaces', '../../../interfaces'))
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete, crate='crates/edge')
+        self.assertIn('crates/edge/src/extra.rs', info['paths'])
+        self.assertNotIn('crates/edge/meta-suifleet-integration/conf/layer.conf', info['paths'])
+        url = self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}')
+
+        def audit_archive(archive, sha, **kwargs):
+            self.archive = archive
+            self.write_recipe(url=url, sha=sha, srcrev=rev)
+            text = (self.recipe_dir / 'suifleet_1.0.bb').read_text()
+            (self.recipe_dir / 'suifleet_1.0.bb').write_text(
+                text.replace('CARGO_SRC_DIR = "suifleet-edge"', 'CARGO_SRC_DIR = "crates/edge"'))
+            with mock.patch.object(audit, 'download', self.fake_download):
+                report = audit.check(self.layer, **kwargs)
+            if 'fetch_dir' in report:
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+            return report['errors']
+
+        for kwargs in ({'repo': self.repo.root}, {'fetch': True}, {'repo': self.repo.root, 'fetch': True}):
+            with self.subTest(**{k: bool(v) for k, v in kwargs.items()}):
+                self.assertEqual(audit_archive(complete, info['sha256'], **kwargs), [])
+        # The same layout missing a closure file is still refused by the
+        # combined audit, under the relocated path.
+        incomplete = complete.with_name('relocated-incomplete.tar.gz')
+        with tarfile.open(complete) as source, tarfile.open(incomplete, 'w:gz') as tar:
+            for member in source.getmembers():
+                if member.name != 'crates/edge/src/data/blob.bin':
+                    tar.addfile(member, source.extractfile(member) if member.isfile() else None)
+        errors = audit_archive(incomplete, sha256(incomplete.read_bytes()), repo=self.repo.root, fetch=True)
+        self.assertTrue(any('build-closure path(s)' in e and 'crates/edge/src/data/blob.bin' in e for e in errors),
+                        errors)
+        self.assertFalse(any('suifleet-edge/Cargo.toml' in e for e in errors), errors)
+
     def test_fetch_and_repo_report_missing_name_only_test_target(self):
         # cargo metadata --no-deps accepts a layout lacking a name-only
         # [[test]]'s inferred tests/<name>.rs, so the static audit must not.

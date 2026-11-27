@@ -43,16 +43,20 @@ import subprocess
 import tarfile
 
 CRATE = 'suifleet-edge'
-ROOTS = (
-    'LICENSE',
-    f'{CRATE}/Cargo.toml',
-    f'{CRATE}/Cargo.lock',
-    f'{CRATE}/config.example.toml',
-    f'{CRATE}/build.rs',
-    f'{CRATE}/src/',
-    f'{CRATE}/examples/',
-)
-REQUIRED = ('LICENSE', f'{CRATE}/Cargo.toml', f'{CRATE}/Cargo.lock')
+LICENSES = ('LICENSE',)
+
+
+def roots(crate=CRATE, licenses=LICENSES):
+    """Closure roots for the root crate directory `crate` (repository-relative)
+    and the license files `licenses`; directory roots end with '/'."""
+    return (*licenses, *(f'{crate}/{rel}' for rel in
+                         ('Cargo.toml', 'Cargo.lock', 'config.example.toml', 'build.rs', 'src/', 'examples/')))
+
+
+def required(crate=CRATE, licenses=LICENSES):
+    return (*licenses, f'{crate}/Cargo.toml', f'{crate}/Cargo.lock')
+
+
 # Every include macro name, however it is delimited or spaced (`include!(..)`,
 # `include! { .. }`, `std::include_str![..]`).
 INCLUDE_MACRO = re.compile(rb'(?<![A-Za-z0-9_])include(_str|_bytes)?\s*!')
@@ -903,8 +907,12 @@ def loose_sources(manifest, read_manifest, declared, exists, read, sources, crat
     return sorted(seen), errors
 
 
-def closure(files, read):
-    """Select the build closure from `files` ({path: (mode, kind, oid)})."""
+def closure(files, read, crate=CRATE, licenses=LICENSES):
+    """Select the build closure from `files` ({path: (mode, kind, oid)}).
+
+    `crate` is the root crate directory and `licenses` the license files, both
+    repository-relative; a recipe passes its effective CARGO_SRC_DIR and
+    LIC_FILES_CHKSUM paths, so a relocated crate yields its own closure."""
     selected = set()
 
     def add_root(root):
@@ -913,27 +921,27 @@ def closure(files, read):
         elif root in files:
             selected.add(root)
 
-    for root in ROOTS:
+    for root in roots(crate, licenses):
         add_root(root)
-    for name in REQUIRED:
+    for name in required(crate, licenses):
         if name not in files:
             raise ValueError(f'source revision lacks required {name}')
-    manifest = read(f'{CRATE}/Cargo.toml').decode()
+    manifest = read(f'{crate}/Cargo.toml').decode()
 
     def read_manifest(directory):
-        path = f'{CRATE}/{directory}/Cargo.toml'
+        path = f'{crate}/{directory}/Cargo.toml'
         return read(path).decode() if path in files else None
 
     for directory in local_crates(manifest, read_manifest):
-        add_root(f'{CRATE}/{directory}/')
-    declared = declared_files(manifest, read_manifest, lambda rel: f'{CRATE}/{rel}' in files)
+        add_root(f'{crate}/{directory}/')
+    declared = declared_files(manifest, read_manifest, lambda rel: f'{crate}/{rel}' in files)
     for rel in declared:
-        if f'{CRATE}/{rel}' not in files:
-            raise ValueError(f'Cargo.toml declares build file {CRATE}/{rel}, absent at this revision')
-        selected.add(f'{CRATE}/{rel}')
+        if f'{crate}/{rel}' not in files:
+            raise ValueError(f'Cargo.toml declares build file {crate}/{rel}, absent at this revision')
+        selected.add(f'{crate}/{rel}')
     # Every .rs file, and every manifest-declared target or build script
     # whatever its suffix: Cargo hands those to rustc as crate roots.
-    pending = sorted({p for p in selected if p.endswith('.rs')} | {f'{CRATE}/{rel}' for rel in declared})
+    pending = sorted({p for p in selected if p.endswith('.rs')} | {f'{crate}/{rel}' for rel in declared})
     scanned = set()
     while pending:
         path = pending.pop()
@@ -947,7 +955,7 @@ def closure(files, read):
             if scanned_as_code(target, code) and target not in scanned:
                 pending.append(target)
     _, errors = loose_sources(manifest, read_manifest, declared, lambda path: path in files, read,
-                              [p for p in files if p.startswith(f'{CRATE}/')])
+                              [p for p in files if p.startswith(f'{crate}/')])
     if errors:
         raise ValueError(errors[0])
     return audit(selected, files, read)
@@ -973,7 +981,7 @@ def crate_version(manifest):
     return version
 
 
-def plan(repo, revision, paths=None):
+def plan(repo, revision, paths=None, crate=CRATE, licenses=LICENSES):
     revision = git(repo, 'rev-parse', '--verify', revision + '^{commit}').decode().strip()
     files = tree(repo, revision)
     cache = {}
@@ -983,24 +991,24 @@ def plan(repo, revision, paths=None):
             cache[path] = git(repo, 'cat-file', 'blob', files[path][2])
         return cache[path]
 
-    required = closure(files, read)
+    needed = closure(files, read, crate, licenses)
     if paths is None:
-        paths = required
+        paths = needed
     else:
         # Reproduce a previously published file list. It may carry more than
         # the build closure, but never less: an archive missing a manifest,
         # workspace member or include target cannot build, and its provenance
         # would wrongly vouch for the reported Cargo inputs.
         paths = audit(set(paths), files, read)
-        missing = sorted(set(required) - set(paths))
+        missing = sorted(set(needed) - set(paths))
         if missing:
             raise ValueError(f'file list omits {len(missing)} build-closure path(s): {", ".join(missing)}')
-    license_md5 = hashlib.md5(read('LICENSE')).hexdigest()
+    license_md5 = hashlib.md5(read(licenses[0])).hexdigest() if licenses else None
     return {
         'source_commit': revision,
         'paths': paths,
-        'crate_version': crate_version(read(f'{CRATE}/Cargo.toml').decode()),
-        'lock_sha256': hashlib.sha256(read(f'{CRATE}/Cargo.lock')).hexdigest(),
+        'crate_version': crate_version(read(f'{crate}/Cargo.toml').decode()),
+        'lock_sha256': hashlib.sha256(read(f'{crate}/Cargo.lock')).hexdigest(),
         'license_md5': license_md5,
     }
 
@@ -1036,9 +1044,9 @@ def verify_archive(repo, revision, paths, data):
         raise ValueError(f'git archive omitted planned files (export-ignore?): {", ".join(missing)}')
 
 
-def build(repo, revision, output, paths=None):
+def build(repo, revision, output, paths=None, crate=CRATE, licenses=LICENSES):
     """Write the archive with exclusive creation; return its provenance."""
-    info = plan(repo, revision, paths)
+    info = plan(repo, revision, paths, crate, licenses)
     # tar.umask decides the archived permission bits; pin the published value
     # so an ambient user/system/GIT_CONFIG_* value cannot change the bytes.
     archive = subprocess.run(['git', '-C', str(repo), '-c', f'tar.umask={TAR_UMASK:04o}', 'archive', '--format=tar',
