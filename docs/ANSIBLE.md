@@ -275,8 +275,9 @@ restarted once.
   following symlinks or blocking, accepts only a regular single-link file
   of at most 4 KiB that the account owns, and passes the bytes it read to
   root through a pipe; it refuses to write to anything but a pipe. Its
-  diagnostics go to a second pipe to root, which reports at most 512
-  printable bytes of them. Root
+  standard error is `/dev/null`: it reports a refusal only by a fixed exit
+  status, which root translates into its own fixed message, so no text the
+  SSH account controls reaches Ansible's output. Root
   stops reading as soon as more than 4 KiB arrive and gives the reader 60
   seconds to finish; otherwise it kills the reader and stages nothing, so a
   misbehaving SSH account cannot hold the host's rollout lock. Root

@@ -1996,6 +1996,7 @@ exit 3
 
     READER_WRITE = "            sys.stdout.buffer.write(data)\n"
     READER_PROBE = "/dev/shm/sf304-reader-probe"
+    READER_LEAK = "/dev/shm/sf304-reader-leak"
 
     def claim_reader_pipe(self, vault):
         """The SSH-account reader writes the claim to a pipe, never to a handle on the staged file.
@@ -2034,13 +2035,22 @@ exit 3
         print("PASS the SSH-account reader wrote the claim to a pipe and held no descriptor in the staging directory;"
               " root staged the claim root:root 0400")
 
+        # The failing reader also writes a synthetic claim marker (and the
+        # claim it read) as diagnostics: root reports only its own fixed
+        # message, so neither may appear in Ansible's output. The marker is
+        # read from a host file, not written into the reader's source, which
+        # Ansible echoes back as the failed command.
+        leak = "suiprivkey1qsf304diagnosticleak" + secrets.token_hex(16)
+        for host in self.hosts.values():
+            self.exec(host["container"], "sh", "-c", f"umask 022 && cat > {self.READER_LEAK}", input=leak + "\n")
         failing = self.variant_examples("examples-reader-fails", {"stage_claim.yml": [(self.READER_WRITE, (
             self.READER_WRITE + "            sys.stdout.flush()\n"
-            "            sys.exit('sf304 reader failed after writing')\n"))]}, folder="tasks", source=self.examples)
+            f"            sys.stderr.write(open('{self.READER_LEAK}').read() + data.decode('utf-8', 'replace'))\n"
+            "            sys.exit(1)\n"))]}, folder="tasks", source=self.examples)
         output, _ = self.ansible("reader failing after output stages nothing", "/work/claim-interrupt.yml", *vault,
                                  expect_rc="nonzero", examples=failing)
         assert "interrupted after the claim transfer" not in output, "staging accepted a failed read"
-        assert output.count("sf304 reader failed after writing") >= len(self.hosts), output[-4000:]
+        assert leak not in output, "the reader's diagnostics reached Ansible's output"
         assert output.count("refusing to stage the claim: the reader exited with status 1") >= len(self.hosts), \
             output[-4000:]
         for name, host in self.hosts.items():
@@ -2049,17 +2059,17 @@ exit 3
                              check=False).returncode != 0, (name, "a failed read was staged")
             left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
             assert left == "0", (name, "the transfer directory was not erased")
-            self.exec(container, "rm", "-rf", "/run/suifleet-enroll")
-        print("PASS a reader failing after writing part of the claim staged nothing; the transfer directory was erased")
+            self.exec(container, "rm", "-rf", "/run/suifleet-enroll", self.READER_LEAK)
+        print("PASS a reader failing after writing part of the claim staged nothing; its diagnostics (a synthetic claim"
+              " marker) never reached Ansible's output; the transfer directory was erased")
 
         # A reader that never finishes, or never stops writing, must not hold
         # root (and the host's rollout lock): root gives up at its deadline
         # (shortened here from 60 to 5 seconds) or as soon as more than 4 KiB
         # arrived, kills the reader and stages nothing; cleanup still runs.
         # A reader writing diagnostics without end must not reach Ansible's
-        # unbounded stderr capture either: root drains its own pipe from the
-        # reader's standard error and reports at most 512 bytes of it.
-        deadline = ("            LIMIT, DEADLINE, NOTE = 4096, 60, 512\n", "            LIMIT, DEADLINE, NOTE = 4096, 5, 512\n")
+        # output either: its standard error is /dev/null.
+        deadline = ("            LIMIT, DEADLINE = 4096, 60\n", "            LIMIT, DEADLINE = 4096, 5\n")
         for label, reader, refusal in (
                 ("stalled", "            sys.stdout.buffer.write(data[:8])\n            sys.stdout.flush()\n"
                  "            __import__('time').sleep(600)\n", "the reader did not finish within 5 seconds"),
@@ -2076,7 +2086,7 @@ exit 3
             assert "interrupted after the claim transfer" not in output, (label, "staging accepted a cut-off read")
             assert output.count(f"refusing to stage the claim: {refusal}") >= len(self.hosts), (label, output[-4000:])
             assert elapsed < 300, (label, "the play waited on the reader", elapsed)
-            assert "e" * 513 not in output, (label, "the reader's diagnostics reached Ansible unbounded")
+            assert "e" * 64 not in output, (label, "the reader's diagnostics reached Ansible")
             for name, host in self.hosts.items():
                 container = host["container"]
                 assert self.exec(container, "test", "-e", "/run/suifleet-enroll/claim.key",

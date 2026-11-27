@@ -213,11 +213,12 @@
     # output, which must be a pipe. Root's writer holds the read end of that
     # pipe and nothing else the reader could use: it reads at most 4097
     # bytes, refusing as soon as more than 4 KiB arrive. The reader's
-    # standard error is a second pipe to root, never Ansible's capture: root
-    # drains it, keeps only the first 512 bytes and reports them, printable
-    # only, if it refuses. Root gives the reader 60 seconds in total to
-    # close both pipes and exit. On overflow or timeout it closes the
-    # pipes, kills the reader's process group (its own
+    # standard error is /dev/null: it reports a refusal only through a fixed
+    # exit status, which root translates into its own fixed message, so no
+    # text the SSH account controls (which could carry claim bytes) reaches
+    # Ansible's output. Root gives the reader 60 seconds in total to close
+    # the pipe and exit. On overflow or timeout it closes the
+    # pipe, kills the reader's process group (its own
     # session) and reaps it, so a misbehaving SSH account cannot hold the
     # host's rollout lock. Only after the reader exited successfully, root
     # creates the destination exclusively (O_EXCL, O_NOFOLLOW), root-owned
@@ -235,37 +236,39 @@
             import os, resource, select, signal, subprocess, sys, time
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
             os.umask(0o077)
-            LIMIT, DEADLINE, NOTE = 4096, 60, 512
+            LIMIT, DEADLINE = 4096, 60
+            # The reader's refusals, by exit status: only these fixed texts are reported.
+            REFUSALS = {
+                10: "the reader's output is not a pipe",
+                11: "cannot open it as the SSH account without following a link",
+                12: "not a regular single-link file of 1 to 4096 bytes owned by the SSH account",
+                13: "it changed while it was read",
+            }
             src, account, dest, reader = sys.argv[1:5]
             if os.path.lexists(dest):
                 sys.exit("refusing to stage the claim: a staged claim already exists")
             proc = subprocess.Popen(
                 ["runuser", "-u", account, "--", "sh", "-c", 'ulimit -c 0 && exec python3 -I -c "$1" "$2"',
                  "sh", reader, src + "/claim.key"],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, close_fds=True,
                 start_new_session=True)
             end = time.monotonic() + DEADLINE
-            data, note, problem, status = b"", b"", None, None
+            data, problem, status = b"", None, None
             try:
-                out, err = proc.stdout.fileno(), proc.stderr.fileno()
-                pending = {out, err}
-                while pending and problem is None:
+                out = proc.stdout.fileno()
+                while problem is None:
                     left = end - time.monotonic()
                     if left <= 0:
                         problem = f"the reader did not finish within {DEADLINE} seconds"
                         break
-                    for fd in select.select(list(pending), [], [], left)[0]:
-                        if fd == out:
-                            chunk = os.read(out, LIMIT + 1 - len(data))
-                            data += chunk
-                            if len(data) > LIMIT:
-                                problem = f"the reader returned more than {LIMIT} bytes"
-                                break
-                        else:
-                            chunk = os.read(err, 4096)
-                            note = (note + chunk)[:NOTE]
-                        if not chunk:
-                            pending.discard(fd)
+                    if not select.select([out], [], [], left)[0]:
+                        continue
+                    chunk = os.read(out, LIMIT + 1 - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+                    if len(data) > LIMIT:
+                        problem = f"the reader returned more than {LIMIT} bytes"
                 if problem is None:
                     try:
                         status = proc.wait(timeout=max(0.0, end - time.monotonic()))
@@ -273,7 +276,6 @@
                         problem = f"the reader did not finish within {DEADLINE} seconds"
             finally:
                 proc.stdout.close()
-                proc.stderr.close()
                 if status is None:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
@@ -283,12 +285,11 @@
                         proc.wait(timeout=10)
                     except subprocess.TimeoutExpired:
                         pass
-            note = "".join(c if c.isprintable() else " " for c in note.decode("utf-8", "replace")).strip()
-            note = f" ({note})" if note else ""
             if problem is not None:
-                sys.exit(f"refusing to stage the claim: {problem}{note}")
+                sys.exit(f"refusing to stage the claim: {problem}")
             if status != 0:
-                sys.exit(f"refusing to stage the claim: the reader exited with status {status}{note}")
+                reason = f" (refusing the transferred claim: {REFUSALS[status]})" if status in REFUSALS else ""
+                sys.exit(f"refusing to stage the claim: the reader exited with status {status}{reason}")
             if not 0 < len(data) <= LIMIT:
                 sys.exit(f"refusing to stage the claim: the reader returned no claim or more than {LIMIT} bytes")
             fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)
@@ -308,15 +309,17 @@
           - "{{ suifleet_enroll_staging }}/claim.key"
           - |-
             import os, stat, sys
+            # Refusals are fixed exit statuses that root translates; this
+            # process's standard error is /dev/null and never reported.
             if not stat.S_ISFIFO(os.fstat(1).st_mode):
-                sys.exit("refusing the transferred claim: the reader's output is not a pipe")
+                sys.exit(10)
             try:
                 fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
-            except OSError as e:
-                sys.exit(f"refusing the transferred claim: cannot open it as the SSH account without following a link ({e.strerror})")
+            except OSError:
+                sys.exit(11)
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_nlink != 1 or not 0 < st.st_size <= 4096:
-                sys.exit("refusing the transferred claim: not a regular single-link file of 1 to 4096 bytes owned by the SSH account")
+                sys.exit(12)
             data = b""
             while len(data) <= 4096:
                 chunk = os.read(fd, 4097 - len(data))
@@ -324,7 +327,7 @@
                     break
                 data += chunk
             if len(data) != st.st_size:
-                sys.exit("refusing the transferred claim: it changed while it was read")
+                sys.exit(13)
             sys.stdout.buffer.write(data)
       diff: false
   always:

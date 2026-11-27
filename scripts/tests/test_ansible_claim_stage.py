@@ -48,9 +48,17 @@ if mode == "endless":
     while True:
         os.write(1, b"x" * 1024)
 if mode == "endless-stderr":
-    # Never stops writing diagnostics: they must not reach Ansible unbounded.
+    # Never stops writing diagnostics: they must never reach Ansible.
     while True:
         os.write(2, b"e" * 1024)
+if mode == "leaky-refusal":
+    # Writes a synthetic claim marker as diagnostics, then fails: the marker
+    # must never appear in root's output.
+    os.write(2, os.environ["SF304_MARKER"].encode() + b"\n")
+    sys.exit(1)
+if mode == "leaky-stall":
+    os.write(2, os.environ["SF304_MARKER"].encode() + b"\n")
+    time.sleep(3600)
 if mode == "noisy":
     # Plenty of diagnostics, then a normal read: root drains them without stalling.
     os.write(2, b"n" * 200000)
@@ -89,8 +97,8 @@ class ClaimStaging(unittest.TestCase):
         # Not root here: the only test-side change gives the staged file to the caller instead of root.
         self.writer = writer.replace("os.fchown(fd, 0, 0)", "os.fchown(fd, os.getuid(), os.getgid())")
         # The stall tests shorten root's overall wait from 60 to 2 seconds.
-        self.assertEqual(self.writer.count("LIMIT, DEADLINE, NOTE = 4096, 60, 512"), 1)
-        self.writer = self.writer.replace("LIMIT, DEADLINE, NOTE = 4096, 60, 512", "LIMIT, DEADLINE, NOTE = 4096, 2, 512")
+        self.assertEqual(self.writer.count("LIMIT, DEADLINE = 4096, 60"), 1)
+        self.writer = self.writer.replace("LIMIT, DEADLINE = 4096, 60", "LIMIT, DEADLINE = 4096, 2")
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         self.transfer, self.staging, bin_dir = root / "transfer", root / "staging", root / "bin"
@@ -99,8 +107,9 @@ class ClaimStaging(unittest.TestCase):
         (bin_dir / "runuser").write_text(FAKE_RUNUSER)
         (bin_dir / "runuser").chmod(0o755)
         self.dest, self.probe = self.staging / "claim.key", root / "probe.json"
+        self.marker = "suiprivkey1qsf304syntheticmarker" + os.urandom(8).hex()
         self.env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", SF304_DEST=str(self.dest),
-                        SF304_PROBE=str(self.probe))
+                        SF304_PROBE=str(self.probe), SF304_MARKER=self.marker)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -138,8 +147,8 @@ class ClaimStaging(unittest.TestCase):
         with open(self.staging / "redirected", "wb") as out:
             result = subprocess.run(["python3", "-I", "-c", self.reader, str(self.transfer / "claim.key")],
                                     stdout=out, stderr=subprocess.PIPE, text=True, timeout=60)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("refusing the transferred claim: the reader's output is not a pipe", result.stderr)
+        self.assertEqual(result.returncode, 10, "the reader reports refusals by fixed exit status")
+        self.assertEqual(result.stderr, "", "the reader prints no diagnostics")
         self.assertEqual((self.staging / "redirected").read_bytes(), b"")
 
     def test_refused_read_leaves_no_staged_file(self):
@@ -217,9 +226,8 @@ class ClaimStaging(unittest.TestCase):
         result = self.stage("endless-stderr")
         self.assertLess(time.monotonic() - started, 15, "root waited past its deadline")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("refusing to stage the claim: the reader did not finish within 2 seconds", result.stderr)
-        self.assertNotIn("e" * 513, result.stderr)
-        self.assertLess(len(result.stderr), 1024, "the reader's diagnostics reached the caller unbounded")
+        self.assertEqual(result.stderr.strip(), "refusing to stage the claim: the reader did not finish within 2 seconds",
+                         "the reader's diagnostics reached the caller")
         self.assertEqual(result.stdout, "")
         self.assertFalse(os.path.lexists(self.dest))
         self.assert_gone(self.probe_result()["pid"])
@@ -231,13 +239,27 @@ class ClaimStaging(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         self.assertEqual(self.dest.read_bytes(), CLAIM)
 
-    def test_reader_diagnostics_are_reported_printable_on_refusal(self):
+    def test_reader_refusal_is_reported_as_roots_fixed_message(self):
         self.write_claim(b"x" * 5000)
         result = self.stage()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("refusing to stage the claim: the reader exited with status 1 (refusing the transferred claim: "
-                      "not a regular single-link file", result.stderr)
+        self.assertEqual(result.stderr.strip(), "refusing to stage the claim: the reader exited with status 12 (refusing "
+                         "the transferred claim: not a regular single-link file of 1 to 4096 bytes owned by the SSH account)")
         self.assertFalse(os.path.lexists(self.dest))
+
+    def test_reader_diagnostics_never_reach_roots_output(self):
+        # A synthetic claim marker the reader writes as diagnostics before it
+        # fails, or before it stalls, must not appear in anything root prints.
+        self.write_claim()
+        for mode, expected in (("leaky-refusal", "refusing to stage the claim: the reader exited with status 1"),
+                               ("leaky-stall", "refusing to stage the claim: the reader did not finish within 2 seconds")):
+            with self.subTest(mode=mode):
+                result = self.stage(mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stderr.strip(), expected)
+                self.assertNotIn(self.marker, result.stderr + result.stdout)
+                self.assertFalse(os.path.lexists(self.dest))
+                self.assert_gone(self.probe_result()["pid"])
 
     def test_existing_staged_claim_is_never_replaced(self):
         self.write_claim()
