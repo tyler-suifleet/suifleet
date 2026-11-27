@@ -47,6 +47,13 @@ if mode == "endless":
     # Never stops writing: root must refuse once more than 4 KiB arrived.
     while True:
         os.write(1, b"x" * 1024)
+if mode == "endless-stderr":
+    # Never stops writing diagnostics: they must not reach Ansible unbounded.
+    while True:
+        os.write(2, b"e" * 1024)
+if mode == "noisy":
+    # Plenty of diagnostics, then a normal read: root drains them without stalling.
+    os.write(2, b"n" * 200000)
 if mode == "stall":
     # Writes part of a claim, then never finishes.
     os.write(1, b"partial")
@@ -82,8 +89,8 @@ class ClaimStaging(unittest.TestCase):
         # Not root here: the only test-side change gives the staged file to the caller instead of root.
         self.writer = writer.replace("os.fchown(fd, 0, 0)", "os.fchown(fd, os.getuid(), os.getgid())")
         # The stall tests shorten root's overall wait from 60 to 2 seconds.
-        self.assertEqual(self.writer.count("LIMIT, DEADLINE = 4096, 60"), 1)
-        self.writer = self.writer.replace("LIMIT, DEADLINE = 4096, 60", "LIMIT, DEADLINE = 4096, 2")
+        self.assertEqual(self.writer.count("LIMIT, DEADLINE, NOTE = 4096, 60, 512"), 1)
+        self.writer = self.writer.replace("LIMIT, DEADLINE, NOTE = 4096, 60, 512", "LIMIT, DEADLINE, NOTE = 4096, 2, 512")
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         self.transfer, self.staging, bin_dir = root / "transfer", root / "staging", root / "bin"
@@ -203,6 +210,34 @@ class ClaimStaging(unittest.TestCase):
                 break
             time.sleep(0.1)
         self.assert_gone(int(child.read_text()))
+
+    def test_endless_reader_diagnostics_are_bounded_and_the_reader_is_killed(self):
+        self.write_claim()
+        started = time.monotonic()
+        result = self.stage("endless-stderr")
+        self.assertLess(time.monotonic() - started, 15, "root waited past its deadline")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to stage the claim: the reader did not finish within 2 seconds", result.stderr)
+        self.assertNotIn("e" * 513, result.stderr)
+        self.assertLess(len(result.stderr), 1024, "the reader's diagnostics reached the caller unbounded")
+        self.assertEqual(result.stdout, "")
+        self.assertFalse(os.path.lexists(self.dest))
+        self.assert_gone(self.probe_result()["pid"])
+
+    def test_reader_diagnostics_are_drained_and_never_passed_through(self):
+        self.write_claim()
+        result = self.stage("noisy")
+        self.assertEqual(result.returncode, 0, result.stderr[:2000])
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(self.dest.read_bytes(), CLAIM)
+
+    def test_reader_diagnostics_are_reported_printable_on_refusal(self):
+        self.write_claim(b"x" * 5000)
+        result = self.stage()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to stage the claim: the reader exited with status 1 (refusing the transferred claim: "
+                      "not a regular single-link file", result.stderr)
+        self.assertFalse(os.path.lexists(self.dest))
 
     def test_existing_staged_claim_is_never_replaced(self):
         self.write_claim()

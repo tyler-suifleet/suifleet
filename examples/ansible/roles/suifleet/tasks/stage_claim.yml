@@ -212,9 +212,12 @@
     # nonempty, at most 4 KiB) and writes the bytes it read to its standard
     # output, which must be a pipe. Root's writer holds the read end of that
     # pipe and nothing else the reader could use: it reads at most 4097
-    # bytes, refusing as soon as more than 4 KiB arrive, and gives the reader
-    # 60 seconds in total to reach end of file and exit. On overflow or
-    # timeout it closes the pipe, kills the reader's process group (its own
+    # bytes, refusing as soon as more than 4 KiB arrive. The reader's
+    # standard error is a second pipe to root, never Ansible's capture: root
+    # drains it, keeps only the first 512 bytes and reports them, printable
+    # only, if it refuses. Root gives the reader 60 seconds in total to
+    # close both pipes and exit. On overflow or timeout it closes the
+    # pipes, kills the reader's process group (its own
     # session) and reaps it, so a misbehaving SSH account cannot hold the
     # host's rollout lock. Only after the reader exited successfully, root
     # creates the destination exclusively (O_EXCL, O_NOFOLLOW), root-owned
@@ -232,32 +235,37 @@
             import os, resource, select, signal, subprocess, sys, time
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
             os.umask(0o077)
-            LIMIT, DEADLINE = 4096, 60
+            LIMIT, DEADLINE, NOTE = 4096, 60, 512
             src, account, dest, reader = sys.argv[1:5]
             if os.path.lexists(dest):
                 sys.exit("refusing to stage the claim: a staged claim already exists")
             proc = subprocess.Popen(
                 ["runuser", "-u", account, "--", "sh", "-c", 'ulimit -c 0 && exec python3 -I -c "$1" "$2"',
                  "sh", reader, src + "/claim.key"],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, close_fds=True, start_new_session=True)
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
+                start_new_session=True)
             end = time.monotonic() + DEADLINE
-            data, problem, status = b"", None, None
+            data, note, problem, status = b"", b"", None, None
             try:
-                out = proc.stdout.fileno()
-                while True:
+                out, err = proc.stdout.fileno(), proc.stderr.fileno()
+                pending = {out, err}
+                while pending and problem is None:
                     left = end - time.monotonic()
                     if left <= 0:
                         problem = f"the reader did not finish within {DEADLINE} seconds"
                         break
-                    if not select.select([out], [], [], left)[0]:
-                        continue
-                    chunk = os.read(out, LIMIT + 1 - len(data))
-                    if not chunk:
-                        break
-                    data += chunk
-                    if len(data) > LIMIT:
-                        problem = f"the reader returned more than {LIMIT} bytes"
-                        break
+                    for fd in select.select(list(pending), [], [], left)[0]:
+                        if fd == out:
+                            chunk = os.read(out, LIMIT + 1 - len(data))
+                            data += chunk
+                            if len(data) > LIMIT:
+                                problem = f"the reader returned more than {LIMIT} bytes"
+                                break
+                        else:
+                            chunk = os.read(err, 4096)
+                            note = (note + chunk)[:NOTE]
+                        if not chunk:
+                            pending.discard(fd)
                 if problem is None:
                     try:
                         status = proc.wait(timeout=max(0.0, end - time.monotonic()))
@@ -265,6 +273,7 @@
                         problem = f"the reader did not finish within {DEADLINE} seconds"
             finally:
                 proc.stdout.close()
+                proc.stderr.close()
                 if status is None:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
@@ -274,10 +283,12 @@
                         proc.wait(timeout=10)
                     except subprocess.TimeoutExpired:
                         pass
+            note = "".join(c if c.isprintable() else " " for c in note.decode("utf-8", "replace")).strip()
+            note = f" ({note})" if note else ""
             if problem is not None:
-                sys.exit(f"refusing to stage the claim: {problem}")
+                sys.exit(f"refusing to stage the claim: {problem}{note}")
             if status != 0:
-                sys.exit(f"refusing to stage the claim: the reader exited with status {status}")
+                sys.exit(f"refusing to stage the claim: the reader exited with status {status}{note}")
             if not 0 < len(data) <= LIMIT:
                 sys.exit(f"refusing to stage the claim: the reader returned no claim or more than {LIMIT} bytes")
             fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)

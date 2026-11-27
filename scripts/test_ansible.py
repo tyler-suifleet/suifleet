@@ -2056,12 +2056,17 @@ exit 3
         # root (and the host's rollout lock): root gives up at its deadline
         # (shortened here from 60 to 5 seconds) or as soon as more than 4 KiB
         # arrived, kills the reader and stages nothing; cleanup still runs.
-        deadline = ("            LIMIT, DEADLINE = 4096, 60\n", "            LIMIT, DEADLINE = 4096, 5\n")
+        # A reader writing diagnostics without end must not reach Ansible's
+        # unbounded stderr capture either: root drains its own pipe from the
+        # reader's standard error and reports at most 512 bytes of it.
+        deadline = ("            LIMIT, DEADLINE, NOTE = 4096, 60, 512\n", "            LIMIT, DEADLINE, NOTE = 4096, 5, 512\n")
         for label, reader, refusal in (
                 ("stalled", "            sys.stdout.buffer.write(data[:8])\n            sys.stdout.flush()\n"
                  "            __import__('time').sleep(600)\n", "the reader did not finish within 5 seconds"),
                 ("endless", "            while True:\n                sys.stdout.buffer.write(b'x' * 1024)\n",
-                 "the reader returned more than 4096 bytes")):
+                 "the reader returned more than 4096 bytes"),
+                ("diagnostics-flooding", "            while True:\n                sys.stderr.write('e' * 1024)\n",
+                 "the reader did not finish within 5 seconds")):
             variant = self.variant_examples(f"examples-reader-{label}", {"stage_claim.yml": [
                 deadline, (self.READER_WRITE, reader + self.READER_WRITE)]}, folder="tasks", source=self.examples)
             started = time.monotonic()
@@ -2071,6 +2076,7 @@ exit 3
             assert "interrupted after the claim transfer" not in output, (label, "staging accepted a cut-off read")
             assert output.count(f"refusing to stage the claim: {refusal}") >= len(self.hosts), (label, output[-4000:])
             assert elapsed < 300, (label, "the play waited on the reader", elapsed)
+            assert "e" * 513 not in output, (label, "the reader's diagnostics reached Ansible unbounded")
             for name, host in self.hosts.items():
                 container = host["container"]
                 assert self.exec(container, "test", "-e", "/run/suifleet-enroll/claim.key",
