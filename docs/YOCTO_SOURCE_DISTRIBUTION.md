@@ -93,6 +93,14 @@ Comments are blanked here too, so `mod /* why */ name;` is still found and
 `#[/* why */ path = ".."] mod name;` still counts as an explicit path. A
 commented-out `mod name;` is ignored.
 
+A literal include or `#[path]` may start with `..` to climb out of the
+source file's directory, but a `..` after a named directory is refused, as in
+`#[path = "../tools/anchor/../helper.rs"]`. Rust traverses `tools/anchor`
+there, and the archive would contain only `tools/helper.rs`, so the path would
+compile in the repository and fail after extraction. Write the path without
+the detour (`../tools/helper.rs`). Both the packager and the `--fetch` layout
+audit refuse it.
+
 A `#[path]` is resolved against the directory of the file it appears in. That
 holds only at file level. Inside an inline `mod name { ... }` block, rustc
 resolves it against the module's own directory (`name/`, or `stem/name/` in a
