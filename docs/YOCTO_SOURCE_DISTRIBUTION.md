@@ -344,6 +344,10 @@ These static checks always run, on every recipe in the layer:
   `SUIFLEET_CODEC_NODE_VERSION` and no `PE`, because the codec `RDEPENDS` on
   exactly that version. The `suifleet-node` `do_install` must copy exactly
   `${S}/bin/node` and `${S}/LICENSE`, the files the fetched check verifies.
+  OE publishes the package version from `PKGV`/`PKGE`, which default to
+  `PV`/`PE`, so the Node recipe may not assign either in any form (plain, weak,
+  append, override or bbappend) and may not `inherit` a class, which could set
+  them out of the audit's view.
 - The daemon and codec recipes are found by PN (`suifleet` and
   `suifleet-walrus-codec`), not by the pins being verified. The layer must
   provide the daemon recipe, with a lowercase 64-hex `SUIFLEET_LOCK_SHA256`, a
@@ -404,7 +408,10 @@ check then verifies the resulting `S`:
   file hashes equal to the recipe pins, as `do_verify_codec` requires. Every
   manifest entry must be an object naming a pinned file;
 - for Node, the `bin/node` and `LICENSE` that `do_install` copies, with
-  `bin/node` a 64-bit little-endian AArch64 ELF executable. The archive
+  `bin/node` a 64-bit little-endian AArch64 ELF executable: a complete 64-byte
+  ELF64 header (`EV_CURRENT`, `ET_EXEC`/`ET_DYN`, standard header sizes), a
+  program header table inside the file and at least one non-empty `PT_LOAD`
+  segment, with no `PT_LOAD` past the end of the file. The archive
   SHA-256 and license checksum alone would accept an archive without the
   executable.
 
