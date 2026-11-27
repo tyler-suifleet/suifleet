@@ -794,6 +794,58 @@ class LayerAuditTests(unittest.TestCase):
                 self.write_recipe(**kwargs)
                 self.assertTrue(any(message in e for e in self.errors()), self.errors())
 
+    def test_rejected_credentials_and_signatures_never_reach_the_report(self):
+        # The audit rejects credentialed and signed URLs; it must not then copy
+        # the secret into the JSON report (stdout, saved reports, CI logs).
+        secrets = ('USERMARK', 'PASSMARK', 'SIGMARK', 'FRAGMARK')
+        name = self.archive.name
+        cases = {
+            'https userinfo': (f'https://USERMARK:PASSMARK@example.com/{name}', 'credentials'),
+            'https query': (f'https://example.com/{name}?X-Amz-Signature=SIGMARK&X-Amz-Credential=USERMARK', 'query/fragment'),
+            'https fragment': (f'https://example.com/{name}#FRAGMARK', 'query/fragment'),
+            'mutable and signed': (f'https://objects.githubusercontent.com/x/{name}?sig=SIGMARK', 'mutable or expiring'),
+            'git userinfo': ('git://USERMARK:PASSMARK@github.com/example/suifleet.git;protocol=https;nobranch=1',
+                             'credentials'),
+            'gitsm userinfo': ('gitsm://USERMARK:PASSMARK@github.com/example/suifleet.git;protocol=https;nobranch=1',
+                               'gitsm sources are not supported'),
+        }
+        for label, (url, message) in cases.items():
+            for fetch in (False, True):
+                with self.subTest(label, fetch=fetch):
+                    self.write_recipe(url=url, extra=f'SRCREV_edge = "{self.rev}"')
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, fetch=fetch)
+                    if fetch:
+                        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                    self.assertFalse(report['ok'])
+                    self.assertTrue(any(message in e for e in report['errors']), report['errors'])
+                    serialized = json.dumps(report)
+                    for secret in secrets:
+                        self.assertNotIn(secret, serialized)
+                    self.assertIn('<redacted>', serialized)
+            # The fetcher's own refusals (direct callers) are redacted too.
+            if label.startswith('gitsm'):
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(errors)
+                self.assertFalse(any(secret in json.dumps(errors) for secret in secrets), errors)
+        # A failing git command line carries the remote; the report still
+        # redacts it (defence in depth for subprocess diagnostics).
+        url = 'git://github.com/example/suifleet.git;protocol=https;nobranch=1;name=edge;destsuffix=source'
+        self.write_recipe(url=url, extra=f'SRCREV_edge = "{self.rev}"')
+        failure = subprocess.CalledProcessError(
+            128, ['git', 'fetch', 'https://USERMARK:PASSMARK@example.com/x.git?sig=SIGMARK#FRAGMARK'])
+        with mock.patch.object(audit.subprocess, 'run', side_effect=failure):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertTrue(any('fetch/unpack failed' in e for e in report['errors']), report['errors'])
+        serialized = json.dumps(report)
+        for secret in secrets:
+            self.assertNotIn(secret, serialized)
+        self.assertIn('https://<redacted>@example.com/x.git?<redacted>#<redacted>', serialized)
+
     def test_git_sources_need_https_and_full_srcrev(self):
         git = 'git://github.com/example/suifleet.git;protocol=https;nobranch=1'
         self.write_recipe(url=git, srcrev='main')

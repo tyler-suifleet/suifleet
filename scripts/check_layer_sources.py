@@ -407,46 +407,47 @@ def audit_recipe(recipe):
     srcrev = recipe.get('SRCREV')
     for url, params in recipe.sources():
         scheme = url.split('://', 1)[0]
-        entry = {'url': url, 'type': scheme}
+        shown = redact_url(url)
+        entry = {'url': shown, 'type': scheme}
         parsed = urllib.parse.urlsplit(url.replace('git://', 'https://', 1) if scheme in ('git', 'gitsm') else url)
         if parsed.username or parsed.password or '@' in parsed.netloc:
-            errors.append(f'{where}: credentials in source URL {url}')
+            errors.append(f'{where}: credentials in source URL {shown}')
         if scheme in ('git', 'gitsm'):
             name = params.get('name')
             rev = recipe.get(f'SRCREV_{name}') if name else srcrev
             entry['revision'] = rev
             if params.get('protocol', 'git') != 'https':
-                errors.append(f'{where}: git source must use protocol=https: {url}')
+                errors.append(f'{where}: git source must use protocol=https: {shown}')
             if not HEX40.match(rev or ''):
                 errors.append(f'{where}: git source needs a 40-hex SRCREV, got {rev!r}')
             # BitBake checks that SRCREV is on the named branch unless
             # nobranch=1. Require one of the two explicitly (newer BitBake
             # rejects a missing branch) so the --fetch check can model it.
             if params.get('nobranch') != '1' and not params.get('branch'):
-                errors.append(f'{where}: git source needs branch=NAME (SRCREV must be on it) or nobranch=1: {url}')
+                errors.append(f'{where}: git source needs branch=NAME (SRCREV must be on it) or nobranch=1: {shown}')
             if ',' in params.get('branch', '') or ',' in params.get('name', ''):
-                errors.append(f'{where}: git source with several names or branches is not supported: {url}')
+                errors.append(f'{where}: git source with several names or branches is not supported: {shown}')
             if unmodelled_git_params(params):
                 errors.append(f'{where}: git source parameters the audit does not model: '
-                              f'{", ".join(unmodelled_git_params(params))}: {url}')
+                              f'{", ".join(unmodelled_git_params(params))}: {shown}')
             if scheme == 'gitsm':
                 # gitsm also fetches every submodule named by .gitmodules at the
                 # pinned gitlinks. The audit verifies only the top-level commit,
                 # so it cannot vouch for those inputs; refuse instead of passing.
                 errors.append(f'{where}: gitsm sources are not supported (submodule inputs cannot be verified); '
-                              f'publish a checksum-pinned archive or list each repository as a pinned git source: {url}')
+                              f'publish a checksum-pinned archive or list each repository as a pinned git source: {shown}')
         elif scheme in ('https', 'http', 'ftp'):
             sha = checksum_for(recipe, params)
             entry['sha256'] = sha
             if scheme != 'https':
-                errors.append(f'{where}: source must use https: {url}')
+                errors.append(f'{where}: source must use https: {shown}')
             if not HEX64.match(sha):
-                errors.append(f'{where}: https source lacks a SHA-256 pin: {url}')
+                errors.append(f'{where}: https source lacks a SHA-256 pin: {shown}')
             if parsed.query or parsed.fragment:
-                errors.append(f'{where}: query/fragment (signed or expiring URL) in {url}')
+                errors.append(f'{where}: query/fragment (signed or expiring URL) in {shown}')
             for pattern, label in MUTABLE_URL:
                 if pattern.search(url):
-                    errors.append(f'{where}: mutable or expiring source ({label}): {url}')
+                    errors.append(f'{where}: mutable or expiring source ({label}): {shown}')
             commits = re.findall(r'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])', PurePosixPath(parsed.path).name)
             if commits and HEX40.match(srcrev or '') and commits[-1] != srcrev:
                 errors.append(f'{where}: archive {PurePosixPath(parsed.path).name} names commit {commits[-1]}, SRCREV is {srcrev}')
@@ -468,7 +469,7 @@ def audit_recipe(recipe):
                     errors.append(f'{where}: {error}')
             continue
         else:
-            errors.append(f'{where}: unsupported fetcher {scheme}: {url}')
+            errors.append(f'{where}: unsupported fetcher {scheme}: {shown}')
         sources.append(entry)
     crate_version = recipe.get('SUIFLEET_CRATE_VERSION')
     if crate_version and recipe.get('PV') != crate_version:
@@ -592,6 +593,36 @@ def anonymous_env(home):
     return env
 
 
+URL_TEXT = re.compile(r'\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\'"<>]+')
+
+
+def redact_url(url):
+    """The URL without userinfo, query or fragment, for diagnostics.
+
+    Rejected credentials or signed/expiring URL parameters must not reach a
+    saved report or CI log, so every URL shown is passed through here."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return '<unparseable URL redacted>'
+    netloc = parts.netloc
+    if '@' in netloc:
+        netloc = '<redacted>@' + netloc.rsplit('@', 1)[1]
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path,
+                                    '<redacted>' if parts.query else '', '<redacted>' if parts.fragment else ''))
+
+
+def redact(value):
+    """Redact every URL inside a report value (strings, lists, dicts)."""
+    if isinstance(value, str):
+        return URL_TEXT.sub(lambda m: redact_url(m.group(0)), value)
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    if isinstance(value, dict):
+        return {k: redact(v) for k, v in value.items()}
+    return value
+
+
 def git_remote(url):
     return 'https://' + url.split('://', 1)[1]
 
@@ -605,12 +636,12 @@ def git_branch_error(repo, remote, branch, rev, env):
     ref = f'refs/heads/{branch}'
     listed = subprocess.run([*git, 'ls-remote', '--heads', remote, ref], env=env, capture_output=True, text=True)
     if listed.returncode != 0:
-        return f'could not list branch {branch!r} on {remote}'
+        return f'could not list branch {branch!r} on {redact_url(remote)}'
     if not any(line.split('\t', 1)[-1] == ref for line in listed.stdout.splitlines()):
-        return f'branch {branch!r} does not exist on {remote}; SRCREV {rev} cannot be on it'
+        return f'branch {branch!r} does not exist on {redact_url(remote)}; SRCREV {rev} cannot be on it'
     local = 'refs/suifleet-audit/branch'
     if subprocess.run([*git, 'fetch', '-q', remote, f'+{ref}:{local}'], env=env).returncode != 0:
-        return f'could not fetch branch {branch!r} from {remote}'
+        return f'could not fetch branch {branch!r} from {redact_url(remote)}'
     contained = subprocess.run([*git, 'merge-base', '--is-ancestor', rev, local], env=env)
     if contained.returncode == 1:
         return f'SRCREV {rev} is not on branch {branch!r}'
@@ -722,16 +753,16 @@ def unpack_plan(recipe, unpack):
             rel = PurePosixPath(params.get('subdir', ''), source.name).as_posix() if source else None
             plan.append((url, params, scheme, rel and (confined(unpack, rel, 'file:// subdir'), rel)))
         elif scheme == 'gitsm':
-            raise ValueError(f'gitsm submodule inputs cannot be verified: {url}')
+            raise ValueError(f'gitsm submodule inputs cannot be verified: {redact_url(url)}')
         elif scheme == 'git':
             if unmodelled_git_params(params):
                 raise ValueError(f'git source parameters the audit does not model: '
-                                 f'{", ".join(unmodelled_git_params(params))}: {url}')
+                                 f'{", ".join(unmodelled_git_params(params))}: {redact_url(url)}')
             plan.append((url, params, scheme, confined(unpack, params.get('destsuffix', 'git'), 'destsuffix')))
         else:
             name = PurePosixPath(urllib.parse.urlsplit(url).path).name
             if name in ('', '.', '..'):
-                raise ValueError(f'source URL has no file name: {url}')
+                raise ValueError(f'source URL has no file name: {redact_url(url)}')
             plan.append((url, params, scheme, confined(unpack, params.get('subdir', '') or '.', 'subdir')))
     s_dir = recipe.get('S')
     if not s_dir.startswith(str(unpack) + '/') and s_dir != str(unpack):
@@ -769,7 +800,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 subprocess.run(['git', '-c', 'credential.helper=', *command], env=env, check=True)
             actual = subprocess.check_output(['git', '-C', str(destination), 'rev-parse', 'HEAD'], env=env, text=True).strip()
             branch_error = None if params.get('nobranch') == '1' else git_branch_error(destination, remote, params.get('branch', ''), rev, env)
-            fetched.append({'url': url, 'revision': actual, 'branch': params.get('branch') if params.get('nobranch') != '1' else None,
+            fetched.append({'url': redact_url(url), 'revision': actual, 'branch': params.get('branch') if params.get('nobranch') != '1' else None,
                             'verified': actual == rev and branch_error is None})
             if actual != rev:
                 errors.append(f'{recipe.path.name}: fetched {actual}, SRCREV is {rev}')
@@ -780,7 +811,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
         target = downloads / name
         expected = checksum_for(recipe, params)
         actual = download(url, target)
-        fetched.append({'url': url, 'sha256': actual, 'verified': actual == expected, 'bytes': target.stat().st_size})
+        fetched.append({'url': redact_url(url), 'sha256': actual, 'verified': actual == expected, 'bytes': target.stat().st_size})
         if actual != expected:
             errors.append(f'{recipe.path.name}: {name} sha256 {actual} differs from pin {expected}')
             continue
@@ -943,6 +974,9 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
                 errors, fetched = [f'{recipe.path.name}: fetch/unpack failed: {error}'], []
             report['errors'] += errors
             report['recipes'][name]['fetched'] = fetched
+    # Defence in depth: no URL in any diagnostic (including git command
+    # lines from a failed subprocess) keeps userinfo, query or fragment.
+    report = redact(report)
     report['ok'] = not report['errors']
     return report
 
