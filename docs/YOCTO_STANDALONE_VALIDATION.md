@@ -3,6 +3,10 @@
 These are software build/export results,
 not physical, production-provider, mainnet or public-distribution acceptance.
 
+The daemon source-archive builder and the layer source/pin audit, with their
+anonymous-fetch results, are in
+[Yocto source distributions](YOCTO_SOURCE_DISTRIBUTION.md) (SF-306).
+
 ## Export and offline checks
 
 `INSIDE_DEV_CONTAINER=1 make test-yocto-packaging` passed all 44 tests
@@ -163,9 +167,11 @@ These are documented in the layer README.
 Kirkstone was declared after these builds (SF-309, merged into this branch from
 main `50de139b`). The class acts on Kirkstone only through the unconditional
 OpenSSL serialization, which the integration layer's previous unconditional
-append also applied; the libcap and xz fixes stay Wrynose-only. Neither a
-Kirkstone task-signature comparison nor a Kirkstone build without the
-integration layer has been run. Kirkstone standalone support stays unclaimed.
+append also applied; the libcap and xz fixes stay Wrynose-only. No Kirkstone
+task-signature comparison has been run. SF-306 later built the published
+daemon, codec and Node recipes on Kirkstone without the integration layer,
+through `do_package_qa` (package builds, no image or runtime); see
+[Yocto source distributions](YOCTO_SOURCE_DISTRIBUTION.md).
 
 ### Offline tests
 
