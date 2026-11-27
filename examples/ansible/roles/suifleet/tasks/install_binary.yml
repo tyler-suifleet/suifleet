@@ -21,10 +21,13 @@
     - {name: suifleet, home: /var/lib/suifleet}
     - {name: suifleet-signer, home: /nonexistent}
 
-# The binary is staged and its SHA-256 checked on the host before it replaces
-# /usr/bin/suifleet (an atomic rename by the copy module). The staging path
-# names the pinned digest, so an overlapping rollout of another release never
-# writes the file this rollout verified and then installs.
+# The binary is uploaded to a private per-run file and its SHA-256 checked on
+# the host; only then is it renamed to the cache path named by the pinned
+# digest, from which it replaces /usr/bin/suifleet (an atomic rename by the
+# copy module). A file already at that path is reused only after the same
+# check. So the cache path only ever holds verified bytes of that digest, even
+# when overlapping rollouts upload the same or another release, or a
+# controller's artifact changes after its preflight check.
 - name: Create the private staging directory
   ansible.builtin.file:
     path: /var/cache/suifleet
@@ -37,35 +40,71 @@
   ansible.builtin.set_fact:
     suifleet_binary_staging: "/var/cache/suifleet/suifleet-{{ suifleet_binary_sha256 }}.staged"
 
-- name: Stage the authenticated binary
-  ansible.builtin.copy:
-    src: "{{ suifleet_binary_src }}"
-    dest: "{{ suifleet_binary_staging }}"
-    owner: root
-    group: root
-    mode: "0700"
-  register: suifleet_binary_staged
-
-# In check mode a pending copy leaves the old staged bytes in place, so the
-# host-side checks run only on bytes actually present; the controller-side
-# digest was already verified in preflight.
-- name: Check the staged binary on the host
+- name: Check for an already verified staged binary
   ansible.builtin.stat:
     path: "{{ suifleet_binary_staging }}"
     get_checksum: true
     checksum_algorithm: sha256
-  register: suifleet_binary_remote
+  register: suifleet_binary_cached
   check_mode: false
-  when: not (ansible_check_mode and suifleet_binary_staged is changed)
 
-- name: Refuse a staged binary that differs from the pinned SHA-256
-  ansible.builtin.assert:
-    that:
-      - suifleet_binary_remote.stat.exists
-      - suifleet_binary_remote.stat.checksum == suifleet_binary_sha256
-    quiet: true
-    fail_msg: The staged binary on the host does not match the pinned SHA-256.
-  when: suifleet_binary_remote is not skipped
+- name: Upload, verify and publish the binary
+  when: not (suifleet_binary_cached.stat.exists and suifleet_binary_cached.stat.checksum == suifleet_binary_sha256)
+  block:
+    - name: Choose this run's private upload path
+      ansible.builtin.set_fact:
+        suifleet_binary_incoming: >-
+          /var/cache/suifleet/incoming-{{ suifleet_binary_sha256 }}-{{ lookup('ansible.builtin.password', '/dev/null',
+          chars=['ascii_lowercase', 'digits'], length=24) }}.part
+
+    - name: Stage the authenticated binary
+      ansible.builtin.copy:
+        src: "{{ suifleet_binary_src }}"
+        dest: "{{ suifleet_binary_incoming }}"
+        owner: root
+        group: root
+        mode: "0700"
+      register: suifleet_binary_staged
+
+    # In check mode nothing was uploaded; the controller-side digest was
+    # already verified in preflight.
+    - name: Check the staged binary on the host
+      ansible.builtin.stat:
+        path: "{{ suifleet_binary_incoming }}"
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: suifleet_binary_remote
+      when: not ansible_check_mode
+
+    - name: Refuse a staged binary that differs from the pinned SHA-256
+      ansible.builtin.assert:
+        that:
+          - suifleet_binary_remote.stat.exists
+          - suifleet_binary_remote.stat.checksum == suifleet_binary_sha256
+        quiet: true
+        fail_msg: The staged binary on the host does not match the pinned SHA-256.
+      when: not ansible_check_mode
+
+    # rename(2) within the directory: the shared name only ever holds bytes
+    # some run verified against this same digest.
+    - name: Publish the verified binary under its digest-named path
+      ansible.builtin.command:
+        argv: [mv, -f, --, "{{ suifleet_binary_incoming }}", "{{ suifleet_binary_staging }}"]
+      changed_when: true
+      when: not ansible_check_mode
+  rescue:
+    - name: Remove this run's unverified upload
+      ansible.builtin.file:
+        path: "{{ suifleet_binary_incoming }}"
+        state: absent
+      when: suifleet_binary_incoming is defined
+
+    - name: Stop after an unverified binary
+      ansible.builtin.fail:
+        msg: >-
+          Staging the binary failed, or the bytes uploaded to the host did not
+          match the pinned SHA-256 {{ suifleet_binary_sha256 }}. This run's upload was
+          removed and nothing was installed.
 
 - name: Report the pending binary installation
   ansible.builtin.debug:

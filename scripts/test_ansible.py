@@ -81,10 +81,14 @@ configured hosts with their SuiFleet units stopped
 show) and one journal not yet initialized, as an interrupted upgrade leaves them
 (succeeds; starts nothing; identity, journal and units untouched) followed by
 a real run that starts and verifies them (rerun changed=0), two rollouts of
-different releases overlapping on every host between one's host-side digest
-check and its install (the other release never writes the verified file; the
-first fails at its install, the host keeps the second release, stale staged
-artifacts are removed; rerun changed=0),
+one release overlapping on every host between the first's host-side digest
+check and its publication, the second's controller artifact replaced after its
+preflight (the second refuses and removes its private upload; the first
+installs only bytes it verified; the cache holds only the verified release;
+rerun changed=0), two rollouts of different releases overlapping on every host
+between one's publication and its install (the other release never writes the
+verified file; the first fails at its install, the host keeps the second
+release, stale staged artifacts are removed; rerun changed=0),
 rolling-restart preview in check mode (succeeds; no process or
 identity changes), rolling restart. It checks preserved identity and
 enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
@@ -215,16 +219,17 @@ INTERRUPTED_PLAY = """- hosts: suifleet_devices
 # The role's install tasks only: one release's artifact staged, checked and installed.
 INSTALL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: {name: suifleet, tasks_from: identity.yml}\n", 1)[0]
 # A controller callback (test-only) that overlaps two rollouts deterministically:
-# as soon as a host's staged artifact has passed the host-side SHA-256 check, it
-# runs a complete install of another release on that host (SF304_OVERLAP_ARGS)
-# and only then lets the first rollout continue to its install task.
+# as soon as a host passes one of the tasks named in SF304_OVERLAP_AFTER, it
+# copies any SF304_OVERLAP_PREPARE files, runs a complete install of another
+# rollout on that host (SF304_OVERLAP_ARGS, with SF304_OVERLAP_ENV added) and
+# only then lets the first rollout continue.
 OVERLAP_VERIFIED_TASKS = ("Refuse a staged binary that differs from the pinned SHA-256",
                           "Refuse a staged package that differs from the pinned SHA-256")
+OVERLAP_PUBLISHED_TASKS = ("Publish the verified binary under its digest-named path",
+                           "Publish the verified package under its digest-named path")
 OVERLAP_INSTALL_TASKS = ("TASK [suifleet : Install the verified binary]", "TASK [suifleet : Install or upgrade the package]")
-OVERLAP_CALLBACK = f"""import json, os, subprocess
+OVERLAP_CALLBACK = """import json, os, shutil, subprocess
 from ansible.plugins.callback import CallbackBase
-
-VERIFIED = {OVERLAP_VERIFIED_TASKS!r}
 
 
 class CallbackModule(CallbackBase):
@@ -234,14 +239,17 @@ class CallbackModule(CallbackBase):
     CALLBACK_NEEDS_ENABLED = True
 
     def v2_runner_on_ok(self, result):
-        if result._task.name not in VERIFIED:
+        if result._task.name not in json.loads(os.environ["SF304_OVERLAP_AFTER"]):
             return
         host = result._host.get_name()
         base = "/work/overlap/" + host
         if os.path.exists(base + ".started"):
             return
         open(base + ".started", "w").close()
-        env = {{k: v for k, v in os.environ.items() if k != "ANSIBLE_CALLBACKS_ENABLED"}}
+        for source, target in json.loads(os.environ.get("SF304_OVERLAP_PREPARE", "[]")):
+            shutil.copyfile(source, target)
+        env = {k: v for k, v in os.environ.items() if k != "ANSIBLE_CALLBACKS_ENABLED"}
+        env.update(json.loads(os.environ.get("SF304_OVERLAP_ENV", "{}")))
         command = ["ansible-playbook", "-i", "/work/inventory.yml", "/work/install-only.yml", "--limit", host,
                    *json.loads(os.environ["SF304_OVERLAP_ARGS"])]
         done = subprocess.run(command, env=env, text=True, capture_output=True)
@@ -249,6 +257,27 @@ class CallbackModule(CallbackBase):
             log.write(done.stdout + done.stderr)
         with open(base + ".rc", "w") as rc:
             rc.write(str(done.returncode))
+"""
+# A controller callback (test-only) for the overlapping rollout: once a host's
+# controller-side artifact check has passed, it replaces that rollout's
+# controller artifacts (SF304_SWAP pairs), as if a release file were replaced
+# while the play runs.
+SWAP_CALLBACK = """import json, os, shutil
+from ansible.plugins.callback import CallbackBase
+
+
+class CallbackModule(CallbackBase):
+    CALLBACK_VERSION = 2.0
+    CALLBACK_TYPE = "aggregate"
+    CALLBACK_NAME = "sf304_swap"
+    CALLBACK_NEEDS_ENABLED = True
+
+    def v2_runner_on_ok(self, result):
+        if result._task.name != "Refuse an artifact that does not match its pinned SHA-256":
+            return
+        for source, target in json.loads(os.environ["SF304_SWAP"]):
+            shutil.copyfile(source, target)
+        open("/work/overlap/" + result._host.get_name() + ".swapped", "w").close()
 """
 # Stops the role's enrollment command right after the enrollment transaction
 # succeeded and its receipt reached the partial file, before the record is
@@ -934,21 +963,77 @@ class Harness:
         self.unchanged(recap, "rerun after the retry")
         return after, rollout
 
-    def overlapping_releases(self, vault, rollout, previous):
-        """Two rollouts of different releases overlap on every host.
-
-        Rollout A (deb -3, binary 2; each would install over the current
-        release if its staged file were still there) stages and checks its artifact; before it
-        installs, a complete rollout B of the current release (deb -2, binary 3)
-        runs on the same host. Each release stages at its own digest-named path,
-        so B never writes the file A verified; B removes A's staged file, and A
-        must then fail at its install task rather than install other bytes."""
+    def write_overlap_callbacks(self):
         overlap = self.work / "ctl/overlap"
         shutil.rmtree(overlap, ignore_errors=True)
         overlap.mkdir()
         (self.work / "ctl/callbacks").mkdir(exist_ok=True)
         (self.work / "ctl/callbacks/sf304_overlap.py").write_text(OVERLAP_CALLBACK)
+        (self.work / "ctl/callbacks/sf304_swap.py").write_text(SWAP_CALLBACK)
         (self.work / "ctl/install-only.yml").write_text(INSTALL_ONLY_PLAY)
+        return overlap
+
+    def same_pin_overlap(self, vault, rollout, previous):
+        """Two rollouts with the same pins overlap; the second's controller artifact changes after its preflight.
+
+        The current release's cached file is removed, so rollout A uploads
+        and checks it again. Right after A's host-side check, and before A
+        publishes or installs, rollout B with the same pins runs on that host
+        from controller copies that are replaced by other releases' bytes (deb
+        -3, binary 2) once B's controller-side check has passed. B uploads
+        those bytes to its own private file, refuses them and removes them; A
+        then installs only the bytes it verified. Nothing on the host may come
+        from B's unverified upload."""
+        overlap = self.write_overlap_callbacks()
+        current = dict(deb=(f"/artifacts/2/{self.debs['2'].name}", sha256(self.debs["2"])),
+                       binary=("/artifacts/suifleet-3", sha256(self.binaries["3"])))
+        replaced = dict(deb=f"/artifacts/3/{self.debs['3'].name}", binary="/artifacts/suifleet-2")
+        sources = dict(deb="/work/overlap/source.deb", binary="/work/overlap/source.bin")
+        for host in self.hosts.values():
+            self.exec(host["container"], "sh", "-c", "rm -f /var/cache/suifleet/suifleet-*.staged /var/cache/suifleet/suifleet_*.deb")
+        second = [*rollout, "-e", f"suifleet_deb_src={sources['deb']}", "-e", f"suifleet_binary_src={sources['binary']}"]
+        output, _ = self.ansible(
+            "overlapping rollouts of one release, the second's artifact replaced", "/work/install-only.yml", *rollout,
+            env=("ANSIBLE_CALLBACK_PLUGINS=/work/callbacks", "ANSIBLE_CALLBACKS_ENABLED=sf304_overlap",
+                 "SF304_OVERLAP_AFTER=" + json.dumps(OVERLAP_VERIFIED_TASKS),
+                 "SF304_OVERLAP_PREPARE=" + json.dumps([[current[k][0], sources[k]] for k in sources]),
+                 "SF304_OVERLAP_ENV=" + json.dumps({"ANSIBLE_CALLBACKS_ENABLED": "sf304_swap",
+                                                    "SF304_SWAP": json.dumps([[replaced[k], sources[k]] for k in sources])}),
+                 "SF304_OVERLAP_ARGS=" + json.dumps(second)))
+        for name, host in self.hosts.items():
+            kind = "deb" if host["profile"] == "deb" else "binary"
+            label = "package" if kind == "deb" else "binary"
+            log = (overlap / f"{name}.log").read_text()
+            assert (overlap / f"{name}.swapped").exists(), (name, "the second rollout's artifact was not replaced", log[-4000:])
+            assert (overlap / f"{name}.rc").read_text() != "0", (name, "the second rollout accepted replaced bytes", log[-4000:])
+            refuse = f"TASK [suifleet : Refuse a staged {label} that differs from the pinned SHA-256]"
+            assert self.task_statuses(log, refuse, name) == {"fatal"}, (name, "the second rollout's host-side check did not refuse", log[-4000:])
+            install = OVERLAP_INSTALL_TASKS[1 if kind == "deb" else 0]
+            assert install not in log, (name, "the second rollout reached its install", log[-4000:])
+            assert self.task_statuses(output, install, name) == {"ok"}, (name, "the first rollout's install did not keep the current release")
+            state, _ = self.host_state(name)
+            for field in ("binary_sha256", "package", "main_pid", "signer_pid", "key_sha256", "enrollment_sha256"):
+                assert state[field] == previous[name][field], (name, field, "changed by the overlapping rollouts")
+            staged = self.exec(host["container"], "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout.split()
+            digest = current[kind][1]
+            path = f"suifleet_amd64-{digest}.deb" if kind == "deb" else f"suifleet-{digest}.staged"
+            assert staged == [digest, path], (name, "staging holds other than the verified current release", staged)
+        print("PASS same-pin overlapping rollouts: the second's replaced artifact was refused in its private upload and"
+              " removed; the first installed only bytes it verified, and the cache holds only the verified release")
+        _, recap = self.ansible("rerun after the same-pin overlapping rollouts", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the same-pin overlapping rollouts")
+
+    def overlapping_releases(self, vault, rollout, previous):
+        """Two rollouts of different releases overlap on every host.
+
+        Rollout A (deb -3, binary 2; each would install over the current
+        release if its staged file were still there) uploads, checks and
+        publishes its artifact; before it installs, a complete rollout B of the
+        current release (deb -2, binary 3) runs on the same host. Each release
+        is cached at its own digest-named path, so B never writes the file A
+        verified; B removes A's staged file, and A must then fail at its install
+        task rather than install other bytes."""
+        overlap = self.write_overlap_callbacks()
         for host in self.hosts.values():
             # A staged file left by a role version with one fixed staging path.
             self.exec(host["container"], "sh", "-c", "cp /usr/bin/suifleet /var/cache/suifleet/suifleet.staged")
@@ -956,6 +1041,7 @@ class Harness:
                      "-e", "suifleet_binary_src=/artifacts/suifleet-2", "-e", f"suifleet_binary_sha256={sha256(self.binaries['2'])}"]
         output, _ = self.ansible("overlapping rollouts of two releases", "/work/install-only.yml", *release_a, expect_rc="nonzero",
                                  env=("ANSIBLE_CALLBACK_PLUGINS=/work/callbacks", "ANSIBLE_CALLBACKS_ENABLED=sf304_overlap",
+                                      "SF304_OVERLAP_AFTER=" + json.dumps(OVERLAP_PUBLISHED_TASKS),
                                       "SF304_OVERLAP_ARGS=" + json.dumps(rollout)))
         expected = {name: dict(deb=sha256(self.debs["2"]), binary=sha256(self.binaries["3"])) for name in self.hosts}
         for name, host in self.hosts.items():
@@ -2526,6 +2612,7 @@ class Harness:
         after = self.socket_drop_in_before_run(vault, rollout, after)
         after = self.drop_in_loaded_by_config_reload(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
+        self.same_pin_overlap(vault, rollout, after)
         self.overlapping_releases(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
 
