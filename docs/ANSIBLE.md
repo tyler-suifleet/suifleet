@@ -111,7 +111,6 @@ source control. The inventory holds no secrets and no device addresses.
 | `suifleet_rollout_batches` | play | Rollout batches. Default `[1, "25%", "100%"]`: one canary host, then a quarter, then the rest. |
 | `suifleet_max_fail_percentage` | play | Default `0`: any failed host stops later batches. |
 | `suifleet_hosts` | play | Inventory group. Default `suifleet_devices`. |
-| `suifleet_revocation_digest` | host | Only to settle an enrollment attempt that printed no receipt: the digest of the revocation of its recorded claim ([recovery](#recovery)). Remove it afterwards. |
 
 Every controller path (`suifleet_manifest_src`, `suifleet_deb_src`,
 `suifleet_binary_src`, `suifleet_units_src`, `suifleet_enrollment_root`) must be
@@ -641,86 +640,65 @@ allows it). The role does not check the controller.
   again.
 
   The lookup exits with status 3 when the node's retained history holds no
-  enrollment by this key. That does not settle an attempt: the history may be
-  pruned, and the enrollment transaction has no expiration, so an attempt that
-  has not committed yet (for example one still pending at the node) may still
-  commit later. The run then stops before staging a claim or submitting again,
-  and keeps the file until the chain settles the outcome. Only a revocation of
-  the registration of the claim that attempt could use, under the policy it
-  used, settles it. Another serial's claim, or the same serial's claim under
-  another policy or job, leaves the attempt able to commit. So does the same
-  claim under the same policy when it was registered again: a revocation from
-  before the claim was registered again says nothing about an attempt that
-  used the new registration. Each attempt therefore also records, in
-  `/etc/suifleet/.enrollment.json.partial.claim`, durably and before anything
-  is submitted, the public address of its claim (first line) and that claim's
-  current registration (second line: the object version and digest of its
-  entry in the policy's claim table, read with the read-only
-  `suifleet --claim-registration`). Every registration creates the entry
-  anew with a higher version and its own digest, and one transaction (an
-  enrollment or a revocation) consumes it. A claim that is not registered
-  is refused before the attempt marker exists. The stop message names that
-  claim and the recorded policy.
+  enrollment by this key. That alone does not settle an attempt: the history
+  may be pruned, and an attempt that has not committed yet (for example one
+  still pending at the node, or signed bytes someone resubmits) may still
+  commit later. Revoking its claim does not settle it either: the claim can be
+  registered again (*Re-register withdrawn claims*), and the signed attempt
+  would then commit. The role therefore signs every enrollment transaction
+  with an expiration. Before anything is submitted, each attempt records in
+  `/etc/suifleet/.enrollment.json.partial.claim`, durably, the public address
+  of its claim (first line) and its window (second line,
+  `epoch EPOCH checkpoint CHECKPOINT`: the node's current epoch and checkpoint,
+  read with the read-only `suifleet --enrollment-window`). The enrollment
+  command (`suifleet --enroll ENROLL_TOML EPOCH`) refuses to sign once the
+  chain is past that epoch, and signs a transaction whose expiration is
+  `Epoch(EPOCH)`, checked in the transaction before either key signs.
+  Validators refuse such a transaction in any later epoch, whatever happens
+  to its claim. A claim that is not registered is refused before the attempt
+  marker exists.
 
-  1. On the Enrollment page, connected to the network the deployment names,
-     select the enrollment policy the stop message names (the policy line of
-     `/etc/suifleet/.enrollment.json.partial.deployment`). Revoke the claim
-     (*Lost a credential file?*, then *Revoke lost claims* for the host's
-     serial). With *Technical details* on, the serial's claim must start like
-     the recorded one. Revocation removes the claim from the policy in a
-     transaction ordered with the enrollment, so it either succeeds, and the
-     earlier attempt can then never commit, or fails. A failure alone does not
-     show that the attempt committed (the transaction may also fail for gas, a
-     network error or a stale page), so keep the file. Reload the page: if the
-     serial now shows *Consumed, pending binding* or *Bound*, the attempt used
-     the claim. A node that pruned the event still cannot find it, so run the
-     lookup against a trusted full node of the same network that retains it:
-     set `rpc_url` (and `rpc_urls`) in `/root/lookup/deployment.json` to that
-     node (the lookup checks the chain identifier) and restore the record by
-     hand as above. If no trusted node retains the event, keep the file and
-     escalate; never remove it, issue a new claim or enroll again. If the
-     serial still shows *Funded, unused*, retry the revocation.
-  2. Once the revocation succeeded, take its transaction digest (from the
-     wallet's activity, or the `log` of the job file from *Export job*), set
-     it for that host only and run the play again:
+  On each later run the role runs the lookup and, only if it finds no
+  enrollment, the read-only `suifleet --check-expired ENROLL_TOML EPOCH
+  CHECKPOINT` as the key holder, with the same verified `enroll.toml` and
+  manifest (the chain identifier, package and policy are checked as for the
+  lookup). It requires that the node's latest checkpoint is in an epoch after
+  `EPOCH`, so the attempt can no longer commit, and that the node's history
+  from `CHECKPOINT` to that checkpoint, which covers all of `EPOCH` and must
+  still be retained, holds no enrollment of this key under the attempt's
+  policy, so it did not commit earlier. Only then does it remove the empty
+  file and the binding, and stop. While the epoch has not ended, the run
+  stops with the marker and binding kept and names the epoch: run the play
+  again after it ends (epochs last about a day on the public networks). A
+  missing or malformed claim record (an attempt by an earlier version of the
+  role, which signed without an expiration), a pruned history or an
+  enrollment found since the checkpoint keeps the file and the binding.
 
-     ```sh
-     ansible-playbook site.yml --limit HOST -e suifleet_revocation_digest=DIGEST
-     ```
+  1. Once the role has settled the attempt, revoke its claim if it is still
+     registered: on the Enrollment page, connected to the network the
+     deployment names, select the enrollment policy of the stop message and
+     use *Lost a credential file?*, then *Revoke lost claims* for the host's
+     serial. The claim record stays, and the role refuses to enroll with that
+     claim again.
+  2. Reissue the serial (*Remove reservations to reissue*, reserve it again
+     and download its new folder into the credential batch) and run the play
+     again.
 
-     The role runs the lookup again and, only if it still finds no
-     enrollment, runs the read-only `suifleet --check-revocation` as the key
-     holder, with the same verified `enroll.toml` and manifest (the chain
-     identifier, package and policy are checked as for the lookup). It
-     requires that the transaction succeeded and is in a checkpoint, that it
-     deleted the recorded claim's entry in the recorded policy's claim table
-     (the entry's object ID is derived from both, so a revocation of another
-     claim or under another policy does not match) at exactly the recorded
-     registration (its input version and digest, so a revocation of an
-     earlier or later registration of the same claim does not match), that
-     it emitted no `DeviceEnrolled` event (an enrollment also deletes the
-     entry, and revocation aborts unless the claim was unused), that the
-     claim is still not registered, and that the node's history since the
-     revocation, which must still be retained, holds no enrollment of this
-     key under the policy (so the attempt did not commit through a later
-     registration either). Only then does it remove the empty file and the
-     binding, and stop. A missing or malformed claim record (an attempt by an
-     earlier version of the role, which recorded no registration) or a
-     digest that fails any check keeps the
-     file and the binding; escalate rather than remove them. The claim record
-     stays, and the role refuses to enroll with that claim again.
-  3. Reissue the serial (*Remove reservations to reissue*, reserve it again
-     and download its new folder into the credential batch), remove
-     `suifleet_revocation_digest` and run the play again.
+  If the lookup cannot run because the node pruned the history, or the stop
+  message reports an enrollment the lookup did not restore, run the lookup
+  against a trusted full node of the same network that retains it: set
+  `rpc_url` (and `rpc_urls`) in `/root/lookup/deployment.json` to that node
+  (the lookup checks the chain identifier) and restore the record by hand as
+  above. If no trusted node retains it, keep the file and escalate; never
+  remove it, issue a new claim or enroll again. An attempt recorded by an
+  earlier version of the role (no window line) has no expiration: settle it
+  only by restoring its receipt this way, or escalate.
 
   Never remove the file by hand: not because the page shows *Funded, unused*
   or *Revoked*, nor because the lookup found nothing. The page describes the
   chain as last read (an open page refreshes it only once a minute) and the
   job and policy it has selected, and neither describes an attempt that may
-  still commit. Never re-register the revoked claim
-  (*Re-register withdrawn claims*): registering it again would let that
-  attempt commit (the check refuses a claim registered again, but cannot see
-  an attempt that already used the re-registered claim).
+  still commit.
   Never issue an enrolled device a new claim, and never replace its key.
 - **Enrollment lock.** One play at a time enrolls a host: it holds
   `/run/suifleet-enroll.lock` from the cleanup of an interrupted run's claim
@@ -872,22 +850,25 @@ The harness checks these phases:
    claim, lock or marker or reaching the enrollment command. After the
    failure the empty marker remains, the lock and staging are gone, and a
    retry stops on the marker. The attempt must have recorded its claim's
-   address and registration before the command ran. The chain setup
-   registered and revoked the same claim under the second policy,
-   registered and revoked another claim under the attempt's policy, and
-   revoked the attempt's claim under its policy and then registered it again
-   (in separate transactions) before the attempt. Retries given those three
-   revocations, or a transaction that revoked no claim, as
-   `suifleet_revocation_digest` stop with the marker, binding and claim
-   record unchanged; the stale revocation stops because it removed another
-   registration of the claim. The harness then revokes the attempt's
-   registration, registers the claim again (a retry with that revocation
-   stops: the claim is registered again) and revokes that later registration
-   (a retry with the later revocation stops: another registration). The
-   revocation of the attempt's registration then settles the attempt: the
-   claim is absent and the key has not enrolled since. The marker and
-   binding are removed and the claim record is kept.
-   A retry with the revoked claim still in the batch is refused before any
+   address and window (`epoch EPOCH checkpoint CHECKPOINT`) before the
+   command ran, and the command must have been given that epoch as its
+   expiry. A retry while the attempt's epoch has not ended (the harness
+   records a far later epoch in its place, since localnet epochs last a
+   minute) stops with the marker and binding kept, and so does a retry with
+   a record from an earlier role version (the claim and its registration,
+   no window). On chain, two real enrollment transactions, each sent by a
+   fresh device key and sponsored by its own registered claim, are signed
+   and held: one with the role's expiration (`Epoch(E)`, the epoch at
+   signing) and one without. Both claims are revoked and registered again,
+   twice. After epoch `E` ends, the transaction without an expiration still
+   commits and enrolls its device, while the expiring one is refused as
+   expired, its claim still registered and its device not enrolled. The
+   attempt's own claim is also revoked and registered again. Once the
+   attempt's epoch has ended, a retry settles it: the lookup finds nothing,
+   `--check-expired` confirms the epoch ended without an enrollment of the
+   key since the checkpoint, and the marker and binding are removed while
+   the claim record is kept.
+   A retry with the attempt's claim still in the batch is refused before any
    marker exists; the serial then gets a new, funded claim (Vault-encrypted)
    and enrolls with it below. Then a test-only copy stops the enrollment right after
    the transaction succeeded and its receipt reached

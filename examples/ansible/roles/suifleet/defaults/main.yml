@@ -61,17 +61,13 @@ suifleet_rollout_lock: /run/suifleet-rollout.lock
 # storage. A receipt is promoted only beside that same manifest, and the
 # binding stays beside the record until configure.yml installed config.toml.
 suifleet_enrollment_deployment: /etc/suifleet/.enrollment.json.partial.deployment
-# Public address of the claim an enrollment attempt used, recorded beside
-# the attempt marker before anything is submitted. An attempt that printed
-# no receipt is settled only by a revocation of exactly this claim, and a
-# later attempt never reuses it (it is spent or revoked).
+# Public address of the claim an enrollment attempt used, and its window
+# (the epoch its transaction expires after and a checkpoint read before it
+# was signed), recorded beside the attempt marker before anything is
+# submitted. An attempt that printed no receipt is settled only once the
+# chain shows that epoch ended without an enrollment of this key since that
+# checkpoint, and a later attempt never reuses the claim.
 suifleet_enrollment_claim: /etc/suifleet/.enrollment.json.partial.claim
-# Per host, only to settle an attempt that printed no receipt
-# (docs/ANSIBLE.md#recovery): the digest of the transaction that revoked the
-# attempt's recorded claim. The role verifies on chain that it removed that
-# claim from the attempt's policy without an enrollment, and that the claim
-# is still absent, before it removes the attempt marker.
-suifleet_revocation_digest: ""
 # Memory-backed directory writable by the SSH account (not root). The claim
 # reaches the host here without privilege escalation, because sudo may log a
 # command's standard input; enrollment refuses a directory that is not tmpfs.
