@@ -187,9 +187,12 @@ These static checks always run, on every recipe in the layer:
   `.tar.xz`, `.txz`, `.tar.bz2`, `.tbz2`), the compressions the supported
   host Python's `tarfile` can decode. Any other name that BitBake would unpack,
   such as `.tar.zst`, `.tzst`, `.zip`, `.jar`, `.7z`, `.deb`, `.rpm`, `.tar.lz`
-  or a bare `.gz`, is refused unless it has `unpack=0`. A pinned tarball that
-  does not decode in the format its name claims (for example Zstandard data
-  saved as `.tar.gz`) is reported as a finding, not a traceback. With `unpack=0` it is
+  or a bare `.gz`, is refused unless it has `unpack=0`. Like BitBake, the audit
+  picks the decompression from the name: gzip for `.tar.gz` and `.tgz`, bzip2
+  for `.tar.bz2` and `.tbz2`, xz for `.tar.xz` and `.txz`. A plain `.tar` is
+  autodetected, as GNU `tar x -f` does. A pinned tarball that does not decode
+  in the format its name claims (for example an uncompressed tar or Zstandard
+  data saved as `.tar.gz`) is reported as a finding, not a traceback. With `unpack=0` it is
   copied as a loose file, as BitBake copies it. The local name must be a plain file name and, like the URL, must not
   name a commit other than `SRCREV`. BitBake uses `downloadfilename` literally
   (only the URL path is percent-decoded), so a `downloadfilename` containing a
