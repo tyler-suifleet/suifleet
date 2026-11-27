@@ -1268,6 +1268,70 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue((source / 'suifleet-edge/windows-runtime/Cargo.toml').is_file())
         self.assertTrue((Path(report['fetch_dir']) / 'suifleet/suifleet.service').is_file())
 
+    def test_fetch_unpacks_by_the_downloadfilename_like_bitbake(self):
+        # BitBake stores an https source under downloadfilename and picks the
+        # unpack method from that name's suffix, not from the URL path.
+        targets = []
+
+        def recording_download(url, target):
+            targets.append(Path(target).name)
+            return self.fake_download(url, target)
+        self.write_recipe(url=f'{self.url};downloadfilename=source.bin')
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+        with mock.patch.object(audit, 'download', recording_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(targets, ['source.bin'])
+        self.assertFalse(report['ok'])
+        source = Path(report['fetch_dir']) / 'suifleet/source'
+        # Copied as a loose file, exactly what a clean BitBake build would get.
+        self.assertTrue((source / 'source.bin').is_file())
+        self.assertFalse((source / 'LICENSE').exists())
+        self.assertTrue(report['errors'], report)
+        # A tarball downloadfilename (the published recipe's form) is extracted.
+        targets.clear()
+        self.write_recipe(url=f'{self.url};downloadfilename=suifleet-edge-{self.rev}-workspace.tar.gz')
+        with mock.patch.object(audit, 'download', recording_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(targets, [f'suifleet-edge-{self.rev}-workspace.tar.gz'])
+        self.assertTrue((Path(report['fetch_dir']) / 'suifleet/source/LICENSE').is_file())
+        self.assertEqual(report['recipes']['suifleet']['sources'][0]['file'], targets[0])
+        # The local name must agree with SRCREV too, and must be a plain name.
+        self.write_recipe(url=f'{self.url};downloadfilename=suifleet-edge-{"c" * 40}.tar.gz')
+        self.assertTrue(any(f'names commit {"c" * 40}' in e for e in self.errors()), self.errors())
+        for bad in ('../escape.tar.gz', 'dir/x.tar.gz', '..'):
+            with self.subTest(bad):
+                self.write_recipe(url=f'{self.url};downloadfilename={bad}')
+                self.assertTrue(any('no usable local file name' in e for e in self.errors()), self.errors())
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('nothing fetched' in e for e in errors), errors)
+
+    def test_https_parameters_the_audit_does_not_model_are_refused(self):
+        for extra in ('striplevel=1', 'md5sum=' + '0' * 32, 'localpath=x', 'unpack=yes', 'unpack=false'):
+            with self.subTest(extra):
+                self.write_recipe(url=f'{self.url};{extra}')
+                key = extra.split('=')[0]
+                self.assertTrue(any('does not model' in e and key in e for e in self.errors()), self.errors())
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('does not model' in e and 'nothing fetched' in e for e in errors), errors)
+        # unpack=0 is modelled: the archive is copied, not extracted.
+        self.write_recipe(url=f'{self.url};unpack=0')
+        self.assertFalse(any('does not model' in e for e in self.errors()), self.errors())
+
     def test_fetch_reports_checksum_and_layout_defects(self):
         self.write_recipe(sha='f' * 64)
         with mock.patch.object(audit, 'download', self.fake_download):

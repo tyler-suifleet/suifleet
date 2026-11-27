@@ -274,6 +274,31 @@ def unmodelled_git_params(params):
     return sorted(set(params) - GIT_PARAMS)
 
 
+# HTTPS SRC_URI parameters the audit reproduces: the checksum name or inline
+# pin, the unpack subdir, unpack=0/1 and downloadfilename (the local file name
+# BitBake stores and unpacks by suffix). Anything else (striplevel, md5sum,
+# localpath, ...) could change the fetched file or unpacked layout, so it is
+# refused rather than verified against a layout the recipe would not get.
+HTTPS_PARAMS = frozenset({'name', 'sha256sum', 'subdir', 'unpack', 'downloadfilename'})
+
+
+def unmodelled_https_params(params):
+    unmodelled = set(params) - HTTPS_PARAMS
+    if params.get('unpack', '1') not in ('0', '1'):
+        unmodelled.add(f'unpack={params["unpack"]}')
+    return sorted(unmodelled)
+
+
+def download_name(url, params):
+    """The local file name BitBake's wget fetcher stores and unpacks: downloadfilename
+    when set (its suffix selects the unpack method), otherwise the URL basename."""
+    name = params.get('downloadfilename', PurePosixPath(urllib.parse.urlsplit(url).path).name)
+    name = urllib.parse.unquote(name)
+    if name in ('', '.', '..') or '/' in name or '\\' in name or '${' in name or '\0' in name:
+        raise ValueError(f'source has no usable local file name {name!r}: {redact_url(url)}')
+    return name
+
+
 def checksum_for(recipe, params, default_name=None):
     if 'sha256sum' in params:
         return params['sha256sum']
@@ -448,9 +473,19 @@ def audit_recipe(recipe):
             for pattern, label in MUTABLE_URL:
                 if pattern.search(url):
                     errors.append(f'{where}: mutable or expiring source ({label}): {shown}')
-            commits = re.findall(r'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])', PurePosixPath(parsed.path).name)
-            if commits and HEX40.match(srcrev or '') and commits[-1] != srcrev:
-                errors.append(f'{where}: archive {PurePosixPath(parsed.path).name} names commit {commits[-1]}, SRCREV is {srcrev}')
+            if unmodelled_https_params(params):
+                errors.append(f'{where}: https source parameters the audit does not model: '
+                              f'{", ".join(unmodelled_https_params(params))}: {shown}')
+            try:
+                local = download_name(url, params)
+                entry['file'] = local
+            except ValueError as error:
+                errors.append(f'{where}: {error}')
+                local = None
+            for archive in dict.fromkeys(filter(None, (PurePosixPath(parsed.path).name, local))):
+                commits = re.findall(r'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])', archive)
+                if commits and HEX40.match(srcrev or '') and commits[-1] != srcrev:
+                    errors.append(f'{where}: archive {archive} names commit {commits[-1]}, SRCREV is {srcrev}')
         elif scheme == 'crate':
             parts = url.split('/')
             sha = checksum_for(recipe, params, f'{parts[-2]}-{parts[-1]}')
@@ -760,9 +795,10 @@ def unpack_plan(recipe, unpack):
                                  f'{", ".join(unmodelled_git_params(params))}: {redact_url(url)}')
             plan.append((url, params, scheme, confined(unpack, params.get('destsuffix', 'git'), 'destsuffix')))
         else:
-            name = PurePosixPath(urllib.parse.urlsplit(url).path).name
-            if name in ('', '.', '..'):
-                raise ValueError(f'source URL has no file name: {redact_url(url)}')
+            if unmodelled_https_params(params):
+                raise ValueError(f'https source parameters the audit does not model: '
+                                 f'{", ".join(unmodelled_https_params(params))}: {redact_url(url)}')
+            download_name(url, params)
             plan.append((url, params, scheme, confined(unpack, params.get('subdir', '') or '.', 'subdir')))
     s_dir = recipe.get('S')
     if not s_dir.startswith(str(unpack) + '/') and s_dir != str(unpack):
@@ -807,7 +843,7 @@ def fetch_recipe(recipe, workdir, cargo=None):
             if branch_error:
                 errors.append(f'{recipe.path.name}: {branch_error}')
             continue
-        name = PurePosixPath(urllib.parse.urlsplit(url).path).name
+        name = download_name(url, params)
         target = downloads / name
         expected = checksum_for(recipe, params)
         actual = download(url, target)
