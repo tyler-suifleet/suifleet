@@ -2198,6 +2198,45 @@ class LayerAuditTests(unittest.TestCase):
         (self.recipe_dir / 'files/suifleet.service').symlink_to('real.service')
         self.assertEqual(self.errors(), [])
 
+    def test_patch_sources_bitbake_applies_after_unpacking_are_refused(self):
+        # BitBake's do_patch applies every SRC_URI entry named *.patch/*.diff
+        # (optionally compressed) after unpacking. The audit binds only the
+        # unpacked tree, so a source-changing patch must never yield a clean
+        # provenance report, statically or with --repo --fetch.
+        patch_text = ('--- a/suifleet-edge/src/main.rs\n+++ b/suifleet-edge/src/main.rs\n'
+                      '@@ -1 +1,2 @@\n+// marker\n')
+        (self.recipe_dir / 'files/marker.patch').write_text(patch_text)
+        self.write_recipe(extra='SRC_URI:append = " file://marker.patch"')
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        if report.get('fetch_dir'):
+            self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('file:// source marker.patch is a patch BitBake applies after unpacking' in e
+                            for e in report['errors']), report['errors'])
+        # Every suffix oe.patch.patch_path treats as a patch, in any case.
+        for name in ('marker.diff', 'marker.patch.gz', 'marker.diff.bz2', 'marker.patch.xz',
+                     'marker.patch.Z', 'MARKER.PATCH'):
+            with self.subTest(name=name):
+                (self.recipe_dir / f'files/{name}').write_bytes(b'patch')
+                self.write_recipe(extra=f'SRC_URI:append = " file://{name};unpack=0"')
+                self.assertTrue(any(f'{name} is a patch BitBake applies' in e for e in self.errors()),
+                                self.errors())
+        # A pinned https patch, by URL basename or downloadfilename.
+        sha = 'c' * 64
+        for source in (f'https://example.com/{"d" * 40}/fix.patch;sha256sum={sha}',
+                       f'https://example.com/{"d" * 40}/fix.txt;sha256sum={sha};downloadfilename=fix.diff'):
+            with self.subTest(source=source):
+                self.write_recipe(extra=f'SRC_URI:append = " {source}"')
+                self.assertTrue(any('is a patch BitBake applies after unpacking' in e for e in self.errors()),
+                                self.errors())
+        # apply=yes makes any file a patch; it stays refused as unmodelled.
+        self.write_recipe(extra='SRC_URI:append = " file://suifleet.service;apply=yes"')
+        self.assertTrue(any('apply' in e for e in self.errors()), self.errors())
+        # Ordinary local files are unaffected.
+        self.write_recipe()
+        self.assertEqual(self.errors(), [])
+
     def test_crates_need_checksums_and_must_match_the_lock(self):
         (self.recipe_dir / 'suifleet-crates.inc').write_text(CRATES_INC.replace('a' * 64, 'b' * 64))
         errors = self.errors(repo=self.repo.root)

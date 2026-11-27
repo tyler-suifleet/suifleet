@@ -775,6 +775,26 @@ def unmodelled_file_params(params):
     return sorted(unmodelled)
 
 
+# BitBake's patch class (oe.patch.patch_path) applies every SRC_URI entry whose
+# local file name ends in .patch or .diff, optionally followed by one
+# compression suffix (.gz, .bz2, .xz, .Z), after do_unpack and before
+# compilation; apply=yes forces the same for any name. The audit binds and
+# scans the unpacked tree only, so a patch could change compiler inputs while
+# the report still certifies the pinned source. Every audited recipe must
+# therefore build its sources unpatched: publish the change in a new pinned
+# source instead. (apply= is already refused as an unmodelled parameter.)
+PATCH_NAME = re.compile(r'\.(patch|diff)(\.(gz|bz2|xz|z))?$', re.I)
+
+
+def patch_error(name, params):
+    """An error message when BitBake's do_patch would apply the source with
+    local file name `name`, or None."""
+    if PATCH_NAME.search(name) or params.get('apply', 'no').lower() not in ('no', 'false', '0', 'n', 'f'):
+        return (f'{name} is a patch BitBake applies after unpacking; patched sources cannot be '
+                'bound to the pinned source, so publish the change in a new pinned source')
+    return None
+
+
 def download_name(url, params):
     """The local file name BitBake's wget fetcher stores and unpacks: downloadfilename
     when set, taken literally like BitBake's parameter parser (its suffix selects
@@ -1018,6 +1038,8 @@ def audit_recipe(recipe):
             try:
                 local = download_name(url, params)
                 entry['file'] = local
+                if patch_error(local, params):
+                    errors.append(f'{where}: {patch_error(local, params)}: {shown}')
                 if unsupported_unpack(local, params):
                     errors.append(f'{where}: {unsupported_unpack(local, params)}: {shown}')
             except ValueError as error:
@@ -1049,6 +1071,8 @@ def audit_recipe(recipe):
                         errors.append(f'{where}: file:// source is not in the layer: {name}')
                 except ValueError as error:
                     errors.append(f'{where}: {error}')
+                if patch_error(PurePosixPath(recipe.expand(name)).name, params):
+                    errors.append(f'{where}: file:// source {patch_error(PurePosixPath(recipe.expand(name)).name, params)}')
                 # Local files are only copied by the audit, never extracted.
                 problem = unsupported_unpack(PurePosixPath(recipe.expand(name)).name, params, extracts=NOTHING)
                 if problem:
