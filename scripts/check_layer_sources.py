@@ -90,6 +90,11 @@ ASSIGN_LIKE = re.compile(r'^(?:export\s+)?([A-Za-z0-9_\-${}.:/+]+?)(\[[^\]]*\])?
 REF = re.compile(r'\$\{([A-Za-z0-9_\-]+)\}')
 # The layer's Scarthgap/Wrynose unpack-root idiom; no other inline Python is evaluated.
 UNPACKDIR_EXPR = re.compile(r"""\$\{@d\.getVar\(['"]UNPACKDIR['"]\)\s+or\s+d\.getVar\(['"]WORKDIR['"]\)\}""")
+# Any other inline Python expansion. BitBake evaluates it whenever a value
+# containing it is expanded (by a getVar, a := assignment, signature
+# generation or a class's anonymous Python, transitively through references),
+# and the code can write the datastore, so audited metadata must not carry it.
+INLINE_PYTHON = re.compile(r'\$\{@')
 # BitBake's anonymous Python forms: python () {, python __anonymous () {, with
 # optional fakeroot and spacing. They run at the end of parsing (ast.finalize).
 # BitBake directives the reader does not model. unset removes a variable or
@@ -101,8 +106,14 @@ ANONYMOUS_PYTHON = re.compile(r'^(?:fakeroot\s+)?python(?:\s+__anonymous)?\s*\(\
 # guard (for example a platform or missing-input check that raises
 # bb.parse.SkipRecipe). Skipping a recipe changes whether it is built, never
 # which sources it pins. The guard must provably not write the datastore:
-# * the datastore d is only read (d.getVar, d.getVarFlag, d.expand), or passed
-#   to the read-only BitBake helpers below; it is never rebound or aliased;
+# * the datastore d is only read, with d.getVar(NAME[, EXPAND]) or
+#   d.getVarFlag(NAME, FLAG[, EXPAND]) and literal arguments, or passed to the
+#   read-only BitBake helpers below; it is never rebound or aliased. d.expand
+#   of an arbitrary string is refused. A read expands its value, which could
+#   run inline Python reached through references; the audit refuses inline
+#   Python anywhere in the recipe, its includes and bbappends (INLINE_PYTHON),
+#   so a guard's reads only reach that metadata and the base layers the build
+#   already trusts;
 # * module access is limited to the bb names and os.path listed here, with
 #   only `import os`; no other import, builtin escape (exec, eval, setattr,
 #   globals, ...), underscore attribute or attribute named d is allowed;
@@ -111,7 +122,8 @@ ANONYMOUS_PYTHON = re.compile(r'^(?:fakeroot\s+)?python(?:\s+__anonymous)?\s*\(\
 # A Fetch used here must be localonly, and the only calls that receive d
 # besides these helpers are a local fetch method's localpaths or
 # localfile_searchpaths (the local-file search path, read-only).
-GUARD_D_METHODS = frozenset({'getVar', 'getVarFlag', 'expand'})
+# Each read method with its number of literal string arguments.
+GUARD_D_METHODS = {'getVar': 1, 'getVarFlag': 2}
 GUARD_BB = frozenset({'bb.parse.SkipRecipe', 'bb.parse.mark_dependency', 'bb.fetch2.Fetch', 'bb.fatal',
                       'bb.error', 'bb.warn', 'bb.note', 'bb.debug'})
 GUARD_D_CALLEES = frozenset({'bb.parse.mark_dependency', 'bb.fetch2.Fetch'})
@@ -151,6 +163,24 @@ def local_search(node):
                 and name.value in GUARD_LOCAL_SEARCH
                 and (len(node.args) == 2 or (isinstance(node.args[2], ast.Constant) and node.args[2].value is None)))
     return False
+
+
+def literal_read_error(method, call):
+    """None if call is d.METHOD with literal arguments (see GUARD_D_METHODS):
+    the names (and flag) as strings, then optionally expand as a bool, given
+    positionally or as expand=."""
+    names = GUARD_D_METHODS[method]
+    args, keywords = call.args, call.keywords
+    if any(isinstance(a, ast.Starred) for a in args) or any(k.arg != 'expand' for k in keywords):
+        return f'd.{method} must be called with literal arguments'
+    if len(args) < names or len(args) + len(keywords) > names + 1:
+        return f'd.{method} must be called with literal arguments'
+    if not all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in args[:names]):
+        return f'd.{method} must read a literal variable name'
+    extra = args[names:] + [k.value for k in keywords]
+    if not all(isinstance(a, ast.Constant) and isinstance(a.value, bool) for a in extra):
+        return f'd.{method} expand argument must be a literal True or False'
+    return None
 
 
 def skip_guard_error(body):
@@ -209,6 +239,9 @@ def skip_guard_error(body):
                     call = parents.get(parent)
                     if not (parent.attr in GUARD_D_METHODS and isinstance(call, ast.Call) and call.func is parent):
                         return f'd.{parent.attr} is not a read-only datastore call'
+                    reason = literal_read_error(parent.attr, call)
+                    if reason:
+                        return reason
                 elif isinstance(parent, ast.Call) and node in parent.args:
                     callee = parent.func
                     name = dotted(callee)
@@ -283,6 +316,9 @@ class Recipe:
         # Anonymous Python accepted as a read-only parse-time skip guard
         # (skip_guard_error); reported, never executed.
         self.guards = []
+        # Inline Python expansions (${@...}) other than the UNPACKDIR idiom, as
+        # file:line. BitBake runs them on expansion; audit_recipe refuses them.
+        self.inline_python = []
         # Directives this reader does not model (unset, include_all, ...). They
         # can remove or replace source pins, so audit_recipe refuses them.
         self.unmodelled = []
@@ -367,6 +403,13 @@ class Recipe:
     def _read(self, path):
         text = path.read_text()
         self.text += text
+        # Each logical line (continuations joined, as BitBake reads them),
+        # numbered by its first physical line; values are never reported.
+        number = 1
+        for logical in re.split(r'(?<!\\)\n', text):
+            if INLINE_PYTHON.search(UNPACKDIR_EXPR.sub('', logical.replace('\\\n', ''))):
+                self.inline_python.append(f'{self.rel(path)}:{number}')
+            number += logical.count('\n') + 1
         lines, block, anonymous = [], False, None
         for line in text.replace('\\\n', ' ').splitlines():
             stripped = line.strip()
@@ -728,6 +771,9 @@ def audit_recipe(recipe):
                for item in recipe.expanded_keys]
     errors += [f'{where}: {item} runs after parsing and can change source pins the audit '
                'reads; it is not supported in audited recipes, includes or appends' for item in recipe.parse_time]
+    errors += [f'{where}: {item} uses inline Python (${{@...}}), which BitBake runs whenever the value is '
+               'expanded and which can change source pins; only the UNPACKDIR idiom is supported'
+               for item in recipe.inline_python]
     if 'FILESPATH' in recipe.vars:
         # The audit models BitBake's default FILESPATH (FILESEXTRAPATHS, then
         # BP, BPN and files beside the recipe). An explicit search path could
@@ -1098,10 +1144,11 @@ def unpack_plan(recipe, unpack):
     if recipe.parse_time:
         # SRC_URI as read here may not be what BitBake fetches after running it.
         raise ValueError(f'metadata that runs after parsing is not supported: {"; ".join(recipe.parse_time)}')
-    if recipe.unmodelled or recipe.include_errors or recipe.expanded_keys:
+    if recipe.unmodelled or recipe.include_errors or recipe.expanded_keys or recipe.inline_python:
         # SRC_URI as read here may not be what BitBake would fetch.
+        inline = [f'{item} inline Python' for item in recipe.inline_python]
         raise ValueError('unmodelled or unresolved metadata is not supported: '
-                         f'{"; ".join(recipe.unmodelled + recipe.expanded_keys + recipe.include_errors)}')
+                         f'{"; ".join(recipe.unmodelled + recipe.expanded_keys + recipe.include_errors + inline)}')
     plan = []
     for url, params in recipe.sources():
         scheme = url.split('://', 1)[0]

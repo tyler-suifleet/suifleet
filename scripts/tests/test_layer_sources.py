@@ -1570,6 +1570,15 @@ class LayerAuditTests(unittest.TestCase):
             'rebind datastore': '    d = None\n',
             'rebind bb': '    bb = None\n',
             'syntax error': '    if :\n',
+            'explicit inline python expansion': '    d.expand("${@d.setVar(\'SRCREV\', \'x\')}")\n',
+            'expand of a reference': '    d.expand("${SRCREV}")\n',
+            'computed variable name': '    name = "SRC_URI"\n    d.getVar(name)\n',
+            'computed flag name': '    flag = "sha256sum"\n    d.getVarFlag("SRC_URI", flag)\n',
+            'computed expand flag': '    d.getVar("SRC_URI", expand=local)\n',
+            'starred read arguments': '    d.getVar(*["SRC_URI"])\n',
+            'extra read argument': '    d.getVar("SRC_URI", True, True)\n',
+            'other read keyword': '    d.getVar("SRC_URI", parsing=True)\n',
+            'non-string variable name': '    d.getVar(1)\n',
         }
         for label, addition in additions.items():
             with self.subTest(label):
@@ -1586,6 +1595,51 @@ class LayerAuditTests(unittest.TestCase):
         # An unterminated function is refused too.
         self.write_recipe(extra='python () {\n    pass\n')
         self.assertTrue(any('without a closing brace' in e for e in self.errors()), self.errors())
+
+    def test_inline_python_reached_by_a_guard_read_is_refused(self):
+        # A guard's literal reads still expand their values, and BitBake runs
+        # inline Python found on the way, directly or through references, so
+        # inline Python anywhere in the audited metadata is refused before any
+        # download, with or without a guard. The UNPACKDIR idiom stays allowed.
+        include = self.recipe_dir / 'extra.inc'
+        append = self.recipe_dir / 'suifleet_1.0.bbappend'
+        self.addCleanup(include.unlink, missing_ok=True)
+        self.addCleanup(append.unlink, missing_ok=True)
+        payload = "${@d.setVar('SRCREV', 'c' * 40) or 'glibc'}"
+        cases = {
+            'read directly': (f'TCLIBC = "{payload}"\n', None, None),
+            'read transitively': (f'SUIFLEET_LIBC = "{payload}"\nTCLIBC = "${{SUIFLEET_LIBC}}"\n', None, None),
+            'in an include': ('require extra.inc\n', f'TCLIBC = "{payload}"\n', None),
+            'in a bbappend': ('', None, f'TCLIBC:append = "{payload}"\n'),
+            'in a flag': (f'TCLIBC[doc] = "{payload}"\n', None, None),
+            'split by a continuation': ('TCLIBC = "$\\\n{@d.setVar(\'SRCREV\', \'x\')}"\n', None, None),
+            'in a task body': (f'do_install() {{\n    echo {payload}\n}}\n', None, None),
+        }
+        for label, (extra, inc, app) in cases.items():
+            for guard in (CODEC_GUARD, ''):
+                with self.subTest(label, guarded=bool(guard)):
+                    for path, text in ((include, inc), (append, app)):
+                        if text is None:
+                            path.unlink(missing_ok=True)
+                        else:
+                            path.write_text(text)
+                    self.write_recipe(extra=guard + extra)
+                    errors = self.errors()
+                    self.assertTrue(any('uses inline Python' in e for e in errors), errors)
+                    self.assertFalse(any(payload in e for e in errors), errors)
+                    recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer,
+                                          [append] if app is not None else [])
+                    workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                    with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                        errors, fetched = audit.fetch_recipe(recipe, workdir)
+                    self.assertEqual(fetched, [])
+                    self.assertTrue(any('inline Python' in e and 'nothing fetched' in e for e in errors), errors)
+        include.unlink(missing_ok=True)
+        append.unlink(missing_ok=True)
+        # Both SF-307 guards with the UNPACKDIR idiom still pass.
+        self.write_recipe(extra=NODE_GUARD + CODEC_GUARD
+                          + 'SUIFLEET_UNPACKDIR = "${@d.getVar(\'UNPACKDIR\') or d.getVar(\'WORKDIR\')}"\n')
+        self.assertEqual(self.errors(), [])
 
     def test_every_include_operand_is_read_and_checked(self):
         # BitBake expands the whole include/require operand and includes every
