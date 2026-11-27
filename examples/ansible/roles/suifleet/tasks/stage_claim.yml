@@ -209,29 +209,56 @@
     # never opens them: a reader running as the SSH account (runuser) opens
     # claim.key without following a symlink or blocking on a FIFO, checks
     # the opened descriptor (a regular file the account owns, one link,
-    # nonempty, at most 4 KiB) and writes the bytes it read to a pipe. Root
-    # writes the pipe to the destination, created exclusively (noclobber),
-    # root-owned with mode 0400, and removes it if the reader refuses. Both
+    # nonempty, at most 4 KiB) and writes the bytes it read to its standard
+    # output, which must be a pipe. Root's writer holds the read end of that
+    # pipe and nothing else the reader could use: it collects the bytes,
+    # waits for the reader, and only after the reader exited successfully
+    # creates the destination exclusively (O_EXCL, O_NOFOLLOW), root-owned
+    # with mode 0400, and writes it. So the reader never holds a handle to
+    # the staged copy, and a refused or failed read leaves no file. Both
     # sides set a core dump size limit of 0, the reader after runuser's PAM
     # limits apply.
     - name: Stage the single-use claim key in memory-backed storage
       ansible.builtin.command:
         argv:
-          - sh
+          - python3
+          - -I
           - -c
-          - >-
-            set -eu; ulimit -c 0; umask 077;
-            test ! -e "$3" && test ! -L "$3";
-            set -C; : > "$3"; set +C;
-            if ! runuser -u "$2" -- sh -c 'ulimit -c 0 && exec python3 -I -c "$1" "$2"' sh "$4" "$1/claim.key" >> "$3";
-            then rm -f -- "$3"; exit 1; fi;
-            chown root:root "$3"; chmod 0400 "$3"
-          - sh
+          - |-
+            import os, resource, subprocess, sys
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            os.umask(0o077)
+            src, account, dest, reader = sys.argv[1:5]
+            if os.path.lexists(dest):
+                sys.exit("refusing to stage the claim: a staged claim already exists")
+            proc = subprocess.run(
+                ["runuser", "-u", account, "--", "sh", "-c", 'ulimit -c 0 && exec python3 -I -c "$1" "$2"',
+                 "sh", reader, src + "/claim.key"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, close_fds=True)
+            if proc.returncode != 0:
+                sys.exit(f"refusing to stage the claim: the reader exited with status {proc.returncode}")
+            data = proc.stdout
+            if not 0 < len(data) <= 4096:
+                sys.exit("refusing to stage the claim: the reader returned no claim or more than 4096 bytes")
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)
+            try:
+                os.fchown(fd, 0, 0)
+                os.fchmod(fd, 0o400)
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view):]
+                os.close(fd)
+            except BaseException:
+                os.close(fd)
+                os.unlink(dest)
+                raise
           - "{{ suifleet_claim_transfer.stdout }}"
           - "{{ suifleet_claim_account.stdout }}"
           - "{{ suifleet_enroll_staging }}/claim.key"
           - |-
             import os, stat, sys
+            if not stat.S_ISFIFO(os.fstat(1).st_mode):
+                sys.exit("refusing the transferred claim: the reader's output is not a pipe")
             try:
                 fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
             except OSError as e:

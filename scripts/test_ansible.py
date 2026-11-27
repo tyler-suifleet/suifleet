@@ -838,8 +838,8 @@ class Harness:
             command += [playbook]
         return [*command, *extra]
 
-    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True, env=()):
-        command = self.ansible_command(playbook, extra, tool=tool, inventory=inventory, env=env)
+    def ansible(self, phase, playbook, *extra, expect_rc=0, tool="ansible-playbook", inventory=True, env=(), examples=None):
+        command = self.ansible_command(playbook, extra, tool=tool, inventory=inventory, env=env, examples=examples)
         result = subprocess.run(command, text=True, capture_output=True)
         output = result.stdout + result.stderr
         self.outputs.append(output)
@@ -1993,6 +1993,64 @@ exit 3
                   " and staged nothing; the transfer directory was erased")
         for host in self.hosts.values():
             self.exec(host["container"], "rm", "-rf", "/root/sf304-root-only", "/run/suifleet-enroll")
+
+    READER_WRITE = "            sys.stdout.buffer.write(data)\n"
+    READER_PROBE = "/dev/shm/sf304-reader-probe"
+
+    def claim_reader_pipe(self, vault):
+        """The SSH-account reader writes the claim to a pipe, never to a handle on the staged file.
+
+        A test-only copy of stage_claim.yml makes the reader (running as the
+        SSH account) record where its standard output and every other open
+        descriptor lead just before it writes the claim. Its output must be a
+        pipe, and none of its descriptors may refer to the staging directory:
+        a handle inherited on the staged copy would stay writable after the
+        chmod to 0400. A second copy makes the reader fail after writing part
+        of a claim; nothing may be staged.
+        """
+        (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
+        probe = self.READER_PROBE
+        recorded = self.variant_examples("examples-reader-probe", {"stage_claim.yml": [(self.READER_WRITE, (
+            "            fds = []\n"
+            "            for n in os.listdir('/proc/self/fd'):\n"
+            "                try:\n"
+            "                    fds.append(n + '=' + os.readlink('/proc/self/fd/' + n))\n"
+            "                except OSError:\n"
+            "                    pass\n"
+            f"            with open('{probe}', 'w') as probe:\n"
+            "                probe.write(f'fifo={stat.S_ISFIFO(os.fstat(1).st_mode)} ' + ' '.join(fds) + '\\n')\n"
+            + self.READER_WRITE))]}, folder="tasks", source=self.examples)
+        output, _ = self.ansible("claim staged from the reader's pipe", "/work/claim-interrupt.yml", *vault,
+                                 expect_rc="nonzero", examples=recorded)
+        assert output.count("interrupted after the claim transfer") >= len(self.hosts), output[-4000:]
+        for name, host in self.hosts.items():
+            container = host["container"]
+            seen = self.exec(container, "cat", probe).stdout.strip()
+            assert seen.startswith("fifo=True ") and " 1=pipe:[" in seen, (name, "reader output is not a pipe", seen)
+            assert "suifleet-enroll" not in seen, (name, "the reader held a handle in the staging directory", seen)
+            meta = self.exec(container, "stat", "-c", "%U:%G %a %s", "/run/suifleet-enroll/claim.key").stdout.strip()
+            assert meta.startswith("root:root 400 ") and not meta.endswith(" 0"), (name, "staged claim", meta)
+            self.exec(container, "rm", "-rf", "/run/suifleet-enroll", probe)
+        print("PASS the SSH-account reader wrote the claim to a pipe and held no descriptor in the staging directory;"
+              " root staged the claim root:root 0400")
+
+        failing = self.variant_examples("examples-reader-fails", {"stage_claim.yml": [(self.READER_WRITE, (
+            self.READER_WRITE + "            sys.stdout.flush()\n"
+            "            sys.exit('sf304 reader failed after writing')\n"))]}, folder="tasks", source=self.examples)
+        output, _ = self.ansible("reader failing after output stages nothing", "/work/claim-interrupt.yml", *vault,
+                                 expect_rc="nonzero", examples=failing)
+        assert "interrupted after the claim transfer" not in output, "staging accepted a failed read"
+        assert output.count("sf304 reader failed after writing") >= len(self.hosts), output[-4000:]
+        assert output.count("refusing to stage the claim: the reader exited with status 1") >= len(self.hosts), \
+            output[-4000:]
+        for name, host in self.hosts.items():
+            container = host["container"]
+            assert self.exec(container, "test", "-e", "/run/suifleet-enroll/claim.key",
+                             check=False).returncode != 0, (name, "a failed read was staged")
+            left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
+            assert left == "0", (name, "the transfer directory was not erased")
+            self.exec(container, "rm", "-rf", "/run/suifleet-enroll")
+        print("PASS a reader failing after writing part of the claim staged nothing; the transfer directory was erased")
 
     def overlapping_enrollment(self, vault, name="deb-ubuntu2404"):
         """Two plays enroll the same host at once; the first attempt fails without printing a receipt.
@@ -3164,6 +3222,7 @@ exit 3
         self.accepted_claim_policy()
         self.interrupted_claim_transfer(vault)
         self.replaced_claim_transfer(vault)
+        self.claim_reader_pipe(vault)
         self.no_swap()
         self.safe_crash_policy()
         verdicts = self.classify()

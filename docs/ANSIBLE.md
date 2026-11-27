@@ -274,7 +274,10 @@ restarted once.
   at any time: a reader running as the SSH account opens it without
   following symlinks or blocking, accepts only a regular single-link file
   of at most 4 KiB that the account owns, and passes the bytes it read to
-  root through a pipe. Root owns the
+  root through a pipe; it refuses to write to anything but a pipe. Root
+  creates the staged copy only after the reader exited successfully, so the
+  reader never holds a handle to it and a refused or failed read stages
+  nothing. Root owns the
   staging directory (mode 0750, the key holder's group), the `enroll.toml`
   and `deployment.json` staged in it (mode 0640) and `claim.key` (mode 0400,
   unreadable to the key holder). The key holder (the daemon user, not root)
