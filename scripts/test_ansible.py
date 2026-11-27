@@ -296,6 +296,10 @@ ENROLL_TASK = "TASK [suifleet : Enroll and record the public IDs]"
 LOOKUP_TASK = "TASK [suifleet : Find this key's enrollment on chain]"
 LOOKUP_NONE = "found no enrollment for this device's key"
 ATTEMPT_DEPLOYMENT = "/etc/suifleet/.enrollment.json.partial.deployment"
+ATTEMPT_CLAIM = "/etc/suifleet/.enrollment.json.partial.claim"
+REVOCATION_REFUSAL = "does not settle it"
+SETTLED = "can never enroll the device, so the role removed"
+REUSED_CLAIM = "which an earlier attempt used"
 POLICY_REFUSAL = "from an attempt under enrollment policy"
 DEPLOYMENT_REFUSAL = "from an attempt that did not run under the configured deployment"
 RECORD_DEPLOYMENT_REFUSAL = "enrolled under a deployment other than the configured one"
@@ -445,7 +449,7 @@ def sha256(path):
 
 
 # ── Inside the chain container ────────────────────────────────────────────
-def chain_setup(out, serials):
+def chain_setup(out, serials, settle_serial):
     """Runs as the dev user in the network-none chain container."""
     import deployment_manifest as dm
     from types import SimpleNamespace
@@ -526,11 +530,40 @@ def chain_setup(out, serials):
     claims_tx = client(*words[2:])
     assert claims_tx["effects"]["status"]["status"] == "success", claims_tx["effects"]["status"]
     claims = json.loads((batch / "claims.json").read_text())
+    claims = {Path(k).parent.name: v for k, v in claims.items()}
+
+    def ptb(*args):
+        result = client("ptb", *args, "--gas-budget", "200000000")
+        assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+        return result["digest"]
+    # Revocations for settling an attempt that printed no receipt (see
+    # overlapping_enrollment): only the revocation of the attempt's own claim
+    # under the attempt's policy settles it. The same claim registered and
+    # revoked under the other policy, and another claim revoked under the
+    # attempt's policy, must not. The serial then gets a new, funded claim.
+    settled = claims[settle_serial]
+    spare = "0x" + os.urandom(32).hex()
+    settle = dict(serial=settle_serial, claim=settled)
+    settle["other_policy_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{other_policy}", f"vector[@{settled}]",
+                                        "--move-call", f"{package}::enrollment::revoke_claim", f"@{other_policy}", f"@{settled}")
+    settle["other_claim_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector[@{spare}]",
+                                       "--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{spare}")
+    settle["revoke_digest"] = ptb("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{settled}")
+    replacement = out / "replacement"
+    (out / "replacement.csv").write_text(f"serial,alias\n{settle_serial},line-{settle_serial.lower()}\n")
+    run(sys.executable, str(ROOT / "scripts/claims.py"), "generate", "--roster", str(out / "replacement.csv"), str(replacement),
+        "--policy", policy, "--manifest", str(out / "deployment.json"))
+    printed = run(sys.executable, str(ROOT / "scripts/claims.py"), "ptb", str(replacement), "--package", package,
+                  "--policy", policy, capture_output=True).stdout.strip().splitlines()
+    assert len(printed) == 1, printed
+    replaced = client(*shlex.split(printed[0])[2:])
+    assert replaced["effects"]["status"]["status"] == "success", replaced["effects"]["status"]
+    settle["replacement"] = next(iter(json.loads((replacement / "claims.json").read_text()).values()))
     (out / "setup.json").write_text(json.dumps(dict(
         chain_identifier=facts["chain_identifier"], package=package, registry=registry, policy=policy, operator=operator,
         other_policy=other_policy, other_policy_digest=other_policy_tx["digest"],
         publish_digest=published["digest"], policy_digest=policy_tx["digest"], claims_digest=claims_tx["digest"],
-        claims={Path(k).parent.name: v for k, v in claims.items()}), indent=2) + "\n")
+        claims=claims, settle=settle), indent=2) + "\n")
     print("chain setup complete")
 
 
@@ -550,7 +583,9 @@ def chain_verify(out, records):
         sender = block["transaction"]["data"]["sender"]
         gas_owner = block["transaction"]["data"]["gasData"]["owner"]
         assert dm.object_id(sender) == dm.object_id(enrolled["device_address"]), (name, "sender")
-        assert dm.object_id(gas_owner) == dm.object_id(setup["claims"][serial]), (name, "gas not paid by its claim")
+        # The settled serial was reissued after its first claim was revoked.
+        claim = setup["settle"]["replacement"] if serial == setup["settle"]["serial"] else setup["claims"][serial]
+        assert dm.object_id(gas_owner) == dm.object_id(claim), (name, "gas not paid by its claim")
         caps = dm.rpc(RPC, "sui_multiGetObjects", [[enrolled["device_cap_id"], enrolled["owner_cap_id"]], {"showOwner": True}])
         device_cap, owner_cap = (c["data"]["owner"]["AddressOwner"] for c in caps)
         assert dm.object_id(device_cap) == dm.object_id(enrolled["device_address"]), (name, "device cap owner")
@@ -727,7 +762,8 @@ class Harness:
         (ssh / "known_hosts").write_text("".join(known))
         # Chain, policy and claim batch.
         self.exec(self.chain, "python3", "/workspace/scripts/test_ansible.py", "--chain-setup", "/chain",
-                  "--serials", ",".join(h["serial"] for h in self.hosts.values()), user="1001:1001")
+                  "--serials", ",".join(h["serial"] for h in self.hosts.values()),
+                  "--settle-serial", self.hosts["deb-ubuntu2404"]["serial"], user="1001:1001")
         self.setup = json.loads((chain_dir / "setup.json").read_text())
         self.evidence["chain"] = {k: v for k, v in self.setup.items() if k != "claims"}
         self.batch = chain_dir / "batch"
@@ -1936,9 +1972,73 @@ class Harness:
         assert sh(f"stat -c %s {partial}").strip() == "0" and absent(lock) and absent(staging), (name, "retry left state")
         print("PASS retry looked the unenrolled key up on chain, found nothing, refused the attempt with an unknown"
               " outcome and released the lock")
-        # The stand-in submitted nothing, so the claim is unused: the
-        # authoritative settlement the recovery steps require is known here.
-        self.exec(container, "rm", "-rf", partial, ENROLL_SHIM_PATH, ENROLL_SHIM_DIR)
+        self.exec(container, "rm", "-rf", ENROLL_SHIM_PATH, ENROLL_SHIM_DIR)
+        self.settle_revoked_attempt(vault, name)
+
+    def settle_revoked_attempt(self, vault, name):
+        """Settles the attempt above, which printed nothing, by a revocation of its own claim.
+
+        The attempt recorded its claim before running the command. Chain setup
+        revoked that claim under the attempt's policy, the same claim under the
+        other policy, and another claim under the attempt's policy. Only the
+        first settles the attempt: the role verifies on chain that the
+        transaction removed exactly the recorded claim from the recorded policy
+        without an enrollment, then removes the marker and binding. The revoked
+        claim is refused afterwards; the serial is reissued with a new claim."""
+        container = self.hosts[name]["container"]
+        partial, record = "/etc/suifleet/.enrollment.json.partial", "/etc/suifleet/enrollment.json"
+        lock, staging = "/run/suifleet-enroll.lock", "/run/suifleet-enroll"
+        settle = self.setup["settle"]
+        serial = self.hosts[name]["serial"]
+        assert settle["serial"] == serial, (name, "chain setup prepared another serial", settle)
+
+        def sh(script, **kwargs):
+            return self.exec(container, "sh", "-c", script, **kwargs).stdout
+
+        def absent(path):
+            return self.exec(container, "test", "-e", path, check=False).returncode != 0
+
+        assert sh(f"cat {ATTEMPT_CLAIM}") == settle["claim"] + "\n", (name, "the attempt did not record its claim")
+        assert sh(f"stat -c '%U:%G %a' {ATTEMPT_CLAIM}").strip() == "root:root 600", name
+        binding = sh(f"cat {ATTEMPT_DEPLOYMENT}")
+        print("PASS the attempt recorded its claim's public address beside its marker before submitting anything")
+        for label, digest in (("another claim of the attempt's policy", settle["other_claim_digest"]),
+                              ("the attempt's claim under another policy", settle["other_policy_digest"]),
+                              ("a transaction that revoked no claim", self.setup["policy_digest"])):
+            output, _ = self.ansible(f"a revocation of {label} does not settle the attempt", "site.yml", "--limit", name,
+                                     *vault, "-e", f"suifleet_revocation_digest={digest}", expect_rc="nonzero")
+            assert LOOKUP_NONE in output and REVOCATION_REFUSAL in output, (name, label, "not refused", output[-8000:])
+            assert SETTLED not in output and ENROLL_TASK not in output, (name, label, "settled or enrolled")
+            assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, label, "marker or record changed")
+            assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == binding, (name, label, "binding changed")
+            assert sh(f"cat {ATTEMPT_CLAIM}") == settle["claim"] + "\n", (name, label, "claim record changed")
+            assert absent(lock) and absent(staging), (name, label, "lock or staging left")
+            print(f"PASS a revocation of {label} did not settle the attempt: marker, binding and claim record kept")
+        output, _ = self.ansible("the revocation of the attempt's claim settles it", "site.yml", "--limit", name, *vault,
+                                 "-e", f"suifleet_revocation_digest={settle['revoke_digest']}", expect_rc="nonzero")
+        assert SETTLED in output and ENROLL_TASK not in output, (name, "not settled", output[-8000:])
+        assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "marker or binding kept")
+        assert sh(f"cat {ATTEMPT_CLAIM}") == settle["claim"] + "\n", (name, "the revoked claim's record was not kept")
+        assert absent(lock) and absent(staging), (name, "lock or staging left")
+        print("PASS the verified revocation of the attempt's own claim settled it: marker and binding removed, the"
+              " claim record kept")
+        output, _ = self.ansible("a retry with the revoked claim is refused", "site.yml", "--limit", name, *vault,
+                                 expect_rc="nonzero")
+        assert REUSED_CLAIM in output, (name, "the revoked claim was not refused", output[-8000:])
+        assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "an attempt was started")
+        assert absent(lock) and absent(staging), (name, "lock or staging left")
+        print("PASS a retry with the revoked claim was refused before any attempt marker existed")
+        # Reissue: the serial's new claim, Vault-encrypted like the one it replaces.
+        revoked = self.claim_secrets[serial]
+        replacement = (self.work / "chain/replacement/enrollment" / serial / "claim.key").read_text()
+        # The Vault-encrypted file belongs to the controller's user: rewrite it
+        # in place as root, keeping its owner and mode.
+        self.exec(self.chain, "sh", "-c", 'cat "$1" > "$2"', "sh", f"/chain/replacement/enrollment/{serial}/claim.key",
+                  f"/chain/batch/enrollment/{serial}/claim.key", user="0:0")
+        self.ansible("vault-encrypt the reissued claim", "encrypt", f"/chain/batch/enrollment/{serial}/claim.key",
+                     "--vault-password-file", "/work/vault-pass", tool="ansible-vault")
+        self.claim_secrets[f"{serial} (revoked)"] = revoked
+        self.claim_secrets[serial] = replacement.strip()
 
     def assert_staging_read_only(self, container, probe, staging, claim, label):
         """The key holder found its staging directory and inputs root-owned and could not change them."""
@@ -3064,10 +3164,11 @@ def main():
     parser.add_argument("--chain-setup", help=argparse.SUPPRESS)
     parser.add_argument("--chain-verify", help=argparse.SUPPRESS)
     parser.add_argument("--serials", help=argparse.SUPPRESS)
+    parser.add_argument("--settle-serial", help=argparse.SUPPRESS)
     parser.add_argument("--records", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.chain_setup:
-        chain_setup(args.chain_setup, args.serials.split(","))
+        chain_setup(args.chain_setup, args.serials.split(","), args.settle_serial)
         return
     if args.chain_verify:
         chain_verify(args.chain_verify, args.records)

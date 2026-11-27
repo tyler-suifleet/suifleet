@@ -214,6 +214,39 @@
                   the batch folder the attempt enrolled with, or settle it as in
                   docs/ANSIBLE.md#recovery.
 
+            # The claim the attempt recorded before it submitted anything. Only
+            # a revocation of that claim under the attempt's policy settles the
+            # attempt; a revocation of another claim (another serial's, or the
+            # same serial's under another policy or job) leaves it able to
+            # commit. An attempt recorded by an earlier version of this role
+            # has no claim record and cannot be settled here.
+            - name: Read the claim the attempt that printed no receipt used
+              ansible.builtin.slurp:
+                src: "{{ suifleet_enrollment_claim }}"
+              register: suifleet_attempt_claim_file
+              failed_when: false
+
+            - name: Keep the claim the attempt that printed no receipt used
+              vars:
+                claim_text: "{{ suifleet_attempt_claim_file.content | default('') | b64decode }}"
+              ansible.builtin.set_fact:
+                suifleet_attempt_claim: "{{ claim_text[:-1] if claim_text is match('^0x[0-9a-f]{64}\\n$') else '' }}"
+
+            - name: Stop unless the revocation to verify names the attempt's claim and a digest
+              ansible.builtin.assert:
+                that:
+                  - suifleet_attempt_claim | length > 0
+                  - suifleet_revocation_digest is match('^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial,
+                  and suifleet_revocation_digest is set to settle it, but
+                  {{ 'the digest is not a transaction digest' if suifleet_attempt_claim | length > 0
+                  else suifleet_enrollment_claim ~ ' does not record the claim the attempt used' }}.
+                  The role keeps the file and writes no record or configuration
+                  (docs/ANSIBLE.md#recovery).
+              when: suifleet_revocation_digest | length > 0
+
             - name: Report the pending on-chain lookup
               ansible.builtin.debug:
                 msg: >-
@@ -274,11 +307,66 @@
                   register: suifleet_enrollment_lookup
                   changed_when: false
                   failed_when: false
+
+                # Read-only, under the same verified inputs. Only when the
+                # lookup found no enrollment: a found receipt is promoted below.
+                - name: Verify the revocation of the attempt's claim on chain
+                  ansible.builtin.command:
+                    argv:
+                      - runuser
+                      - -u
+                      - "{{ suifleet_key.stat.pw_name }}"
+                      - --
+                      - /usr/bin/suifleet
+                      - --check-revocation
+                      - "{{ suifleet_enroll_staging }}/enroll.toml"
+                      - "{{ suifleet_attempt_claim }}"
+                      - "{{ suifleet_revocation_digest }}"
+                  register: suifleet_revocation_check
+                  changed_when: false
+                  failed_when: false
+                  when:
+                    - suifleet_enrollment_lookup.rc == 3
+                    - suifleet_revocation_digest | length > 0
               always:
                 - name: Erase the lookup directory
                   ansible.builtin.file:
                     path: "{{ suifleet_enroll_staging }}"
                     state: absent
+
+            # The chain proved that the attempt's own claim was removed from
+            # the attempt's policy by a revocation, which aborts unless the
+            # claim was unused, and that it is still absent: the attempt never
+            # committed and never can. Remove the marker first, durably, then
+            # the binding (a later attempt rewrites a binding left alone). The
+            # claim record stays, so the revoked claim is never used again.
+            - name: Settle the attempt whose claim was revoked
+              ansible.builtin.command:
+                argv:
+                  - sh
+                  - -c
+                  - rm -f "$1" && sync -f "$(dirname "$1")" && rm -f "$2"
+                  - sh
+                  - /etc/suifleet/.enrollment.json.partial
+                  - "{{ suifleet_enrollment_deployment }}"
+              when:
+                - not ansible_check_mode
+                - suifleet_enrollment_lookup.rc == 3
+                - suifleet_revocation_check.rc | default(1) == 0
+
+            - name: Stop after settling the attempt whose claim was revoked
+              ansible.builtin.fail:
+                msg: >-
+                  {{ inventory_hostname }}: {{ suifleet_revocation_check.stdout | trim }}.
+                  The earlier attempt can never enroll the device, so the role removed
+                  /etc/suifleet/.enrollment.json.partial. Reissue the serial
+                  {{ suifleet_serial }} (docs/ANSIBLE.md#recovery), replace its batch folder,
+                  remove suifleet_revocation_digest and run again. The revoked claim is
+                  refused.
+              when:
+                - not ansible_check_mode
+                - suifleet_enrollment_lookup.rc == 3
+                - suifleet_revocation_check.rc | default(1) == 0
 
             - name: Stop on an enrollment attempt with an unknown outcome
               ansible.builtin.assert:
@@ -289,10 +377,16 @@
                   an earlier enrollment attempt printed no receipt, and it may still enroll
                   the device on chain. The on-chain lookup found no enrollment for this
                   device's key ({{ suifleet_enrollment_lookup.stderr | default('') | trim }}).
-                  The role will not stage a claim or submit again. Settle it on chain
-                  (docs/ANSIBLE.md#recovery): revoke the claim, and remove the file only
-                  after the revocation succeeded. An unused label on the Enrollment page
-                  alone is not enough: the attempt may still commit.
+                  {% if suifleet_revocation_check.stderr is defined %}The revocation
+                  {{ suifleet_revocation_digest }} does not settle it
+                  ({{ suifleet_revocation_check.stderr | trim }}). {% endif %}The role will
+                  not stage a claim or submit again. Settle it on chain
+                  (docs/ANSIBLE.md#recovery): revoke
+                  {{ ('claim ' ~ suifleet_attempt_claim) if suifleet_attempt_claim | length > 0 else 'its claim (not recorded on the host)' }}
+                  under enrollment policy {{ suifleet_attempt_policy }}, then set
+                  suifleet_revocation_digest to the revocation's digest and run again.
+                  Never remove the file by hand: an unused label on the Enrollment page
+                  alone is not enough, and the attempt may still commit.
               when: not ansible_check_mode
 
             # The checks below verify it like any receipt; the file stays the
@@ -471,6 +565,18 @@
                     set -eu
                     umask 077
                     partial=/etc/suifleet/.enrollment.json.partial
+                    # The public address of the staged claim. A claim an earlier
+                    # attempt recorded is spent or revoked: refuse it before the
+                    # marker exists, keeping that record.
+                    claim=$(runuser -u "$HOLDER" -- /usr/bin/suifleet --derive-address "$STAGING/claim.key")
+                    if ! printf '%s\n' "$claim" | grep -Eqx '0x[0-9a-f]{64}'; then
+                      echo "could not derive the claim address; nothing was sent" >&2
+                      exit 1
+                    fi
+                    if test -e "$CLAIM" && test "$(cat "$CLAIM")" = "$claim"; then
+                      echo "the batch folder holds claim $claim, which an earlier attempt used; reissue the serial (docs/ANSIBLE.md#recovery). Nothing was sent" >&2
+                      exit 1
+                    fi
                     # Create the attempt marker exclusively (noclobber opens it with
                     # O_EXCL), so it is never the file of an earlier attempt: that file
                     # marks an attempt that may have spent the claim, and may hold the
@@ -483,13 +589,15 @@
                     fi
                     set +C
                     # Record the attempt, the manifest it enrolls under (staged and
-                    # verified above) and its policy (canonical, from the checked
-                    # enroll.toml), durably before anything can be submitted,
-                    # so a retry after a lost response or power loss never submits
-                    # again and promotes its receipt only beside that manifest.
-                    # Nothing was sent if this fails, so both are removed.
-                    if ! { printf '%s\n%s\n' "$MANIFEST_SHA256" "$POLICY_ID" > "$DEPLOYMENT" && sync -f "$DEPLOYMENT" "$partial"; }; then
-                      rm -f "$partial" "$DEPLOYMENT"
+                    # verified above), its policy (canonical, from the checked
+                    # enroll.toml) and its claim, durably before anything can be
+                    # submitted, so a retry after a lost response or power loss
+                    # never submits again, promotes its receipt only beside that
+                    # manifest, and settles an attempt that printed nothing only by
+                    # a revocation of that claim. Nothing was sent if this fails, so
+                    # all are removed.
+                    if ! { printf '%s\n%s\n' "$MANIFEST_SHA256" "$POLICY_ID" > "$DEPLOYMENT" && printf '%s\n' "$claim" > "$CLAIM" && sync -f "$DEPLOYMENT" "$CLAIM" "$partial"; }; then
+                      rm -f "$partial" "$DEPLOYMENT" "$CLAIM"
                       echo "could not record $partial; nothing was sent" >&2
                       exit 1
                     fi
@@ -508,6 +616,7 @@
                     HOLDER: "{{ suifleet_key.stat.pw_name }}"
                     STAGING: "{{ suifleet_enroll_staging }}"
                     DEPLOYMENT: "{{ suifleet_enrollment_deployment }}"
+                    CLAIM: "{{ suifleet_enrollment_claim }}"
                     MANIFEST_SHA256: "{{ suifleet_manifest.stat.checksum }}"
                     POLICY_ID: "{{ suifleet_enroll_policy }}"
               always:

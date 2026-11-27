@@ -58,8 +58,12 @@
       register: suifleet_config_file
 
     # Configuration is complete: the record no longer needs the deployment it
-    # enrolled under (enroll.yml enforced it before anything above ran).
-    - name: Remove the enrollment's deployment binding once configured
+    # enrolled under (enroll.yml enforced it before anything above ran), and
+    # a configured host never enrolls again, so it needs no claim record.
+    - name: Remove the enrollment's deployment binding and claim record once configured
       ansible.builtin.file:
-        path: "{{ suifleet_enrollment_deployment }}"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ suifleet_enrollment_deployment }}"
+        - "{{ suifleet_enrollment_claim }}"
