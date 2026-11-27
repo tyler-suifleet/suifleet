@@ -1,0 +1,49 @@
+---
+# Order matters (docs/INSTALL_DEVICE_CLIENT.md): package -> on-device identity
+# -> enrollment -> deployment.json -> signer.toml -> config.toml -> services.
+- name: Preflight
+  ansible.builtin.import_tasks: preflight.yml
+
+# One play at a time changes a host (site.yml or restart.yml). Everything from
+# the installation to the final health check runs under the host's rollout lock
+# (rollout_lock.yml), so an overlapping play (for example one pinning another
+# release, or a rolling restart) cannot install or restart between this play's
+# installation and its service and health checks: this play never restarts,
+# checks or records the applied inputs of another play's release. The other
+# play stops before it changes anything.
+- name: Roll out under the host's rollout lock
+  block:
+    - name: Take the host's rollout lock or stop
+      ansible.builtin.import_tasks: rollout_lock.yml
+
+    - name: Install the Debian package
+      ansible.builtin.include_tasks: install_deb.yml
+      when: suifleet_selected_profile == 'deb'
+
+    - name: Install the release binary and systemd units
+      ansible.builtin.include_tasks: install_binary.yml
+      when: suifleet_selected_profile == 'systemd-binary'
+
+    - name: Read installation state
+      ansible.builtin.stat:
+        path: /usr/bin/suifleet
+      register: suifleet_binary_installed
+
+    # In check mode on a host without the client, the remaining steps cannot be
+    # evaluated; the install tasks above already report the pending change.
+    - name: Provision, enroll, configure and start
+      when: suifleet_binary_installed.stat.exists
+      block:
+        - name: Device identity
+          ansible.builtin.import_tasks: identity.yml
+        - name: Enrollment
+          ansible.builtin.import_tasks: enroll.yml
+        - name: Configuration
+          ansible.builtin.import_tasks: configure.yml
+        - name: Services
+          ansible.builtin.import_tasks: service.yml
+        - name: Health
+          ansible.builtin.import_tasks: verify.yml
+  always:
+    - name: Release the host's rollout lock
+      ansible.builtin.import_tasks: rollout_unlock.yml

@@ -1,0 +1,29 @@
+---
+# Staged artifacts are named by their pinned SHA-256; only this run's is kept.
+# Removing a concurrent rollout's published file makes that rollout's install
+# fail (its source is missing), never install other bytes. Private uploads of
+# runs still in flight are left alone; only abandoned ones (a day old) go.
+- name: Find staged artifacts of other releases
+  ansible.builtin.find:
+    paths: /var/cache/suifleet
+    patterns: ["suifleet.staged", "suifleet-*.staged", "suifleet_*.deb"]
+    file_type: file
+  register: suifleet_staged_artifacts
+  check_mode: false
+
+- name: Find abandoned private uploads
+  ansible.builtin.find:
+    paths: /var/cache/suifleet
+    patterns: ["incoming-*.part"]
+    file_type: file
+    age: 1d
+  register: suifleet_abandoned_uploads
+  check_mode: false
+
+- name: Remove staged artifacts of other releases and abandoned uploads
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ (suifleet_staged_artifacts.files + suifleet_abandoned_uploads.files)
+       | map(attribute='path') | reject('equalto', suifleet_staging_keep) | list }}
