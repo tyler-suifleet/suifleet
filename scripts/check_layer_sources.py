@@ -2015,15 +2015,22 @@ def unpack_plan(recipe, unpack):
     return plan, confined(unpack, os.path.relpath(s_dir, unpack), 'S')
 
 
-def tree_binding_errors(recipe, s_dir, files, tree):
-    """Refuse unpacked daemon files that are not byte-identical to SRCREV.
+def tree_binding_errors(recipe, s_dir, files, tree, required=()):
+    """Refuse unpacked daemon files that are not byte-identical to SRCREV, and
+    an unpacked layout that omits any path of the SRCREV build closure.
 
     `tree(rel)` returns the committed blob at SRCREV or None. The archive is
     pinned by its own SHA-256 only, so a stale or mislabelled archive with an
     unchanged lock, license and version would otherwise audit clean while the
     compiler builds different code under the newer revision's build-info. Every
     unpacked file is compared, so a broader published file list (any committed
-    path) is still accepted, but no file may be absent from or differ from it."""
+    path) is still accepted, but no file may be absent from or differ from it.
+
+    `required` is the packager's build closure at SRCREV. Comparing only the
+    files that are present cannot see an omission: an archive lacking, say, an
+    implicit `mod` file of the committed revision would bind cleanly yet fail
+    to compile, so every closure path must also be present."""
+    missing = sorted(set(required) - set(files))
     absent, differing = [], []
     for rel in sorted(files):
         committed = tree(rel)
@@ -2036,10 +2043,13 @@ def tree_binding_errors(recipe, s_dir, files, tree):
         if items:
             errors.append(f'{recipe.path.name}: {len(items)} unpacked daemon source files {label} '
                           f'the Git tree at SRCREV {rev}, e.g. {items[:3]}; the archive is not the declared revision')
+    if missing:
+        errors.append(f'{recipe.path.name}: the unpacked daemon sources omit {len(missing)} build-closure path(s) '
+                      f'of SRCREV {rev}: {", ".join(missing[:5])}; the archive cannot build the declared revision')
     return errors
 
 
-def fetch_recipe(recipe, workdir, cargo=None, tree=None):
+def fetch_recipe(recipe, workdir, cargo=None, tree=None, required=()):
     errors, fetched = [], []
     downloads = Path(workdir).resolve() / 'downloads'
     try:
@@ -2206,7 +2216,7 @@ def fetch_recipe(recipe, workdir, cargo=None, tree=None):
         packager = load_packager()
         files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if p.is_file()}
         if tree is not None and not aliases:
-            errors += tree_binding_errors(recipe, s_dir, files, tree)
+            errors += tree_binding_errors(recipe, s_dir, files, tree, required)
         # Every .rs file is scanned, and so is every manifest-declared target
         # or build script and every include!/#[path] target whatever its
         # suffix, because Rust compiles each of them as code.
@@ -2448,7 +2458,7 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
             report['errors'].append(f'{node.path.name}: suifleet-node PV {node.get("PV")!r}'
                                     f'{" with PE " + repr(node.get("PE")) if node.get("PE") else ""} does not satisfy '
                                     f'the codec dependency suifleet-node (= {wanted})')
-    tree = None
+    tree, required = None, ()
     if repo and daemon:
         rev = daemon.get('SRCREV')
 
@@ -2464,8 +2474,15 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
                                          f'{directory}/'], capture_output=True, check=True)
                 return [p for p in result.stdout.decode().split('\0') if p]
             report['errors'] += daemon_errors(daemon, read, lambda rel: read(rel) is not None, listing)
-            # With --fetch too, the downloaded compiler inputs are bound to this tree.
+            # With --fetch too, the downloaded compiler inputs are bound to this
+            # tree, and must contain its whole build closure.
             tree = read
+            if fetch:
+                try:
+                    required = load_packager().plan(repo, rev)['paths']
+                except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                    report['errors'].append(f'{daemon.path.name}: cannot derive the build closure at SRCREV {rev}: '
+                                            f'{error}')
     if fetch:
         workdir = Path(tempfile.mkdtemp(prefix='meta-suifleet-fetch-'))
         report['fetch_dir'] = str(workdir)
@@ -2476,7 +2493,7 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
                                                             else 'static source findings')
                 continue
             try:
-                errors, fetched = fetch_recipe(recipe, workdir, cargo, tree if name == DAEMON_PN else None)
+                errors, fetched = fetch_recipe(recipe, workdir, cargo, *((tree, required) if name == DAEMON_PN else ()))
             except (OSError, ValueError, subprocess.CalledProcessError, *ARCHIVE_DECODE_ERRORS) as error:
                 errors, fetched = [f'{recipe.path.name}: fetch/unpack failed: {error}'], []
             report['errors'] += errors

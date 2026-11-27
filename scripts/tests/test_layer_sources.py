@@ -3629,6 +3629,40 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
 
+    def test_fetch_and_repo_refuse_archive_omitting_srcrev_closure_file(self):
+        # The source reviewer's reproduction: SRCREV commits an implicit module
+        # (`mod required_module;` with src/required_module.rs) and the pinned
+        # archive at that SRCREV carries every other file byte-identically but
+        # omits the module. Every present file binds, yet rustc fails with
+        # E0583, so the omission itself must be refused.
+        self.repo.write('suifleet-edge/src/main.rs', 'mod required_module;\n' + MAIN_RS)
+        self.repo.write('suifleet-edge/src/required_module.rs', 'pub fn f() {}\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/src/required_module.rs', info['paths'])
+        url = self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}')
+        omitted = complete.with_name('omitted-module.tar.gz')
+        with tarfile.open(complete) as source, tarfile.open(omitted, 'w:gz') as tar:
+            for member in source.getmembers():
+                if member.name != 'suifleet-edge/src/required_module.rs':
+                    tar.addfile(member, source.extractfile(member) if member.isfile() else None)
+        self.archive = omitted
+        self.write_recipe(url=url, sha=sha256(omitted.read_bytes()), srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('omit 1 build-closure path(s)' in e and 'suifleet-edge/src/required_module.rs' in e
+                            for e in report['errors']), report['errors'])
+        # The complete archive at the same SRCREV audits clean.
+        self.archive = complete
+        self.write_recipe(url=url, sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
     def test_fetch_and_repo_report_missing_name_only_test_target(self):
         # cargo metadata --no-deps accepts a layout lacking a name-only
         # [[test]]'s inferred tests/<name>.rs, so the static audit must not.
