@@ -369,6 +369,93 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.repo.commit()
         packager.plan(self.repo.root, 'HEAD')
 
+    def test_name_only_test_and_bench_targets_use_cargo_default_paths(self):
+        # The integration reviewer's reproduction: a [[test]] declared by name
+        # only compiles Cargo's inferred tests/<name>.rs, which lies outside
+        # the fixed roots and must be packaged (or the declaration refused).
+        manifest = (CARGO_TOML + '\n[[test]]\nname = "integration"\n'
+                    '\n[[bench]]\nname = "speed"\n\n[[test]]\nname = "explicit"\npath = "checks/explicit.rs"\n')
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tests/integration.rs', 'const D: &str = include_str!("data/case.txt");\n')
+        self.repo.write('suifleet-edge/tests/data/case.txt', 'case')
+        self.repo.write('suifleet-edge/tests/undeclared.rs', '#[test]\nfn t() {}\n')
+        self.repo.write('suifleet-edge/benches/speed/main.rs', 'fn main() {}\n')
+        self.repo.write('suifleet-edge/checks/explicit.rs', '')
+        self.repo.commit()
+        info = packager.build(self.repo.root, 'HEAD', self.out / 'defaults.tar.gz')
+        with tarfile.open(self.out / 'defaults.tar.gz') as tar:
+            names = {m.name for m in tar.getmembers() if m.isfile()}
+        for rel in ('tests/integration.rs', 'tests/data/case.txt', 'benches/speed/main.rs', 'checks/explicit.rs'):
+            with self.subTest(rel):
+                self.assertIn(f'suifleet-edge/{rel}', names)
+        # Autodiscovered, undeclared tests are not build inputs of a build.
+        self.assertNotIn('suifleet-edge/tests/undeclared.rs', names)
+        self.assertEqual(sorted(names), info['paths'])
+        # Unresolvable declarations are refused rather than silently dropped.
+        cases = (
+            ('[[test]]\nname = "absent"\n', {}, 'declares build file suifleet-edge/tests/absent.rs, absent'),
+            ('[[bench]]\nname = "twice"\n', {'benches/twice.rs': '', 'benches/twice/main.rs': ''},
+             'bench target twice matches both benches/twice.rs and benches/twice/main.rs'),
+            ('[[test]]\nharness = false\n', {}, 'unsupported test target without a path'),
+            ('[[test]]\nname = "../escape"\n', {}, 'unsupported test target without a path'),
+            ('[[test]]\nname = "modular"\n', {'tests/modular/main.rs': 'mod common;\nfn main() {}\n',
+                                               'tests/modular/common.rs': ''},
+             r'tests/modular/main.rs declares module\(s\) common without #\[path\]'),
+        )
+        for declaration, extra, error in cases:
+            with self.subTest(declaration):
+                self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML + '\n' + declaration)
+                for rel, text in extra.items():
+                    self.repo.write(f'suifleet-edge/{rel}', text)
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, error):
+                    packager.plan(self.repo.root, 'HEAD')
+                for rel in extra:
+                    self.repo.git('rm', '-q', f'suifleet-edge/{rel}')
+        # Local crates are packaged whole, so their defaults resolve there.
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML)
+        self.repo.write('suifleet-edge/windows-runtime/Cargo.toml',
+                        '[package]\nname = "suifleet-windows"\nversion = "0.1.0"\n\n[[test]]\nname = "win"\n')
+        self.repo.write('suifleet-edge/windows-runtime/tests/win.rs', '')
+        self.repo.commit()
+        self.assertIn('suifleet-edge/windows-runtime/tests/win.rs', packager.plan(self.repo.root, 'HEAD')['paths'])
+
+    def test_fresh_unpack_builds_name_only_test_target(self):
+        # End to end with the real Cargo: the archive of a crate with a
+        # name-only [[test]] must build and test after extraction, exactly
+        # like its checkout. Cargo refuses the whole manifest otherwise.
+        cargo = os.environ.get('SUIFLEET_TEST_CARGO') or shutil.which('cargo')
+        if not cargo or subprocess.run([cargo, '--version'], capture_output=True).returncode:
+            self.skipTest('no working cargo')
+        root = self.out / 'cargo-fixture'
+        repo = SourceRepo.__new__(SourceRepo)
+        repo.root = root
+        root.mkdir()
+        repo.git('init', '-q')
+        repo.git('config', 'user.name', 'Source fixture')
+        repo.git('config', 'user.email', 'fixture@example.invalid')
+        repo.write('LICENSE', LICENSE)
+        repo.write('suifleet-edge/Cargo.toml', '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2021"\n'
+                   '\n[[test]]\nname = "integration"\n')
+        repo.write('suifleet-edge/src/main.rs', 'fn main() {}\n')
+        repo.write('suifleet-edge/tests/integration.rs', '#[test]\nfn passes() {}\n')
+        env = {**os.environ, 'CARGO_TARGET_DIR': str(self.out / 'cargo-target'), 'CARGO_NET_OFFLINE': 'true'}
+        subprocess.run([cargo, 'generate-lockfile', '--offline'], cwd=root / 'suifleet-edge', env=env,
+                       check=True, capture_output=True)
+        rev = repo.commit()
+        archive = self.out / 'fixture.tar.gz'
+        packager.build(root, rev, archive)
+        unpacked = self.out / 'unpacked'
+        unpacked.mkdir()
+        with tarfile.open(archive) as tar:
+            tar.extractall(unpacked, filter='data')
+        for command in (['build', '--offline', '--locked', '--bin', 'fixture'],
+                        ['test', '--offline', '--locked', '--test', 'integration']):
+            with self.subTest(command[0]):
+                result = subprocess.run([cargo, *command], cwd=unpacked / 'suifleet-edge', env=env,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_implicit_modules_in_out_of_root_targets_are_refused(self):
         # The reviewer's reproduction: a [[bin]] outside src/ whose `mod helper;`
         # resolves to a sibling file compiles in the repository, but only the
@@ -2869,6 +2956,43 @@ class LayerAuditTests(unittest.TestCase):
         complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
         info = packager.build(self.repo.root, rev, complete)
         self.assertIn('suifleet-edge/tools/standalone.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
+    def test_fetch_and_repo_report_missing_name_only_test_target(self):
+        # cargo metadata --no-deps accepts a layout lacking a name-only
+        # [[test]]'s inferred tests/<name>.rs, so the static audit must not.
+        manifest = CARGO_TOML + '\n[[test]]\nname = "integration"\n'
+        archive = self.archive.with_name('name-only-test.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/Cargo.toml':
+                    member.size, data = len(manifest), io.BytesIO(manifest.encode())
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'Cargo.toml declares build file suifleet-edge/tests/integration.rs, missing from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # --repo: a SRCREV declaring the test without committing its file.
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        rev = self.repo.commit()
+        self.write_recipe(srcrev=rev)
+        self.assertTrue(any(expected in e for e in audit.check(self.layer, repo=self.repo.root)['errors']))
+        # Committed and packaged, both audits are clean.
+        self.repo.write('suifleet-edge/tests/integration.rs', '#[test]\nfn passes() {}\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/tests/integration.rs', info['paths'])
         self.archive = complete
         self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
                           sha=info['sha256'], srcrev=rev)

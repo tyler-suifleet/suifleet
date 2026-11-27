@@ -457,17 +457,44 @@ def local_crates(manifest, read_manifest):
 
 
 TARGET_TABLES = ('lib', 'bin', 'example', 'test', 'bench')
+# Directories in which Cargo looks for a [[test]]/[[bench]] declared without a
+# `path`. The other target kinds default under src/ or examples/, which the
+# archive always contains whole.
+DEFAULT_TARGET_DIRS = {'test': 'tests', 'bench': 'benches'}
 
 
-def target_files(document):
-    """Return the files a parsed manifest declares explicitly for its build.
+def default_target_path(kind, entry, exists):
+    """The file Cargo compiles for a [[test]]/[[bench]] declared without a
+    `path`: `<dir>/<name>.rs` or `<dir>/<name>/main.rs`, relative to the
+    manifest directory (the candidates Cargo infers from that directory).
+    `exists(path)` sees the source layout. When neither exists the first
+    candidate is returned, so the caller reports it absent exactly as for an
+    explicit path; both existing is ambiguous to Cargo and raises ValueError,
+    as does a missing or non-plain name."""
+    name = entry.get('name')
+    if type(name) is not str or not name or name in ('.', '..') or '/' in name or '\\' in name:
+        raise ValueError(f'unsupported {kind} target without a path: expected a plain non-empty name, '
+                         'from which Cargo infers its file')
+    directory = DEFAULT_TARGET_DIRS[kind]
+    candidates = [f'{directory}/{name}.rs', f'{directory}/{name}/main.rs']
+    present = [path for path in candidates if exists(path)]
+    if len(present) > 1:
+        raise ValueError(f'{kind} target {name} matches both {candidates[0]} and {candidates[1]}; '
+                         'Cargo cannot infer its file, so give it an explicit path')
+    return present[0] if present else candidates[0]
 
-    These are a string `package.build` and the `path` of every [lib], [[bin]],
-    [[example]], [[test]] and [[bench]] target, relative to the manifest's
-    directory. Cargo refuses a manifest whose declared target file is absent,
-    so each one is a build input wherever it lives. Any other spelling of
-    these keys (a non-string path, a build-script list) raises ValueError
-    instead of being skipped."""
+
+def target_files(document, exists=lambda path: False):
+    """Return the files a parsed manifest declares for its build.
+
+    These are a string `package.build`, the `path` of every [lib], [[bin]],
+    [[example]], [[test]] and [[bench]] target, and Cargo's inferred file for
+    a [[test]] or [[bench]] declared by name only (see default_target_path;
+    `exists` sees paths relative to the manifest directory), all relative to
+    the manifest's directory. Cargo refuses a manifest whose declared target
+    file is absent, so each one is a build input wherever it lives. Any other
+    spelling of these keys (a non-string path, a build-script list) raises
+    ValueError instead of being skipped."""
     paths = []
     package = document.get('package', {})
     if not isinstance(package, dict):
@@ -492,19 +519,25 @@ def target_files(document):
                 if type(entry['path']) is not str or not entry['path']:
                     raise ValueError(f'unsupported {name} target path: expected a non-empty string')
                 paths.append(entry['path'])
+            elif name in DEFAULT_TARGET_DIRS:
+                paths.append(default_target_path(name, entry, exists))
     return paths
 
 
-def declared_files(manifest, read_manifest):
+def declared_files(manifest, read_manifest, exists):
     """Return the manifest-declared build files of the root crate and of every
     local crate (see local_crates), relative to the root crate directory.
+    `exists(path)`, with `path` relative to the root crate directory, sees the
+    source layout and resolves name-only [[test]]/[[bench]] targets.
 
     Raises MissingCrate for an absent local crate and ValueError for a target
     path that is absolute or leaves the root crate directory."""
     files = []
     for directory in ['', *local_crates(manifest, read_manifest)]:
         text = manifest if directory == '' else read_manifest(directory)
-        files += [normalize(directory, raw, 'Cargo target file') for raw in target_files(parse_toml(text))]
+        def exists_here(raw, directory=directory):
+            return exists(normalize(directory, raw, 'Cargo target file'))
+        files += [normalize(directory, raw, 'Cargo target file') for raw in target_files(parse_toml(text), exists_here)]
     return sorted(set(files))
 
 
@@ -885,7 +918,7 @@ def closure(files, read):
 
     for directory in local_crates(manifest, read_manifest):
         add_root(f'{CRATE}/{directory}/')
-    declared = declared_files(manifest, read_manifest)
+    declared = declared_files(manifest, read_manifest, lambda rel: f'{CRATE}/{rel}' in files)
     for rel in declared:
         if f'{CRATE}/{rel}' not in files:
             raise ValueError(f'Cargo.toml declares build file {CRATE}/{rel}, absent at this revision')

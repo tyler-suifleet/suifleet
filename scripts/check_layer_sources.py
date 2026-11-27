@@ -1314,7 +1314,7 @@ def daemon_errors(recipe, read, exists=None, listing=None):
             path = f'{src}/{directory}/Cargo.toml'
             return read(path).decode() if exists(path) else None
         try:
-            declared = packager.declared_files(manifest.decode(), read_manifest)
+            declared = packager.declared_files(manifest.decode(), read_manifest, lambda rel: exists(f'{src}/{rel}'))
             for rel in declared:
                 if not exists(f'{src}/{rel}'):
                     errors.append(f'{recipe.path.name}: Cargo.toml declares build file {src}/{rel}, '
@@ -1802,7 +1802,8 @@ def fetch_recipe(recipe, workdir, cargo=None):
             def read_manifest(directory):
                 path = s_dir / src / directory / 'Cargo.toml'
                 return path.read_bytes().decode() if path.is_file() else None
-            roots |= {f'{src}/{rel}' for rel in packager.declared_files(manifest, read_manifest)
+            roots |= {f'{src}/{rel}' for rel in packager.declared_files(manifest, read_manifest,
+                                                                          lambda rel: f'{src}/{rel}' in files)
                       if f'{src}/{rel}' in files}
         except (OSError, ValueError, packager.MissingCrate):
             pass  # daemon_errors above already reports an unreadable manifest or layout
