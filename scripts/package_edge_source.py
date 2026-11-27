@@ -939,11 +939,18 @@ def plan(repo, revision, paths=None):
             cache[path] = git(repo, 'cat-file', 'blob', files[path][2])
         return cache[path]
 
+    required = closure(files, read)
     if paths is None:
-        paths = closure(files, read)
+        paths = required
     else:
-        # Reproduce a previously published file list; it gets the same audit.
+        # Reproduce a previously published file list. It may carry more than
+        # the build closure, but never less: an archive missing a manifest,
+        # workspace member or include target cannot build, and its provenance
+        # would wrongly vouch for the reported Cargo inputs.
         paths = audit(set(paths), files, read)
+        missing = sorted(set(required) - set(paths))
+        if missing:
+            raise ValueError(f'file list omits {len(missing)} build-closure path(s): {", ".join(missing)}')
     license_md5 = hashlib.md5(read('LICENSE')).hexdigest()
     return {
         'source_commit': revision,
@@ -1019,7 +1026,7 @@ def main():
         return
     if not args.output:
         parser.error('--output is required unless --list is given')
-    paths = args.paths_from.read_text().split() if args.paths_from else None
+    paths = [line for line in args.paths_from.read_text().splitlines() if line] if args.paths_from else None
     result = build(args.repo, args.revision, args.output, paths)
     result.pop('paths')
     print(json.dumps(result, indent=2, sort_keys=True))

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -785,11 +786,58 @@ class PackageEdgeSourceTests(unittest.TestCase):
             packager.plan(self.repo.root, 'HEAD')
 
     def test_published_file_list_is_reproduced_with_the_same_audit(self):
-        listing = ['LICENSE', 'suifleet-edge/Cargo.toml', 'suifleet-edge/Cargo.lock']
+        closure = packager.plan(self.repo.root, 'HEAD')['paths']
+        # A broader published inventory is allowed; it must still cover the
+        # build closure.
+        listing = closure + ['docs/README.md', 'interfaces/unrelated.json']
         info = packager.build(self.repo.root, 'HEAD', self.out / 'listed.tar.gz', listing)
-        self.assertEqual(info['files'], 3)
+        self.assertEqual(info['files'], len(closure) + 2)
+        with tarfile.open(self.out / 'listed.tar.gz') as tar:
+            self.assertEqual(sorted(m.name for m in tar.getmembers() if m.isfile()), sorted(listing))
+        exact = packager.build(self.repo.root, 'HEAD', self.out / 'exact.tar.gz', list(closure))
+        default = packager.build(self.repo.root, 'HEAD', self.out / 'default.tar.gz')
+        self.assertEqual(exact['sha256'], default['sha256'])
         with self.assertRaisesRegex(ValueError, 'absent from revision'):
-            packager.build(self.repo.root, 'HEAD', self.out / 'bad.tar.gz', ['nope'])
+            packager.build(self.repo.root, 'HEAD', self.out / 'bad.tar.gz', closure + ['nope'])
+
+    def test_published_file_list_must_cover_the_build_closure(self):
+        # The reviewer's reproduction: a list holding only LICENSE produced a
+        # one-member archive while reporting the crate version and lock digest.
+        closure = packager.plan(self.repo.root, 'HEAD')['paths']
+        omissions = {
+            'only LICENSE': [p for p in closure if p != 'LICENSE'],
+            'package manifest': ['suifleet-edge/Cargo.toml'],
+            'lockfile': ['suifleet-edge/Cargo.lock'],
+            'workspace member manifest': ['suifleet-edge/windows-runtime/Cargo.toml'],
+            'workspace member source': ['suifleet-edge/windows-runtime/src/lib.rs'],
+            'crate root': ['suifleet-edge/src/main.rs'],
+            'transitive include_bytes target': ['suifleet-edge/src/data/blob.bin'],
+            'shared interface root': ['interfaces/schema.json'],
+        }
+        for label, dropped in omissions.items():
+            with self.subTest(label):
+                listing = [p for p in closure if p not in dropped] + ['docs/README.md']
+                output = self.out / 'incomplete.tar.gz'
+                with self.assertRaisesRegex(ValueError, 'omits .*build-closure path'):
+                    packager.build(self.repo.root, 'HEAD', output, listing)
+                self.assertFalse(output.exists())
+
+    def test_paths_from_cli_refuses_an_incomplete_list(self):
+        listing = self.out / 'list.txt'
+        listing.write_text('LICENSE\n')
+        output = self.out / 'cli.tar.gz'
+        result = subprocess.run([sys.executable, str(Path(packager.__file__)), '--repo', str(self.repo.root),
+                                 '--revision', 'HEAD', '--output', str(output), '--paths-from', str(listing)],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('build-closure', result.stderr)
+        self.assertFalse(output.exists())
+        listing.write_text('\n'.join(packager.plan(self.repo.root, 'HEAD')['paths']) + '\n')
+        result = subprocess.run([sys.executable, str(Path(packager.__file__)), '--repo', str(self.repo.root),
+                                 '--revision', 'HEAD', '--output', str(output), '--paths-from', str(listing)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(output.exists())
 
 
 def recipe_text(archive_url, archive_sha, srcrev, extra=''):
@@ -2322,9 +2370,13 @@ class LayerAuditTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertTrue(any('differs from pin' in e for e in report['errors']))
         # The published-archive defect: a workspace member left out of the file list.
+        # The packager now refuses such a list, so write the archive directly.
         broken = self.archive.with_name('broken.tar.gz')
-        packager.build(self.repo.root, self.rev, broken,
-                       [p for p in self.info['paths'] if 'windows-runtime' not in p])
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0002', 'archive',
+                                       '--format=tar', self.rev, '--',
+                                       *[p for p in self.info['paths'] if 'windows-runtime' not in p]])
+        broken.write_bytes(subprocess.run(['gzip', '-n', '-9'], input=raw, stdout=subprocess.PIPE,
+                                          check=True).stdout)
         self.archive = broken
         self.write_recipe(sha=sha256(broken.read_bytes()))
         with mock.patch.object(audit, 'download', self.fake_download):
