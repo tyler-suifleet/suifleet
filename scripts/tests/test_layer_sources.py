@@ -1796,6 +1796,52 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue((source / 'suifleet-edge/windows-runtime/Cargo.toml').is_file())
         self.assertTrue((Path(report['fetch_dir']) / 'suifleet/suifleet.service').is_file())
 
+    def test_recipes_sharing_one_pinned_archive_each_fetch_and_unpack_it(self):
+        # BitBake shares one DL_DIR, so two recipes may consume the same
+        # immutable URL and SHA-256. Each must unpack it independently, and an
+        # earlier (even failed) fetch of the same file name must not decide a
+        # later recipe's result. Only urllib's response is faked: download,
+        # checksum and unpack run for real.
+        data = self.archive.read_bytes()
+        requested = []
+
+        def urlopen(request, timeout=None):
+            requested.append(request.full_url)
+            return io.BytesIO(data)
+        sibling = self.recipe_dir / 'suifleet-mirror_1.0.bb'
+        self.addCleanup(sibling.unlink, missing_ok=True)
+        for label, sibling_sha in (('same pin', self.info['sha256']), ('failing pin', 'f' * 64)):
+            with self.subTest(label):
+                # A plain (non-cargo) recipe that unpacks the daemon's archive.
+                sibling.write_text(f'''SUMMARY = "fixture sharing the daemon archive"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://LICENSE;md5={md5(LICENSE)}"
+SRC_URI = "{self.url};subdir=source;name=edge"
+SRC_URI[edge.sha256sum] = "{sibling_sha}"
+SUIFLEET_UNPACKDIR = "${{@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}}"
+S = "${{SUIFLEET_UNPACKDIR}}/source"
+''')
+                requested.clear()
+                with mock.patch.object(audit.urllib.request, 'urlopen', urlopen):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                self.assertFalse(any('File exists' in e for e in report['errors']), report['errors'])
+                self.assertEqual(requested, [self.url, self.url], report['errors'])
+                daemon = report['recipes']['suifleet']
+                self.assertTrue(daemon['fetched'][0]['verified'], daemon)
+                self.assertFalse(any(e.startswith('suifleet_1.0.bb:') for e in report['errors']), report['errors'])
+                self.assertTrue((Path(report['fetch_dir']) / 'suifleet/source/LICENSE').is_file())
+                mirror = report['recipes']['suifleet-mirror']['fetched'][0]
+                if label == 'same pin':
+                    self.assertEqual(report['errors'], [])
+                    self.assertTrue(mirror['verified'])
+                    self.assertTrue((Path(report['fetch_dir']) / 'suifleet-mirror/source/LICENSE').is_file())
+                else:
+                    self.assertFalse(mirror['verified'])
+                    self.assertTrue(any(e.startswith('suifleet-mirror_1.0.bb:') and 'differs from pin' in e
+                                        for e in report['errors']), report['errors'])
+                    self.assertFalse(report['ok'])
+
     def test_fetch_unpacks_by_the_downloadfilename_like_bitbake(self):
         # BitBake stores an https source under downloadfilename and picks the
         # unpack method from that name's suffix, not from the URL path.

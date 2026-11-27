@@ -1880,7 +1880,11 @@ def fetch_recipe(recipe, workdir, cargo=None):
                                  f'directory after checkout: {", ".join(escaping)}'], fetched
             continue
         name = download_name(url, params)
-        target = downloads / name
+        # Each source gets its own fresh staging directory. A name-keyed shared
+        # directory would let another recipe's fetch of the same file (or an
+        # earlier failed one) collide with or decide this source's result;
+        # every source is downloaded and verified against its own pin.
+        target = Path(tempfile.mkdtemp(prefix='source-', dir=downloads)) / name
         expected = checksum_for(recipe, params)
         actual = download(url, target)
         fetched.append({'url': redact_url(url), 'sha256': actual, 'verified': actual == expected, 'bytes': target.stat().st_size})
