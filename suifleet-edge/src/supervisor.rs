@@ -2099,7 +2099,9 @@ mod tests {
         let v2 = f.spec("2.0.0", "exit 1");
         tokio::select! {
             _ = f.deploy(&mut s, v2, None) => panic!("recovery should still be running"),
-            _ = until("recovery command", || marker.exists()) => {}
+            // `>>` creates the marker before `echo` writes it; wait for the
+            // complete line so stopping the supervisor cannot race the write.
+            _ = until("recovery command", || std::fs::read_to_string(&marker).is_ok_and(|text| text == "ran\n")) => {}
         }
         assert!(f.dir.join("supervised/recovery-intent.json").exists());
         s.stop_all().await;
