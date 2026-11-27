@@ -251,7 +251,11 @@ These static checks always run, on every recipe in the layer:
   architecture) of each search directory before the unqualified ones, so a
   same-named file such as `files/qemuarm64/suifleet.service` replaces
   `files/suifleet.service` on that machine. The audit does not model
-  per-configuration overrides, so any such candidate is rejected.
+  per-configuration overrides, so any such candidate is rejected unless it
+  is the same file the unqualified search selects. This holds even when the
+  override subdirectory is also a search root: with `FILESEXTRAPATHS` naming
+  `extra` and `files/qemuarm64`, `files/qemuarm64/payload` still precedes
+  `extra/payload` on qemuarm64, so the pair is rejected.
   BitBake's local fetcher takes the first candidate that exists, directories
   included. A directory such as `suifleet-1.0/payload` therefore wins over a
   later `files/payload`. The audit supports only regular local files, so it
