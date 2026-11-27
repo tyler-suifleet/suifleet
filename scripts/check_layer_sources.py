@@ -327,14 +327,21 @@ def authority_error(parsed):
     malformed host or a nonnumeric or out-of-range port must be refused here,
     statically, rather than surface as a fetch failure or pass unchecked.
     Accepts DNS names (ASCII/punycode labels, optional root dot), IPv4
-    addresses and bracketed IPv6 literals. Raises nothing; urllib's port
+    addresses and unscoped bracketed IPv6 literals. Raises nothing; urllib's port
     parser raises ValueError, which is reported as a finding."""
     netloc = parsed.netloc.rsplit('@', 1)[-1]
     if netloc.startswith('['):
-        literal = netloc[1:].split(']', 1)[0]
+        literal, _, rest = netloc[1:].partition(']')
+        # A zone identifier (fe80::1%eth0, or %25 percent-encoded) names an
+        # interface on the fetching host, so it is not a portable source, and
+        # wget refuses it. ipaddress accepts a scope, so check it first.
+        if '%' in literal:
+            return 'scoped IPv6 host'
         try:
             ipaddress.IPv6Address(literal)
         except ValueError:
+            return 'invalid bracketed IPv6 host'
+        if rest and not rest.startswith(':'):
             return 'invalid bracketed IPv6 host'
     host = parsed.hostname
     if not host:

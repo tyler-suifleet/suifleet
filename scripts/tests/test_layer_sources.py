@@ -1337,6 +1337,11 @@ class LayerAuditTests(unittest.TestCase):
             'invalid host name': f'https://exa_mple..com/immutable/{name}',
             'invalid bracketed IPv6': f'https://[not-ipv6]/immutable/{name}',
             'unterminated IPv6 bracket': f'https://[invalid/{name}',
+            'scoped IPv6 literal': f'https://[::1%bogus]/immutable/{name}',
+            'percent-encoded scoped IPv6 literal': f'https://[::1%25bogus]/immutable/{name}',
+            'scoped link-local IPv6 with port': f'https://[fe80::1%25eth0]:443/immutable/{name}',
+            'text after IPv6 bracket': f'https://[::1]junk/immutable/{name}',
+            'git scoped IPv6 literal': 'git://[fe80::1%25eth0]/example/suifleet.git;protocol=https;nobranch=1',
             'git missing host': 'git:///example/suifleet.git;protocol=https;nobranch=1',
             'git nonnumeric port': 'git://github.com:bad/example/suifleet.git;protocol=https;nobranch=1',
             'git unterminated bracket': 'git://[invalid/example/suifleet.git;protocol=https;nobranch=1',
@@ -1359,7 +1364,8 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual(fetched, [])
         # Ordinary authorities (explicit port, root dot, IP literals) stay accepted.
         for url in (f'https://example.com:8443/immutable/{name}', f'https://example.com./immutable/{name}',
-                    f'https://192.0.2.1/immutable/{name}', f'https://[2001:db8::1]:443/immutable/{name}'):
+                    f'https://192.0.2.1/immutable/{name}', f'https://[2001:db8::1]:443/immutable/{name}',
+                    f'https://[2001:db8::1]/immutable/{name}'):
             with self.subTest('accepted', url=url):
                 self.write_recipe(url=url)
                 self.assertFalse(any('authority' in e or 'unparseable' in e for e in self.errors()), self.errors())
