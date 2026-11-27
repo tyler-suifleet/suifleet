@@ -228,28 +228,30 @@ These static checks always run, on every recipe in the layer:
   static, and the fetcher repeats it before anything is downloaded. Named task
   functions such as `python do_verify_lock()` are not run during parsing and
   are still accepted, as is inheriting classes from other layers.
-- The one accepted anonymous Python form is a read-only skip guard, such as the
-  SF-307 platform and missing-input guards in `suifleet-node` and
-  `suifleet-walrus-codec`. Skipping a recipe changes whether it is built, not
-  which sources it pins. The audit parses the function body without running it
-  and accepts it only if all of these hold:
-  - The datastore `d` is only read, with `d.getVar(NAME[, EXPAND])` or
-    `d.getVarFlag(NAME, FLAG[, EXPAND])` and literal arguments; `d.expand` is
-    refused. It is never rebound, aliased or stored. It is passed only to
-    `bb.parse.mark_dependency` (which records a parse dependency, not a pin),
-    to `bb.fetch2.Fetch(..., localonly=True)` or to a local fetch method's
-    `localpaths`/`localfile_searchpaths`.
-  - The only names it uses are `bb.parse.SkipRecipe`, `bb.parse.mark_dependency`,
-    `bb.fetch2.Fetch`, `bb.fatal`/`error`/`warn`/`note`/`debug` and `os.path`
-    functions, after at most `import os`.
-  - It has no other imports, no `exec`, `eval`, `setattr`, `globals` or similar
-    builtins, no underscore attributes or attributes named `d`, and no nested
-    functions, lambdas, classes, `global`, `with` or `del`.
+- The one accepted anonymous Python form is a skip guard built only from the
+  reviewed SF-307 forms in `suifleet-node` and `suifleet-walrus-codec`.
+  Skipping a recipe changes whether it is built, not which sources it pins.
+  The audit parses the function body without running it. It does not try to
+  prove arbitrary Python read-only; it accepts the body only if every
+  statement matches this positive grammar:
+  - `import os`;
+  - a platform check, `if COND: raise bb.parse.SkipRecipe(MESSAGE)` with no
+    `else`. COND compares a literal `d.getVar(NAME[, EXPAND])` or
+    `d.getVarFlag(NAME, FLAG[, EXPAND])` with a string constant using `==`,
+    `!=`, `in` or `not in`, optionally combined with `and`, `or` and `not`.
+    MESSAGE is a string constant, optionally `%` literal reads;
+  - the reviewed missing-local-input block, matched statement for statement
+    (comments and the skip message text are not compared). It resolves the
+    `file://` entries of `SRC_URI` with `bb.fetch2.Fetch(local, d,
+    cache=False, localonly=True)`, calls that fetcher's local method search
+    path (`localfile_searchpaths` or `localpaths`), records each candidate
+    with `bb.parse.mark_dependency` and skips when an input is missing.
 
-  Anything else is refused as before. Accepted guards are listed per recipe as
+  Any other statement, call, receiver, name or binding is refused as before,
+  even when it looks read-only. Accepted guards are listed per recipe as
   `skip_guards` in the JSON report, and the recipe is still fetched and
-  verified. The model trusts those listed BitBake helpers not to rewrite pins;
-  a new guard that needs another helper must extend the audit deliberately.
+  verified. The model trusts those fixed BitBake calls not to rewrite pins; a
+  new guard form must extend the grammar deliberately, with review.
 - Inline Python (`${@...}`) is refused anywhere in a recipe, its includes and
   its bbappends, including flags, appends and task bodies, except the
   `SUIFLEET_UNPACKDIR` idiom `${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}`.
