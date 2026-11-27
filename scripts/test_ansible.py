@@ -291,18 +291,18 @@ class CallbackModule(CallbackBase):
 # Stops the role's enrollment command right after the enrollment transaction
 # succeeded and its receipt reached the partial file, before the record is
 # promoted (test-only copy; used with INTERRUPTED_PLAY).
-ENROLL_CLI_LINE = '"$STAGING/enroll.toml" >> "$partial"\n'
+ENROLL_CLI_LINE = '"$STAGING/enroll.toml" "$epoch" >> "$partial"\n'
 ENROLL_STOP = "                    echo SF304-STOPPED-BEFORE-PROMOTION >&2; exit 75\n"
 ENROLL_TASK = "TASK [suifleet : Enroll and record the public IDs]"
 LOOKUP_TASK = "TASK [suifleet : Find this key's enrollment on chain]"
 LOOKUP_NONE = "found no enrollment for this device's key"
 ATTEMPT_DEPLOYMENT = "/etc/suifleet/.enrollment.json.partial.deployment"
 ATTEMPT_CLAIM = "/etc/suifleet/.enrollment.json.partial.claim"
-REVOCATION_REFUSAL = "does not settle it"
+NOT_EXPIRED = "The expiry check did not settle it"
+STILL_VALID = "it can still commit"
+LEGACY_ATTEMPT = "does not record the attempt's claim and expiry window"
 SETTLED = "can never enroll the device, so the role removed"
 REUSED_CLAIM = "which an earlier attempt used"
-STALE_REGISTRATION = "removed another registration of the claim"
-REGISTERED_AGAIN = "is registered in policy"
 POLICY_REFUSAL = "from an attempt under enrollment policy"
 DEPLOYMENT_REFUSAL = "from an attempt that did not run under the configured deployment"
 RECORD_DEPLOYMENT_REFUSAL = "enrolled under a deployment other than the configured one"
@@ -316,7 +316,7 @@ ENROLL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: 
 # output is when it starts, waits until the harness releases it, and fails
 # without printing or submitting anything: an attempt whose outcome is unknown
 # to the host, held open so another play can overlap it.
-ENROLL_EXEC = "exec /usr/bin/suifleet --enroll"
+ENROLL_EXEC = 'exec /usr/bin/suifleet --enroll "$1" "$2"'
 ENROLL_SHIM_PATH = "/usr/local/bin/sf304-enroll-shim"
 ENROLL_SHIM_DIR = "/run/sf304-shim"
 HOLDER_CORE_LIMITS = "/etc/security/limits.d/sf304-holder-core.conf"
@@ -348,7 +348,8 @@ printf 'core=%s stdin=%s claim=%s\n' "$core" "$stdin" "$(printf '%s\n' "$key" | 
 """
 CLAIM_INPUT = 'core=$(ulimit -c); stdin=$(readlink /proc/$$/fd/0 | cut -d: -f1)\n'
 ENROLL_SHIM = f"""#!/bin/sh
-{CLAIM_INPUT}{STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/staging")}{CLAIM_RECEIPT.format(report=ENROLL_SHIM_DIR + "/enroll-claim")}printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
+{CLAIM_INPUT}{STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/staging")}{CLAIM_RECEIPT.format(report=ENROLL_SHIM_DIR + "/enroll-claim")}printf '%s\\n' "$*" > {ENROLL_SHIM_DIR}/args
+printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
 i=0
 while [ ! -e {ENROLL_SHIM_DIR}/release ] && [ "$i" -lt 900 ]; do sleep 1; i=$((i + 1)); done
 echo SF304-SHIM-FAILED-BEFORE-PRINTING >&2
@@ -497,12 +498,25 @@ def chain_client(wallet):
     return client
 
 
+def chain_epoch():
+    """The localnet's current epoch."""
+    import deployment_manifest as dm
+    return int(dm.rpc(RPC, "suix_getLatestSuiSystemState", [])["epoch"])
+
+
 def chain_claim(out, action):
     """Revokes or registers again the settle serial's claim under the batch's policy; prints the digest.
 
     Runs as the dev user in the chain container, after chain setup, so the
-    harness can order these transactions around the attempt it settles."""
+    harness can order these transactions around the attempt it settles.
+    "epoch" prints the current epoch instead, and "held" runs chain_held."""
     out = Path(out)
+    if action == "epoch":
+        print(json.dumps({"epoch": chain_epoch()}))
+        return
+    if action == "held":
+        print(json.dumps(chain_held(out)))
+        return
     setup = json.loads((out / "setup.json").read_text())
     client = chain_client(out / "wallet")
     package, policy, claim = setup["package"], setup["policy"], setup["settle"]["claim"]
@@ -510,6 +524,116 @@ def chain_claim(out, action):
     result = client("ptb", "--move-call", f"{package}::enrollment::{call[0]}", f"@{policy}", call[1], "--gas-budget", "200000000")
     assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
     print(json.dumps({"digest": result["digest"]}))
+
+
+def chain_held(out):
+    """An in-flight enrollment across revocation and re-registration of its claim.
+
+    Two real enrollment transactions, each sent by a fresh device key and
+    sponsored by its own registered claim, are signed by both keys and held
+    unsubmitted: one with the expiration the role's enrollment uses
+    (Epoch(E), the epoch at signing), one without (as before the fix). Both
+    claims are then revoked and registered again, and the harness waits
+    until epoch E has ended. The transaction without an expiration still
+    commits and enrolls its device: a revocation, even of exactly the
+    registration the attempt saw, settles nothing once the claim is
+    registered again. The expiring transaction is refused as expired, its
+    claim stays registered and its device has no enrollment. Both are built
+    by the Sui CLI from the same call; only the expiration (the last field
+    of the transaction data) differs, so the control proves the expiring
+    bytes are otherwise valid."""
+    import base64
+    import struct
+    import deployment_manifest as dm
+
+    setup = json.loads((out / "setup.json").read_text())
+    wallet = out / "wallet"
+    client = chain_client(wallet)
+    package, policy, registry = setup["package"], setup["policy"], setup["registry"]
+
+    def new_address():
+        return client("new-address", "ed25519")["address"]
+
+    def ptb(*args):
+        result = client("ptb", *args, "--gas-budget", "200000000")
+        assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+        return result["digest"]
+
+    def sign(address, data):
+        env = dict(os.environ, SUI_CONFIG_DIR=str(wallet))
+        done = subprocess.run(["sui", "keytool", "sign", "--address", address, "--data", data, "--json"], text=True,
+                              capture_output=True, timeout=120, env=env)
+        assert done.returncode == 0, done.stderr[-2000:]
+        return json.loads(done.stdout)["suiSignature"]
+
+    def registered(claim):
+        table = dm.rpc(RPC, "sui_getObject", [policy, {"showContent": True}])["data"]["content"]["fields"]["claims"]
+        table_id = table["fields"]["id"]["id"]
+        field = dm.rpc(RPC, "suix_getDynamicFieldObject", [table_id, {"type": "address", "value": claim}])
+        return "data" in field
+
+    def enrollments(device):
+        events = dm.rpc(RPC, "suix_queryEvents", [{"MoveEventType": f"{package}::enrollment::DeviceEnrolled"}, None, 1000, False])
+        return [e for e in events["data"] if dm.object_id(e["parsedJson"]["device_address"]) == dm.object_id(device)]
+
+    devices, claims = [new_address(), new_address()], [new_address(), new_address()]
+    for claim in claims:
+        client("faucet", "--url", FAUCET, "--address", claim, json_output=False)
+    coins = []
+    for claim in claims:
+        for _ in range(120):
+            gas = client("gas", claim)
+            found = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
+            if found:
+                coins.append(found[0]["gasCoinId"])
+                break
+            time.sleep(0.5)
+        else:
+            raise SystemExit(f"claim {claim} was not funded")
+    ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector[@{claims[0]},@{claims[1]}]")
+    epoch = chain_epoch()
+    held = []
+    for index, (device, claim, coin) in enumerate(zip(devices, claims, coins)):
+        unsigned = client("ptb", "--sender", f"@{device}", "--gas-sponsor", f"@{claim}", "--gas-coin", f"@{coin}",
+                          "--move-call", f"{package}::enrollment::enroll", f"@{policy}", f"@{registry}",
+                          f'"held-{index}"', '"x86_64"', "@0x6", "--gas-budget", "50000000",
+                          "--serialize-unsigned-transaction", json_output=False).strip().splitlines()[-1]
+        data = base64.b64decode(unsigned)
+        assert data[-1] == 0, "the CLI built a transaction with an expiration"
+        if index == 0:
+            data = data[:-1] + b"\x01" + struct.pack("<Q", epoch)
+        data = base64.b64encode(data).decode()
+        held.append((data, [sign(device, data), sign(claim, data)]))
+    evidence = dict(epoch=epoch, devices=devices, claims=claims, revocations=[], registrations=[])
+    for _ in range(2):
+        for claim in claims:
+            evidence["revocations"].append(ptb("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{claim}"))
+            evidence["registrations"].append(ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}",
+                                                 f"vector[@{claim}]"))
+    deadline = time.monotonic() + 300
+    while chain_epoch() <= epoch:
+        assert time.monotonic() < deadline, f"epoch {epoch} did not end"
+        time.sleep(1)
+    evidence["submitted_in_epoch"] = chain_epoch()
+
+    def submit(data, signatures):
+        command = ["sui", "client", "--client.config", str(wallet / "client.yaml"), "execute-signed-tx", "--tx-bytes", data]
+        for signature in signatures:
+            command += ["--signatures", signature]
+        return subprocess.run(command + ["--json"], text=True, capture_output=True, timeout=300)
+
+    control = submit(*held[1])
+    assert control.returncode == 0, ("the held transaction without an expiration did not commit", control.stderr[-3000:])
+    result = json.loads(control.stdout[control.stdout.find("{"):])
+    assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+    assert len(enrollments(devices[1])) == 1 and not registered(claims[1]), "the control did not enroll with its claim"
+    evidence["control_digest"] = result["digest"]
+    expiring = submit(*held[0])
+    assert expiring.returncode != 0 and "Transaction Expired" in expiring.stderr + expiring.stdout, \
+        ("the expiring held transaction was not refused as expired", expiring.stdout[-2000:], expiring.stderr[-3000:])
+    assert not enrollments(devices[0]) and registered(claims[0]), "the expiring transaction enrolled or used its claim"
+    evidence["expired_refusal"] = "Transaction Expired"
+    return evidence
 
 
 def chain_setup(out, serials, settle_serial):
@@ -588,24 +712,10 @@ def chain_setup(out, serials, settle_serial):
         result = client("ptb", *args, "--gas-budget", "200000000")
         assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
         return result["digest"]
-    # Revocations for settling an attempt that printed no receipt (see
-    # overlapping_enrollment): only the revocation of the registration of the
-    # attempt's own claim that the attempt recorded, under the attempt's
-    # policy, settles it. The same claim registered and revoked under the
-    # other policy, another claim revoked under the attempt's policy, and a
-    # revocation of the attempt's claim before it was registered again (the
-    # stale revocation below, two separate transactions) must not. The
-    # attempt's own revocation is submitted after the attempt (chain_claim).
-    # The serial then gets a new, funded claim.
+    # The serial whose attempt printed no receipt (see overlapping_enrollment)
+    # is settled once that attempt expires, then gets a new, funded claim.
     settled = claims[settle_serial]
-    spare = "0x" + os.urandom(32).hex()
     settle = dict(serial=settle_serial, claim=settled)
-    settle["other_policy_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{other_policy}", f"vector[@{settled}]",
-                                        "--move-call", f"{package}::enrollment::revoke_claim", f"@{other_policy}", f"@{settled}")
-    settle["other_claim_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector[@{spare}]",
-                                       "--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{spare}")
-    settle["stale_revoke_digest"] = ptb("--move-call", f"{package}::enrollment::revoke_claim", f"@{policy}", f"@{settled}")
-    settle["reregister_digest"] = ptb("--move-call", f"{package}::enrollment::add_claims", f"@{policy}", f"vector[@{settled}]")
     replacement = out / "replacement"
     (out / "replacement.csv").write_text(f"serial,alias\n{settle_serial},line-{settle_serial.lower()}\n")
     run(sys.executable, str(ROOT / "scripts/claims.py"), "generate", "--roster", str(out / "replacement.csv"), str(replacement),
@@ -640,7 +750,7 @@ def chain_verify(out, records):
         sender = block["transaction"]["data"]["sender"]
         gas_owner = block["transaction"]["data"]["gasData"]["owner"]
         assert dm.object_id(sender) == dm.object_id(enrolled["device_address"]), (name, "sender")
-        # The settled serial was reissued after its first claim was revoked.
+        # The settled serial was reissued after its first attempt expired.
         claim = setup["settle"]["replacement"] if serial == setup["settle"]["serial"] else setup["claims"][serial]
         assert dm.object_id(gas_owner) == dm.object_id(claim), (name, "gas not paid by its claim")
         caps = dm.rpc(RPC, "sui_multiGetObjects", [[enrolled["device_cap_id"], enrolled["owner_cap_id"]], {"showOwner": True}])
@@ -2151,7 +2261,7 @@ exit 3
         self.exec(container, "install", "-m", "0755", "/dev/stdin", DERIVE_WRAPPER_PATH, input=DERIVE_WRAPPER)
         self.exec(container, "install", "-d", "-m", "0777", ENROLL_SHIM_DIR)
         shimmed = self.variant_examples("examples-enroll-shim",
-                                        {"enroll.yml": [(ENROLL_EXEC, f"exec {ENROLL_SHIM_PATH} --enroll"),
+                                        {"enroll.yml": [(ENROLL_EXEC, f'exec {ENROLL_SHIM_PATH} --enroll "$1" "$2"'),
                                                         (DERIVE_EXEC, f"exec {DERIVE_WRAPPER_PATH} --derive-address /dev/stdin")]},
                                         folder="tasks", source=self.examples)
         # runuser's PAM limits give the key holder an unlimited core dump size
@@ -2212,32 +2322,47 @@ exit 3
         assert sh(f"stat -c '%s %U:%G %a' {partial}").strip() == "0 root:root 600", (name, "attempt marker not kept")
         assert absent(record) and absent(lock) and absent(staging), (name, "record written, or lock or staging left")
         print("PASS the failed attempt kept its empty marker and released the lock and staging")
+        attempt_record = sh(f"cat {ATTEMPT_CLAIM}")
+        window = re.fullmatch(r"(0x[0-9a-f]{64})\nepoch ([0-9]{1,20}) checkpoint ([0-9]{1,20})\n", attempt_record)
+        assert window, (name, "the attempt did not record its claim and window", attempt_record)
+        epoch = int(window.group(2))
+        args = sh(f"cat {ENROLL_SHIM_DIR}/args").strip()
+        assert args == f"--enroll {staging}/enroll.toml {epoch}", (name, "the command was not given the recorded expiry", args)
+        print("PASS the attempt recorded its claim and window (expiry epoch and checkpoint) before the command ran, and"
+              " the command was given that expiry epoch")
+        # Retries while the attempt can still commit. The localnet's epochs
+        # last a minute, so a record naming a far later epoch stands in for
+        # an attempt whose epoch has not ended; the real record is restored.
+        self.exec(container, "sh", "-c", 'printf "%s\\nepoch %s checkpoint %s\\n" "$1" "$2" "$3" > "$4"', "sh",
+                  window.group(1), str(epoch + 10**6), window.group(3), ATTEMPT_CLAIM)
         output, _ = self.ansible("retry after an attempt that printed nothing", "site.yml", "--limit", name, *vault,
                                  expect_rc="nonzero")
         assert "printed no receipt" in output and ENROLL_TASK not in output, (name, "the retry was not refused")
-        assert LOOKUP_NONE in output, (name, "the retry did not refuse on the lookup's result", output[-8000:])
+        assert LOOKUP_NONE in output and NOT_EXPIRED in output and STILL_VALID in output, \
+            (name, "the retry did not refuse an unexpired attempt", output[-8000:])
+        assert SETTLED not in output, (name, "an unexpired attempt was settled")
         assert sh(f"stat -c %s {partial}").strip() == "0" and absent(lock) and absent(staging), (name, "retry left state")
-        print("PASS retry looked the unenrolled key up on chain, found nothing, refused the attempt with an unknown"
-              " outcome and released the lock")
+        assert not absent(ATTEMPT_DEPLOYMENT), (name, "binding removed")
+        self.exec(container, "sh", "-c", 'printf "%s" "$1" > "$2"', "sh", attempt_record, ATTEMPT_CLAIM)
+        print("PASS retry looked the unenrolled key up on chain, found nothing, refused an attempt whose expiry epoch has"
+              " not ended and released the lock, keeping marker and binding")
         self.exec(container, "rm", "-rf", ENROLL_SHIM_PATH, ENROLL_SHIM_DIR)
-        self.settle_revoked_attempt(vault, name)
+        self.settle_expired_attempt(vault, name, epoch)
 
-    def settle_revoked_attempt(self, vault, name):
-        """Settles the attempt above, which printed nothing, by a revocation of its own claim's registration.
+    def settle_expired_attempt(self, vault, name, epoch):
+        """Settles the attempt above, which printed nothing, once its expiry epoch has ended.
 
-        The attempt recorded its claim, and the registration of that claim it
-        could consume (the claim table entry's object version and digest),
-        before running the command. Chain setup revoked the same claim under
-        the other policy, another claim under the attempt's policy, and the
-        attempt's claim itself before registering it again for the attempt
-        (a stale revocation). None of those settles the attempt. The
-        revocation submitted now does, but not while the claim is registered
-        again, and a revocation of that later registration does not either:
-        the role verifies on chain that the transaction removed exactly the
-        recorded registration from the recorded policy without an enrollment,
-        that the claim is absent, and that the key has not enrolled since,
-        then removes the marker and binding. The revoked claim is refused
-        afterwards; the serial is reissued with a new claim."""
+        The attempt recorded its claim and window (the epoch its transaction
+        expires after and a checkpoint read before it) before running the
+        command. A record without a window (an earlier role version, which
+        signed without an expiration) is refused. Revoking the claim and
+        registering it again settles nothing; chain_held shows on chain why
+        (a held enrollment without an expiration commits across both) and
+        that the expiring one is refused once its epoch ended. After the
+        attempt's epoch has ended the role verifies on chain that it expired
+        and that the key has not enrolled since the checkpoint, then removes
+        the marker and binding. The attempt's claim is refused afterwards;
+        the serial is reissued with a new claim."""
         container = self.hosts[name]["container"]
         partial, record = "/etc/suifleet/.enrollment.json.partial", "/etc/suifleet/enrollment.json"
         lock, staging = "/run/suifleet-enroll.lock", "/run/suifleet-enroll"
@@ -2254,58 +2379,60 @@ exit 3
         def chain_claim(action):
             done = self.exec(self.chain, "python3", "/workspace/scripts/test_ansible.py", "--chain-claim", "/chain",
                              "--action", action, user="1001:1001")
-            return json.loads(done.stdout.strip().splitlines()[-1])["digest"]
+            return json.loads(done.stdout.strip().splitlines()[-1])
 
         attempt_record = sh(f"cat {ATTEMPT_CLAIM}")
         lines = attempt_record.splitlines()
-        assert len(lines) == 2 and attempt_record.endswith("\n") and lines[0] == settle["claim"], \
-            (name, "the attempt did not record its claim", attempt_record)
-        assert re.fullmatch(r"[0-9]{1,20} [1-9A-HJ-NP-Za-km-z]{32,44}", lines[1]), (name, "no registration recorded", attempt_record)
+        assert len(lines) == 2 and lines[0] == settle["claim"] and lines[1].startswith(f"epoch {epoch} checkpoint "), \
+            (name, "the attempt did not record its claim and window", attempt_record)
         assert sh(f"stat -c '%U:%G %a' {ATTEMPT_CLAIM}").strip() == "root:root 600", name
         binding = sh(f"cat {ATTEMPT_DEPLOYMENT}")
-        print("PASS the attempt recorded its claim's public address and registration beside its marker before submitting"
-              " anything")
 
-        def refused(label, digest, why=None):
-            output, _ = self.ansible(f"a revocation of {label} does not settle the attempt", "site.yml", "--limit", name,
-                                     *vault, "-e", f"suifleet_revocation_digest={digest}", expect_rc="nonzero")
-            assert LOOKUP_NONE in output and REVOCATION_REFUSAL in output, (name, label, "not refused", output[-8000:])
-            assert why is None or why in output, (name, label, "refused for another reason", why, output[-8000:])
-            assert SETTLED not in output and ENROLL_TASK not in output, (name, label, "settled or enrolled")
+        def kept(label):
             assert sh(f"stat -c %s {partial}").strip() == "0" and absent(record), (name, label, "marker or record changed")
             assert sh(f"cat {ATTEMPT_DEPLOYMENT}") == binding, (name, label, "binding changed")
-            assert sh(f"cat {ATTEMPT_CLAIM}") == attempt_record, (name, label, "claim record changed")
             assert absent(lock) and absent(staging), (name, label, "lock or staging left")
-            print(f"PASS a revocation of {label} did not settle the attempt: marker, binding and claim record kept")
 
-        refused("another claim of the attempt's policy", settle["other_claim_digest"])
-        refused("the attempt's claim under another policy", settle["other_policy_digest"])
-        refused("no claim (a transaction that revoked no claim)", self.setup["policy_digest"])
-        # The reviewer's case: the claim was revoked, then registered again,
-        # and the attempt used the new registration. The old revocation, of
-        # the same claim under the same policy, says nothing about it.
-        refused("an earlier registration of the attempt's claim (revoked before it was registered again)",
-                settle["stale_revoke_digest"], why=STALE_REGISTRATION)
-        revoke_digest = chain_claim("revoke")
-        chain_claim("register")
-        refused("the attempt's registration while the claim is registered again", revoke_digest, why=REGISTERED_AGAIN)
-        later_digest = chain_claim("revoke")
-        refused("a later registration of the attempt's claim", later_digest, why=STALE_REGISTRATION)
-        settle["revoke_digest"], settle["later_revoke_digest"] = revoke_digest, later_digest
-        output, _ = self.ansible("the revocation of the attempt's registration settles it", "site.yml", "--limit", name,
-                                 *vault, "-e", f"suifleet_revocation_digest={revoke_digest}", expect_rc="nonzero")
-        assert SETTLED in output and ENROLL_TASK not in output, (name, "not settled", output[-8000:])
-        assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "marker or binding kept")
-        assert sh(f"cat {ATTEMPT_CLAIM}") == attempt_record, (name, "the revoked claim's record was not kept")
-        assert absent(lock) and absent(staging), (name, "lock or staging left")
-        print("PASS the verified revocation of the attempt's own registration settled it: marker and binding removed, the"
-              " claim record kept")
-        output, _ = self.ansible("a retry with the revoked claim is refused", "site.yml", "--limit", name, *vault,
+        # An attempt recorded by an earlier version of the role: the claim and
+        # the registration it saw, no window. It has no expiration.
+        self.exec(container, "sh", "-c", 'printf "%s\\n12 4BKqvjVWUYiRY9LeqjtM2TxfoMAoHhXL7yuyhKWGGH2K\\n" "$1" > "$2"', "sh",
+                  settle["claim"], ATTEMPT_CLAIM)
+        output, _ = self.ansible("an attempt recorded without a window is not settled", "site.yml", "--limit", name, *vault,
                                  expect_rc="nonzero")
-        assert REUSED_CLAIM in task_stderr(output), (name, "the revoked claim was not refused", output[-8000:])
+        assert LOOKUP_NONE in output and LEGACY_ATTEMPT in output, (name, "legacy record not refused", output[-8000:])
+        assert SETTLED not in output and ENROLL_TASK not in output, (name, "legacy record settled or enrolled")
+        kept("legacy record")
+        self.exec(container, "sh", "-c", 'printf "%s" "$1" > "$2"', "sh", attempt_record, ATTEMPT_CLAIM)
+        print("PASS an attempt recorded without an expiry window (earlier role version) was refused: marker and binding kept")
+
+        # The reviewer's case, on chain: enrollments held in flight across a
+        # revocation and re-registration of their claims.
+        held = chain_claim("held")
+        self.evidence["held_enrollment"] = held
+        print(f"PASS a held enrollment without an expiration committed after its claim was revoked and registered again"
+              f" ({held['control_digest']}); the held enrollment expiring with epoch {held['epoch']} was refused as"
+              f" expired in epoch {held['submitted_in_epoch']}, its claim still registered and its device not enrolled")
+        # Revoking and registering the attempt's own claim again changes nothing.
+        settle["revoke_digest"] = chain_claim("revoke")["digest"]
+        settle["reregister_digest"] = chain_claim("register")["digest"]
+        deadline = time.monotonic() + 300
+        while chain_claim("epoch")["epoch"] <= epoch:
+            assert time.monotonic() < deadline, (name, f"epoch {epoch} did not end")
+            time.sleep(2)
+        output, _ = self.ansible("the expired attempt is settled", "site.yml", "--limit", name, *vault, expect_rc="nonzero")
+        assert SETTLED in output and ENROLL_TASK not in output, (name, "not settled", output[-8000:])
+        assert f"expired with epoch {epoch}" in output, (name, "settled without the expiry check", output[-8000:])
+        assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "marker or binding kept")
+        assert sh(f"cat {ATTEMPT_CLAIM}") == attempt_record, (name, "the attempt's claim record was not kept")
+        assert absent(lock) and absent(staging), (name, "lock or staging left")
+        print(f"PASS once epoch {epoch} ended, the role verified on chain that the attempt expired without enrolling and"
+              " settled it: marker and binding removed, the claim record kept")
+        output, _ = self.ansible("a retry with the attempt's claim is refused", "site.yml", "--limit", name, *vault,
+                                 expect_rc="nonzero")
+        assert REUSED_CLAIM in task_stderr(output), (name, "the attempt's claim was not refused", output[-8000:])
         assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "an attempt was started")
         assert absent(lock) and absent(staging), (name, "lock or staging left")
-        print("PASS a retry with the revoked claim was refused before any attempt marker existed")
+        print("PASS a retry with the attempt's claim was refused before any attempt marker existed")
         # Reissue: the serial's new claim, Vault-encrypted like the one it replaces.
         revoked = self.claim_secrets[serial]
         replacement = (self.work / "chain/replacement/enrollment" / serial / "claim.key").read_text()
@@ -2315,7 +2442,7 @@ exit 3
                   f"/chain/batch/enrollment/{serial}/claim.key", user="0:0")
         self.ansible("vault-encrypt the reissued claim", "encrypt", f"/chain/batch/enrollment/{serial}/claim.key",
                      "--vault-password-file", "/work/vault-pass", tool="ansible-vault")
-        self.claim_secrets[f"{serial} (revoked)"] = revoked
+        self.claim_secrets[f"{serial} (expired attempt)"] = revoked
         self.claim_secrets[serial] = replacement.strip()
 
     def assert_staging_read_only(self, container, probe, staging, claim, label):
@@ -3447,7 +3574,7 @@ def main():
     parser.add_argument("--settle-serial", help=argparse.SUPPRESS)
     parser.add_argument("--records", help=argparse.SUPPRESS)
     parser.add_argument("--chain-claim", help=argparse.SUPPRESS)
-    parser.add_argument("--action", choices=("revoke", "register"), help=argparse.SUPPRESS)
+    parser.add_argument("--action", choices=("revoke", "register", "epoch", "held"), help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.chain_claim:
         chain_claim(args.chain_claim, args.action)
