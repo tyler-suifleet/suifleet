@@ -61,7 +61,13 @@ The file set is the daemon build closure, computed from that commit's tree:
   and a `path` inside `cfg_attr(..)` is recognized. An include or `#[path]`
   whose argument is not one string literal without escapes (for example
   `include!(concat!(env!("OUT_DIR"), ..))`) stops the build instead of being
-  skipped. The scan is lexical, so comments and strings count too. Rust
+  skipped. Rust allows a comment wherever whitespace may appear, for example
+  `include_str /* why */ !("..")` or `#[/* why */ path = ".."]`, so comments
+  are blanked (string literals kept) before the include and `#[path]` forms
+  are matched. References that appear only inside a comment are still
+  packaged when they resolve. Renaming an include macro with `use` (for
+  example `use std::include_str as embed;`) stops the build, because calls
+  through the new name would not be seen. Rust
   compiles an `include!` or `#[path]` target as code whatever its file name,
   so that target is scanned for further includes too (`src/main.rs` →
   `tools/entry.inc` → `tools/helper.rs`). `include_str!`/`include_bytes!`
@@ -80,6 +86,9 @@ The same check applies to a file outside those directories that a file inside
 them reaches through a literal include or `#[path]`, such as
 `#[path = "../tools/entry.rs"]` in `src/main.rs`.
 A `cfg_attr` path is packaged but still counts as implicit for this check. Inline `mod name { ... }` blocks are fine.
+Comments are blanked here too, so `mod /* why */ name;` is still found and
+`#[/* why */ path = ".."] mod name;` still counts as an explicit path. A
+commented-out `mod name;` is ignored.
 
 A `#[path]` is resolved against the directory of the file it appears in. That
 holds only at file level. Inside an inline `mod name { ... }` block, rustc
