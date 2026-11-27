@@ -434,7 +434,10 @@ check then verifies the resulting `S`:
 
 The JSON report maps each recipe to its PV, crate version, source revision,
 source URLs and SHA-256, license files and crate count, plus the advertised
-`LAYERSERIES_COMPAT`. That report is the per-series version/source/license
+`LAYERSERIES_COMPAT`. The series are read from BitBake's logical lines, with
+continuations joined, for the registered collection; a registration variable
+assigned more than once in `layer.conf` is a finding, because only the last
+assignment takes effect. That report is the per-series version/source/license
 evidence. A listed series is only declared compatibility, until an actual
 build on that series is recorded.
 
