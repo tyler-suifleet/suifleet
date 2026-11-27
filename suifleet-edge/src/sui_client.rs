@@ -2390,6 +2390,22 @@ impl SuiClient {
         result
     }
 
+    /// Look up this key's enrollment under a policy, without a claim (read-only).
+    /// Scans the node's retained history: a result is authoritative, an absence
+    /// is not (the history may be pruned, or an attempt may still commit).
+    #[cfg(target_os = "linux")]
+    pub async fn find_enrollment(&self, policy: &str) -> anyhow::Result<Option<(Enrolled, String)>> {
+        let object = self.object(policy).await?;
+        let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
+        self.validate_enrollment_policy(policy, &operator).await?;
+        let info = self.service_info().await.map_err(status)?.into_inner();
+        let found = self.previous_enrollment(policy, &operator, info.lowest_available_checkpoint.unwrap_or(0)).await?;
+        if let Some((enrolled, _)) = &found {
+            self.validate_cap(&enrolled.device_cap_id, &enrolled.device_object_id).await?;
+        }
+        Ok(found)
+    }
+
     #[cfg(target_os = "linux")]
     async fn scan_enrollments(&self, policy: &str, operator: &str, from: u64) -> anyhow::Result<Option<(Enrolled, String)>> {
         let address = self.address();

@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: suifleet
+  author: SuiFleet
+  description: Install, enroll and run the SuiFleet device client on existing systemd Linux hosts
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Debian
+      versions: ["bookworm"]
+    - name: Ubuntu
+      versions: ["noble"]
+dependencies: []
