@@ -233,8 +233,9 @@ These static checks always run, on every recipe in the layer:
   `suifleet-walrus-codec`. Skipping a recipe changes whether it is built, not
   which sources it pins. The audit parses the function body without running it
   and accepts it only if all of these hold:
-  - The datastore `d` is only read (`d.getVar`, `d.getVarFlag`, `d.expand`).
-    It is never rebound, aliased or stored. It is passed only to
+  - The datastore `d` is only read, with `d.getVar(NAME[, EXPAND])` or
+    `d.getVarFlag(NAME, FLAG[, EXPAND])` and literal arguments; `d.expand` is
+    refused. It is never rebound, aliased or stored. It is passed only to
     `bb.parse.mark_dependency` (which records a parse dependency, not a pin),
     to `bb.fetch2.Fetch(..., localonly=True)` or to a local fetch method's
     `localpaths`/`localfile_searchpaths`.
@@ -249,6 +250,16 @@ These static checks always run, on every recipe in the layer:
   `skip_guards` in the JSON report, and the recipe is still fetched and
   verified. The model trusts those listed BitBake helpers not to rewrite pins;
   a new guard that needs another helper must extend the audit deliberately.
+- Inline Python (`${@...}`) is refused anywhere in a recipe, its includes and
+  its bbappends, including flags, appends and task bodies, except the
+  `SUIFLEET_UNPACKDIR` idiom `${@d.getVar('UNPACKDIR') or d.getVar('WORKDIR')}`.
+  BitBake runs inline Python whenever a value containing it is expanded,
+  directly or through a reference, for example by a skip guard's
+  `d.getVar`, a `:=` assignment or signature generation, and that code could
+  rewrite pins. Only the file and line are reported, never the value. The
+  fetcher repeats the refusal before anything is downloaded. A guard's reads
+  therefore reach only this checked metadata and the base layers the build
+  already trusts.
 - Directives the reader does not model are refused: `unset` (of a variable or
   a flag), `include_all`, `addfragments` and `addpylib`. They can remove or
   replace source pins or load further metadata. The refusal is static, and the
