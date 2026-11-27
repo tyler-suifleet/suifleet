@@ -84,6 +84,28 @@ class Staging(unittest.TestCase):
                 self.assertLess(text.index(f"- name: {install}\n"), text.index("prune_staging.yml"))
                 self.assertIn(f"suifleet_staging_keep: {ref}", text)
 
+    def test_cache_upload_alone_restarts_nothing(self):
+        """A real run's restart flag follows the install, not the cache upload.
+
+        Restoring only the cache file of the release already installed (after a
+        cache cleanup or an interrupted overlap) must not restart a live fleet;
+        scripts/test_ansible.py cache_only_restore runs that on real hosts."""
+        for file, staged, installed in (
+                ("install_binary.yml", "suifleet_binary_staged", "suifleet_binary_copy"),
+                ("install_deb.yml", "suifleet_deb_staged", "suifleet_package")):
+            with self.subTest(file=file):
+                flag = task((TASKS / file).read_text(), "Record whether the client code changed")
+                self.assertIn(f"{installed} is changed", flag)
+                # Each mention of the upload result is limited to a preview.
+                for line in flag.splitlines():
+                    if staged in line:
+                        self.assertIn("ansible_check_mode", line, line)
+                if file == "install_binary.yml":
+                    self.assertIn("suifleet_binary_install_pending", flag)
+                    pending = task((TASKS / file).read_text(), "Decide whether a preview would install the binary")
+                    self.assertIn("ansible_check_mode and suifleet_binary_staged is changed", pending)
+                    self.assertIn("suifleet_binary_installed.stat.checksum | default('') == suifleet_binary_sha256", pending)
+
     def test_prune_keeps_in_flight_uploads(self):
         text = (TASKS / "prune_staging.yml").read_text()
         published = task(text, "Find staged artifacts of other releases")

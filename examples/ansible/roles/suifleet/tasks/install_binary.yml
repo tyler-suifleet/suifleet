@@ -106,11 +106,30 @@
           match the pinned SHA-256 {{ suifleet_binary_sha256 }}. This run's upload was
           removed and nothing was installed.
 
+# A preview cannot run the install from a cache file it did not upload, so it
+# compares the installed binary with the pin instead: restoring only the cache
+# for the release already installed is not a pending installation.
+- name: Check the installed binary for a preview
+  ansible.builtin.stat:
+    path: /usr/bin/suifleet
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_binary_installed
+  check_mode: false
+  when: ansible_check_mode and suifleet_binary_staged is changed
+
+- name: Decide whether a preview would install the binary
+  ansible.builtin.set_fact:
+    suifleet_binary_install_pending: >-
+      {{ ansible_check_mode and suifleet_binary_staged is changed
+         and not (suifleet_binary_installed.stat.exists | default(false)
+                  and suifleet_binary_installed.stat.checksum | default('') == suifleet_binary_sha256) }}
+
 - name: Report the pending binary installation
   ansible.builtin.debug:
     msg: Would install the staged binary as /usr/bin/suifleet.
   changed_when: true
-  when: ansible_check_mode and suifleet_binary_staged is changed
+  when: suifleet_binary_install_pending | bool
 
 - name: Install the verified binary
   ansible.builtin.copy:
@@ -184,9 +203,11 @@
     daemon_reload: true
   when: suifleet_units_copy is changed
 
+# Only an installed change counts (or, in a preview, a pending one): uploading
+# the cache file for the release already installed restarts nothing.
 - name: Record whether the client code changed
   ansible.builtin.set_fact:
     suifleet_code_changed: >-
-      {{ suifleet_binary_staged is changed or suifleet_binary_copy is changed
+      {{ suifleet_binary_install_pending | bool or suifleet_binary_copy is changed
          or suifleet_helper_copy is changed
          or suifleet_units_copy is changed }}

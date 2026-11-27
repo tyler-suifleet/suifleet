@@ -67,7 +67,11 @@ the same or different pins or a controller's artifact changes after its
 preflight check: a mismatching upload is removed and its run stops. A run
 removes other releases' staged files (and abandoned uploads a day old) after
 installing, which makes an overlapping rollout of another release fail at its
-install rather than install other bytes. For
+install rather than install other bytes. Restoring only the cache file of
+the release already installed restarts nothing; services restart only for an
+installed change or inputs not yet applied. (A `deb` preview cannot ask apt
+about a package it has not uploaded, so it reports that restore as a pending
+installation; the preview itself changes nothing.) For
 `systemd-binary`, extract the binary from the verified tarball and pin its own
 SHA-256 (`suifleet_binary_sha256`). Point `suifleet_units_src` at the reviewed
 `suifleet-edge/meta-suifleet/recipes-edge/suifleet/files` directory of the same

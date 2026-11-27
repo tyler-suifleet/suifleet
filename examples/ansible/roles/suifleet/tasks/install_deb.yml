@@ -102,6 +102,12 @@
   vars:
     suifleet_staging_keep: "{{ suifleet_deb_staging }}"
 
+# A real run counts only apt's own result: uploading the cache file for the
+# package already installed restarts nothing. A preview cannot ask apt about a
+# package it did not upload, so a pending upload is reported as a pending
+# installation (and its restarts); that preview changes nothing.
 - name: Record whether the client code changed
   ansible.builtin.set_fact:
-    suifleet_code_changed: "{{ suifleet_deb_staged is changed or suifleet_package is changed }}"
+    suifleet_code_changed: >-
+      {{ (ansible_check_mode and suifleet_deb_staged is changed)
+         or suifleet_package is changed }}
