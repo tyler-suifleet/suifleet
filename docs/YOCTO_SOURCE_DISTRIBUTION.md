@@ -202,7 +202,10 @@ These static checks always run, on every recipe in the layer:
   It keeps the URL's intermediate directories, so a `LIC_FILES_CHKSUM` entry or
   `S` layout has to use that path. The audit only copies local files and never
   extracts them, so a local archive (any suffix BitBake unpacks) needs
-  `unpack=0`.
+  `unpack=0`. A `file://` entry may only use `subdir` and `unpack=0/1`. Other
+  parameters are refused statically and by the fetcher before anything is
+  downloaded. For example, BitBake reads an explicit `localpath` instead of the
+  layer file, and `downloadfilename` or `striplevel` are not modelled either.
   BitBake tries every `FILESOVERRIDES` subdirectory (machine, distro,
   architecture) of each search directory before the unqualified ones, so a
   same-named file such as `files/qemuarm64/suifleet.service` replaces
