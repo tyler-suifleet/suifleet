@@ -87,6 +87,7 @@ import tempfile
 import textwrap
 import urllib.parse
 import urllib.request
+import zlib
 
 HEX40 = re.compile(r'^[0-9a-f]{40}$')
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
@@ -271,7 +272,20 @@ def skip_guard_error(body):
     return None
 
 
-TARBALL = re.compile(r'\.(tar(\.(gz|xz|bz2|zst))?|tgz|tbz2|txz)$')
+# Only the compressions the supported host Python's tarfile decodes (gzip,
+# bzip2, xz). Python 3.10 tarfile has no Zstandard support, so .tar.zst/.tzst
+# fall through to unsupported_unpack and are refused statically instead of
+# failing at extraction time.
+TARBALL = re.compile(r'\.(tar(\.(gz|xz|bz2))?|tgz|tbz2|txz)$')
+# Decoder failures a corrupt or mislabelled tarball raises while being read;
+# reported as findings rather than escaping as a traceback. bz2 and gzip
+# header failures are OSError, which callers already report.
+ARCHIVE_DECODE_ERRORS = (tarfile.TarError, EOFError, zlib.error)
+try:
+    import lzma
+    ARCHIVE_DECODE_ERRORS += (lzma.LZMAError,)
+except ImportError:  # pragma: no cover - CPython built without lzma
+    pass
 # Every suffix BitBake's FetchMethod.unpack runs an unpack command for (tar and
 # its compressed forms, bare gz/bz2/xz/lz/lzma/zst/Z, zip/jar, rpm/srpm,
 # deb/ipk, 7z) plus squashfs, matched case-insensitively so near misses are
@@ -1621,7 +1635,12 @@ def fetch_recipe(recipe, workdir, cargo=None):
             continue
         destination.mkdir(parents=True, exist_ok=True)
         if TARBALL.search(name) and params.get('unpack', '1') == '1':
-            safe_extract(target, destination)
+            try:
+                safe_extract(target, destination)
+            except ARCHIVE_DECODE_ERRORS as error:
+                errors.append(f'{recipe.path.name}: {name} could not be decoded as a tarball: '
+                              f'{type(error).__name__}: {error}')
+                continue
         else:
             try:
                 write_new(unpack, os.path.relpath(destination / name, unpack.resolve()), target)
@@ -1913,7 +1932,7 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
                 continue
             try:
                 errors, fetched = fetch_recipe(recipe, workdir, cargo)
-            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            except (OSError, ValueError, subprocess.CalledProcessError, *ARCHIVE_DECODE_ERRORS) as error:
                 errors, fetched = [f'{recipe.path.name}: fetch/unpack failed: {error}'], []
             report['errors'] += errors
             report['recipes'][name]['fetched'] = fetched

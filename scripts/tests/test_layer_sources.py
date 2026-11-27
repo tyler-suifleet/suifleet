@@ -2482,6 +2482,65 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(url=f'{self.url};unpack=0')
         self.assertFalse(any('does not model' in e for e in self.errors()), self.errors())
 
+    def test_zstandard_tarballs_are_refused_statically(self):
+        # The supported host Python's tarfile cannot decode Zstandard, so a
+        # correctly pinned .tar.zst must be refused before download rather
+        # than fail inside the extractor.
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0002', 'archive',
+                                       '--format=tar', self.rev, '--', *self.info['paths']])
+        if shutil.which('zstd'):
+            packed = subprocess.run(['zstd', '-q', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout
+        else:
+            packed = b'\x28\xb5\x2f\xfd' + raw  # Zstandard frame magic; undecodable either way
+        archive = Path(self.tmp.name) / 'source.tar.zst'
+        archive.write_bytes(packed)
+        self.archive = archive
+        sha = sha256(packed)
+        for name in ('source.tar.zst', 'source.tzst'):
+            with self.subTest(name):
+                self.write_recipe(url=f'{self.url};downloadfilename={name}', sha=sha)
+                self.assertTrue(any('format the audit does not extract' in e for e in self.errors()), self.errors())
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('nothing fetched' in e for e in errors), errors)
+        # unpack=0 keeps it a loose file, which the audit can model.
+        self.write_recipe(url=f'{self.url};downloadfilename=source.tar.zst;unpack=0', sha=sha)
+        self.assertFalse(any('format the audit does not extract' in e for e in self.errors()), self.errors())
+
+    def test_undecodable_pinned_tarballs_are_findings_not_tracebacks(self):
+        # Correctly pinned bytes that do not decode as the tarball their name
+        # claims (Zstandard data saved as .tar.gz, a truncated .tar.xz, plain
+        # garbage) must come back as structured findings in the JSON report.
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0002', 'archive',
+                                       '--format=tar', self.rev, '--', *self.info['paths']])
+        cases = {}
+        if shutil.which('zstd'):
+            cases['source-zstd.tar.gz'] = subprocess.run(['zstd', '-q', '-c'], input=raw, stdout=subprocess.PIPE,
+                                                         check=True).stdout
+        xz = subprocess.run(['xz', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout
+        cases['source-truncated.tar.xz'] = xz[:len(xz) // 2]
+        gz = subprocess.run(['gzip', '-n', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout
+        cases['source-truncated.tar.gz'] = gz[:len(gz) // 2]
+        cases['source-garbage.tar'] = b'not a tarball\n' * 64
+        for name, data in cases.items():
+            with self.subTest(name):
+                archive = Path(self.tmp.name) / f'bad-{name}'
+                archive.write_bytes(data)
+                self.archive = archive
+                self.write_recipe(url=f'{self.url};downloadfilename={name}', sha=sha256(data))
+                self.assertEqual(self.errors(), [])
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                json.dumps(report)
+                self.assertFalse(report['ok'])
+                self.assertTrue(report['recipes']['suifleet']['fetched'][0]['verified'])
+                self.assertTrue(any(f'{name} could not be decoded as a tarball' in e for e in report['errors']),
+                                report['errors'])
+
     def test_fetch_reports_checksum_and_layout_defects(self):
         self.write_recipe(sha='f' * 64)
         with mock.patch.object(audit, 'download', self.fake_download):
