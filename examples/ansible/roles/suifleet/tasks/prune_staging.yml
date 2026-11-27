@@ -1,0 +1,17 @@
+---
+# Staged artifacts are named by their pinned SHA-256; only this run's is kept.
+# Removing a concurrent rollout's in-flight file makes that rollout's install
+# fail (its source is missing), never install other bytes.
+- name: Find staged artifacts of other releases
+  ansible.builtin.find:
+    paths: /var/cache/suifleet
+    patterns: ["suifleet.staged", "suifleet-*.staged", "suifleet_*.deb"]
+    file_type: file
+  register: suifleet_staged_artifacts
+  check_mode: false
+
+- name: Remove staged artifacts of other releases
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ suifleet_staged_artifacts.files | map(attribute='path') | reject('equalto', suifleet_staging_keep) | list }}"

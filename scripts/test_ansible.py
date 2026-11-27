@@ -80,7 +80,11 @@ configured hosts with their SuiFleet units stopped
 (one with only the signing socket active, so a socket-activated signer would
 show) and one journal not yet initialized, as an interrupted upgrade leaves them
 (succeeds; starts nothing; identity, journal and units untouched) followed by
-a real run that starts and verifies them (rerun changed=0),
+a real run that starts and verifies them (rerun changed=0), two rollouts of
+different releases overlapping on every host between one's host-side digest
+check and its install (the other release never writes the verified file; the
+first fails at its install, the host keeps the second release, stale staged
+artifacts are removed; rerun changed=0),
 rolling-restart preview in check mode (succeeds; no process or
 identity changes), rolling restart. It checks preserved identity and
 enrollment, on-chain enrollment effects (device sender, claim-sponsored gas,
@@ -207,6 +211,44 @@ INTERRUPTED_PLAY = """- hosts: suifleet_devices
     - ansible.builtin.include_role: {name: suifleet, tasks_from: identity.yml}
     - ansible.builtin.include_role: {name: suifleet, tasks_from: enroll.yml}
     - ansible.builtin.include_role: {name: suifleet, tasks_from: configure.yml}
+"""
+# The role's install tasks only: one release's artifact staged, checked and installed.
+INSTALL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: {name: suifleet, tasks_from: identity.yml}\n", 1)[0]
+# A controller callback (test-only) that overlaps two rollouts deterministically:
+# as soon as a host's staged artifact has passed the host-side SHA-256 check, it
+# runs a complete install of another release on that host (SF304_OVERLAP_ARGS)
+# and only then lets the first rollout continue to its install task.
+OVERLAP_VERIFIED_TASKS = ("Refuse a staged binary that differs from the pinned SHA-256",
+                          "Refuse a staged package that differs from the pinned SHA-256")
+OVERLAP_INSTALL_TASKS = ("TASK [suifleet : Install the verified binary]", "TASK [suifleet : Install or upgrade the package]")
+OVERLAP_CALLBACK = f"""import json, os, subprocess
+from ansible.plugins.callback import CallbackBase
+
+VERIFIED = {OVERLAP_VERIFIED_TASKS!r}
+
+
+class CallbackModule(CallbackBase):
+    CALLBACK_VERSION = 2.0
+    CALLBACK_TYPE = "aggregate"
+    CALLBACK_NAME = "sf304_overlap"
+    CALLBACK_NEEDS_ENABLED = True
+
+    def v2_runner_on_ok(self, result):
+        if result._task.name not in VERIFIED:
+            return
+        host = result._host.get_name()
+        base = "/work/overlap/" + host
+        if os.path.exists(base + ".started"):
+            return
+        open(base + ".started", "w").close()
+        env = {{k: v for k, v in os.environ.items() if k != "ANSIBLE_CALLBACKS_ENABLED"}}
+        command = ["ansible-playbook", "-i", "/work/inventory.yml", "/work/install-only.yml", "--limit", host,
+                   *json.loads(os.environ["SF304_OVERLAP_ARGS"])]
+        done = subprocess.run(command, env=env, text=True, capture_output=True)
+        with open(base + ".log", "w") as log:
+            log.write(done.stdout + done.stderr)
+        with open(base + ".rc", "w") as rc:
+            rc.write(str(done.returncode))
 """
 # Stops the role's enrollment command right after the enrollment transaction
 # succeeded and its receipt reached the partial file, before the record is
@@ -560,7 +602,8 @@ class Harness:
         binary = packages / "suifleet-built"
         run("strip", "--strip-debug", "-o", str(binary), str(self.args.binary))
         out = {}
-        for revision in ("1", "2"):
+        # Revision 3 is only staged by the overlapping-rollouts case.
+        for revision in ("1", "2", "3"):
             deb = build_deb.build(binary, packages / revision, f"{version}-{revision}", "amd64", 1793606400)
             out[revision] = deb
         # A content-different binary for the systemd-binary upgrade: bytes after
@@ -890,6 +933,53 @@ class Harness:
         _, recap = self.ansible("rerun after the retry", "site.yml", *vault, *rollout)
         self.unchanged(recap, "rerun after the retry")
         return after, rollout
+
+    def overlapping_releases(self, vault, rollout, previous):
+        """Two rollouts of different releases overlap on every host.
+
+        Rollout A (deb -3, binary 2; each would install over the current
+        release if its staged file were still there) stages and checks its artifact; before it
+        installs, a complete rollout B of the current release (deb -2, binary 3)
+        runs on the same host. Each release stages at its own digest-named path,
+        so B never writes the file A verified; B removes A's staged file, and A
+        must then fail at its install task rather than install other bytes."""
+        overlap = self.work / "ctl/overlap"
+        shutil.rmtree(overlap, ignore_errors=True)
+        overlap.mkdir()
+        (self.work / "ctl/callbacks").mkdir(exist_ok=True)
+        (self.work / "ctl/callbacks/sf304_overlap.py").write_text(OVERLAP_CALLBACK)
+        (self.work / "ctl/install-only.yml").write_text(INSTALL_ONLY_PLAY)
+        for host in self.hosts.values():
+            # A staged file left by a role version with one fixed staging path.
+            self.exec(host["container"], "sh", "-c", "cp /usr/bin/suifleet /var/cache/suifleet/suifleet.staged")
+        release_a = ["-e", f"suifleet_deb_src=/artifacts/3/{self.debs['3'].name}", "-e", f"suifleet_deb_sha256={sha256(self.debs['3'])}",
+                     "-e", "suifleet_binary_src=/artifacts/suifleet-2", "-e", f"suifleet_binary_sha256={sha256(self.binaries['2'])}"]
+        output, _ = self.ansible("overlapping rollouts of two releases", "/work/install-only.yml", *release_a, expect_rc="nonzero",
+                                 env=("ANSIBLE_CALLBACK_PLUGINS=/work/callbacks", "ANSIBLE_CALLBACKS_ENABLED=sf304_overlap",
+                                      "SF304_OVERLAP_ARGS=" + json.dumps(rollout)))
+        expected = {name: dict(deb=sha256(self.debs["2"]), binary=sha256(self.binaries["3"])) for name in self.hosts}
+        for name, host in self.hosts.items():
+            deb = host["profile"] == "deb"
+            assert (overlap / f"{name}.rc").read_text() == "0", (name, "the overlapping rollout failed",
+                                                                 (overlap / f"{name}.log").read_text()[-4000:])
+            install = OVERLAP_INSTALL_TASKS[1 if deb else 0]
+            assert self.task_statuses(output, install, name) == {"fatal"}, (name, "the first rollout's install did not fail closed")
+            # It failed because its own staged file was gone, not for another reason.
+            own = sha256(self.debs["3"]) if deb else sha256(self.binaries["2"])
+            failure = [line for line in output.split(install, 1)[1].split("\nTASK [", 1)[0].splitlines()
+                       if line.startswith(f"fatal: [{name}]")]
+            assert failure and own in failure[0], (name, "the install failed for another reason", failure)
+            state, _ = self.host_state(name)
+            for field in ("binary_sha256", "package", "main_pid", "signer_pid", "key_sha256", "enrollment_sha256"):
+                assert state[field] == previous[name][field], (name, field, "changed by the overlapping rollouts")
+            staged = self.exec(host["container"], "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout.split()
+            digest = expected[name]["deb" if deb else "binary"]
+            path = f"suifleet_amd64-{digest}.deb" if deb else f"suifleet-{digest}.staged"
+            assert staged == [digest, path], (name, "staging holds other than the current release", staged)
+        print("PASS overlapping rollouts: the second release never wrote the first's verified file; the first failed"
+              " at its install, the host kept the second release, and stale staged artifacts were removed")
+        _, recap = self.ansible("rerun after the overlapping rollouts", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the overlapping rollouts")
 
     def sudo_log_control(self):
         """sudo records the standard input of become commands on every host, so the claim checks can see it."""
@@ -2436,6 +2526,7 @@ class Harness:
         after = self.socket_drop_in_before_run(vault, rollout, after)
         after = self.drop_in_loaded_by_config_reload(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
+        self.overlapping_releases(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")

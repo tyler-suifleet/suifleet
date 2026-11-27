@@ -59,7 +59,11 @@ Copy each artifact's SHA-256 from that verified `release.json` into the
 inventory (`suifleet_deb_sha256`). The role checks the SHA-256 on the
 controller, then stages the artifact under `/var/cache/suifleet` and checks
 the staged copy on each host before installing. A binary replaces
-`/usr/bin/suifleet` only after its staged copy matches. For
+`/usr/bin/suifleet` only after its staged copy matches. Each staged file is
+named by its pinned SHA-256, so overlapping rollouts of different releases
+never share the file one of them checked; a run removes other releases'
+staged files after installing, which makes an overlapping rollout's install
+fail rather than install other bytes. For
 `systemd-binary`, extract the binary from the verified tarball and pin its own
 SHA-256 (`suifleet_binary_sha256`). Point `suifleet_units_src` at the reviewed
 `suifleet-edge/meta-suifleet/recipes-edge/suifleet/files` directory of the same

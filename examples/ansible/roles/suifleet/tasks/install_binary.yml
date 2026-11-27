@@ -22,7 +22,9 @@
     - {name: suifleet-signer, home: /nonexistent}
 
 # The binary is staged and its SHA-256 checked on the host before it replaces
-# /usr/bin/suifleet (an atomic rename by the copy module).
+# /usr/bin/suifleet (an atomic rename by the copy module). The staging path
+# names the pinned digest, so an overlapping rollout of another release never
+# writes the file this rollout verified and then installs.
 - name: Create the private staging directory
   ansible.builtin.file:
     path: /var/cache/suifleet
@@ -31,10 +33,14 @@
     group: root
     mode: "0700"
 
+- name: Choose the release-specific staging path
+  ansible.builtin.set_fact:
+    suifleet_binary_staging: "/var/cache/suifleet/suifleet-{{ suifleet_binary_sha256 }}.staged"
+
 - name: Stage the authenticated binary
   ansible.builtin.copy:
     src: "{{ suifleet_binary_src }}"
-    dest: /var/cache/suifleet/suifleet.staged
+    dest: "{{ suifleet_binary_staging }}"
     owner: root
     group: root
     mode: "0700"
@@ -45,7 +51,7 @@
 # digest was already verified in preflight.
 - name: Check the staged binary on the host
   ansible.builtin.stat:
-    path: /var/cache/suifleet/suifleet.staged
+    path: "{{ suifleet_binary_staging }}"
     get_checksum: true
     checksum_algorithm: sha256
   register: suifleet_binary_remote
@@ -69,7 +75,7 @@
 
 - name: Install the verified binary
   ansible.builtin.copy:
-    src: /var/cache/suifleet/suifleet.staged
+    src: "{{ suifleet_binary_staging }}"
     remote_src: true
     dest: /usr/bin/suifleet
     owner: root
@@ -77,6 +83,11 @@
     mode: "0755"
   register: suifleet_binary_copy
   when: not (ansible_check_mode and suifleet_binary_staged is changed)
+
+- name: Remove other releases' staged artifacts
+  ansible.builtin.import_tasks: prune_staging.yml
+  vars:
+    suifleet_staging_keep: "{{ suifleet_binary_staging }}"
 
 - name: Install the provisioning helper
   ansible.builtin.copy:

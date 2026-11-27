@@ -7,10 +7,16 @@
     group: root
     mode: "0700"
 
+# The staging path names the pinned digest, so an overlapping rollout of
+# another release never writes the file this rollout verified and installs.
+- name: Choose the release-specific staging path
+  ansible.builtin.set_fact:
+    suifleet_deb_staging: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}-{{ suifleet_deb_sha256 }}.deb"
+
 - name: Stage the authenticated package
   ansible.builtin.copy:
     src: "{{ suifleet_deb_src }}"
-    dest: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
+    dest: "{{ suifleet_deb_staging }}"
     owner: root
     group: root
     mode: "0600"
@@ -21,7 +27,7 @@
 # controller-side digest was already verified in preflight.
 - name: Check the staged package on the host
   ansible.builtin.stat:
-    path: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
+    path: "{{ suifleet_deb_staging }}"
     get_checksum: true
     checksum_algorithm: sha256
   register: suifleet_deb_remote
@@ -47,9 +53,14 @@
 # (docs/DEBIAN_PACKAGING.md); the service tasks start them again afterwards.
 - name: Install or upgrade the package
   ansible.builtin.apt:
-    deb: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}.deb"
+    deb: "{{ suifleet_deb_staging }}"
   register: suifleet_package
   when: suifleet_deb_remote is not skipped and suifleet_deb_remote.stat.exists
+
+- name: Remove other releases' staged artifacts
+  ansible.builtin.import_tasks: prune_staging.yml
+  vars:
+    suifleet_staging_keep: "{{ suifleet_deb_staging }}"
 
 - name: Record whether the client code changed
   ansible.builtin.set_fact:
