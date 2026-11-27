@@ -187,7 +187,11 @@ These static checks always run, on every recipe in the layer:
   percent escape is refused rather than decoded. Other parameters, such as `striplevel`,
   `md5sum` or `localpath`, are refused statically and by the fetcher before
   anything is downloaded.
-- Every `crate://` entry has a SHA-256.
+- Every `crate://` entry has the generated form `crate://crates.io/NAME/VERSION`
+  and a SHA-256. BitBake derives the download host from the URL and lets an
+  inline `sha256sum` or a `name=` parameter replace the generated
+  `NAME-VERSION.sha256sum` flag, so another registry, any parameter and a
+  duplicate entry are refused.
 - `file://` entries resolve, after following symlinks, to regular files inside
   the layer, and `FILESEXTRAPATHS` doesn't point outside it. This rejects the
   pre-parse `${TOPDIR}` codec artifacts. No symlink in the layer may leave it.
@@ -339,7 +343,10 @@ These static checks always run, on every recipe in the layer:
 
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
-the lockfile's registry crates, versions and checksums. The crate include is
+the lockfile's crates.io registry crates, versions and checksums. It compares
+each entry's registry and effective checksum, as BitBake would fetch and verify
+it, and refuses lockfile sources other than the crates.io index. `--fetch` does
+not download crates. The crate include is
 still regenerated with `bitbake -c update_crates suifleet`; this check confirms
 the committed result matches.
 
