@@ -798,6 +798,50 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(url=git.replace('protocol=https', 'protocol=ssh'))
         self.assertTrue(any('protocol=https' in e for e in self.errors()))
 
+    def test_git_sources_need_a_branch_or_nobranch(self):
+        base = 'git://github.com/example/suifleet.git;protocol=https'
+        self.write_recipe(url=base)
+        self.assertTrue(any('needs branch=NAME' in e for e in self.errors()), self.errors())
+        for params in (';nobranch=1', ';branch=main'):
+            with self.subTest(params):
+                self.write_recipe(url=base + params)
+                self.assertFalse(any('needs branch=NAME' in e for e in self.errors()), self.errors())
+        self.write_recipe(url=base + ';branch=a,b;name=x,y', extra=f'SRCREV_x = "{self.rev}"\nSRCREV_y = "{self.rev}"')
+        self.assertTrue(any('several names or branches' in e for e in self.errors()), self.errors())
+
+    def test_fetch_verifies_srcrev_is_on_the_named_branch(self):
+        # BitBake rejects a SRCREV that is not on branch= (unless nobranch=1);
+        # the audit must not report such a git source as verified.
+        self.repo.git('branch', 'release', self.rev)
+        self.repo.git('checkout', '-q', '-b', 'side')
+        self.repo.write('side.txt', 'off the release branch')
+        side = self.repo.commit()
+        self.repo.git('checkout', '-q', 'release')
+        remote = f'file://{self.repo.root}'
+        cases = [
+            ('branch=missing', self.rev, "branch 'missing' does not exist", False),
+            ('branch=release', side, "is not on branch 'release'", False),
+            ('branch=release', self.rev, None, True),
+            ('nobranch=1', side, None, True),
+        ]
+        for params, rev, message, verified in cases:
+            with self.subTest(params=params, rev=rev):
+                url = f'git://github.com/example/suifleet.git;protocol=https;{params};name=edge;destsuffix=source'
+                self.write_recipe(url=url, extra=f'SRCREV_edge = "{rev}"')
+                with mock.patch.object(audit, 'git_remote', return_value=remote):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                entry = report['recipes']['suifleet']
+                self.assertNotIn('fetch_skipped', entry, report['errors'])
+                fetched = [f for f in entry['fetched'] if 'revision' in f]
+                self.assertEqual([f['verified'] for f in fetched], [verified], report['errors'])
+                branch_errors = [e for e in report['errors'] if 'branch' in e]
+                if message:
+                    self.assertFalse(report['ok'])
+                    self.assertTrue(any(message in e for e in branch_errors), report['errors'])
+                else:
+                    self.assertEqual(branch_errors, [])
+
     def test_gitsm_sources_are_refused_and_never_fetched(self):
         # gitsm would also fetch submodules that the audit never verifies, so a
         # fully pinned gitsm source must still fail, statically and under --fetch.

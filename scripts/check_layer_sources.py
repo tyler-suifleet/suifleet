@@ -408,6 +408,13 @@ def audit_recipe(recipe):
                 errors.append(f'{where}: git source must use protocol=https: {url}')
             if not HEX40.match(rev or ''):
                 errors.append(f'{where}: git source needs a 40-hex SRCREV, got {rev!r}')
+            # BitBake checks that SRCREV is on the named branch unless
+            # nobranch=1. Require one of the two explicitly (newer BitBake
+            # rejects a missing branch) so the --fetch check can model it.
+            if params.get('nobranch') != '1' and not params.get('branch'):
+                errors.append(f'{where}: git source needs branch=NAME (SRCREV must be on it) or nobranch=1: {url}')
+            if ',' in params.get('branch', '') or ',' in params.get('name', ''):
+                errors.append(f'{where}: git source with several names or branches is not supported: {url}')
             if scheme == 'gitsm':
                 # gitsm also fetches every submodule named by .gitmodules at the
                 # pinned gitlinks. The audit verifies only the top-level commit,
@@ -571,6 +578,33 @@ def anonymous_env(home):
     return env
 
 
+def git_remote(url):
+    return 'https://' + url.split('://', 1)[1]
+
+
+def git_branch_error(repo, remote, branch, rev, env):
+    """Model BitBake's branch check: SRCREV must be reachable from the named
+    remote branch. Returns an error string, or None when it is."""
+    if not branch or branch.startswith('-') or '..' in branch or branch.endswith('/'):
+        return f'git branch {branch!r} is not a valid branch name'
+    git = ['git', '-c', 'credential.helper=', '-C', str(repo)]
+    ref = f'refs/heads/{branch}'
+    listed = subprocess.run([*git, 'ls-remote', '--heads', remote, ref], env=env, capture_output=True, text=True)
+    if listed.returncode != 0:
+        return f'could not list branch {branch!r} on {remote}'
+    if not any(line.split('\t', 1)[-1] == ref for line in listed.stdout.splitlines()):
+        return f'branch {branch!r} does not exist on {remote}; SRCREV {rev} cannot be on it'
+    local = 'refs/suifleet-audit/branch'
+    if subprocess.run([*git, 'fetch', '-q', remote, f'+{ref}:{local}'], env=env).returncode != 0:
+        return f'could not fetch branch {branch!r} from {remote}'
+    contained = subprocess.run([*git, 'merge-base', '--is-ancestor', rev, local], env=env)
+    if contained.returncode == 1:
+        return f'SRCREV {rev} is not on branch {branch!r}'
+    if contained.returncode != 0:
+        return f'could not check whether SRCREV {rev} is on branch {branch!r}'
+    return None
+
+
 def download(url, target):
     # urllib sends no Authorization header and never reads ~/.netrc.
     request = urllib.request.Request(url, headers={'User-Agent': 'meta-suifleet-source-audit'})
@@ -711,15 +745,19 @@ def fetch_recipe(recipe, workdir, cargo=None):
         destination = confined(unpack, os.path.relpath(destination, unpack.resolve()), 'unpack destination')
         if scheme == 'git':
             rev = recipe.get(f'SRCREV_{params["name"]}') if 'name' in params else recipe.get('SRCREV')
-            remote = 'https://' + url.split('://', 1)[1]
+            remote = git_remote(url)
             env = anonymous_env(Path(workdir))
             for command in (['init', '-q', str(destination)], ['-C', str(destination), 'fetch', '-q', '--depth', '1', remote, rev],
                             ['-C', str(destination), 'checkout', '-q', '--detach', 'FETCH_HEAD']):
                 subprocess.run(['git', '-c', 'credential.helper=', *command], env=env, check=True)
             actual = subprocess.check_output(['git', '-C', str(destination), 'rev-parse', 'HEAD'], env=env, text=True).strip()
-            fetched.append({'url': url, 'revision': actual, 'verified': actual == rev})
+            branch_error = None if params.get('nobranch') == '1' else git_branch_error(destination, remote, params.get('branch', ''), rev, env)
+            fetched.append({'url': url, 'revision': actual, 'branch': params.get('branch') if params.get('nobranch') != '1' else None,
+                            'verified': actual == rev and branch_error is None})
             if actual != rev:
                 errors.append(f'{recipe.path.name}: fetched {actual}, SRCREV is {rev}')
+            if branch_error:
+                errors.append(f'{recipe.path.name}: {branch_error}')
             continue
         name = PurePosixPath(urllib.parse.urlsplit(url).path).name
         target = downloads / name
