@@ -911,22 +911,42 @@ def crate_source(url, params):
 def lock_packages(lock):
     """Return ({(name, version): (registry, checksum)}, unsupported) for Cargo.lock.
 
+    The whole lock is parsed as TOML (package_edge_source.parse_toml, which
+    raises ValueError on anything outside its strict subset), so every TOML
+    spelling of a row's keys is read as Cargo reads it; a source field can never
+    be missed and mistaken for a source-less workspace package.
+
     Cargo package identity includes the source, so two rows may share a name and
     version. Only crates.io index rows enter the mapping; every row from another
-    source, and any repeated crates.io coordinate, is listed in `unsupported`
-    while reading, so no row can be overwritten before it is refused."""
+    source, any repeated crates.io coordinate and any row whose name, version,
+    source or checksum is not a plain string is listed in `unsupported` while
+    reading, so no row can be overwritten or skipped before it is refused."""
+    packager = load_packager()
+    try:
+        document = packager.parse_toml(lock)
+    except ValueError as error:
+        raise ValueError('Cargo.lock: ' + str(error).replace('Cargo.toml syntax', 'TOML syntax')) from None
+    rows = document.get('package', [])
+    if not isinstance(rows, packager._TableArray):
+        raise ValueError('Cargo.lock: package is not an array of [[package]] tables')
+    plain = lambda value: isinstance(value, str) and not isinstance(value, packager._Scalar)
     packages, unsupported = {}, []
-    for block in lock.split('[[package]]')[1:]:
-        fields = dict(re.findall(r'^(\w+) = "([^"]*)"', block, re.M))
-        source = fields.get('source')
-        key = (fields.get('name', ''), fields.get('version', ''))
+    for index, row in enumerate(rows):
+        name, version = row.get('name'), row.get('version')
+        if not (plain(name) and plain(version)):
+            unsupported.append(f'[[package]] #{index + 1} (name/version not plain strings)')
+            continue
+        if any(field in row and not plain(row[field]) for field in ('source', 'checksum')):
+            unsupported.append(f'{name} {version} (source/checksum not plain strings)')
+            continue
+        source, key = row.get('source'), (name, version)
         if source == CRATES_IO_LOCK_SOURCE:
             if key in packages:
-                unsupported.append(f'{key[0]} {key[1]} (duplicate crates.io entry)')
+                unsupported.append(f'{name} {version} (duplicate crates.io entry)')
             else:
-                packages[key] = (CRATES_IO, fields.get('checksum', ''))
-        elif source:
-            unsupported.append(f'{key[0]} {key[1]} ({redact_url(source)})')
+                packages[key] = (CRATES_IO, row.get('checksum', ''))
+        elif source is not None:
+            unsupported.append(f'{name} {version} ({redact_url(source)})')
     return packages, unsupported
 
 
@@ -985,7 +1005,13 @@ def daemon_errors(recipe, read, exists=None, listing=None):
         version = None
     if version is not None and version != recipe.get('SUIFLEET_CRATE_VERSION'):
         errors.append(f'{recipe.path.name}: Cargo.toml version {version} differs from SUIFLEET_CRATE_VERSION')
-    (locked, unsupported), included = lock_packages(lock.decode()), crate_include(recipe)
+    try:
+        locked, unsupported = lock_packages(lock.decode())
+    except (ValueError, UnicodeDecodeError) as error:
+        errors.append(f'{recipe.path.name}: {src}/{error}' if isinstance(error, ValueError)
+                      else f'{recipe.path.name}: {src}/Cargo.lock is not UTF-8')
+        locked, unsupported = {}, []
+    included = crate_include(recipe)
     if unsupported:
         errors.append(f'{recipe.path.name}: Cargo.lock has {len(unsupported)} packages from sources other than '
                       f'the crates.io registry that the crate include cannot pin, e.g. {unsupported[:3]}')

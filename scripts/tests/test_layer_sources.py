@@ -1397,6 +1397,64 @@ class LayerAuditTests(unittest.TestCase):
                           sha=info['sha256'], srcrev=rev)
         self.assertEqual(self.errors(repo=self.repo.root), [])
 
+    def commit_lock_and_audit(self, lock):
+        self.repo.write('suifleet-edge/Cargo.lock', lock)
+        rev = self.repo.commit()
+        archive = Path(self.tmp.name) / f'suifleet-edge-{rev}.tar.gz'
+        info = packager.build(self.repo.root, rev, archive)
+        url = f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/{archive.name}'
+        self.write_recipe(url=url, sha=info['sha256'], srcrev=rev,
+                          extra=f'SUIFLEET_LOCK_SHA256 = "{sha256(lock)}"')
+        report = audit.check(self.layer, repo=self.repo.root)
+        self.assertFalse(any('Cargo.lock sha256' in e for e in report['errors']), report['errors'])
+        return report
+
+    def test_lock_rows_are_read_as_toml_whatever_the_spelling(self):
+        # Valid TOML may space or quote keys differently; the audit must read
+        # the source field as Cargo does, not as one exact `key = "value"`
+        # spelling, or the row would pass as a source-less workspace package.
+        alternate = 'registry+https://example.invalid/index'
+        spellings = {
+            'no spaces': f'\n[[package]]\nname="anyhow"\nversion="1.0.102"\nsource="{alternate}"\nchecksum="{"c" * 64}"\n',
+            'tab and wide spacing': f'\n[[package]]\nname = "anyhow"\nversion = "1.0.102"\n\tsource\t=   "{alternate}"\n',
+            'quoted key': f'\n[[package]]\nname = "anyhow"\nversion = "1.0.102"\n"source" = "{alternate}"\n',
+            'literal string': f"\n[[package]]\nname = 'anyhow'\nversion = '1.0.102'\nsource = '{alternate}'\n",
+            'spaced table header': f'\n[[ package ]]\nname = "anyhow"\nversion = "1.0.102"\nsource = "{alternate}"\n',
+        }
+        for label, row in spellings.items():
+            with self.subTest(label):
+                report = self.commit_lock_and_audit(CARGO_LOCK + row)
+                self.assertFalse(report['ok'], report['errors'])
+                self.assertTrue(any('sources other than the crates.io registry' in e
+                                    and f'anyhow 1.0.102 ({alternate})' in e for e in report['errors']),
+                                report['errors'])
+        # A crates.io row spelled differently is compared like the canonical one.
+        respaced = CARGO_LOCK.replace('name = "anyhow"', 'name="anyhow"').replace('source = ', '"source"\t= ')
+        self.assertNotEqual(respaced, CARGO_LOCK)
+        self.assertEqual(audit.lock_packages(respaced), audit.lock_packages(CARGO_LOCK))
+        wrong = respaced.replace('a' * 64, 'f' * 64)
+        report = self.commit_lock_and_audit(wrong)
+        self.assertTrue(any('checksum differs in' in e for e in report['errors']), report['errors'])
+        # Syntax outside the strict reader, and non-string fields, are refused
+        # instead of being skipped.
+        refused = {
+            'multi-line string': (CARGO_LOCK + f'\n[[package]]\nname = "anyhow"\nversion = "1.0.102"\nsource = """{alternate}"""\n',
+                                  'Cargo.lock: unsupported TOML syntax'),
+            'duplicate key': (CARGO_LOCK.replace('checksum = ', f'source = "{alternate}"\nchecksum = '),
+                              'Cargo.lock: unsupported TOML syntax'),
+            'non-string source': (CARGO_LOCK + '\n[[package]]\nname = "anyhow"\nversion = "1.0.102"\nsource = 1\n',
+                                  'anyhow 1.0.102 (source/checksum not plain strings)'),
+            'package table': ('version = 4\n\n[package]\nname = "anyhow"\n',
+                              'package is not an array of [[package]] tables'),
+        }
+        for label, (lock, expected) in refused.items():
+            with self.subTest(label):
+                report = self.commit_lock_and_audit(lock)
+                self.assertFalse(report['ok'], report['errors'])
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        report = self.commit_lock_and_audit(CARGO_LOCK)
+        self.assertEqual(report['errors'], [])
+
     def test_coupled_pins_must_agree(self):
         self.write_recipe(extra='PV = "1.0"')
         self.assertTrue(any("PV '1.0' differs" in e for e in self.errors()))
