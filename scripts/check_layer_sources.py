@@ -1713,14 +1713,24 @@ LAYER_CONF_STATEMENT = re.compile(r'^([A-Za-z0-9_\-]+)\s*(\.=|\+=|=)\s*"([^"]*)"
 
 def layer_conf_errors(text):
     """Refuse every layer.conf statement that is not plain layer registration."""
-    statements = [line.strip() for _, kind, line in bitbake_lines(text, functions=False) if kind == 'statement']
+    statements, errors = [], []
+    for number, kind, line in bitbake_lines(text, functions=False):
+        if kind == 'statement':
+            statements.append(line.strip())
+        elif kind == 'mixed-comment':
+            # BitBake's ConfHandler refuses these, so the layer would not parse.
+            errors.append(f'conf/layer.conf:{number}: a continuation mixing a comment and code; '
+                          'BitBake refuses to parse it')
+        elif kind == 'unterminated':
+            errors.append(f'conf/layer.conf:{number}: a continuation at end of file; BitBake refuses to parse it')
+        else:
+            errors.append(f'conf/layer.conf:{number}: unexpected {kind} line {line!r}')
     statements = [line for line in statements if line and not line.startswith('#')]
     collections = []
     for line in statements:
         match = LAYER_CONF_STATEMENT.match(line)
         if match and match.group(1) == 'BBFILE_COLLECTIONS' and match.group(2) == '+=':
             collections += match.group(3).split()
-    errors = []
     for line in statements:
         match = LAYER_CONF_STATEMENT.match(line)
         accepted = False

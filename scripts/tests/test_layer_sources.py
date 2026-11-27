@@ -2301,6 +2301,10 @@ class LayerAuditTests(unittest.TestCase):
             'extra BBFILES': 'BBFILES += "${LAYERDIR}/../other/*.bb"',
             'second collection': 'BBFILE_COLLECTIONS += "other"',
             'anonymous python': 'python () {\n    d.setVar("SRCREV", "x")\n}',
+            # Continuations BitBake's ConfHandler refuses: the layer would not
+            # parse, so the audit must not certify it.
+            'comment continued into code': '# note \\\nBBMASK = ".*"',
+            'continuation at end of file': '# trailing note \\',
         }
         for label, text in cases.items():
             with self.subTest(label):
