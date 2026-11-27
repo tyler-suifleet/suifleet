@@ -973,6 +973,67 @@ class Harness:
         (self.work / "ctl/install-only.yml").write_text(INSTALL_ONLY_PLAY)
         return overlap
 
+    def cache_only_restore(self, vault, rollout):
+        """Only the cached artifact of the installed release is missing; full site.yml restores it and restarts nothing.
+
+        The cache is disposable (an operator may clean it; an interrupted
+        overlapping rollout of another release prunes it). Re-uploading the
+        current release's file is not a code change: the signer and daemon on a
+        converged host must keep running. A systemd-binary preview compares the
+        installed binary with the pin and predicts no restart either; a deb
+        preview cannot ask apt about a package it has not uploaded, so it only
+        has to leave the host untouched."""
+        restart_tasks = ("TASK [suifleet : Restart the signing service after code, manifest, signer or socket changes]",
+                         "TASK [suifleet : Restart the daemon after code or configuration changes]")
+        current = dict(deb=sha256(self.debs["2"]), binary=sha256(self.binaries["3"]))
+        before = {}
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert state["signer_pid"] != "0", (name, "signing service not active before the cache-only restore")
+            self.exec(host["container"], "sh", "-c", "rm -f /var/cache/suifleet/suifleet-*.staged /var/cache/suifleet/suifleet_*.deb")
+            assert not self.exec(host["container"], "ls", "-A", "/var/cache/suifleet").stdout.strip(), (name, "cache not emptied")
+            before[name] = state
+        fields = ("main_pid", "signer_pid", "invocations", "binary_sha256", "package", "applied", "key_sha256",
+                  "enrollment_sha256")
+        output, recap = self.ansible("check mode with only the artifact cache removed", "site.yml", "--check", "--diff",
+                                     *vault, *rollout)
+        self.preview_skipped_self_check(output, "check mode with only the artifact cache removed")
+        for name, host in self.hosts.items():
+            assert recap[name]["failed"] == 0 and recap[name]["unreachable"] == 0, (name, recap[name])
+            state, _ = self.host_state(name)
+            for field in fields:
+                assert state[field] == before[name][field], (name, field, "changed by the cache-only preview")
+            assert not self.exec(host["container"], "ls", "-A", "/var/cache/suifleet").stdout.strip(), (name, "preview wrote the cache")
+            if host["profile"] == "systemd-binary":
+                assert self.task_statuses(output, "TASK [suifleet : Report the pending binary installation]", name) == {"skipping"}, \
+                    (name, "preview reported installing the binary already installed")
+                for task in restart_tasks:
+                    assert self.task_statuses(output, task, name) == {"skipping"}, (name, task, "preview predicted a restart")
+        print("PASS cache-only preview wrote nothing; systemd-binary hosts predicted no installation or restart")
+        output, recap = self.ansible("full rollout with only the artifact cache removed", "site.yml", *vault, *rollout)
+        after = {}
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            assert recap[name]["changed"] > 0, (name, "the cache was not restored", recap[name])
+            for task in restart_tasks:
+                assert self.task_statuses(output, task, name) == {"skipping"}, (name, task, "restarted for a cache-only change")
+            assert self.task_statuses(output, "TASK [suifleet : Keep the daemon running]", name) == {"ok"}, name
+            for field in fields:
+                assert state[field] == before[name][field], (name, field, "changed by restoring only the cache")
+            kind = "deb" if host["profile"] == "deb" else "binary"
+            digest = current[kind]
+            path = f"suifleet_amd64-{digest}.deb" if kind == "deb" else f"suifleet-{digest}.staged"
+            staged = self.exec(host["container"], "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout.split()
+            assert staged == [digest, path], (name, "cache not restored to the verified current release", staged)
+            after[name] = state
+        print("PASS full site.yml restored only the verified cache file on every host; signer and daemon kept their"
+              " PIDs and invocations, the binary, package and applied record were unchanged")
+        _, recap = self.ansible("rerun after restoring the cache", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after restoring the cache")
+        return after
+
     def same_pin_overlap(self, vault, rollout, previous):
         """Two rollouts with the same pins overlap; the second's controller artifact changes after its preflight.
 
@@ -2612,6 +2673,7 @@ class Harness:
         after = self.socket_drop_in_before_run(vault, rollout, after)
         after = self.drop_in_loaded_by_config_reload(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
+        after = self.cache_only_restore(vault, rollout)
         self.same_pin_overlap(vault, rollout, after)
         self.overlapping_releases(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
