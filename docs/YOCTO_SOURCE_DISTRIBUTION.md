@@ -552,8 +552,9 @@ The check then verifies the resulting `S`:
   broader published file list such as one including `windows-runtime` still
   passes; a file that differs from, or is absent from, the tree is a finding.
   The reverse also holds: every path of the packager's build closure at
-  `SRCREV` (the same selection `package_edge_source.py` makes) must be present
-  in `S`, so an archive that omits a committed file the build needs, such as
+  `SRCREV` (the same selection `package_edge_source.py` makes, rooted at the
+  recipe's effective `CARGO_SRC_DIR` and `LIC_FILES_CHKSUM` files) must be
+  present in `S`, so an archive that omits a committed file the build needs, such as
   an implicit `mod` file, is a finding even though every file it does carry
   matches the tree;
 - for the codec, the exact five pinned files (each file `do_install` copies
