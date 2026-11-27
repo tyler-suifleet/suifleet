@@ -1317,6 +1317,43 @@ class LayerAuditTests(unittest.TestCase):
         (self.recipe_dir / 'suifleet-crates.inc').write_text(CRATES_INC.split('SRC_URI[')[0])
         self.assertTrue(any('crate anyhow 1.0.102 lacks a SHA-256' in e for e in self.errors()))
 
+    def test_crate_registry_and_effective_checksum_must_match_the_lock(self):
+        # The include is compared as BitBake fetches it: a crate from another
+        # registry, or an inline checksum overriding the correct generated
+        # flag, must not be reported as the verified Cargo.lock pin.
+        inc = self.recipe_dir / 'suifleet-crates.inc'
+        cases = {
+            'other registry': (CRATES_INC.replace('crate://crates.io/', 'crate://example.invalid/'),
+                               "registry 'example.invalid' is not crates.io"),
+            'registry with a path': (CRATES_INC.replace('crate://crates.io/', 'crate://crates.io/mirror/'),
+                                     "registry 'crates.io/mirror' is not crates.io"),
+            'inline checksum': (CRATES_INC.replace('anyhow/1.0.102 ', f'anyhow/1.0.102;sha256sum={"0" * 64} '),
+                                'crate source parameters the audit does not model: sha256sum'),
+            'name parameter': (CRATES_INC.replace('anyhow/1.0.102 ', 'anyhow/1.0.102;name=other ')
+                               + f'SRC_URI[other.sha256sum] = "{"a" * 64}"\n',
+                               'crate source parameters the audit does not model: name'),
+            'duplicate entry': (CRATES_INC.replace('anyhow/1.0.102 \\\n', 'anyhow/1.0.102 \\\n    crate://crates.io/anyhow/1.0.102 \\\n'),
+                                'duplicate crate entry'),
+        }
+        for label, (text, expected) in cases.items():
+            with self.subTest(label):
+                self.assertNotEqual(text, CRATES_INC)
+                inc.write_text(text)
+                report = audit.check(self.layer, repo=self.repo.root)
+                self.assertFalse(report['ok'], report['errors'])
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+                # The plain layer check refuses the form too, without the lock.
+                if label != 'duplicate entry':
+                    self.assertTrue(any(expected in e for e in self.errors()), self.errors())
+        inc.write_text(CRATES_INC)
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+
+    def test_lock_sources_other_than_crates_io_are_refused(self):
+        self.assertEqual(audit.lock_packages(CARGO_LOCK)[('anyhow', '1.0.102')][0], 'crates.io')
+        other = CARGO_LOCK.replace('registry+https://github.com/rust-lang/crates.io-index',
+                                   'registry+https://example.invalid/index')
+        self.assertTrue(audit.lock_packages(other)[('anyhow', '1.0.102')][0].startswith('unsupported:'))
+
     def test_coupled_pins_must_agree(self):
         self.write_recipe(extra='PV = "1.0"')
         self.assertTrue(any("PV '1.0' differs" in e for e in self.errors()))
