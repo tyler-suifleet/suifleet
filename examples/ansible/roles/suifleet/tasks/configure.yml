@@ -1,0 +1,69 @@
+---
+# Installed in this order: deployment.json, signer.toml, then config.toml.
+# config.toml's appearance starts the daemon through suifleet-enrollment.path,
+# and the daemon asks the signing service for its address at startup.
+# The controller file may change after preflight.yml hashed it. copy writes
+# the transferred bytes to a temporary file, runs validate on that file, and
+# only then renames it over /etc/suifleet/deployment.json: bytes other than
+# the ones preflight hashed fail the task and leave the installed manifest
+# (the last valid one) byte for byte as it was.
+- name: Install the network manifest
+  ansible.builtin.copy:
+    src: "{{ suifleet_manifest_src }}"
+    dest: /etc/suifleet/deployment.json
+    owner: root
+    group: suifleet
+    mode: "0640"
+    validate: >-
+      sh -c 'test "$(sha256sum < "$1" | cut -c1-64)" = "$0"'
+      {{ suifleet_manifest.stat.checksum }} %s
+  register: suifleet_manifest_file
+
+# In check mode copy writes nothing, so there is no installed copy to compare.
+# An unchanged copy transfers nothing to validate: this also refuses a
+# controller file that changed to the bytes already installed.
+- name: Check the installed manifest against the controller digest
+  when: not ansible_check_mode
+  ansible.builtin.include_tasks: verify_manifest.yml
+  vars:
+    staged: /etc/suifleet/deployment.json
+
+- name: Configure only enrolled devices
+  when: suifleet_enrollment is defined
+  block:
+    - name: Install the signing service configuration
+      ansible.builtin.template:
+        src: signer.toml.j2
+        dest: /etc/suifleet/signer.toml
+        owner: root
+        group: suifleet-signer
+        mode: "0640"
+      register: suifleet_signer_file
+
+    # The provisioning helper hands the key to the signing service's user
+    # once signer.toml exists; the key itself never changes.
+    - name: Hand the device key to the signing service
+      ansible.builtin.systemd_service:
+        name: suifleet-provision.service
+        state: restarted
+      when: suifleet_signer_file is changed and not ansible_check_mode
+
+    - name: Install the daemon configuration last
+      ansible.builtin.template:
+        src: config.toml.j2
+        dest: /etc/suifleet/config.toml
+        owner: root
+        group: suifleet
+        mode: "0640"
+      register: suifleet_config_file
+
+    # Configuration is complete: the record no longer needs the deployment it
+    # enrolled under (enroll.yml enforced it before anything above ran), and
+    # a configured host never enrolls again, so it needs no claim record.
+    - name: Remove the enrollment's deployment binding and claim record once configured
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ suifleet_enrollment_deployment }}"
+        - "{{ suifleet_enrollment_claim }}"

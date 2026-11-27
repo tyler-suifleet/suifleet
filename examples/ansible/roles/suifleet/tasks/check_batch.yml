@@ -1,0 +1,86 @@
+---
+# Binds a host's batch folder to the deployment the role configures. Both the
+# claim enrollment and the read-only lookup of an attempt that printed no
+# receipt run the CLI with an enroll.toml rebuilt from the batch's parsed
+# enroll.toml (suifleet_enroll_toml), which loads deployment.json staged from
+# suifleet_manifest_src. The same device key can hold a valid enrollment under
+# another deployment, so the receipt's address alone does not prove that its
+# Device and DeviceCap belong to suifleet_manifest_src, which configure.yml
+# installs beside them. Inputs: batch (the folder) and suifleet_batch_claim
+# (whether the claim key is needed: the lookup never reads it).
+# Ansible expands environment references (and a leading ~) in path arguments
+# such as stat's path, and in command arguments, while the claim's file lookup
+# and relative paths resolve differently again. The batch path must therefore
+# be absolute and free of $, so every task reads the folder the inventory
+# names and no other (suifleet_serial is already a plain name).
+- name: Require a literal, absolute batch folder path
+  ansible.builtin.assert:
+    that:
+      - batch is match('^/')
+      - "'$' not in batch"
+    quiet: true
+    fail_msg: >-
+      suifleet_enrollment_root must be an absolute controller path without $
+      (Ansible would expand it to another folder), not {{ batch | to_json }}.
+      This run changed nothing on chain.
+
+- name: Read the batch folder on the controller
+  delegate_to: localhost
+  become: false
+  ansible.builtin.stat:
+    path: "{{ batch }}/{{ item }}"
+    get_checksum: "{{ item == 'deployment.json' }}"
+    checksum_algorithm: sha256
+  loop: "{{ (['claim.key'] if suifleet_batch_claim | bool else []) + ['enroll.toml', 'deployment.json'] }}"
+  register: suifleet_batch_files
+  check_mode: false
+
+- name: Refuse an incomplete batch folder or a different manifest
+  vars:
+    batch_manifest: "{{ suifleet_batch_files.results | selectattr('item', 'equalto', 'deployment.json') | first }}"
+  ansible.builtin.assert:
+    that:
+      - suifleet_batch_files.results | map(attribute='stat.exists') | min
+      - batch_manifest.stat.checksum == suifleet_manifest.stat.checksum
+    quiet: true
+    fail_msg: >-
+      {{ batch }} must contain {{ 'claim.key, ' if suifleet_batch_claim | bool else '' }}enroll.toml
+      and the same deployment.json as suifleet_manifest_src. This run changed nothing
+      on chain.
+
+# The CLI parses enroll.toml as TOML, so its parsed values are checked, not
+# its spelling (files/enroll_config.py). The role then stages the canonical
+# configuration built from those values (suifleet_enroll_toml) and the
+# inventory manifest, never the batch's own files.
+- name: Check the enrollment configuration's parsed values
+  delegate_to: localhost
+  become: false
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -I
+      - "{{ role_path }}/files/enroll_config.py"
+      - "{{ batch }}/enroll.toml"
+    expand_argument_vars: false
+  register: suifleet_enroll_config
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse an enrollment configuration for another manifest or key
+  ansible.builtin.assert:
+    that: suifleet_enroll_config.rc == 0
+    quiet: true
+    fail_msg: >-
+      {{ batch }}/enroll.toml must use the batch-relative deployment.json and
+      claim.key and the device's own /etc/suifleet/device.key, with no [signer]
+      table that would sign with another key
+      ({{ suifleet_enroll_config.stderr | trim }}). This run changed nothing on chain.
+
+# suifleet_enroll_policy is the canonical policy ID (0x and 64 lowercase hex
+# digits): each attempt records it beside the manifest's SHA-256, and the
+# lookup of an attempt that printed no receipt runs only under that policy.
+- name: Keep the validated enrollment configuration and its policy
+  ansible.builtin.set_fact:
+    suifleet_enroll_toml: "{{ (suifleet_enroll_config.stdout | from_json).toml }}"
+    suifleet_enroll_policy: "{{ (suifleet_enroll_config.stdout | from_json).policy_id }}"
