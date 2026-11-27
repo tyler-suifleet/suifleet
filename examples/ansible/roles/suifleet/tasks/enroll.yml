@@ -214,9 +214,14 @@
                   the batch folder the attempt enrolled with, or settle it as in
                   docs/ANSIBLE.md#recovery.
 
-            # The claim the attempt recorded before it submitted anything. Only
-            # a revocation of that claim under the attempt's policy settles the
-            # attempt; a revocation of another claim (another serial's, or the
+            # The claim the attempt recorded before it submitted anything, and
+            # the registration of that claim it could consume (the object
+            # version and digest of the claim's table entry). Only a
+            # revocation of that very registration under the attempt's policy
+            # settles the attempt: a revocation of an earlier registration (the
+            # claim was registered again before the attempt) or a later one
+            # (registered again after the attempt) does not. A revocation of
+            # another claim (another serial's, or the
             # same serial's under another policy or job) leaves it able to
             # commit. An attempt recorded by an earlier version of this role
             # has no claim record and cannot be settled here.
@@ -229,8 +234,10 @@
             - name: Keep the claim the attempt that printed no receipt used
               vars:
                 claim_text: "{{ suifleet_attempt_claim_file.content | default('') | b64decode }}"
+                claim_ok: "{{ claim_text is match('^0x[0-9a-f]{64}\\n[0-9]{1,20} [1-9A-HJ-NP-Za-km-z]{32,44}\\n$') and claim_text.splitlines() | length == 2 }}"
               ansible.builtin.set_fact:
-                suifleet_attempt_claim: "{{ claim_text[:-1] if claim_text is match('^0x[0-9a-f]{64}\\n$') else '' }}"
+                suifleet_attempt_claim: "{{ claim_text.splitlines()[0] if claim_ok | bool else '' }}"
+                suifleet_attempt_registration: "{{ claim_text.splitlines()[1].split(' ') if claim_ok | bool else [] }}"
 
             - name: Stop unless the revocation to verify names the attempt's claim and a digest
               ansible.builtin.assert:
@@ -242,7 +249,7 @@
                   {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial,
                   and suifleet_revocation_digest is set to settle it, but
                   {{ 'the digest is not a transaction digest' if suifleet_attempt_claim | length > 0
-                  else suifleet_enrollment_claim ~ ' does not record the claim the attempt used' }}.
+                  else suifleet_enrollment_claim ~ ' does not record the claim and its registration the attempt used' }}.
                   The role keeps the file and writes no record or configuration
                   (docs/ANSIBLE.md#recovery).
               when: suifleet_revocation_digest | length > 0
@@ -321,6 +328,8 @@
                       - --check-revocation
                       - "{{ suifleet_enroll_staging }}/enroll.toml"
                       - "{{ suifleet_attempt_claim }}"
+                      - "{{ suifleet_attempt_registration[0] }}"
+                      - "{{ suifleet_attempt_registration[1] }}"
                       - "{{ suifleet_revocation_digest }}"
                   register: suifleet_revocation_check
                   changed_when: false
@@ -334,10 +343,13 @@
                     path: "{{ suifleet_enroll_staging }}"
                     state: absent
 
-            # The chain proved that the attempt's own claim was removed from
-            # the attempt's policy by a revocation, which aborts unless the
-            # claim was unused, and that it is still absent: the attempt never
-            # committed and never can. Remove the marker first, durably, then
+            # The chain proved that the registration of the attempt's own
+            # claim that the attempt could consume was removed from the
+            # attempt's policy by a revocation (one transaction consumes a
+            # registration, and a revocation emits no enrollment), that the
+            # claim is still absent, and that this key has not enrolled under
+            # the policy since: the attempt never committed, and cannot while
+            # the claim stays unregistered. Remove the marker first, durably, then
             # the binding (a later attempt rewrites a binding left alone). The
             # claim record stays, so the revoked claim is never used again.
             - name: Settle the attempt whose claim was revoked
@@ -582,8 +594,19 @@
                       echo "could not derive the claim address; nothing was sent" >&2
                       exit 1
                     fi
-                    if test -e "$CLAIM" && test "$(cat "$CLAIM")" = "$claim"; then
+                    if test -e "$CLAIM" && test "$(head -n 1 "$CLAIM")" = "$claim"; then
                       echo "the batch folder holds claim $claim, which an earlier attempt used; reissue the serial (docs/ANSIBLE.md#recovery). Nothing was sent" >&2
+                      exit 1
+                    fi
+                    # The current registration of the claim under the batch policy
+                    # (read-only; no claim key is read): the object version and
+                    # digest of its table entry, the only registration this
+                    # attempt can consume. A revocation settles the attempt only
+                    # if it removed this registration. An unregistered claim
+                    # (revoked, or used) is refused here, before the marker.
+                    registration=$(runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && exec /usr/bin/suifleet --claim-registration "$1" "$2"' sh "$STAGING/enroll.toml" "$claim")
+                    if ! printf '%s\n' "$registration" | grep -Eqx '[0-9]{1,20} [1-9A-HJ-NP-Za-km-z]{32,44}'; then
+                      echo "could not read the registration of claim $claim; nothing was sent" >&2
                       exit 1
                     fi
                     # Create the attempt marker exclusively (noclobber opens it with
@@ -599,13 +622,13 @@
                     set +C
                     # Record the attempt, the manifest it enrolls under (staged and
                     # verified above), its policy (canonical, from the checked
-                    # enroll.toml) and its claim, durably before anything can be
-                    # submitted, so a retry after a lost response or power loss
-                    # never submits again, promotes its receipt only beside that
-                    # manifest, and settles an attempt that printed nothing only by
-                    # a revocation of that claim. Nothing was sent if this fails, so
-                    # all are removed.
-                    if ! { printf '%s\n%s\n' "$MANIFEST_SHA256" "$POLICY_ID" > "$DEPLOYMENT" && printf '%s\n' "$claim" > "$CLAIM" && sync -f "$DEPLOYMENT" "$CLAIM" "$partial"; }; then
+                    # enroll.toml), its claim and the registration of that claim, durably
+                    # before anything can be submitted, so a retry after a lost
+                    # response or power loss never submits again, promotes its
+                    # receipt only beside that manifest, and settles an attempt that
+                    # printed nothing only by a revocation of that registration.
+                    # Nothing was sent if this fails, so all are removed.
+                    if ! { printf '%s\n%s\n' "$MANIFEST_SHA256" "$POLICY_ID" > "$DEPLOYMENT" && printf '%s\n%s\n' "$claim" "$registration" > "$CLAIM" && sync -f "$DEPLOYMENT" "$CLAIM" "$partial"; }; then
                       rm -f "$partial" "$DEPLOYMENT" "$CLAIM"
                       echo "could not record $partial; nothing was sent" >&2
                       exit 1

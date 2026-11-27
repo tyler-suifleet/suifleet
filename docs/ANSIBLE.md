@@ -646,12 +646,21 @@ allows it). The role does not check the controller.
   has not committed yet (for example one still pending at the node) may still
   commit later. The run then stops before staging a claim or submitting again,
   and keeps the file until the chain settles the outcome. Only a revocation of
-  the claim that attempt used, under the policy it used, settles it. Another
-  serial's claim, or the same serial's claim under another policy or job,
-  leaves the attempt able to commit. Each attempt therefore also records the
-  public address of its claim in `/etc/suifleet/.enrollment.json.partial.claim`
-  (one line), durably and before anything is submitted. The stop message
-  names that claim and the recorded policy.
+  the registration of the claim that attempt could use, under the policy it
+  used, settles it. Another serial's claim, or the same serial's claim under
+  another policy or job, leaves the attempt able to commit. So does the same
+  claim under the same policy when it was registered again: a revocation from
+  before the claim was registered again says nothing about an attempt that
+  used the new registration. Each attempt therefore also records, in
+  `/etc/suifleet/.enrollment.json.partial.claim`, durably and before anything
+  is submitted, the public address of its claim (first line) and that claim's
+  current registration (second line: the object version and digest of its
+  entry in the policy's claim table, read with the read-only
+  `suifleet --claim-registration`). Every registration creates the entry
+  anew with a higher version and its own digest, and one transaction (an
+  enrollment or a revocation) consumes it. A claim that is not registered
+  is refused before the attempt marker exists. The stop message names that
+  claim and the recorded policy.
 
   1. On the Enrollment page, connected to the network the deployment names,
      select the enrollment policy the stop message names (the policy line of
@@ -686,12 +695,18 @@ allows it). The role does not check the controller.
      requires that the transaction succeeded and is in a checkpoint, that it
      deleted the recorded claim's entry in the recorded policy's claim table
      (the entry's object ID is derived from both, so a revocation of another
-     claim or under another policy does not match), that it emitted no
-     `DeviceEnrolled` event (an enrollment also deletes the entry, and
-     revocation aborts unless the claim was unused), and that the claim is
-     still not registered. Only then does it remove the empty file and the
+     claim or under another policy does not match) at exactly the recorded
+     registration (its input version and digest, so a revocation of an
+     earlier or later registration of the same claim does not match), that
+     it emitted no `DeviceEnrolled` event (an enrollment also deletes the
+     entry, and revocation aborts unless the claim was unused), that the
+     claim is still not registered, and that the node's history since the
+     revocation, which must still be retained, holds no enrollment of this
+     key under the policy (so the attempt did not commit through a later
+     registration either). Only then does it remove the empty file and the
      binding, and stop. A missing or malformed claim record (an attempt by an
-     earlier version of the role) or a digest that fails any check keeps the
+     earlier version of the role, which recorded no registration) or a
+     digest that fails any check keeps the
      file and the binding; escalate rather than remove them. The claim record
      stays, and the role refuses to enroll with that claim again.
   3. Reissue the serial (*Remove reservations to reissue*, reserve it again
