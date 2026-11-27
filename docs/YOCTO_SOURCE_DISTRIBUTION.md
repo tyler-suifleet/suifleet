@@ -177,7 +177,11 @@ These static checks always run, on every recipe in the layer:
   `unpack=1` and `downloadfilename`. Like BitBake, the audit saves the
   download under `downloadfilename` when that is set and chooses how to unpack
   it from that name's suffix. A `.bin` local name is copied as a loose file, not
-  extracted. The local name must be a plain file name and, like the URL, must not
+  extracted. The audit extracts only tarballs (`.tar`, `.tar.gz`, `.tgz`,
+  `.tar.xz`, `.txz`, `.tar.bz2`, `.tbz2`, `.tar.zst`). Any other name that
+  BitBake would unpack, such as `.zip`, `.jar`, `.7z`, `.deb`, `.rpm`, `.tar.lz`
+  or a bare `.gz`, is refused unless it has `unpack=0`. With `unpack=0` it is
+  copied as a loose file, as BitBake copies it. The local name must be a plain file name and, like the URL, must not
   name a commit other than `SRCREV`. BitBake uses `downloadfilename` literally
   (only the URL path is percent-decoded), so a `downloadfilename` containing a
   percent escape is refused rather than decoded. Other parameters, such as `striplevel`,
@@ -194,6 +198,11 @@ These static checks always run, on every recipe in the layer:
   file that contains it; a deferred `${THISDIR}` is rejected. An explicit
   `FILESPATH` assignment is rejected, because it can replace that search
   order with directories outside the layer.
+  Like BitBake, the fetcher copies `file://nested/NAME` to `subdir/nested/NAME`.
+  It keeps the URL's intermediate directories, so a `LIC_FILES_CHKSUM` entry or
+  `S` layout has to use that path. The audit only copies local files and never
+  extracts them, so a local archive (any suffix BitBake unpacks) needs
+  `unpack=0`.
   BitBake tries every `FILESOVERRIDES` subdirectory (machine, distro,
   architecture) of each search directory before the unqualified ones, so a
   same-named file such as `files/qemuarm64/suifleet.service` replaces
