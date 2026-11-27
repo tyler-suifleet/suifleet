@@ -53,8 +53,13 @@ The file set is the daemon build closure, computed from that commit's tree:
 - every file a manifest (the root crate's or a local crate's) declares
   explicitly: a string `package.build` and the `path` of each `[lib]`,
   `[[bin]]`, `[[example]]`, `[[test]]` and `[[bench]]` target, wherever it
-  lives under `suifleet-edge/`. Cargo refuses a manifest whose declared target
-  file is absent. A declared file that is missing, absolute or outside
+  lives under `suifleet-edge/`. A `[[test]]` or `[[bench]]` declared by name
+  only uses the file Cargo infers, `tests/<name>.rs` or `tests/<name>/main.rs`
+  (`benches/` for benchmarks); the other target kinds default under `src/` or
+  `examples/`, which are packaged whole. Cargo refuses a manifest whose declared
+  target file is absent, even for `cargo build --bin`. A name-only target with
+  neither or both inferred files, or without a plain name, stops the build; its
+  `tests/<name>/main.rs` falls under the implicit-module refusal below. A declared file that is missing, absolute or outside
   `suifleet-edge/`, a non-string target `path` and a `package.build` that is
   neither a string nor a boolean stop the build. Today the only declaration is
   `[[bin]] path = "src/main.rs"`, already under `src/`;
@@ -433,7 +438,8 @@ check then verifies the resulting `S`:
 - for every recipe, the license file checksums;
 - for the daemon, the lockfile digest, crate version, crate include, workspace
   members, transitive local path-dependency crates, manifest-declared target
-  files, every include target (followed from declared targets and through
+  files (including Cargo's inferred file for a name-only `[[test]]`/`[[bench]]`,
+  which `cargo metadata --no-deps` does not check), every include target (followed from declared targets and through
   non-`.rs` code targets, whatever their suffix) and
   the same implicit-module refusal outside the
   directories packaged whole, plus `cargo metadata --offline --locked
