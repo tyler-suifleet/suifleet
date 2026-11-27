@@ -1484,6 +1484,46 @@ def tar_mode(name):
 COMPRESSION_MAGIC = ((b'\x1f\x8b', 'gz'), (b'BZh', 'bz2'), (b'\xfd7zXZ\x00', 'xz'))
 
 
+def verify_xz_stream(archive):
+    """Decode an .xz file as 'xz -dc' (XZ Utils) does.
+
+    lzma.open ignores any bytes after a complete stream that fail to decode as
+    another stream, and rejects the legal null stream padding after one, so it
+    disagrees with the xz command BitBake runs in both directions. XZ Utils
+    accepts one or more concatenated streams, each optionally followed by null
+    stream padding whose length is a multiple of four, and rejects anything
+    else: trailing garbage, misaligned padding, leading padding or a stream
+    that ends early. Raises lzma.LZMAError or EOFError on such input."""
+    with open(archive, 'rb') as data:
+        decoder, streams, padding, pending = None, 0, 0, b''
+        while True:
+            if not pending and not (pending := data.read(1 << 20)):
+                break
+            if decoder is None:
+                stripped = pending.lstrip(b'\0')
+                if not streams and len(stripped) != len(pending):
+                    raise lzma.LZMAError('null bytes before the first xz stream')
+                padding += len(pending) - len(stripped)
+                pending = stripped
+                if not pending:
+                    continue
+                if padding % 4:
+                    raise lzma.LZMAError(f'xz stream padding of {padding} bytes is not a multiple of four')
+                padding, decoder = 0, lzma.LZMADecompressor(lzma.FORMAT_XZ)
+            decoder.decompress(pending, 1 << 20)
+            pending = b''
+            while not decoder.eof and not decoder.needs_input:
+                decoder.decompress(b'', 1 << 20)
+            if decoder.eof:
+                pending, decoder, streams = decoder.unused_data, None, streams + 1
+    if decoder is not None:
+        raise EOFError('file ends inside an xz stream')
+    if not streams:
+        raise lzma.LZMAError('no xz stream')
+    if padding % 4:
+        raise lzma.LZMAError(f'xz stream padding of {padding} bytes is not a multiple of four')
+
+
 def verify_compressed_stream(archive, mode):
     """Decode the whole compressed stream through its end-of-stream marker.
 
@@ -1499,9 +1539,11 @@ def verify_compressed_stream(archive, mode):
         compression = next((kind for magic, kind in COMPRESSION_MAGIC if head.startswith(magic)), '')
     if not compression:
         return
-    opener = {'gz': gzip.open, 'bz2': bz2.open, 'xz': lambda path: lzma.open(path)}[compression]
     try:
-        with opener(archive) as stream:
+        if compression == 'xz':
+            verify_xz_stream(archive)
+            return
+        with {'gz': gzip.open, 'bz2': bz2.open}[compression](archive) as stream:
             while stream.read(1 << 20):
                 pass
     except (OSError, EOFError, ValueError, *ARCHIVE_DECODE_ERRORS) as error:

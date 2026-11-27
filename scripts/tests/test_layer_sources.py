@@ -2648,6 +2648,53 @@ class LayerAuditTests(unittest.TestCase):
                                                        stdout=subprocess.DEVNULL,
                                                        stderr=subprocess.DEVNULL).returncode, 0)
 
+    def test_xz_trailing_bytes_follow_xz_utils(self):
+        # lzma.open drops bytes after a complete stream that do not decode as
+        # another stream, and rejects legal null stream padding. The audit must
+        # instead accept and reject exactly what 'xz -dc' does.
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0002', 'archive',
+                                       '--format=tar', self.rev, '--', *self.info['paths']])
+        stream = subprocess.run(['xz', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout
+        cases = [
+            ('junk', stream + b'junk', False),
+            ('three padding bytes', stream + b'\0' * 3, False),
+            ('five padding bytes', stream + b'\0' * 5, False),
+            ('leading padding', b'\0' * 4 + stream, False),
+            ('partial second stream', stream + stream[:6], False),
+            ('four padding bytes', stream + b'\0' * 4, True),
+            ('eight padding bytes', stream + b'\0' * 8, True),
+            ('concatenated streams', stream + b'\0' * 4 + stream, True),
+        ]
+
+        def run(name, data):
+            archive = Path(tempfile.mkdtemp(dir=self.tmp.name)) / name
+            archive.write_bytes(data)
+            self.archive = archive
+            self.write_recipe(url=f'{self.url};downloadfilename={name}', sha=sha256(data))
+            self.assertEqual(self.errors(), [])
+            with mock.patch.object(audit, 'download', self.fake_download):
+                report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+            self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+            json.dumps(report)
+            self.assertTrue(report['recipes']['suifleet']['fetched'][0]['verified'])
+            return archive, report
+
+        for name in ('source.tar.xz', 'source.txz'):
+            for what, data, accepted in cases:
+                with self.subTest(name=name, case=what):
+                    archive, report = run(name, data)
+                    if shutil.which('xz'):
+                        decoded = subprocess.run(['xz', '-dc', str(archive)], stdout=subprocess.DEVNULL,
+                                                 stderr=subprocess.DEVNULL).returncode == 0
+                        self.assertEqual(decoded, accepted)
+                    if accepted:
+                        self.assertTrue(report['ok'], report['errors'])
+                    else:
+                        self.assertFalse(report['ok'])
+                        self.assertTrue(any(f'{name} could not be decoded as a tarball' in e
+                                            and 'through its end' in e for e in report['errors']),
+                                        report['errors'])
+
     def test_fetch_reports_checksum_and_layout_defects(self):
         self.write_recipe(sha='f' * 64)
         with mock.patch.object(audit, 'download', self.fake_download):
