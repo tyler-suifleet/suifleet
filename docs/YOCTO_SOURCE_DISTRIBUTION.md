@@ -219,6 +219,15 @@ These static checks always run, on every recipe in the layer:
   overrides are rejected, because the reader doesn't evaluate them. So are
   flagged appends and `?=`/`??=` appends. That way the audited assignment is
   the one BitBake uses in every configuration.
+- Metadata that BitBake runs after parsing is refused, because it can rewrite
+  `SRC_URI` and the other pins after the reader has read them. This covers
+  anonymous Python functions (`python () {`, `python __anonymous () {`, with or
+  without `fakeroot`), `addhandler` event handlers, and `inherit` or
+  `inherit_defer` of a class in this layer or of an unexpandable class name.
+  The rule applies to the recipe, its includes and its bbappends. The refusal is
+  static, and the fetcher repeats it before anything is downloaded. Named task
+  functions such as `python do_verify_lock()` are not run during parsing and
+  are still accepted, as is inheriting classes from other layers.
 - The reader follows BitBake's ordering. Plain `:append` and `:prepend` apply
   after every assignment, even one that comes later in the file. `??=` is a
   weak default, used only when nothing else assigns the variable; each later
