@@ -2321,6 +2321,36 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual(self.errors(), [])
         self.assertEqual(audit.layer_conf_errors(registration), [])
 
+    def test_reported_series_follow_bitbake_logical_assignments(self):
+        # The report's series field is the per-series evidence, so it must be
+        # what BitBake applies: continuations joined, and a repeated assignment
+        # (where the last one wins) refused rather than reported from the first.
+        conf = self.layer / 'conf/layer.conf'
+        registration = (Path(audit.__file__).resolve().parents[1]
+                        / 'suifleet-edge/meta-suifleet/conf/layer.conf').read_text()
+        line = next(l for l in registration.splitlines() if l.startswith('LAYERSERIES_COMPAT_meta-suifleet'))
+        declared = audit.layer_conf_series(registration)
+        conf.write_text(registration)
+        self.assertEqual(self.errors(), [])
+        self.assertTrue(declared)
+        self.assertEqual(audit.check(self.layer)['series'], declared)
+        # A key split by a continuation is one BitBake assignment.
+        conf.write_text(registration.replace(line, line.replace('meta-', 'meta-\\\n', 1)))
+        report = audit.check(self.layer)
+        self.assertEqual((report['ok'], report['errors'], report['series']), (True, [], declared))
+        # A later assignment replaces the declared compatibility: refused, and
+        # the series reported are the effective ones.
+        conf.write_text(registration + 'LAYERSERIES_COMPAT_meta-suifleet = "kirkstone"\n')
+        with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        self.assertFalse(report['ok'])
+        self.assertEqual(report['series'], ['kirkstone'])
+        self.assertTrue(any('LAYERSERIES_COMPAT_meta-suifleet is assigned 2 times' in e for e in report['errors']),
+                        report['errors'])
+        self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'layer configuration findings')
+        conf.write_text(registration)
+
     def test_missing_bbfiles_registration_is_refused(self):
         # The audit globs the recipe and append files itself; if layer.conf no
         # longer registers them, BitBake would not parse them and a clean report

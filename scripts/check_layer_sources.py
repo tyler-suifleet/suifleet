@@ -1752,7 +1752,40 @@ def layer_conf_errors(text):
                           'BitBake applies layer.conf to every recipe, so its effect on sources cannot be audited')
     if len(collections) > 1:
         errors.append(f'conf/layer.conf: several BBFILE_COLLECTIONS {collections}; the audit supports one collection')
+    # A later plain assignment replaces an earlier one, so a repeated
+    # registration variable would make the first value (and anything read from
+    # it) differ from the effective configuration.
+    assigned = {}
+    for line in statements:
+        match = LAYER_CONF_STATEMENT.match(line)
+        if match and match.group(2) == '=':
+            assigned[match.group(1)] = assigned.get(match.group(1), 0) + 1
+    for name, count in assigned.items():
+        if count > 1:
+            errors.append(f'conf/layer.conf: {name} is assigned {count} times; only the last assignment takes '
+                          'effect, so the audit refuses repeated registration variables')
     return errors
+
+
+def layer_conf_series(text):
+    """The effective LAYERSERIES_COMPAT of the registered collection.
+
+    Read from BitBake's logical lines (continuations joined), with a later plain
+    assignment replacing an earlier one, as BitBake applies them. Without a
+    BBFILE_COLLECTIONS line any LAYERSERIES_COMPAT_<name> counts.
+    """
+    statements = [line.strip() for _, kind, line in bitbake_lines(text, functions=False) if kind == 'statement']
+    matches = [LAYER_CONF_STATEMENT.match(line) for line in statements]
+    matches = [m for m in matches if m]
+    collections = [c for m in matches if m.group(1) == 'BBFILE_COLLECTIONS' and m.group(2) == '+='
+                   for c in m.group(3).split()]
+    series = []
+    for match in matches:
+        name, op, value = match.groups()
+        if op == '=' and name.startswith('LAYERSERIES_COMPAT_'):
+            if not collections or name[len('LAYERSERIES_COMPAT_'):] in collections:
+                series = value.split()
+    return series
 
 
 def layer_registration_errors(text, recipes, appends):
@@ -1796,8 +1829,7 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
     bbfiles = sorted(layer.glob('recipes-*/*/*.bb'))
     conf_errors = layer_conf_errors(conf) + layer_registration_errors(conf, bbfiles, bbappends)
     report['errors'] += conf_errors
-    series = re.search(r'^LAYERSERIES_COMPAT_\S+\s*=\s*"([^"]*)"', conf, re.M)
-    report['series'] = series.group(1).split() if series else []
+    report['series'] = layer_conf_series(conf)
     recipes, static_errors = {}, {}
     used = set()
     for path in bbfiles:
