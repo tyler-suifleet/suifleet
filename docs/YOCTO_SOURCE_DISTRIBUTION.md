@@ -17,11 +17,14 @@ python3 scripts/package_edge_source.py --revision <reviewed-main-commit> \
 python3 scripts/package_edge_source.py --revision <commit> --list   # review the file set
 ```
 
-The archive is `git archive --format=tar <commit> -- <paths> | gzip -n -6`. It
-reads committed objects only: working-tree edits and untracked files can't
+The archive is `git -c tar.umask=0002 archive --format=tar <commit> -- <paths> | gzip -n -6`.
+It reads committed objects only: working-tree edits and untracked files can't
 enter it. Contents sit at the archive root (recipes unpack with `subdir=`).
-Ownership is root, timestamps are the commit time, and `gzip -n` stores no name
-or time, so the same commit, git and gzip produce identical bytes. The output
+Ownership is root and timestamps are the commit time. Modes are 0664, or 0775
+for executables and directories: the builder pins `tar.umask` to git's default
+0002, which the published archives were built with, so a different user, system
+or `GIT_CONFIG_*` setting can't change them. `gzip -n`
+stores no name or time, so the same commit, git and gzip produce identical bytes. The output
 file must not already exist. The JSON result records the commit, SHA-256, crate
 version, Cargo.lock SHA-256, LICENSE md5 and tool versions.
 
@@ -129,7 +132,7 @@ the [security CI](SECURITY_CI.md) secret scanning already covers.
 
 Before writing, the builder reads back the tar stream `git archive` produced.
 It must contain exactly the planned files and their directories, each with the
-committed blob's bytes and executable bit. A committed `export-ignore` or
+committed blob's bytes and exact mode. A committed `export-ignore` or
 `export-subst` attribute that drops or rewrites a build input therefore stops
 the build, instead of yielding an incomplete archive that reports success.
 
