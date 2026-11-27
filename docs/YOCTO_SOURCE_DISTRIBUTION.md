@@ -550,7 +550,12 @@ The check then verifies the resulting `S`:
   license and version would pass while the compiler built different Rust code
   under the newer revision's build-info. Any committed path is accepted, so a
   broader published file list such as one including `windows-runtime` still
-  passes; a file that differs from, or is absent from, the tree is a finding;
+  passes; a file that differs from, or is absent from, the tree is a finding.
+  The reverse also holds: every path of the packager's build closure at
+  `SRCREV` (the same selection `package_edge_source.py` makes) must be present
+  in `S`, so an archive that omits a committed file the build needs, such as
+  an implicit `mod` file, is a finding even though every file it does carry
+  matches the tree;
 - for the codec, the exact five pinned files (each file `do_install` copies
   must be pinned, so it must also be fetched), their digests, provenance
   revision, licenses and Node version, plus manifest schema 1 and manifest
