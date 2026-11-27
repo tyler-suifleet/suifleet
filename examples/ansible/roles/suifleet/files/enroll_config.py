@@ -8,9 +8,11 @@ file's spelling: a multiline string, a quoted key or a quoted table name can
 hide or add a field that a line match would miss. The effective manifest,
 claim and key paths must be the batch-relative deployment.json and claim.key
 and the device's own /etc/suifleet/device.key, with no [signer] and no other
-field. On success, prints JSON {"toml": TEXT}: a canonical enroll.toml built
-only from the validated values, which the role stages instead of the batch's
-file. It parses back to the same values. Exit 2 with a reason on stderr
+field. On success, prints JSON {"toml": TEXT, "policy_id": ID}: a canonical
+enroll.toml built only from the validated values, which the role stages
+instead of the batch's file (it parses back to the same values), and the
+canonical form of its policy ID (0x and 64 lowercase hex digits, the object ID
+the CLI resolves), which the role records with each enrollment attempt. Exit 2 with a reason on stderr
 otherwise. The file holds only public values (no keys).
 """
 import json
@@ -38,6 +40,11 @@ class Invalid(Exception):
 def quote(value):
     # A JSON string of control-free text is a TOML basic string with the same value.
     return json.dumps(value, ensure_ascii=False)
+
+
+def canonical_id(value):
+    """The canonical spelling of a validated object ID: 0x and 64 lowercase hex digits."""
+    return "0x" + value[2:].lower().rjust(64, "0")
 
 
 def validate(data):
@@ -96,7 +103,7 @@ def main(argv):
     except (OSError, tomllib.TOMLDecodeError, Invalid) as error:
         print(f"enroll.toml refused: {error}", file=sys.stderr)
         return 2
-    print(json.dumps({"toml": text}))
+    print(json.dumps({"toml": text, "policy_id": canonical_id(data["policy_id"])}))
     return 0
 
 

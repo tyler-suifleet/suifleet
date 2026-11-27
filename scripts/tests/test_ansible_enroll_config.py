@@ -149,5 +149,20 @@ class EnrollConfigTest(unittest.TestCase):
         base = batch_file("pumpe-ü-😀")
         self.assertEqual(toml(self.accepted(base))["name"], "pumpe-ü-😀")
 
+    def policy_output(self, policy):
+        result = run(batch_file().replace(f'"{POLICY}"', f'"{policy}"'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["policy_id"]
+
+    def test_policy_id_is_printed_in_canonical_form(self):
+        # The role records this ID with each attempt and compares it with the
+        # batch's before an on-chain lookup, so every spelling of the same
+        # object ID yields one string, and different objects differ.
+        self.assertEqual(self.policy_output(POLICY), POLICY)
+        self.assertEqual(self.policy_output("0x" + "AB" * 32), POLICY)
+        self.assertEqual(self.policy_output("0xAbC"), "0x" + "0" * 61 + "abc")
+        self.assertEqual(self.policy_output("0x" + "0" * 61 + "abc"), "0x" + "0" * 61 + "abc")
+        self.assertNotEqual(self.policy_output("0x" + "ab" * 31 + "ac"), POLICY)
+
 if __name__ == "__main__":
     unittest.main()

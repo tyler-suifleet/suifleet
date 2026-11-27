@@ -41,6 +41,9 @@ OTHER = {**FLEET, "call_package_id": "0x" + "6" * 64}
 ENROLL = ('manifest_path = "deployment.json"\npolicy_id = "0x7"\nclaim_key_path = "claim.key"\n'
           'name = "pi-1"\nkeypair_path = "/etc/suifleet/device.key"\n')
 LINE = json.dumps(RECEIPT, separators=(",", ":")) + "\n"
+# ENROLL's policy_id in the canonical form the role and the procedure record.
+POLICY = "0x" + "0" * 63 + "7"
+OTHER_POLICY = "0x" + "0" * 63 + "8"
 
 
 def modern_python():
@@ -58,6 +61,11 @@ if PYTHON is None and os.environ.get("CI"):
 
 def digest(manifest):
     return hashlib.sha256(json.dumps(manifest).encode()).hexdigest()
+
+
+def binding(manifest, policy=POLICY):
+    """The attempt binding: the manifest's SHA-256, then the canonical policy ID."""
+    return f"{digest(manifest)}\n{policy}\n"
 
 
 def procedure():
@@ -183,7 +191,7 @@ class ManualRecovery(unittest.TestCase):
         other.write_text(json.dumps(OTHER))
         result = self.run_procedure(LINE, tamper=other)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+        self.assertEqual(self.binding.read_text(), binding(FLEET))
 
     def test_symlinked_or_special_inputs_are_refused(self):
         secret = self.tmp / "secret"
@@ -202,21 +210,53 @@ class ManualRecovery(unittest.TestCase):
 
     def test_matching_attempt_binding_is_kept(self):
         # The next run configures the host only under the deployment the attempt enrolled under.
-        self.binding.write_text(digest(FLEET) + "\n")
+        self.binding.write_text(binding(FLEET))
         result = self.run_procedure(LINE)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.etc / "enrollment.json").read_text(), LINE)
-        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+        self.assertEqual(self.binding.read_text(), binding(FLEET))
 
     def test_binding_for_another_deployment_is_refused_before_the_lookup(self):
         # The attempt enrolled under A; restoring with B's lookup and manifest would pair
         # B's Device and DeviceCap with A's binding.
-        self.binding.write_text(digest(OTHER) + "\n")
+        self.binding.write_text(binding(OTHER))
         result = self.run_procedure(LINE)
         self.assert_untouched(result)
         self.assertIn("another deployment", result.stderr)
         self.assertFalse(self.looked_up.exists(), "the lookup ran")
-        self.assertEqual(self.binding.read_text(), digest(OTHER) + "\n")
+        self.assertEqual(self.binding.read_text(), binding(OTHER))
+
+    def test_binding_for_another_policy_is_refused_before_the_lookup(self):
+        # Same deployment, another enrollment policy: the same key may hold a valid
+        # enrollment (its own Device and DeviceCap) under enroll.toml's policy while
+        # the attempt under the recorded policy is unresolved.
+        self.binding.write_text(binding(FLEET, OTHER_POLICY))
+        result = self.run_procedure(LINE)
+        self.assert_untouched(result)
+        self.assertIn("another deployment or policy", result.stderr)
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+        self.assertEqual(self.binding.read_text(), binding(FLEET, OTHER_POLICY))
+
+    def test_binding_without_a_policy_is_refused_before_the_lookup(self):
+        # A binding written before policies were recorded cannot be attributed to one.
+        self.binding.write_text(digest(FLEET) + "\n")
+        result = self.run_procedure(LINE)
+        self.assert_untouched(result)
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+
+    def test_noncanonical_policy_spelling_matches_its_binding(self):
+        self.write_enroll(ENROLL.replace('"0x7"', '"0x' + "0" * 60 + '0007"'))
+        self.binding.write_text(binding(FLEET))
+        result = self.run_procedure(LINE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.binding.read_text(), binding(FLEET))
+
+    def test_enroll_config_without_a_policy_is_refused(self):
+        self.write_enroll(ENROLL.replace('policy_id = "0x7"\n', ""))
+        self.assert_untouched(self.run_procedure(LINE))
+        self.assertFalse(self.looked_up.exists(), "the lookup ran")
+        self.assertFalse(self.binding.exists())
 
     def test_unreadable_binding_is_refused(self):
         self.binding.write_text("")
@@ -226,7 +266,7 @@ class ManualRecovery(unittest.TestCase):
     def test_unconfigured_host_without_binding_records_the_lookup_deployment(self):
         result = self.run_procedure(LINE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+        self.assertEqual(self.binding.read_text(), binding(FLEET))
         self.assertEqual(self.binding.stat().st_mode & 0o777, 0o600)
         self.assertFalse(Path(str(self.binding) + ".new").exists())
 
@@ -245,7 +285,7 @@ class ManualRecovery(unittest.TestCase):
             json.dumps({**FLEET, "rpc_url": "https://archive.example", "rpc_urls": ["https://archive.example"]}))
         result = self.run_procedure(LINE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.binding.read_text(), digest(FLEET) + "\n")
+        self.assertEqual(self.binding.read_text(), binding(FLEET))
 
     def test_lookup_under_another_deployment_is_refused(self):
         (self.lookup / "deployment.json").write_text(json.dumps(OTHER))

@@ -104,11 +104,15 @@
         # place leaves it: never submit again or overwrite it. Promote a receipt
         # for this device's key; stop on any other output for manual recovery.
         # Each attempt also records, in the deployment file beside it, the
-        # SHA-256 of the manifest it enrolled under: a receipt is promoted only
-        # beside that same manifest (the same key can enroll under another
-        # deployment, and configure.yml installs suifleet_manifest_src). The
-        # binding outlives the promotion: configure.yml removes it only after
-        # config.toml is installed, and the checks after this block enforce it.
+        # SHA-256 of the manifest it enrolled under and the canonical ID of
+        # its enrollment policy (two lines): a receipt is promoted only beside
+        # that same manifest (the same key can enroll under another
+        # deployment, and configure.yml installs suifleet_manifest_src), and
+        # an attempt that printed nothing is looked up only under that policy
+        # (the same key can also enroll under another policy of the same
+        # deployment, with its own Device and DeviceCap). The binding outlives
+        # the promotion: configure.yml removes it only after config.toml is
+        # installed, and the checks after this block enforce it.
         - name: Look for the output of an interrupted enrollment
           ansible.builtin.stat:
             path: /etc/suifleet/.enrollment.json.partial
@@ -129,13 +133,17 @@
             - suifleet_enrollment_partial.stat.size == 0
           block:
             # The attempt recorded, durably and before anything was submitted,
-            # the SHA-256 of the manifest it enrolled under. The lookup and the
-            # record it restores belong to that deployment only: a batch and
-            # inventory that agree with each other but select another
-            # deployment could find this key's valid enrollment there and
-            # discard the evidence of the unresolved attempt. A missing
-            # binding cannot be attributed either. Refuse both before the
-            # lookup (check mode too), keeping the marker and the binding.
+            # the SHA-256 of the manifest it enrolled under and its policy ID.
+            # The lookup and the record it restores belong to that deployment
+            # and policy only: a batch and inventory that agree with each
+            # other but select another deployment, or another policy of the
+            # same deployment, could find this key's valid enrollment there
+            # and discard the evidence of the unresolved attempt. A missing
+            # binding, or one without a policy (written by an earlier version
+            # of this role), cannot be attributed either. Refuse all of them
+            # before the lookup (check mode too), keeping the marker and the
+            # binding: the deployment here, the policy once the batch folder
+            # is checked below.
             - name: Read the deployment the attempt that printed no receipt enrolled under
               ansible.builtin.slurp:
                 src: "{{ suifleet_enrollment_deployment }}"
@@ -143,21 +151,29 @@
               failed_when: false
 
             - name: Stop unless the attempt is bound to the configured deployment
+              vars:
+                binding_lines: "{{ (suifleet_enrollment_lookup_binding.content | default('') | b64decode).splitlines() }}"
               ansible.builtin.assert:
                 that:
                   - suifleet_enrollment_lookup_binding.content is defined
-                  - >-
-                    (suifleet_enrollment_lookup_binding.content | b64decode)
-                    == suifleet_manifest.stat.checksum ~ '\n'
+                  - binding_lines | length == 2
+                  - (suifleet_enrollment_lookup_binding.content | b64decode) == binding_lines[0] ~ '\n' ~ binding_lines[1] ~ '\n'
+                  - binding_lines[0] == suifleet_manifest.stat.checksum
+                  - binding_lines[1] is match('^0x[0-9a-f]{64}$')
                 quiet: true
                 fail_msg: >-
                   {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial
                   from an attempt that did not run under the configured deployment
                   ({{ suifleet_manifest_src }}, SHA-256 {{ suifleet_manifest.stat.checksum }}),
-                  or whose deployment is not recorded in {{ suifleet_enrollment_deployment }}.
-                  The role keeps the file and the binding, looks nothing up and writes no
-                  record or configuration. Select the deployment the attempt enrolled
-                  under, or settle it as in docs/ANSIBLE.md#recovery.
+                  or whose deployment and enrollment policy are not recorded in
+                  {{ suifleet_enrollment_deployment }}. The role keeps the file and the
+                  binding, looks nothing up and writes no record or configuration. Select
+                  the deployment the attempt enrolled under, or settle it as in
+                  docs/ANSIBLE.md#recovery.
+
+            - name: Keep the enrollment policy the attempt that printed no receipt used
+              ansible.builtin.set_fact:
+                suifleet_attempt_policy: "{{ (suifleet_enrollment_lookup_binding.content | b64decode).splitlines()[1] }}"
 
             - name: Require the batch folder for the lookup
               ansible.builtin.assert:
@@ -180,6 +196,23 @@
               ansible.builtin.import_tasks: check_batch.yml
               vars:
                 suifleet_batch_claim: false
+
+            # The lookup finds this key's enrollment under the batch's policy
+            # only. The same key can hold a valid enrollment under another
+            # policy of the same deployment (a separate Device and DeviceCap),
+            # which would settle nothing about the recorded attempt.
+            - name: Stop unless the batch selects the attempt's enrollment policy
+              ansible.builtin.assert:
+                that: suifleet_enroll_policy == suifleet_attempt_policy
+                quiet: true
+                fail_msg: >-
+                  {{ inventory_hostname }} has an empty /etc/suifleet/.enrollment.json.partial
+                  from an attempt under enrollment policy {{ suifleet_attempt_policy }}, but its
+                  batch folder {{ batch }} selects policy {{ suifleet_enroll_policy }}. The same
+                  device key can hold an enrollment under each, so the role keeps the file and
+                  the binding, looks nothing up and writes no record or configuration. Select
+                  the batch folder the attempt enrolled with, or settle it as in
+                  docs/ANSIBLE.md#recovery.
 
             - name: Report the pending on-chain lookup
               ansible.builtin.debug:
@@ -318,20 +351,26 @@
               register: suifleet_enrollment_attempt_deployment
               failed_when: false
 
+            # The receipt came from the attempt itself, or from a lookup that
+            # ran under the attempt's recorded policy, so the policy line is
+            # checked for form here.
             - name: Stop unless the receipt is bound to the configured deployment
+              vars:
+                binding_lines: "{{ (suifleet_enrollment_attempt_deployment.content | default('') | b64decode).splitlines() }}"
               ansible.builtin.assert:
                 that:
                   - suifleet_enrollment_attempt_deployment.content is defined
-                  - >-
-                    (suifleet_enrollment_attempt_deployment.content | b64decode)
-                    == suifleet_manifest.stat.checksum ~ '\n'
+                  - binding_lines | length == 2
+                  - (suifleet_enrollment_attempt_deployment.content | b64decode) == binding_lines[0] ~ '\n' ~ binding_lines[1] ~ '\n'
+                  - binding_lines[0] == suifleet_manifest.stat.checksum
+                  - binding_lines[1] is match('^0x[0-9a-f]{64}$')
                 quiet: true
                 fail_msg: >-
                   {{ inventory_hostname }} has an enrollment receipt in
                   /etc/suifleet/.enrollment.json.partial from an attempt that did not
                   run under the configured deployment ({{ suifleet_manifest_src }},
                   SHA-256 {{ suifleet_manifest.stat.checksum }}), or whose deployment
-                  is not recorded in {{ suifleet_enrollment_deployment }}. The role
+                  and enrollment policy are not recorded in {{ suifleet_enrollment_deployment }}. The role
                   keeps the receipt and writes no record or configuration. Select the
                   deployment the device enrolled under, or restore the record under
                   this deployment with suifleet --find-enrollment (docs/ANSIBLE.md#recovery).
@@ -443,12 +482,13 @@
                       exit 1
                     fi
                     set +C
-                    # Record the attempt, and the manifest it enrolls under (staged
-                    # and verified above), durably before anything can be submitted,
+                    # Record the attempt, the manifest it enrolls under (staged and
+                    # verified above) and its policy (canonical, from the checked
+                    # enroll.toml), durably before anything can be submitted,
                     # so a retry after a lost response or power loss never submits
                     # again and promotes its receipt only beside that manifest.
                     # Nothing was sent if this fails, so both are removed.
-                    if ! { printf '%s\n' "$MANIFEST_SHA256" > "$DEPLOYMENT" && sync -f "$DEPLOYMENT" "$partial"; }; then
+                    if ! { printf '%s\n%s\n' "$MANIFEST_SHA256" "$POLICY_ID" > "$DEPLOYMENT" && sync -f "$DEPLOYMENT" "$partial"; }; then
                       rm -f "$partial" "$DEPLOYMENT"
                       echo "could not record $partial; nothing was sent" >&2
                       exit 1
@@ -469,6 +509,7 @@
                     STAGING: "{{ suifleet_enroll_staging }}"
                     DEPLOYMENT: "{{ suifleet_enrollment_deployment }}"
                     MANIFEST_SHA256: "{{ suifleet_manifest.stat.checksum }}"
+                    POLICY_ID: "{{ suifleet_enroll_policy }}"
               always:
                 - name: Erase the staged claim
                   ansible.builtin.file:
@@ -534,16 +575,21 @@
       when: suifleet_enrollment_binding.stat.exists
 
     - name: Stop unless the record is bound to the configured deployment
+      vars:
+        binding_lines: "{{ (suifleet_enrollment_binding_file.content | b64decode).splitlines() }}"
       ansible.builtin.assert:
-        that: >-
-          (suifleet_enrollment_binding_file.content | b64decode)
-          == suifleet_manifest.stat.checksum ~ '\n'
+        that:
+          - binding_lines | length == 2
+          - (suifleet_enrollment_binding_file.content | b64decode) == binding_lines[0] ~ '\n' ~ binding_lines[1] ~ '\n'
+          - binding_lines[0] == suifleet_manifest.stat.checksum
+          - binding_lines[1] is match('^0x[0-9a-f]{64}$')
         quiet: true
         fail_msg: >-
           {{ inventory_hostname }} enrolled under a deployment other than the
           configured one ({{ suifleet_manifest_src }}, SHA-256
-          {{ suifleet_manifest.stat.checksum }}); {{ suifleet_enrollment_deployment }}
-          records the manifest it enrolled under, and its configuration is not
+          {{ suifleet_manifest.stat.checksum }}), or its binding does not record an
+          enrollment policy; {{ suifleet_enrollment_deployment }} records the manifest
+          and policy it enrolled under, and its configuration is not
           complete. The role writes no configuration. Select the deployment the
           device enrolled under and run again (docs/ANSIBLE.md#recovery).
       when: suifleet_enrollment_binding.stat.exists
@@ -564,5 +610,6 @@
           its deployment binding ({{ suifleet_enrollment_deployment }}) nor a
           configuration. The role cannot tell which deployment the device
           enrolled under, and writes no configuration. Record that deployment's
-          manifest SHA-256 in the binding by hand (docs/ANSIBLE.md#recovery).
+          manifest SHA-256 and enrollment policy in the binding by hand
+          (docs/ANSIBLE.md#recovery).
       when: not suifleet_enrollment_binding.stat.exists

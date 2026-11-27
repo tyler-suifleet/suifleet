@@ -77,6 +77,10 @@
       table that would sign with another key
       ({{ suifleet_enroll_config.stderr | trim }}). This run changed nothing on chain.
 
-- name: Keep the validated enrollment configuration
+# suifleet_enroll_policy is the canonical policy ID (0x and 64 lowercase hex
+# digits): each attempt records it beside the manifest's SHA-256, and the
+# lookup of an attempt that printed no receipt runs only under that policy.
+- name: Keep the validated enrollment configuration and its policy
   ansible.builtin.set_fact:
     suifleet_enroll_toml: "{{ (suifleet_enroll_config.stdout | from_json).toml }}"
+    suifleet_enroll_policy: "{{ (suifleet_enroll_config.stdout | from_json).policy_id }}"

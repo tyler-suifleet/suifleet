@@ -431,8 +431,11 @@ allows it). The role does not check the controller.
   complete receipt for the device's own key, without needing the credential
   batch. Any other non-empty content (for example a truncated file, or a
   receipt for another key) stops the run before the claim is staged.
-  The same key can enroll under another deployment, so each attempt also
-  records the SHA-256 of the manifest it enrolled under in
+  The same key can enroll under another deployment, or under another
+  enrollment policy of the same deployment (each creates its own Device and
+  DeviceCap), so each attempt also records the SHA-256 of the manifest it
+  enrolled under and its policy ID (two lines: the digest, then the policy ID
+  as `0x` and 64 lowercase hex digits) in
   `/etc/suifleet/.enrollment.json.partial.deployment`, durably and before
   anything is submitted. A receipt is promoted only while
   `suifleet_manifest_src` still has those bytes. If the inventory now selects
@@ -452,12 +455,16 @@ allows it). The role does not check the controller.
   without enrolling again; with another deployment selected it stops before
   installing `deployment.json`, `signer.toml` or `config.toml` (check mode
   too). A record with neither a binding nor `config.toml` also stops the run:
-  after confirming which deployment the device enrolled under, record that
-  manifest's SHA-256 as root (here from a copy of the manifest in the current
-  directory; it must be the file `suifleet_manifest_src` names) and run again:
+  after confirming which deployment and enrollment policy the device enrolled
+  under, record that manifest's SHA-256 and the policy ID as root (here from
+  a copy of the manifest in the current directory, which must be the file
+  `suifleet_manifest_src` names, and the host's `enroll.toml` from its batch
+  folder) and run again:
 
   ```sh
-  sha256sum < deployment.json | cut -c1-64 > /etc/suifleet/.enrollment.json.partial.deployment
+  { sha256sum < deployment.json | cut -c1-64
+    python3 -I -c 'import sys, tomllib; p = tomllib.load(open(sys.argv[1], "rb"))["policy_id"]; print("0x" + p[2:].lower().rjust(64, "0"))' enroll.toml
+  } > /etc/suifleet/.enrollment.json.partial.deployment
   ```
 
   On a configured host (the binding removed, `config.toml` present) a later
@@ -478,12 +485,15 @@ allows it). The role does not check the controller.
   receipt as the enrollment command. The role verifies that receipt like any
   other and restores the record from it, keeping the device's key and
   identity. It never enrolls again. The same key can hold an enrollment under
-  another deployment, so before the lookup the role first requires the
-  attempt's binding (`/etc/suifleet/.enrollment.json.partial.deployment`) to
-  name `suifleet_manifest_src`. A binding for another deployment, or none,
-  stops the run (check mode too) before anything is looked up, keeping the
-  empty file and the binding unchanged: select the deployment the attempt
-  enrolled under, or settle it by hand as below. It then requires the folder's
+  another deployment or policy, so before the lookup the role first requires
+  the attempt's binding (`/etc/suifleet/.enrollment.json.partial.deployment`)
+  to name `suifleet_manifest_src` and, after checking the batch folder below,
+  the policy of the folder's `enroll.toml`. A binding for another deployment
+  or another policy, one without a policy line (written by an earlier
+  version of the role), or none, stops the run (check mode too) before
+  anything is looked up, keeping the empty file and the binding unchanged:
+  select the deployment and batch folder the attempt enrolled under, or
+  settle it by hand as below. It then requires the folder's
   `deployment.json` to be identical to `suifleet_manifest_src` (the manifest
   it installs beside the restored IDs) and its `enroll.toml`, as parsed TOML,
   to name that batch-relative manifest and `/etc/suifleet/device.key`, with no
@@ -541,12 +551,7 @@ allows it). The role does not check the controller.
     chgrp "$(id -gn "$holder")" "$dir/$name"
     chmod 0640 "$dir/$name"
   done
-  want=$(sha256sum < "$dir/fleet.json" | cut -c1-64)
-  if test -e "$binding" && test "$(cat "$binding")" != "$want"; then
-    echo "the attempt enrolled under another deployment: use its manifest as fleet.json" >&2
-    exit 1
-  fi
-  python3 -I -c 'import json, sys, tomllib
+  policy=$(python3 -I -c 'import json, re, sys, tomllib
   def unique(pairs):
       if len({k for k, _ in pairs}) != len(pairs):
           sys.exit("duplicate key in a manifest")
@@ -562,7 +567,16 @@ allows it). The role does not check the controller.
   c = tomllib.load(open(sys.argv[1] + "/enroll.toml", "rb"))
   if (c.get("manifest_path") != "deployment.json" or "signer" in c
           or c.get("keypair_path") != "/etc/suifleet/device.key"):
-      sys.exit("enroll.toml must use deployment.json and /etc/suifleet/device.key")' "$dir"
+      sys.exit("enroll.toml must use deployment.json and /etc/suifleet/device.key")
+  p = c.get("policy_id")
+  if not isinstance(p, str) or not re.fullmatch("0x[0-9a-fA-F]{1,64}", p):
+      sys.exit("enroll.toml must name an enrollment policy ID")
+  print("0x" + p[2:].lower().rjust(64, "0"))' "$dir")
+  want=$(sha256sum < "$dir/fleet.json" | cut -c1-64; printf '%s\n' "$policy")
+  if test -e "$binding" && test "$(cat "$binding")" != "$want"; then
+    echo "the attempt enrolled under another deployment or policy: use its manifest as fleet.json and its batch folder" >&2
+    exit 1
+  fi
   address=$(runuser -u "$holder" -- /usr/bin/suifleet --derive-address /etc/suifleet/device.key)
   receipt=$(runuser -u "$holder" -- /usr/bin/suifleet --find-enrollment "$dir/enroll.toml")
   (umask 077 && printf '%s\n' "$receipt" > "$dir/receipt.json")
@@ -588,15 +602,16 @@ allows it). The role does not check the controller.
 
   Before it changes anything it refuses an input in `/root/lookup` that is a
   symlink or not a regular file, an attempt binding for another
-  deployment than `fleet.json`, a lookup `deployment.json` that differs from
+  deployment than `fleet.json` or another policy than `enroll.toml`'s (or one
+  without a policy line), a lookup `deployment.json` that differs from
   `fleet.json` in more than its node URLs, and an `enroll.toml` that names
   another manifest or key or has a `[signer]` table. It then installs the
   record, and only then removes the attempt marker, after the lookup
   succeeded and printed a complete receipt for the device's own key. An
   existing binding (necessarily for `fleet.json`) is kept; on an unconfigured
-  host without one it first records `fleet.json`'s SHA-256 as the binding, so
-  the next run configures the host only under the deployment the lookup found
-  the enrollment in. A configured host gets no binding, as after a completed
+  host without one it first records `fleet.json`'s SHA-256 and the policy ID
+  as the binding, so the next run configures the host only under the
+  deployment the lookup found the enrollment in. A configured host gets no binding, as after a completed
   run. Any failure (a conflicting binding or folder, a lookup that found
   nothing, a receipt for another key, an existing record) stops it with a
   non-zero status, installs nothing and keeps
@@ -794,14 +809,18 @@ The harness checks these phases:
    receipt for another key, and with an empty file (the committed enrollment
    printed nothing) stop before any claim is staged or the enrollment command
    runs, and keep the file unchanged. The interrupted attempt must have
-   recorded its manifest's SHA-256; the complete receipt with another
+   recorded its manifest's SHA-256 and its policy ID; the complete receipt with another
    deployment selected in `suifleet_manifest_src`, and with no recorded
    deployment, is refused in check mode and a retry, keeping the receipt and
    writing no record, `deployment.json`, `signer.toml` or `config.toml`. An
    empty file whose binding names another deployment than a batch and
    inventory that agree with each other, or with no binding, is refused before
-   the lookup (check mode and a retry), keeping the file and the binding. The
-   real on-chain lookup, run through a test-only wrapper, must likewise find
+   the lookup (check mode and a retry), keeping the file and the binding. So
+   is an empty file whose binding names the same deployment but a second real
+   policy that the chain setup created on the same registry, while the batch
+   selects the policy under which the device key holds a valid enrollment, and
+   one whose binding records no policy: no lookup runs, and no record or
+   configuration is written. The real on-chain lookup, run through a test-only wrapper, must likewise find
    its staging directory and inputs owned by root and unwritable by the key
    holder. It restores the record in a play stopped before configuration;
    its deployment binding must remain, and with that promoted, unconfigured
