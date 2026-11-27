@@ -81,6 +81,20 @@ them reaches through a literal include or `#[path]`, such as
 `#[path = "../tools/entry.rs"]` in `src/main.rs`.
 A `cfg_attr` path is packaged but still counts as implicit for this check. Inline `mod name { ... }` blocks are fine.
 
+A `#[path]` is resolved against the directory of the file it appears in. That
+holds only at file level. Inside an inline `mod name { ... }` block, rustc
+resolves it against the module's own directory (`name/`, or `stem/name/` in a
+file other than `mod.rs`, `lib.rs` or `main.rs`), and on an inline module it
+names a directory. Neither case is modelled, so both stop the build and the
+fetched-source audit everywhere, including under `src/`. Otherwise the wrong
+file of the same name could be packaged, giving an archive that compiles in
+the repository and fails after extraction. Declare such a module at file
+level instead. The blocks are found structurally: comments, strings, raw
+strings and char literals are masked first, so a `}` inside one cannot end a
+block early. A file-level `#[path]` after a closed inline block is accepted,
+for example the `#[cfg(test)] #[path = "poll_tests.rs"]` module in
+`src/sui_client.rs`.
+
 A missing workspace member, local path dependency, declared target file or include target, a path outside the
 repository, a symlink or submodule, or a runtime identity/state file name
 (`device.key`, `config.toml`, `*.key`, journals, databases and so on) stops the
