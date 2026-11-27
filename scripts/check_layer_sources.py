@@ -263,6 +263,17 @@ class Recipe:
             yield url, dict(p.split('=', 1) for p in params if '=' in p)
 
 
+# Git SRC_URI parameters whose fetch/unpack semantics the audit reproduces.
+# Anything else (subpath, nocheckout, bareclone, rev, tag, usehead, lfs, ...)
+# changes what BitBake fetches or the unpacked layout, so it is refused rather
+# than verified against a layout the recipe would not get.
+GIT_PARAMS = frozenset({'protocol', 'branch', 'nobranch', 'name', 'destsuffix'})
+
+
+def unmodelled_git_params(params):
+    return sorted(set(params) - GIT_PARAMS)
+
+
 def checksum_for(recipe, params, default_name=None):
     if 'sha256sum' in params:
         return params['sha256sum']
@@ -415,6 +426,9 @@ def audit_recipe(recipe):
                 errors.append(f'{where}: git source needs branch=NAME (SRCREV must be on it) or nobranch=1: {url}')
             if ',' in params.get('branch', '') or ',' in params.get('name', ''):
                 errors.append(f'{where}: git source with several names or branches is not supported: {url}')
+            if unmodelled_git_params(params):
+                errors.append(f'{where}: git source parameters the audit does not model: '
+                              f'{", ".join(unmodelled_git_params(params))}: {url}')
             if scheme == 'gitsm':
                 # gitsm also fetches every submodule named by .gitmodules at the
                 # pinned gitlinks. The audit verifies only the top-level commit,
@@ -710,6 +724,9 @@ def unpack_plan(recipe, unpack):
         elif scheme == 'gitsm':
             raise ValueError(f'gitsm submodule inputs cannot be verified: {url}')
         elif scheme == 'git':
+            if unmodelled_git_params(params):
+                raise ValueError(f'git source parameters the audit does not model: '
+                                 f'{", ".join(unmodelled_git_params(params))}: {url}')
             plan.append((url, params, scheme, confined(unpack, params.get('destsuffix', 'git'), 'destsuffix')))
         else:
             name = PurePosixPath(urllib.parse.urlsplit(url).path).name

@@ -708,11 +708,14 @@ class PackageEdgeSourceTests(unittest.TestCase):
 
 
 def recipe_text(archive_url, archive_sha, srcrev, extra=''):
+    # subdir= is an archive unpack parameter; git sources place the checkout
+    # with destsuffix= and the audit refuses git parameters it does not model.
+    params = ';name=edge' if archive_url.startswith(('git://', 'gitsm://')) else ';subdir=source;name=edge'
     return f'''SUMMARY = "fixture"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5={md5(LICENSE)}"
 SRC_URI = " \\
-    {archive_url};subdir=source;name=edge \\
+    {archive_url}{params} \\
     file://suifleet.service \\
 "
 SRC_URI[edge.sha256sum] = "{archive_sha}"
@@ -841,6 +844,40 @@ class LayerAuditTests(unittest.TestCase):
                     self.assertTrue(any(message in e for e in branch_errors), report['errors'])
                 else:
                     self.assertEqual(branch_errors, [])
+
+    def test_git_parameters_the_audit_does_not_model_are_refused(self):
+        # subpath/nocheckout/etc. change what BitBake checks out; the audit
+        # verifies the whole tree, so it must refuse instead of passing.
+        self.repo.git('branch', 'release', self.rev)
+        remote = f'file://{self.repo.root}'
+        base = 'git://github.com/example/suifleet.git;protocol=https;branch=release;name=edge;destsuffix=source'
+        for extra in ('subpath=missing-directory', 'nocheckout=1', 'bareclone=1', 'rev=release',
+                      'tag=v1', 'usehead=1', 'lfs=1'):
+            with self.subTest(extra):
+                self.write_recipe(url=f'{base};{extra}', extra=f'SRCREV_edge = "{self.rev}"')
+                key = extra.split('=')[0]
+                self.assertTrue(any('does not model' in e and key in e for e in self.errors()), self.errors())
+                with mock.patch.object(audit, 'git_remote', return_value=remote), \
+                        mock.patch.object(audit.subprocess, 'run', side_effect=AssertionError('git ran')):
+                    report = audit.check(self.layer, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+                self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+                # The fetcher itself refuses before cloning anything.
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit.subprocess, 'run', side_effect=AssertionError('git ran')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('does not model' in e and 'nothing fetched' in e for e in errors), errors)
+        # The modelled parameters alone still fetch and verify.
+        self.write_recipe(url=base, extra=f'SRCREV_edge = "{self.rev}"')
+        self.assertFalse(any('does not model' in e for e in self.errors()), self.errors())
+        with mock.patch.object(audit, 'git_remote', return_value=remote):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+        fetched = [f for f in report['recipes']['suifleet']['fetched'] if 'revision' in f]
+        self.assertEqual([f['verified'] for f in fetched], [True], report['errors'])
 
     def test_gitsm_sources_are_refused_and_never_fetched(self):
         # gitsm would also fetch submodules that the audit never verifies, so a
