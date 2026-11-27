@@ -71,7 +71,10 @@ The file set is the daemon build closure, computed from that commit's tree:
   `r#include_str!`). An include or `#[path]`
   whose argument is not one string literal without escapes (for example
   `include!(concat!(env!("OUT_DIR"), ..))`) stops the build instead of being
-  skipped. Rust allows a comment wherever whitespace may appear, for example
+  skipped. So does a literal that names a directory: one ending in `/` or
+  with a final `.` or `..` component (`"../extra/helper.inc/"`). rustc fails
+  with "Not a directory" on such a path even when the normalized file exists.
+  Rust allows a comment wherever whitespace may appear, for example
   `include_str /* why */ !("..")` or `#[/* why */ path = ".."]`, so comments
   are blanked (string literals kept) before the include and `#[path]` forms
   are matched. References that appear only inside a comment are still
