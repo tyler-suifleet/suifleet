@@ -269,7 +269,12 @@ restarted once.
   writes the claim into a private directory on `suifleet_claim_transfer_dir`
   (default `/dev/shm`, which must be a tmpfs). A root task, whose module
   carries only paths, then copies it into a staging directory on a
-  memory-backed `/run`, and the transfer directory is erased. Root owns the
+  memory-backed `/run`, and the transfer directory is erased. Root never
+  opens the transferred file itself, since the SSH account can replace it
+  at any time: a reader running as the SSH account opens it without
+  following symlinks or blocking, accepts only a regular single-link file
+  of at most 4 KiB that the account owns, and passes the bytes it read to
+  root through a pipe. Root owns the
   staging directory (mode 0750, the key holder's group), the `enroll.toml`
   and `deployment.json` staged in it (mode 0640) and `claim.key` (mode 0400,
   unreadable to the key holder). The key holder (the daemon user, not root)

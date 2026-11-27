@@ -116,6 +116,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -1928,6 +1929,71 @@ class Harness:
         print("PASS interrupted claim transfer left the claim only in tmpfs staging: none on host persistent storage"
               " (including Ansible remote temp) or in controller files (including Vault decryption)")
 
+    # Replaces the SSH account's transferred claim.key (as that account) as soon
+    # as it appears, before the root staging task reads it. Exits 0 once it
+    # replaced one, 3 if no transfer appeared within its time limit.
+    CLAIM_REPLACER = r"""
+end=$(( $(date +%s) + 120 ))
+while [ "$(date +%s)" -lt "$end" ]; do
+  for f in /dev/shm/suifleet-claim.*/claim.key; do
+    if [ -f "$f" ] && [ ! -L "$f" ]; then
+      rm -f -- "$f"
+      case $1 in
+        symlink) ln -s /root/sf304-root-only "$f" ;;
+        fifo) mkfifo -m 0600 "$f" ;;
+      esac
+      exit 0
+    fi
+  done
+  sleep 0.005
+done
+exit 3
+"""
+
+    def replaced_claim_transfer(self, vault):
+        """The SSH account replaces its transferred claim before root stages it.
+
+        The SSH account owns the transfer directory, so it can swap claim.key
+        for a symlink to a file only root can read, or for a FIFO, between the
+        transfer and the root staging task. Staging must open the file with
+        the SSH account's permissions and refuse anything but its own regular
+        file: no root-only bytes reach the key holder's staging directory and
+        a FIFO does not block the run.
+        """
+        (self.work / "ctl/claim-interrupt.yml").write_text(CLAIM_INTERRUPT_PLAY)
+        marker = "sf304-root-only-" + secrets.token_hex(16)
+        for host in self.hosts.values():
+            self.exec(host["container"], "sh", "-c", "umask 077 && cat > /root/sf304-root-only", input=marker + "\n")
+        for kind, expected in (("symlink", "without following a link"), ("fifo", "not a regular single-link file")):
+            replacers = {name: subprocess.Popen(["docker", "exec", "-u", "deploy", host["container"], "sh", "-c",
+                                                 self.CLAIM_REPLACER, "sh", kind])
+                         for name, host in self.hosts.items()}
+            try:
+                output, _ = self.ansible(f"claim replaced by a {kind} before staging", "/work/claim-interrupt.yml",
+                                         *vault, expect_rc="nonzero")
+            finally:
+                for proc in replacers.values():
+                    if proc.poll() is None:
+                        proc.kill()
+                    proc.wait()
+            for name, host in self.hosts.items():
+                assert replacers[name].returncode == 0, (name, kind, "the transferred claim was never replaced")
+            assert "interrupted after the claim transfer" not in output, (kind, "staging accepted the replaced claim")
+            assert output.count("refusing the transferred claim: ") >= len(self.hosts), (kind, output[-4000:])
+            assert expected in output, (kind, "refused for another reason", output[-4000:])
+            for name, host in self.hosts.items():
+                container = host["container"]
+                assert self.exec(container, "test", "-e", "/run/suifleet-enroll/claim.key",
+                                 check=False).returncode != 0, (name, kind, "a replaced claim was staged")
+                assert not self.disk_hits(container, [marker], "/run/suifleet-enroll", one_filesystem=False), \
+                    (name, kind, "root-only bytes reached the staging directory")
+                left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
+                assert left == "0", (name, kind, "the transfer directory was not erased")
+            print(f"PASS claim replaced by a {kind} after the transfer: staging read it as the SSH account, refused it"
+                  " and staged nothing; the transfer directory was erased")
+        for host in self.hosts.values():
+            self.exec(host["container"], "rm", "-rf", "/root/sf304-root-only", "/run/suifleet-enroll")
+
     def overlapping_enrollment(self, vault, name="deb-ubuntu2404"):
         """Two plays enroll the same host at once; the first attempt fails without printing a receipt.
 
@@ -3097,6 +3163,7 @@ class Harness:
         self.crash_refused(vault)
         self.accepted_claim_policy()
         self.interrupted_claim_transfer(vault)
+        self.replaced_claim_transfer(vault)
         self.no_swap()
         self.safe_crash_policy()
         verdicts = self.classify()

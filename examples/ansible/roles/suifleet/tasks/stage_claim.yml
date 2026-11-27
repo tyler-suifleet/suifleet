@@ -159,6 +159,25 @@
     group: "{{ suifleet_claim_group }}"
     mode: "0750"
 
+- name: Read the SSH account that transfers the claim
+  ansible.builtin.command:
+    argv: [id, -un]
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_claim_account
+  changed_when: false
+  check_mode: false
+
+- name: Require a named SSH account for the claim transfer
+  ansible.builtin.assert:
+    that: suifleet_claim_account.stdout is match('^[A-Za-z_][A-Za-z0-9_.-]*[$]?$')
+    quiet: true
+    fail_msg: >-
+      The claim transfer to {{ inventory_hostname }} must run as a named SSH
+      account, so root can read the transferred claim with that account's
+      permissions only.
+
 - name: Transfer and stage the claim
   block:
     - name: Send the single-use claim key without privilege escalation
@@ -184,9 +203,16 @@
         fail_msg: The claim transfer did not report its private directory.
 
     # Root copies the transferred file into the root-owned directory; this
-    # module carries only paths, never the claim, so nothing reaches sudo's
-    # standard input. The copy is created exclusively (noclobber), root-owned
-    # with mode 0400, under a core dump size limit of 0 set after sudo's PAM
+    # module carries only paths and the account name, never the claim, so
+    # nothing reaches sudo's standard input. The SSH account owns the
+    # transfer directory and can replace its entries at any time, so root
+    # never opens them: a reader running as the SSH account (runuser) opens
+    # claim.key without following a symlink or blocking on a FIFO, checks
+    # the opened descriptor (a regular file the account owns, one link,
+    # nonempty, at most 4 KiB) and writes the bytes it read to a pipe. Root
+    # writes the pipe to the destination, created exclusively (noclobber),
+    # root-owned with mode 0400, and removes it if the reader refuses. Both
+    # sides set a core dump size limit of 0, the reader after runuser's PAM
     # limits apply.
     - name: Stage the single-use claim key in memory-backed storage
       ansible.builtin.command:
@@ -194,14 +220,34 @@
           - sh
           - -c
           - >-
-            set -eu; ulimit -c 0; umask 077; src="$1/claim.key";
-            test -f "$src" && test ! -L "$src";
-            test ! -e "$2" && test ! -L "$2";
-            set -C; cat "$src" > "$2"; set +C;
-            chown root:root "$2"; chmod 0400 "$2"
+            set -eu; ulimit -c 0; umask 077;
+            test ! -e "$3" && test ! -L "$3";
+            set -C; : > "$3"; set +C;
+            if ! runuser -u "$2" -- sh -c 'ulimit -c 0 && exec python3 -I -c "$1" "$2"' sh "$4" "$1/claim.key" >> "$3";
+            then rm -f -- "$3"; exit 1; fi;
+            chown root:root "$3"; chmod 0400 "$3"
           - sh
           - "{{ suifleet_claim_transfer.stdout }}"
+          - "{{ suifleet_claim_account.stdout }}"
           - "{{ suifleet_enroll_staging }}/claim.key"
+          - |-
+            import os, stat, sys
+            try:
+                fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+            except OSError as e:
+                sys.exit(f"refusing the transferred claim: cannot open it as the SSH account without following a link ({e.strerror})")
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_nlink != 1 or not 0 < st.st_size <= 4096:
+                sys.exit("refusing the transferred claim: not a regular single-link file of 1 to 4096 bytes owned by the SSH account")
+            data = b""
+            while len(data) <= 4096:
+                chunk = os.read(fd, 4097 - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            if len(data) != st.st_size:
+                sys.exit("refusing the transferred claim: it changed while it was read")
+            sys.stdout.buffer.write(data)
       diff: false
   always:
     - name: Erase the claim transfer directory
