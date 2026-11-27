@@ -136,8 +136,11 @@ committed blob's bytes and exact mode. A committed `export-ignore` or
 `export-subst` attribute that drops or rewrites a build input therefore stops
 the build, instead of yielding an incomplete archive that reports success.
 
-`--paths-from FILE` rebuilds an archive from an existing file list, with the
-same audit. Use it to reproduce a previously published archive, or to keep the
+`--paths-from FILE` rebuilds an archive from an existing newline-separated
+file list, with the same audit. The builder still computes the default build
+closure and refuses a list that omits any of it, such as a manifest, the
+lockfile, a workspace member or an include target. A list may contain more than
+the closure. Use it to reproduce a previously published archive, or to keep the
 broader published file set. The SF-295 archives also carry packaging inputs,
 shared interfaces, test fixtures and docs (see the layer's `RELEASE.md`); the
 default closure is the smaller set the recipe build needs.
