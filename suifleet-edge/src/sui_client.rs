@@ -2387,8 +2387,18 @@ impl SuiClient {
         let info = self.service_info().await.map_err(status)?.into_inner();
         let tip = info.checkpoint_height.ok_or_else(|| anyhow::anyhow!("missing enrollment checkpoint"))?;
         anyhow::ensure!(from <= tip, "enrollment history starts after the node tip");
+        self.enrollments_through(policy, operator, from, tip).await
+    }
+
+    /// This key's enrollment under `policy` in checkpoints `from..=through`.
+    /// The scan must end on the checkpoint bound itself: a node (or a
+    /// fallback/load-balanced backend) whose ledger or event index has not
+    /// reached `through` fails the scan rather than report a shorter range.
+    #[cfg(target_os = "linux")]
+    async fn enrollments_through(&self, policy: &str, operator: &str, from: u64, through: u64) -> anyhow::Result<Option<(Enrolled, String)>> {
+        anyhow::ensure!(from <= through, "enrollment history starts after checkpoint {through}");
         self.ensure_retained(Some(from)).await?;
-        self.set_event_limit(Some(tip.checked_add(1).ok_or_else(|| anyhow::anyhow!("invalid enrollment checkpoint"))?));
+        self.set_event_limit(Some(through.checked_add(1).ok_or_else(|| anyhow::anyhow!("invalid enrollment checkpoint"))?));
         let result = self.scan_enrollments(policy, operator, from).await;
         self.set_event_limit(None);
         result
@@ -2462,14 +2472,22 @@ impl SuiClient {
         let object = self.object(policy).await?;
         let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
         self.validate_enrollment_policy(policy, &operator).await?;
-        let (now, _) = self.enrollment_window().await?;
+        self.unenrolled_through_expiry(policy, &operator, epoch, checkpoint).await
+    }
+
+    /// The core of [`Self::check_expired`], after the policy is validated.
+    /// The checkpoint reported together with the later epoch is in that
+    /// later epoch, so every checkpoint of `epoch` is at or before it: it is
+    /// the scan's fence. The scan never takes its end from another tip read,
+    /// which a lagging backend could report below the fence.
+    #[cfg(target_os = "linux")]
+    async fn unenrolled_through_expiry(&self, policy: &str, operator: &str, epoch: u64, checkpoint: u64) -> anyhow::Result<u64> {
+        let (now, fence) = self.enrollment_window().await?;
         expired(epoch, now)?;
-        // previous_enrollment reads the tip again: at or after the one read
-        // above, so the scan covers the end of `epoch`.
         let found = self
-            .previous_enrollment(policy, &operator, checkpoint)
+            .enrollments_through(policy, operator, checkpoint, fence)
             .await
-            .map_err(|e| e.context(format!("cannot read this key's enrollments since checkpoint {checkpoint}")))?;
+            .map_err(|e| e.context(format!("cannot read this key's enrollments from checkpoint {checkpoint} through {fence}")))?;
         anyhow::ensure!(
             found.is_none(),
             "this key enrolled under policy {policy} after checkpoint {checkpoint}; restore the record with --find-enrollment"

@@ -977,8 +977,8 @@ async fn enrollment_window(path: &Path) -> anyhow::Result<()> {
 /// Read-only settlement of an enrollment attempt that printed no receipt,
 /// signed to expire after EPOCH and started after CHECKPOINT (both from
 /// --enrollment-window): proves that EPOCH has ended, so validators refuse
-/// the attempt from now on, and that the node's history from CHECKPOINT on
-/// holds no enrollment of this key under the enroll.toml's policy, so it
+/// the attempt from now on, and that the node's history from CHECKPOINT
+/// through the checkpoint observed in the later epoch holds no enrollment of this key under the enroll.toml's policy, so it
 /// did not commit before. Fails when that history is not retained. Never
 /// reads the claim key or submits anything.
 #[cfg(target_os = "linux")]
