@@ -84,7 +84,10 @@ packaged. An implicit out-of-line module (`mod name;` without a literal
 instead: give the module a `#[path]` or move the target under `src/`.
 The same check applies to a file outside those directories that a file inside
 them reaches through a literal include or `#[path]`, such as
-`#[path = "../tools/entry.rs"]` in `src/main.rs`.
+`#[path = "../tools/entry.rs"]` in `src/main.rs`. It also applies to files
+outside the crate directory, such as `#[path = "../../interfaces/helper.rs"]`:
+a `mod child;` there would read `interfaces/child.rs`, which the archive
+would not contain. Both the packager and the `--fetch` layout audit refuse it.
 A `cfg_attr` path is packaged but still counts as implicit for this check. Inline `mod name { ... }` blocks are fine.
 Comments are blanked here too, so `mod /* why */ name;` is still found and
 `#[/* why */ path = ".."] mod name;` still counts as an explicit path. A
