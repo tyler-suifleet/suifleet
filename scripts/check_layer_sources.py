@@ -309,6 +309,8 @@ class Recipe:
         self.flags = {}
         self.overrides = []
         self.unparsed = []
+        # Out-of-layer classes inherited, as (class, file).
+        self.inherits = []
         self.include_errors = []
         # Metadata BitBake runs after parsing (anonymous Python, event handlers,
         # in-layer classes). It can rewrite SRC_URI and the other pins, and
@@ -444,6 +446,8 @@ class Recipe:
                 for name in words[1:]:
                     if '${' in name or self.layer_class(name):
                         self.parse_time.append(f'{self.rel(path)}: {words[0]} of in-layer or unresolved class {name}')
+                    else:
+                        self.inherits.append((name, path.name))
                 continue
             if words[0] in UNMODELLED_DIRECTIVES:
                 self.unmodelled.append(f'{self.rel(path)}: {line}')
@@ -1036,6 +1040,63 @@ NODE_INSTALL_REF = re.compile(r'\$\{S\}/(\S+)')
 ELF_AARCH64 = 183
 
 
+ELF64_EHDR, ELF64_PHDR, PT_LOAD = 64, 56, 1
+# Package version and epoch: OE publishes the Node package (and resolves the
+# codec's RDEPENDS) from PKGV/PKGE, which default to PV/PE. The audit compares
+# PV/PE, so it refuses anything that could make the package version differ.
+PACKAGE_VERSION_VARS = ('PKGV', 'PKGE')
+
+
+def elf_aarch64_problem(data):
+    """Why data is not a minimal loadable ELF64 LE AArch64 executable, or None.
+
+    Checks the whole 64-byte ELF header and that the program header table and
+    at least one non-empty PT_LOAD segment lie inside the file, so a truncated
+    or header-only file is not reported as the verified executable."""
+    if len(data) < ELF64_EHDR:
+        return f'{len(data)} bytes, shorter than the 64-byte ELF64 header'
+    # e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT.
+    if data[:4] != b'\x7fELF' or data[4] != 2 or data[5] != 1 or data[6] != 1:
+        return 'not an ELF64 little-endian identification'
+    def u(offset, size):
+        return int.from_bytes(data[offset:offset + size], 'little')
+    if u(16, 2) not in (2, 3):
+        return f'e_type {u(16, 2)} is neither ET_EXEC nor ET_DYN'
+    if u(18, 2) != ELF_AARCH64:
+        return f'e_machine {u(18, 2)} is not AArch64'
+    if u(20, 4) != 1:
+        return 'e_version is not EV_CURRENT'
+    phoff, ehsize, phentsize, phnum = u(32, 8), u(52, 2), u(54, 2), u(56, 2)
+    if ehsize != ELF64_EHDR or phentsize != ELF64_PHDR:
+        return 'ELF64 header or program header size is wrong'
+    if phnum == 0 or phoff < ELF64_EHDR or phoff + phnum * ELF64_PHDR > len(data):
+        return 'program header table is missing or extends past the end of the file'
+    loads = 0
+    for index in range(phnum):
+        entry = phoff + index * ELF64_PHDR
+        p_type, p_offset, p_filesz = u(entry, 4), u(entry + 8, 8), u(entry + 32, 8)
+        if p_type != PT_LOAD:
+            continue
+        if p_offset + p_filesz > len(data):
+            return f'PT_LOAD segment {index} extends past the end of the file'
+        loads += bool(p_filesz)
+    return None if loads else 'no non-empty PT_LOAD segment'
+
+
+def node_package_version_errors(recipe):
+    """Refuse metadata that can make the Node package version differ from PV/PE."""
+    where = recipe.path.name
+    assigned = {name for name in PACKAGE_VERSION_VARS if name in recipe.vars}
+    assigned |= {base for base, *_ in recipe.overrides + recipe.unparsed if base in PACKAGE_VERSION_VARS}
+    errors = [f'{where}: {name} is assigned; the package version must come from PV/PE so the audit can check '
+              'it against the codec dependency' for name in sorted(assigned)]
+    # Out-of-layer classes (gitpkgv, ...) can set PKGV/PKGE or PV, which this
+    # reader does not see, so the Node recipe may inherit none.
+    errors += [f'{where}: inherit {name} ({file}) can change the package version; the Node recipe must not inherit classes'
+               for name, file in recipe.inherits]
+    return errors
+
+
 def node_install_errors(recipe):
     where = recipe.path.name
     bodies = CODEC_INSTALL.findall(recipe.text)
@@ -1060,13 +1121,9 @@ def node_errors(recipe, s_dir):
             errors.append(f'{where}: do_install input {rel} is absent from the Node archive')
     node = s_dir / 'bin/node'
     if node.is_file():
-        with open(node, 'rb') as handle:
-            header = handle.read(20)
-        # e_ident: magic, ELFCLASS64, ELFDATA2LSB; e_type EXEC/DYN; e_machine AArch64.
-        if (len(header) < 20 or header[:4] != b'\x7fELF' or header[4] != 2 or header[5] != 1
-                or int.from_bytes(header[16:18], 'little') not in (2, 3)
-                or int.from_bytes(header[18:20], 'little') != ELF_AARCH64):
-            errors.append(f'{where}: bin/node is not a 64-bit little-endian AArch64 ELF executable')
+        problem = elf_aarch64_problem(node.read_bytes())
+        if problem:
+            errors.append(f'{where}: bin/node is not a 64-bit little-endian AArch64 ELF executable ({problem})')
     return errors
 
 
@@ -1095,6 +1152,7 @@ def pin_errors(recipe):
         errors.append(f'{where}: SUIFLEET_CODEC_SOURCE_REV is only verified for PN {CODEC_PN!r}, not {pn!r}')
     if pn == NODE_PN:
         errors += node_install_errors(recipe)
+        errors += node_package_version_errors(recipe)
     return errors
 
 

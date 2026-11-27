@@ -3014,8 +3014,16 @@ class NodeRecipeTests(unittest.TestCase):
         self.archive = Path(self.tmp.name) / 'node.tar.xz'
 
     @staticmethod
-    def elf(machine, kind=2):
-        return b'\x7fELF\x02\x01\x01' + bytes(9) + kind.to_bytes(2, 'little') + machine.to_bytes(2, 'little') + bytes(44)
+    def elf(machine, kind=2, phnum=1, p_type=1, filesz=8, phoff=64, version=1, size=None):
+        """A minimal ELF64 LE file: header, phnum program headers, then a segment."""
+        def le(value, n):
+            return value.to_bytes(n, 'little')
+        header = (b'\x7fELF\x02\x01\x01' + bytes(9) + le(kind, 2) + le(machine, 2) + le(version, 4) + le(0, 8)
+                  + le(phoff, 8) + le(0, 8) + le(0, 4) + le(64, 2) + le(56, 2) + le(phnum, 2) + le(0, 6))
+        offset = 64 + 56 * phnum
+        program = (le(p_type, 4) + le(5, 4) + le(offset, 8) + bytes(16) + le(filesz, 8) + le(filesz, 8) + le(0, 8)) * phnum
+        data = header + program + b'\xaa' * 8
+        return data if size is None else data[:size]
 
     def fetch(self, files):
         """Fetch the Node recipe offline from a checksum-correct archive of files."""
@@ -3052,7 +3060,13 @@ class NodeRecipeTests(unittest.TestCase):
     def test_installed_executable_must_be_an_aarch64_elf(self):
         cases = {'x86-64': self.elf(62), 'shell script': b'#!/bin/sh\n', 'truncated': b'\x7fELF',
                  '32-bit': b'\x7fELF\x01\x01\x01' + bytes(9) + (2).to_bytes(2, 'little') + (183).to_bytes(2, 'little'),
-                 'relocatable': self.elf(183, kind=1)}
+                 'relocatable': self.elf(183, kind=1),
+                 # Review finding: only the first 20 bytes of an otherwise valid header.
+                 'first 20 bytes': self.elf(183)[:20], 'header only': self.elf(183, size=64),
+                 'no program headers': self.elf(183, phnum=0), 'bad e_version': self.elf(183, version=0),
+                 'program headers past end': self.elf(183, phoff=4096),
+                 'segment past end': self.elf(183, filesz=4096), 'no PT_LOAD': self.elf(183, p_type=6),
+                 'empty PT_LOAD': self.elf(183, filesz=0)}
         for label, data in cases.items():
             with self.subTest(label):
                 report = self.fetch({'LICENSE': b'node license\n', 'bin/node': data})
@@ -3098,6 +3112,40 @@ class NodeRecipeTests(unittest.TestCase):
         codec.write_text(re.sub(r'^SUIFLEET_CODEC_NODE_VERSION = .*\n', '', codec.read_text(), flags=re.M))
         errors = audit.check(self.layer)['errors']
         self.assertTrue(any('lacks required SUIFLEET_CODEC_NODE_VERSION' in e for e in errors), errors)
+
+
+    def test_package_version_must_come_from_pv_and_pe(self):
+        # Review finding: PKGV/PKGE set the published package version that the
+        # codec RDEPENDS resolves against, so any assignment form is refused.
+        original = self.recipe.read_text()
+        append = self.layer / 'recipes-devtools/suifleet-node/suifleet-node_%.bbappend'
+        cases = {
+            'PKGV': (original + 'PKGV = "99.0.0"\n', 'PKGV is assigned'),
+            'PKGE': (original + 'PKGE = "1"\n', 'PKGE is assigned'),
+            'weak PKGV': (original + 'PKGV ??= "99.0.0"\n', 'PKGV is assigned'),
+            'PKGV append': (original + 'PKGV:append = "+x"\n', 'PKGV is assigned'),
+            'package override': (original + 'PKGV:${PN} = "99.0.0"\n', 'PKGV is assigned'),
+            'conditional override': (original + 'PKGE:aarch64 = "2"\n', 'PKGE is assigned'),
+            'unparsed': (original + 'PKGV = 99\n', 'PKGV is assigned'),
+            'inherit': (original + 'inherit gitpkgv\n', 'inherit gitpkgv'),
+        }
+        for label, (text, expected) in cases.items():
+            with self.subTest(label):
+                self.recipe.write_text(text)
+                errors = audit.check(self.layer)['errors']
+                self.assertTrue(any(expected in e for e in errors), errors)
+        self.recipe.write_text(original)
+        append.write_text('PKGV = "99.0.0"\n')
+        inventory = self.layer / 'export-files.json'
+        saved = inventory.read_text()
+        files = json.loads(saved)
+        files.append(append.relative_to(self.layer).as_posix())
+        inventory.write_text(json.dumps(files))
+        errors = audit.check(self.layer)['errors']
+        self.assertTrue(any('PKGV is assigned' in e for e in errors), errors)
+        append.unlink()
+        inventory.write_text(saved)
+        self.assertEqual(audit.check(self.layer)['errors'], [])
 
 
 class RepositoryLayerTests(unittest.TestCase):
