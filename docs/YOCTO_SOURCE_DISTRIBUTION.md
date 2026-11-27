@@ -157,6 +157,11 @@ These static checks always run, on every recipe in the layer:
   Under `--fetch`, the audit checks that the named branch exists on the remote
   and that `SRCREV` is reachable from it, as BitBake does. A source with
   several names or branches is refused.
+- Git sources may use only `protocol`, `branch`, `nobranch`, `name` and
+  `destsuffix`, the parameters whose fetch and checkout the audit reproduces.
+  Other parameters, such as `subpath`, `nocheckout`, `bareclone`, `rev`, `tag`,
+  `usehead` or `lfs`, change what BitBake fetches or unpacks, so they are
+  refused statically and by the fetcher before anything is cloned.
 - `gitsm://` sources are refused. The audit verifies only a top-level commit,
   not the submodules that `gitsm` also fetches. Use a checksum-pinned archive or
   a separate pinned `git://` source for each repository. Under `--fetch` the
