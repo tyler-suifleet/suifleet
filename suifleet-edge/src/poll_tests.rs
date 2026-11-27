@@ -417,3 +417,98 @@ async fn version_batch_fallback_counts_attempts_and_verifies_chain_before_readin
     assert_eq!(*wrong.requests.lock().unwrap(), 0); // No unverified object read.
     assert_eq!(sui.read_stats().0, 2); // Failed primary + rejected identity probe.
 }
+
+/// A same-chain node whose successive service-info reads and event index
+/// can lag each other, as behind a fallback or load-balanced endpoint.
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct LaggingNode {
+    /// (epoch, checkpoint) per service-info read; the last one repeats.
+    tips: Arc<Mutex<Vec<(u64, u64)>>>,
+    /// The highest checkpoint the event index has reached.
+    indexed: Arc<std::sync::atomic::AtomicU64>,
+    ends: Arc<Mutex<Vec<Option<u64>>>>,
+}
+#[cfg(target_os = "linux")]
+#[tonic::async_trait]
+impl proto::ledger_service_server::LedgerService for LaggingNode {
+    async fn get_service_info(&self, _: tonic::Request<proto::GetServiceInfoRequest>) -> Result<tonic::Response<proto::GetServiceInfoResponse>, tonic::Status> {
+        let mut tips = self.tips.lock().unwrap();
+        let (epoch, checkpoint) = if tips.len() > 1 { tips.remove(0) } else { tips[0] };
+        let mut genesis = [0; 32];
+        genesis[..4].copy_from_slice(&[0x12, 0x34, 0xab, 0xcd]);
+        let mut info = proto::GetServiceInfoResponse::default();
+        info.chain_id = Some(sui_sdk_types::Digest::new(genesis).to_string());
+        info.epoch = Some(epoch);
+        info.checkpoint_height = Some(checkpoint);
+        info.lowest_available_checkpoint = Some(0);
+        Ok(tonic::Response::new(info))
+    }
+    async fn list_events(
+        &self,
+        request: tonic::Request<proto::ListEventsRequest>,
+    ) -> Result<tonic::Response<tonic::codegen::BoxStream<proto::ListEventsResponse>>, tonic::Status> {
+        let end_checkpoint = request.into_inner().end_checkpoint;
+        self.ends.lock().unwrap().push(end_checkpoint);
+        let indexed = self.indexed.load(std::sync::atomic::Ordering::SeqCst);
+        // An exclusive bound the index has reached ends on that bound;
+        // otherwise the scan stops at the index's own tip.
+        let (reason, at) = match end_checkpoint {
+            Some(end) if end <= indexed + 1 => (proto::QueryEndReason::CheckpointBound, end - 1),
+            _ => (proto::QueryEndReason::LedgerTip, indexed),
+        };
+        let mut watermark = proto::Watermark::default();
+        watermark.cursor = Some(vec![1].into());
+        watermark.checkpoint = Some(at);
+        let mut end = proto::QueryEnd::default();
+        end.reason = Some(reason as i32);
+        let mut frame = proto::ListEventsResponse::default();
+        frame.watermark = Some(watermark);
+        frame.end = Some(end);
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(frame)]))))
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn expiry_settlement_scans_through_the_later_epoch_checkpoint_despite_a_lagging_view() {
+    let node = LaggingNode {
+        // The attempt expired with epoch 5 and started after checkpoint 40.
+        // The later epoch is observed at checkpoint 100; the next read (the
+        // retention check) comes from a backend that has only reached 50.
+        tips: Arc::new(Mutex::new(vec![(6, 100), (5, 50)])),
+        indexed: Arc::new(std::sync::atomic::AtomicU64::new(50)),
+        ends: Default::default(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let sui = client(&format!("http://{}", listener.local_addr().unwrap()));
+    let server_node = node.clone();
+    let _server = Server(tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(proto::ledger_service_server::LedgerServiceServer::new(server_node))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    }));
+    let (policy, operator) = ("0x5", "0x6");
+    // The event index lags the fence: no settlement (the role keeps its
+    // marker), however complete the shorter range looks.
+    let error = sui.unenrolled_through_expiry(policy, operator, 5, 40).await.err().unwrap();
+    assert!(format!("{error:#}").contains("through 100"), "{error:#}");
+    assert_eq!(*node.ends.lock().unwrap(), [Some(101)]);
+    assert!(sui.poll.lock().unwrap().event_limit.is_none());
+
+    // A regressed tip later on does not shorten the scan either.
+    *node.tips.lock().unwrap() = vec![(6, 100), (5, 50)];
+    node.indexed.store(100, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(sui.unenrolled_through_expiry(policy, operator, 5, 40).await.unwrap(), 6);
+    assert_eq!(*node.ends.lock().unwrap(), [Some(101), Some(101)]);
+
+    // The epoch has not ended: nothing is scanned.
+    *node.tips.lock().unwrap() = vec![(5, 100)];
+    assert!(sui.unenrolled_through_expiry(policy, operator, 5, 40).await.is_err());
+    // A start beyond the fence is refused, not read as an empty range.
+    *node.tips.lock().unwrap() = vec![(6, 30)];
+    assert!(sui.unenrolled_through_expiry(policy, operator, 5, 40).await.is_err());
+    assert_eq!(node.ends.lock().unwrap().len(), 2);
+}
