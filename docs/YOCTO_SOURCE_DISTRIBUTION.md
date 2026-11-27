@@ -153,6 +153,10 @@ python3 scripts/check_layer_sources.py --repo . --fetch \
 These static checks always run, on every recipe in the layer:
 
 - No `AUTOREV`. Git sources use `protocol=https` and a 40-hex `SRCREV`.
+- `gitsm://` sources are refused. The audit verifies only a top-level commit,
+  not the submodules that `gitsm` also fetches. Use a checksum-pinned archive or
+  a separate pinned `git://` source for each repository. Under `--fetch` the
+  fetcher also refuses `gitsm` before it downloads anything.
 - https sources have a SHA-256 (as a `SRC_URI[...]` flag or inline). They may
   not use a query string, a fragment or credentials. They may not use a GitHub
   branch/tag archive, a `raw.githubusercontent.com` or codeload URL at a
