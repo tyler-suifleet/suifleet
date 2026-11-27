@@ -666,7 +666,10 @@ allows it). The role does not check the controller.
   `EPOCH`, so the attempt can no longer commit, and that the node's history
   from `CHECKPOINT` to that checkpoint, which covers all of `EPOCH` and must
   still be retained, holds no enrollment of this key under the attempt's
-  policy, so it did not commit earlier. Only then does it remove the empty
+  policy, so it did not commit earlier. The scan ends at the checkpoint read
+  together with the later epoch, never at a later tip read: a node, fallback
+  endpoint or event index that has not reached that checkpoint fails the
+  check instead of reporting a shorter history. Only then does it remove the empty
   file and the binding, and stop. While the epoch has not ended, the run
   stops with the marker and binding kept and names the epoch: run the play
   again after it ends (epochs last about a day on the public networks). A
