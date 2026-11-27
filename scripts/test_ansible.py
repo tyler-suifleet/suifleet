@@ -316,24 +316,36 @@ ENROLL_ONLY_PLAY = INTERRUPTED_PLAY.rsplit("    - ansible.builtin.include_role: 
 ENROLL_EXEC = "exec /usr/bin/suifleet --enroll"
 ENROLL_SHIM_PATH = "/usr/local/bin/sf304-enroll-shim"
 ENROLL_SHIM_DIR = "/run/sf304-shim"
+HOLDER_CORE_LIMITS = "/etc/security/limits.d/sf304-holder-core.conf"
 # Run as the key holder by the enrollment command and the lookup (stand-in and
 # wrapper below): records the owner, group and mode of the staging directory
 # (the directory of the configuration file in $2) and its entries, and tries to
 # append to, rename and create its inputs. The role stages them root-owned and
-# read-only to the key holder, so every attempt must fail.
+# read-only to the key holder (claim.key unreadable too), so every attempt must
+# fail.
 STAGING_PROBE = r"""d=$(dirname "$2")
 {{
 echo "USER $(id -un)"
 stat -c 'STAT %U:%G %a %n' "$d" "$d"/*
-for f in enroll.toml deployment.json; do
+for f in enroll.toml deployment.json claim.key; do
   if (: >> "$d/$f") 2>/dev/null; then echo "WRITABLE $f"; fi
   if mv "$d/$f" "$d/$f.moved" 2>/dev/null; then echo "RENAMED $f"; fi
 done
 if (: > "$d/planted") 2>/dev/null; then echo "CREATED planted"; fi
 }} > {report}
 """
+# What a key holder process received (used by both stand-ins): its core dump
+# size limit after runuser's PAM limits, what its standard input is and the
+# SHA-256 of the claim read from it, opened by path as the CLI does (the open
+# re-checks the pipe's permissions; trailing newlines normalized, so the
+# harness compares it with the staged file the same way). The claim stays in
+# a shell variable (printf is a dash builtin), never in a command argument.
+CLAIM_RECEIPT = r"""key=$(cat /dev/stdin)
+printf 'core=%s stdin=%s claim=%s\n' "$core" "$stdin" "$(printf '%s\n' "$key" | sha256sum | cut -d' ' -f1)" > {report}
+"""
+CLAIM_INPUT = 'core=$(ulimit -c); stdin=$(readlink /proc/$$/fd/0 | cut -d: -f1)\n'
 ENROLL_SHIM = f"""#!/bin/sh
-{STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/staging")}printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
+{CLAIM_INPUT}{STAGING_PROBE.format(report=ENROLL_SHIM_DIR + "/staging")}{CLAIM_RECEIPT.format(report=ENROLL_SHIM_DIR + "/enroll-claim")}printf 'stdout=%s size=%s\\n' "$(readlink /proc/$$/fd/1)" "$(stat -L -c %s /proc/$$/fd/1)" > {ENROLL_SHIM_DIR}/invoked
 i=0
 while [ ! -e {ENROLL_SHIM_DIR}/release ] && [ "$i" -lt 900 ]; do sleep 1; i=$((i + 1)); done
 echo SF304-SHIM-FAILED-BEFORE-PRINTING >&2
@@ -341,6 +353,14 @@ exit 1
 """
 # A test-only wrapper the lookup runs instead of /usr/bin/suifleet (through a
 # copy of the role): it probes the staging directory, then runs the real lookup.
+# A test-only wrapper the address derivation runs instead of /usr/bin/suifleet
+# (through the same copy of the role): it records what it received, then pipes
+# the same claim to the real derivation.
+DERIVE_EXEC = "exec /usr/bin/suifleet --derive-address /dev/stdin"
+DERIVE_WRAPPER_PATH = "/usr/local/bin/sf304-derive-wrapper"
+DERIVE_WRAPPER = f"""#!/bin/sh
+{CLAIM_INPUT}{CLAIM_RECEIPT.format(report=ENROLL_SHIM_DIR + "/derive-claim")}printf '%s\\n' "$key" | exec /usr/bin/suifleet "$@"
+"""
 LOOKUP_EXEC = "                      - /usr/bin/suifleet\n                      - --find-enrollment\n"
 LOOKUP_WRAPPER_PATH = "/usr/local/bin/sf304-lookup-wrapper"
 LOOKUP_WRAPPER = f"""#!/bin/sh
@@ -429,6 +449,15 @@ RECAP = re.compile(r"^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s
 # The role's self-check connects to the signing socket; a preview must never dispatch it.
 SELF_CHECK_TASK = "TASK [suifleet : Check configuration, identity and journal binding as the daemon user]"
 TASK_RESULT = re.compile(r"^(ok|changed|skipping|fatal|failed): \[([^\]]+)\]", re.M)
+
+
+def task_stderr(output):
+    """The standard error of the failed tasks in ansible-playbook output.
+
+    A failed command task's result also echoes its whole script ("cmd"), so a
+    message the script can print is in the output whether or not it ran; only
+    its "stderr" shows what the script actually reported."""
+    return "\n".join(json.loads(f'"{text}"') for text in re.findall(r'"stderr": "((?:[^"\\]|\\.)*)"', output))
 
 
 def other_manifest(text):
@@ -1890,7 +1919,7 @@ class Harness:
             assert staged == ["/run/suifleet-enroll/claim.key"], (name, "claim not staged", staged)
             assert self.exec(container, "stat", "-f", "-c", "%T", "/run/suifleet-enroll").stdout.strip() == "tmpfs", name
             meta = self.exec(container, "stat", "-c", "%U:%G %a", "/run/suifleet-enroll/claim.key").stdout.strip()
-            assert meta == "nobody:nogroup 600", (name, meta)
+            assert meta == "root:root 400", (name, "the staged claim is not root's alone", meta)
             hits = self.disk_hits(container, [secret], "/")
             assert not hits, (name, "the claim reached persistent storage", hits)
             assert not self.disk_hits(container, [secret], "/dev/shm", one_filesystem=False), (name, "transfer copy left")
@@ -1921,10 +1950,18 @@ class Harness:
 
         assert absent(partial) and absent(record) and absent(lock), (name, "host not fresh for the overlap case")
         self.exec(container, "install", "-m", "0755", "/dev/stdin", ENROLL_SHIM_PATH, input=ENROLL_SHIM)
+        self.exec(container, "install", "-m", "0755", "/dev/stdin", DERIVE_WRAPPER_PATH, input=DERIVE_WRAPPER)
         self.exec(container, "install", "-d", "-m", "0777", ENROLL_SHIM_DIR)
         shimmed = self.variant_examples("examples-enroll-shim",
-                                        {"enroll.yml": [(ENROLL_EXEC, f"exec {ENROLL_SHIM_PATH} --enroll")]},
+                                        {"enroll.yml": [(ENROLL_EXEC, f"exec {ENROLL_SHIM_PATH} --enroll"),
+                                                        (DERIVE_EXEC, f"exec {DERIVE_WRAPPER_PATH} --derive-address /dev/stdin")]},
                                         folder="tasks", source=self.examples)
+        # runuser's PAM limits give the key holder an unlimited core dump size
+        # here even when its caller set 0, so only the role's own limit, set
+        # after PAM, makes the key holder's processes report 0.
+        # (Either account can hold the key; the play may provision it.)
+        self.exec(container, "sh", "-c", "umask 022 && for u in suifleet suifleet-signer; do"
+                  f" printf '%s soft core unlimited\\n%s hard core unlimited\\n' $u $u; done > {HOLDER_CORE_LIMITS}")
         (self.work / "ctl/interrupted.yml").write_text(INTERRUPTED_PLAY)
         log = self.work / "overlap-first-play.log"
         command = self.ansible_command("/work/interrupted.yml", ["--limit", name, *vault], examples=shimmed,
@@ -1943,6 +1980,17 @@ class Harness:
             self.assert_staging_read_only(container, sh(f"cat {ENROLL_SHIM_DIR}/staging"), staging, claim=True,
                                           label="enrollment command")
             claim = sh(f"sha256sum {staging}/claim.key")
+            # The derivation and the enrollment command each ran with a core limit
+            # of 0 and read, from a pipe, the very claim root staged.
+            staged_claim = sh(f"printf '%s\\n' \"$(cat {staging}/claim.key)\" | sha256sum | cut -d' ' -f1").strip()
+            holder = sh("stat -c %U /etc/suifleet/device.key").strip()
+            after_pam = sh(f"ulimit -c 0; runuser -u {holder} -- sh -c 'ulimit -c'").strip()
+            assert after_pam == "unlimited", (name, "runuser PAM did not reset the core limit; the fixture proves nothing", after_pam)
+            for step in ("derive", "enroll"):
+                got = sh(f"cat {ENROLL_SHIM_DIR}/{step}-claim").strip()
+                assert got == f"core=0 stdin=pipe claim={staged_claim}", (name, step, "core limit or claim input", got)
+            print("PASS address derivation and enrollment each read the root-owned staged claim through a pipe, with a"
+                  " core limit of 0 set after runuser's PAM limits (which would otherwise allow unlimited dumps)")
             owner = sh(f"cat {lock}/owner")
             print("PASS the role created the empty attempt marker, as the command's output, before invoking it, under the lock")
             for label, extra in (("check mode", ["--check", "--diff"]), ("run", [])):
@@ -1958,6 +2006,7 @@ class Harness:
         finally:
             self.exec(container, "touch", f"{ENROLL_SHIM_DIR}/release")
             first.wait(timeout=900)
+            self.exec(container, "rm", "-f", HOLDER_CORE_LIMITS, DERIVE_WRAPPER_PATH)
         first_output = log.read_text()
         self.outputs.append(first_output)
         assert first.returncode != 0 and "SF304-SHIM-FAILED-BEFORE-PRINTING" in first_output, \
@@ -2024,7 +2073,7 @@ class Harness:
               " claim record kept")
         output, _ = self.ansible("a retry with the revoked claim is refused", "site.yml", "--limit", name, *vault,
                                  expect_rc="nonzero")
-        assert REUSED_CLAIM in output, (name, "the revoked claim was not refused", output[-8000:])
+        assert REUSED_CLAIM in task_stderr(output), (name, "the revoked claim was not refused", output[-8000:])
         assert absent(partial) and absent(ATTEMPT_DEPLOYMENT) and absent(record), (name, "an attempt was started")
         assert absent(lock) and absent(staging), (name, "lock or staging left")
         print("PASS a retry with the revoked claim was refused before any attempt marker existed")
@@ -2055,13 +2104,13 @@ class Harness:
         expected = {staging: f"root:{group} 750", f"{staging}/enroll.toml": f"root:{group} 640",
                     f"{staging}/deployment.json": f"root:{group} 640"}
         if claim:
-            expected[f"{staging}/claim.key"] = f"{holder}:{group} 600"
+            expected[f"{staging}/claim.key"] = "root:root 400"
         assert stats == expected, (label, "staging ownership or modes", stats, expected)
         changed = [line for line in lines if line.split(" ", 1)[0] in ("WRITABLE", "RENAMED", "CREATED")]
         assert not changed, (label, "the key holder could change the staged inputs", changed)
         print(f"PASS the {label} ran as the key holder ({holder}) with a root-owned staging directory (0750) and"
               f" root-owned enroll.toml and deployment.json (0640) it could not append to, rename or replace, and"
-              f" could create nothing beside{'; only claim.key (0600) was its own' if claim else ''}")
+              f" could create nothing beside{'; claim.key was root-owned (0400), so it could not change it' if claim else ''}")
 
     def interrupted_enrollment_record(self, vault, name="deb-ubuntu2404"):
         """Enrollment succeeded on chain and printed its receipt; the host stopped before the record was promoted.
@@ -2089,7 +2138,7 @@ class Harness:
                                      "--limit", name, *vault, expect_rc="nonzero")
         finally:
             self.examples = committed
-        assert "SF304-STOPPED-BEFORE-PROMOTION" in output, ("the play stopped elsewhere", output[-8000:])
+        assert "SF304-STOPPED-BEFORE-PROMOTION" in task_stderr(output), ("the play stopped elsewhere", output[-8000:])
         receipt = sh(f"cat {partial}")
         enrolled = json.loads(receipt)
         address = sh("cat /etc/suifleet/device.address").strip()

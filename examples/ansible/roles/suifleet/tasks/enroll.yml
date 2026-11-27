@@ -526,12 +526,12 @@
               when: not ansible_check_mode
               block:
                 # The current key holder (the daemon user before signer.toml exists)
-                # runs the enrollment, not root.
+                # runs the enrollment, not root. Root stages the claim (mode 0400)
+                # and pipes it to the key holder's commands.
                 - name: Stage the single-use claim key in memory-backed storage
                   ansible.builtin.import_tasks: stage_claim.yml
                   vars:
                     suifleet_claim_file: "{{ batch }}/claim.key"
-                    suifleet_claim_owner: "{{ suifleet_key.stat.pw_name }}"
                     suifleet_claim_group: "{{ suifleet_key.stat.gr_name }}"
 
                 # check_batch.yml validated both: the canonical configuration
@@ -564,11 +564,20 @@
                   ansible.builtin.shell: |
                     set -eu
                     umask 077
+                    ulimit -c 0
                     partial=/etc/suifleet/.enrollment.json.partial
                     # The public address of the staged claim. A claim an earlier
                     # attempt recorded is spent or revoked: refuse it before the
-                    # marker exists, keeping that record.
-                    claim=$(runuser -u "$HOLDER" -- /usr/bin/suifleet --derive-address "$STAGING/claim.key")
+                    # marker exists, keeping that record. The claim reaches the key
+                    # holder only through a pipe from the root-owned copy, which the
+                    # key holder cannot change, so the enrollment command below sends
+                    # the claim whose address is recorded. A core dump size limit of
+                    # 0, set after the PAM limits of runuser apply, keeps a crash of
+                    # either key holder process from being stored. The CLI opens
+                    # /dev/stdin by path, which reopens its pipe with a permission
+                    # check, and the pipe root creates is root-owned (mode 0600), so the
+                    # key holder relays it through a pipe of its own.
+                    claim=$(cat "$STAGING/claim.key" | runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && cat | exec /usr/bin/suifleet --derive-address /dev/stdin')
                     if ! printf '%s\n' "$claim" | grep -Eqx '0x[0-9a-f]{64}'; then
                       echo "could not derive the claim address; nothing was sent" >&2
                       exit 1
@@ -602,10 +611,10 @@
                       exit 1
                     fi
                     # The command appends to the empty marker created above, which is
-                    # never truncated. A core dump size limit of 0, set after the PAM
-                    # limits of runuser apply, keeps a crash of the claim holder from
-                    # being stored.
-                    runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && exec /usr/bin/suifleet --enroll "$1"' sh "$STAGING/enroll.toml" >> "$partial"
+                    # never truncated. It reads the claim from standard input (the
+                    # staged enroll.toml names /dev/stdin), piped from the same
+                    # root-owned copy as above, under a core dump size limit of 0.
+                    cat "$STAGING/claim.key" | runuser -u "$HOLDER" -- sh -c 'ulimit -c 0 && cat | exec /usr/bin/suifleet --enroll "$1"' sh "$STAGING/enroll.toml" >> "$partial"
                     grep -Eq '"device_cap_id":"0x[0-9a-f]{64}"' "$partial"
                     chown root:suifleet "$partial"
                     chmod 0640 "$partial"

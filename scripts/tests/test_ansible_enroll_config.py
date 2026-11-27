@@ -29,7 +29,7 @@ POLICY = "0x" + "ab" * 32
 CANONICAL = {
     "manifest_path": "deployment.json",
     "policy_id": POLICY,
-    "claim_key_path": "claim.key",
+    "claim_key_path": "/dev/stdin",
     "name": "pump-7",
     "keypair_path": "/etc/suifleet/device.key",
 }
@@ -71,7 +71,9 @@ class EnrollConfigTest(unittest.TestCase):
         result = run(text)
         self.assertEqual(result.returncode, 0, result.stderr)
         rebuilt = json.loads(result.stdout)["toml"]
-        self.assertEqual(toml(rebuilt), toml(text))
+        # The same values, except that the staged file reads the claim from
+        # standard input (the role pipes it from a root-owned copy).
+        self.assertEqual(toml(rebuilt), {**toml(text), "claim_key_path": "/dev/stdin"})
         return rebuilt
 
     def refused(self, text, reason):
@@ -85,6 +87,12 @@ class EnrollConfigTest(unittest.TestCase):
         rebuilt = self.accepted(text)
         self.assertEqual(toml(rebuilt), CANONICAL)
         self.assertNotIn("#", rebuilt)
+
+    def test_batch_claim_path_on_stdin_is_refused(self):
+        # Only the role's staged copy reads the claim from standard input; the
+        # batch file must still name its own claim.key.
+        base = batch_file()
+        self.refused(base.replace('claim_key_path = "claim.key"', 'claim_key_path = "/dev/stdin"'), "claim_key_path must be")
 
     def test_noncanonical_equivalent_spellings_are_rebuilt(self):
         text = "\n".join([

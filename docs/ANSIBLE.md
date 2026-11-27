@@ -268,14 +268,20 @@ restarted once.
   or a connection that is not SSH refuses the claim. The SSH account
   writes the claim into a private directory on `suifleet_claim_transfer_dir`
   (default `/dev/shm`, which must be a tmpfs). A root task, whose module
-  carries only paths, then has the current key holder (the daemon user, not
-  root) copy it into a staging directory on a memory-backed `/run`, and the
-  transfer directory is erased. Root owns the staging directory (mode 0750,
-  the key holder's group) and the `enroll.toml` and `deployment.json` staged
-  in it (mode 0640); only `claim.key` belongs to the key holder (mode 0600).
-  The key holder runs the enrollment command and the on-chain lookup, and can
-  read these inputs but cannot create, rename, replace or change them, so the
-  command reads the manifest whose SHA-256 the role verified and recorded. Ansible's file copy,
+  carries only paths, then copies it into a staging directory on a
+  memory-backed `/run`, and the transfer directory is erased. Root owns the
+  staging directory (mode 0750, the key holder's group), the `enroll.toml`
+  and `deployment.json` staged in it (mode 0640) and `claim.key` (mode 0400,
+  unreadable to the key holder). The key holder (the daemon user, not root)
+  runs the address derivation, the enrollment command and the on-chain
+  lookup. It can read the configuration and manifest but cannot create,
+  rename, replace or change any staged input, so the command reads the
+  manifest whose SHA-256 the role verified and recorded. Root pipes the one
+  staged `claim.key` to both the derivation and the enrollment command (the
+  staged `enroll.toml` reads the claim from `/dev/stdin`), so the claim
+  address the attempt records is the claim the command sends. Each key-holder
+  process sets a core dump size limit of 0 after `runuser`'s PAM limits
+  apply, before it reads the claim. Ansible's file copy,
   which goes through the remote temporary directory, is never used for the
   claim. Enrollment refuses to send a claim unless modules are pipelined, so
   keep `pipelining = True` and leave `ANSIBLE_KEEP_REMOTE_FILES` unset. The
@@ -826,8 +832,12 @@ The harness checks these phases:
    enrollment command that waits, then fails without printing or submitting.
    It must start with the role's empty `.enrollment.json.partial` as its
    output, and as the key holder it must find the staging directory and its
-   `enroll.toml` and `deployment.json` owned by root and unwritable (no file
-   can be created, renamed or appended to), with only `claim.key` its own.
+   `enroll.toml`, `deployment.json` and `claim.key` (mode 0400) owned by
+   root and unwritable (no file can be created, renamed or appended to).
+   Under a test limits file that gives the key holder an unlimited core size
+   through `runuser`'s PAM limits, the address derivation and the enrollment
+   command must each report a core limit of 0 and must each have read,
+   through a pipe, the bytes of the staged `claim.key`.
    While it waits, an overlapping check-mode run and an overlapping
    run stop on the enrollment lock without changing the first play's staged
    claim, lock or marker or reaching the enrollment command. After the

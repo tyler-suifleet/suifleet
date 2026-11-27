@@ -1,7 +1,9 @@
 ---
 # Writes the claim (suifleet_claim_file on the controller, plain or Vault)
-# to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner,
-# in a staging directory owned by root.
+# to {{ suifleet_enroll_staging }}/claim.key, owned by root (mode 0400), in a
+# staging directory owned by root. The key holder can neither read nor change
+# it: enroll.yml pipes this one copy to each of its commands, so the address it
+# records and the claim the enrollment command sends are the same bytes.
 # enroll.yml checks that the staging directory is on tmpfs and erases it
 # afterwards, also when enrollment fails. tmpfs pages and process memory can
 # be swapped out, so swap_policy.yml refuses hosts with any active swap
@@ -146,8 +148,9 @@
 # Root owns the staging directory; the key holder can enter and read it but
 # not create, rename or replace its entries. enroll.yml stages enroll.toml and
 # deployment.json there as root-owned read-only files, so the inputs the CLI
-# opens are the ones root verified. Only claim.key belongs to the key holder
-# (mode 0600, created empty by root and filled by the key holder below).
+# opens are the ones root verified. claim.key is root's alone (mode 0400): a
+# copy the key holder could write could change between the read that records
+# its address and the read that sends it.
 - name: Create the root-owned staging directory
   ansible.builtin.file:
     path: "{{ suifleet_enroll_staging }}"
@@ -180,27 +183,25 @@
         quiet: true
         fail_msg: The claim transfer did not report its private directory.
 
-    # Root reads the transferred file and the current key holder writes
-    # it; the claim moves through a pipe inside this command, never
-    # through sudo's standard input. Root first creates the empty file,
-    # owned by the key holder with mode 0600, in the root-owned directory
-    # (which the key holder cannot write).
+    # Root copies the transferred file into the root-owned directory; this
+    # module carries only paths, never the claim, so nothing reaches sudo's
+    # standard input. The copy is created exclusively (noclobber), root-owned
+    # with mode 0400, under a core dump size limit of 0 set after sudo's PAM
+    # limits apply.
     - name: Stage the single-use claim key in memory-backed storage
       ansible.builtin.command:
         argv:
           - sh
           - -c
           - >-
-            set -eu; src="$1/claim.key";
+            set -eu; ulimit -c 0; umask 077; src="$1/claim.key";
             test -f "$src" && test ! -L "$src";
-            test ! -e "$3" && test ! -L "$3";
-            install -o "$2" -g "$4" -m 0600 /dev/null "$3";
-            runuser -u "$2" -- sh -c 'ulimit -c 0 && umask 077 && cat > "$1"' sh "$3" < "$src"
+            test ! -e "$2" && test ! -L "$2";
+            set -C; cat "$src" > "$2"; set +C;
+            chown root:root "$2"; chmod 0400 "$2"
           - sh
           - "{{ suifleet_claim_transfer.stdout }}"
-          - "{{ suifleet_claim_owner }}"
           - "{{ suifleet_enroll_staging }}/claim.key"
-          - "{{ suifleet_claim_group }}"
       diff: false
   always:
     - name: Erase the claim transfer directory

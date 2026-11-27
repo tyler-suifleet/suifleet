@@ -10,7 +10,9 @@ claim and key paths must be the batch-relative deployment.json and claim.key
 and the device's own /etc/suifleet/device.key, with no [signer] and no other
 field. On success, prints JSON {"toml": TEXT, "policy_id": ID}: a canonical
 enroll.toml built only from the validated values, which the role stages
-instead of the batch's file (it parses back to the same values), and the
+instead of the batch's file (it parses back to the same values, except that
+claim_key_path is /dev/stdin: the role pipes the claim to the command from a
+root-owned copy the key holder can neither read nor change), and the
 canonical form of its policy ID (0x and 64 lowercase hex digits, the object ID
 the CLI resolves), which the role records with each enrollment attempt. Exit 2 with a reason on stderr
 otherwise. The file holds only public values (no keys).
@@ -25,6 +27,10 @@ FIXED = {
     "claim_key_path": "claim.key",
     "keypair_path": "/etc/suifleet/device.key",
 }
+# The staged configuration reads the claim from standard input, which the role
+# feeds through a pipe from its root-owned staged copy (tasks/enroll.yml), so
+# the address it records and the claim the command sends come from one file.
+STAGED_CLAIM = "/dev/stdin"
 OPTIONAL = ("arch", "managed")
 MANAGED = ("customer_id", "fleet_id", "budget_id")
 OBJECT_ID = re.compile(r"0x[0-9a-fA-F]{1,64}")
@@ -66,7 +72,7 @@ def validate(data):
     lines = [
         f"manifest_path = {quote(FIXED['manifest_path'])}",
         f"policy_id = {quote(policy)}",
-        f"claim_key_path = {quote(FIXED['claim_key_path'])}",
+        f"claim_key_path = {quote(STAGED_CLAIM)}",
         f"name = {quote(name)}",
         f"keypair_path = {quote(FIXED['keypair_path'])}",
     ]
@@ -87,7 +93,7 @@ def validate(data):
                 raise Invalid(f"managed.{field} must be an object ID")
             lines.append(f"{field} = {quote(value)}")
     text = "\n".join(lines) + "\n"
-    if tomllib.loads(text) != data:
+    if tomllib.loads(text) != {**data, "claim_key_path": STAGED_CLAIM}:
         raise Invalid("it does not round-trip to the same values")
     return text
 
