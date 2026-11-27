@@ -393,7 +393,8 @@ check then verifies the resulting `S`:
   directories packaged whole, plus `cargo metadata --offline --locked
   --no-deps` when `--cargo` is set;
 - for the codec, the exact five pinned files, their digests, provenance
-  revision, licenses and Node version.
+  revision, licenses and Node version, plus manifest schema 1 and manifest
+  file hashes equal to the recipe pins, as `do_verify_codec` requires.
 
 The JSON report maps each recipe to its PV, crate version, source revision,
 source URLs and SHA-256, license files and crate count, plus the advertised
