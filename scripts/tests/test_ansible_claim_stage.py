@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -23,7 +24,7 @@ CLAIM = b"suiprivkey1qexampleclaimbytes\n"
 # Records the reader's descriptors, then runs it as the caller (the test is
 # not root, so there is no account to switch to).
 FAKE_RUNUSER = r"""#!/usr/bin/env python3
-import json, os, stat, sys
+import json, os, stat, sys, time
 assert sys.argv[1] == "-u" and sys.argv[3] == "--", sys.argv
 fds = {}
 for name in os.listdir("/proc/self/fd"):
@@ -31,7 +32,7 @@ for name in os.listdir("/proc/self/fd"):
         fds[name] = os.readlink(f"/proc/self/fd/{name}")
     except OSError:
         pass
-probe = {"stdout_fifo": stat.S_ISFIFO(os.fstat(1).st_mode), "fds": fds,
+probe = {"stdout_fifo": stat.S_ISFIFO(os.fstat(1).st_mode), "fds": fds, "pid": os.getpid(),
          "dest_exists": os.path.lexists(os.environ["SF304_DEST"])}
 with open(os.environ["SF304_PROBE"], "w") as handle:
     json.dump(probe, handle)
@@ -41,6 +42,24 @@ if mode == "fail-after-output":
     sys.exit(1)
 if mode == "oversized":
     os.write(1, b"x" * 5000)
+    sys.exit(0)
+if mode == "endless":
+    # Never stops writing: root must refuse once more than 4 KiB arrived.
+    while True:
+        os.write(1, b"x" * 1024)
+if mode == "stall":
+    # Writes part of a claim, then never finishes.
+    os.write(1, b"partial")
+    time.sleep(3600)
+    sys.exit(0)
+if mode == "orphan-holder":
+    # Exits successfully but leaves a descendant holding the pipe open.
+    if os.fork() == 0:
+        with open(os.environ["SF304_PROBE"] + ".child", "w") as handle:
+            handle.write(str(os.getpid()))
+        time.sleep(3600)
+        os._exit(0)
+    os.write(1, b"partial")
     sys.exit(0)
 os.execvp(sys.argv[4], sys.argv[4:])
 """
@@ -62,6 +81,9 @@ class ClaimStaging(unittest.TestCase):
         self.assertEqual(writer.count("os.fchown(fd, 0, 0)"), 1)
         # Not root here: the only test-side change gives the staged file to the caller instead of root.
         self.writer = writer.replace("os.fchown(fd, 0, 0)", "os.fchown(fd, os.getuid(), os.getgid())")
+        # The stall tests shorten root's overall wait from 60 to 2 seconds.
+        self.assertEqual(self.writer.count("LIMIT, DEADLINE = 4096, 60"), 1)
+        self.writer = self.writer.replace("LIMIT, DEADLINE = 4096, 60", "LIMIT, DEADLINE = 4096, 2")
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         self.transfer, self.staging, bin_dir = root / "transfer", root / "staging", root / "bin"
@@ -134,6 +156,53 @@ class ClaimStaging(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("more than 4096 bytes", result.stderr)
         self.assertFalse(os.path.lexists(self.dest))
+
+    def assert_gone(self, pid):
+        # Killed and reaped (a zombie of an unrelated parent would still be listed, so allow a moment).
+        for _ in range(50):
+            try:
+                with open(f"/proc/{pid}/stat") as handle:
+                    if handle.read().rsplit(")", 1)[1].split()[0] == "Z":
+                        return
+            except FileNotFoundError:
+                return
+            time.sleep(0.1)
+        self.fail(f"reader process {pid} is still running")
+
+    def test_continued_oversized_output_is_refused_promptly(self):
+        self.write_claim()
+        started = time.monotonic()
+        result = self.stage("endless")
+        self.assertLess(time.monotonic() - started, 15, "root kept reading an endless reader")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to stage the claim: the reader returned more than 4096 bytes", result.stderr)
+        self.assertFalse(os.path.lexists(self.dest))
+        self.assert_gone(self.probe_result()["pid"])
+
+    def test_stalled_reader_times_out_and_is_killed(self):
+        self.write_claim()
+        started = time.monotonic()
+        result = self.stage("stall")
+        self.assertLess(time.monotonic() - started, 15, "root waited past its deadline")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to stage the claim: the reader did not finish within 2 seconds", result.stderr)
+        self.assertFalse(os.path.lexists(self.dest))
+        self.assert_gone(self.probe_result()["pid"])
+
+    def test_descendant_holding_the_pipe_times_out_and_is_killed(self):
+        self.write_claim()
+        started = time.monotonic()
+        result = self.stage("orphan-holder")
+        self.assertLess(time.monotonic() - started, 15, "root waited past its deadline")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("the reader did not finish within 2 seconds", result.stderr)
+        self.assertFalse(os.path.lexists(self.dest))
+        child = Path(str(self.probe) + ".child")
+        for _ in range(50):
+            if child.exists() and child.read_text():
+                break
+            time.sleep(0.1)
+        self.assert_gone(int(child.read_text()))
 
     def test_existing_staged_claim_is_never_replaced(self):
         self.write_claim()

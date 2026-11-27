@@ -275,6 +275,9 @@ restarted once.
   following symlinks or blocking, accepts only a regular single-link file
   of at most 4 KiB that the account owns, and passes the bytes it read to
   root through a pipe; it refuses to write to anything but a pipe. Root
+  stops reading as soon as more than 4 KiB arrive and gives the reader 60
+  seconds to finish; otherwise it kills the reader and stages nothing, so a
+  misbehaving SSH account cannot hold the host's rollout lock. Root
   creates the staged copy only after the reader exited successfully, so the
   reader never holds a handle to it and a refused or failed read stages
   nothing. Root owns the

@@ -2052,6 +2052,37 @@ exit 3
             self.exec(container, "rm", "-rf", "/run/suifleet-enroll")
         print("PASS a reader failing after writing part of the claim staged nothing; the transfer directory was erased")
 
+        # A reader that never finishes, or never stops writing, must not hold
+        # root (and the host's rollout lock): root gives up at its deadline
+        # (shortened here from 60 to 5 seconds) or as soon as more than 4 KiB
+        # arrived, kills the reader and stages nothing; cleanup still runs.
+        deadline = ("            LIMIT, DEADLINE = 4096, 60\n", "            LIMIT, DEADLINE = 4096, 5\n")
+        for label, reader, refusal in (
+                ("stalled", "            sys.stdout.buffer.write(data[:8])\n            sys.stdout.flush()\n"
+                 "            __import__('time').sleep(600)\n", "the reader did not finish within 5 seconds"),
+                ("endless", "            while True:\n                sys.stdout.buffer.write(b'x' * 1024)\n",
+                 "the reader returned more than 4096 bytes")):
+            variant = self.variant_examples(f"examples-reader-{label}", {"stage_claim.yml": [
+                deadline, (self.READER_WRITE, reader + self.READER_WRITE)]}, folder="tasks", source=self.examples)
+            started = time.monotonic()
+            output, _ = self.ansible(f"{label} reader is cut off and stages nothing", "/work/claim-interrupt.yml",
+                                     *vault, expect_rc="nonzero", examples=variant)
+            elapsed = time.monotonic() - started
+            assert "interrupted after the claim transfer" not in output, (label, "staging accepted a cut-off read")
+            assert output.count(f"refusing to stage the claim: {refusal}") >= len(self.hosts), (label, output[-4000:])
+            assert elapsed < 300, (label, "the play waited on the reader", elapsed)
+            for name, host in self.hosts.items():
+                container = host["container"]
+                assert self.exec(container, "test", "-e", "/run/suifleet-enroll/claim.key",
+                                 check=False).returncode != 0, (name, label, "a cut-off read was staged")
+                left = self.exec(container, "sh", "-c", "ls -d /dev/shm/suifleet-claim.* 2>/dev/null | wc -l").stdout.strip()
+                assert left == "0", (name, label, "the transfer directory was not erased")
+                readers = self.exec(container, "sh", "-c", "ps -eo user=,args= | grep '[c]laim.key' || true").stdout.strip()
+                assert not readers, (name, label, "the reader survived", readers)
+                self.exec(container, "rm", "-rf", "/run/suifleet-enroll")
+            print(f"PASS the {label} reader was cut off and killed in {elapsed:.0f}s; nothing was staged and the transfer"
+                  " directory was erased")
+
     def overlapping_enrollment(self, vault, name="deb-ubuntu2404"):
         """Two plays enroll the same host at once; the first attempt fails without printing a receipt.
 

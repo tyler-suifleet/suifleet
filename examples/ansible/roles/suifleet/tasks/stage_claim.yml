@@ -211,8 +211,12 @@
     # the opened descriptor (a regular file the account owns, one link,
     # nonempty, at most 4 KiB) and writes the bytes it read to its standard
     # output, which must be a pipe. Root's writer holds the read end of that
-    # pipe and nothing else the reader could use: it collects the bytes,
-    # waits for the reader, and only after the reader exited successfully
+    # pipe and nothing else the reader could use: it reads at most 4097
+    # bytes, refusing as soon as more than 4 KiB arrive, and gives the reader
+    # 60 seconds in total to reach end of file and exit. On overflow or
+    # timeout it closes the pipe, kills the reader's process group (its own
+    # session) and reaps it, so a misbehaving SSH account cannot hold the
+    # host's rollout lock. Only after the reader exited successfully, root
     # creates the destination exclusively (O_EXCL, O_NOFOLLOW), root-owned
     # with mode 0400, and writes it. So the reader never holds a handle to
     # the staged copy, and a refused or failed read leaves no file. Both
@@ -225,21 +229,57 @@
           - -I
           - -c
           - |-
-            import os, resource, subprocess, sys
+            import os, resource, select, signal, subprocess, sys, time
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
             os.umask(0o077)
+            LIMIT, DEADLINE = 4096, 60
             src, account, dest, reader = sys.argv[1:5]
             if os.path.lexists(dest):
                 sys.exit("refusing to stage the claim: a staged claim already exists")
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 ["runuser", "-u", account, "--", "sh", "-c", 'ulimit -c 0 && exec python3 -I -c "$1" "$2"',
                  "sh", reader, src + "/claim.key"],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, close_fds=True)
-            if proc.returncode != 0:
-                sys.exit(f"refusing to stage the claim: the reader exited with status {proc.returncode}")
-            data = proc.stdout
-            if not 0 < len(data) <= 4096:
-                sys.exit("refusing to stage the claim: the reader returned no claim or more than 4096 bytes")
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, close_fds=True, start_new_session=True)
+            end = time.monotonic() + DEADLINE
+            data, problem, status = b"", None, None
+            try:
+                out = proc.stdout.fileno()
+                while True:
+                    left = end - time.monotonic()
+                    if left <= 0:
+                        problem = f"the reader did not finish within {DEADLINE} seconds"
+                        break
+                    if not select.select([out], [], [], left)[0]:
+                        continue
+                    chunk = os.read(out, LIMIT + 1 - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+                    if len(data) > LIMIT:
+                        problem = f"the reader returned more than {LIMIT} bytes"
+                        break
+                if problem is None:
+                    try:
+                        status = proc.wait(timeout=max(0.0, end - time.monotonic()))
+                    except subprocess.TimeoutExpired:
+                        problem = f"the reader did not finish within {DEADLINE} seconds"
+            finally:
+                proc.stdout.close()
+                if status is None:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        pass
+            if problem is not None:
+                sys.exit(f"refusing to stage the claim: {problem}")
+            if status != 0:
+                sys.exit(f"refusing to stage the claim: the reader exited with status {status}")
+            if not 0 < len(data) <= LIMIT:
+                sys.exit(f"refusing to stage the claim: the reader returned no claim or more than {LIMIT} bytes")
             fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)
             try:
                 os.fchown(fd, 0, 0)
