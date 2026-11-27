@@ -1787,6 +1787,19 @@ def open_parent(destination, parts):
     return fd
 
 
+def directory_symlinks(root):
+    """Every symlink under root (not following links) that resolves to a
+    directory, relative to root."""
+    root = Path(root)
+    found = []
+    for directory, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            path = Path(directory) / name
+            if path.is_symlink() and path.is_dir():
+                found.append(path.relative_to(root).as_posix())
+    return sorted(found)
+
+
 def links_escaping(root):
     """Every symlink under root (not following links) whose full resolution
     leaves root."""
@@ -2067,6 +2080,16 @@ def fetch_recipe(recipe, workdir, cargo=None):
                 source_path(unpack, s_dir, rel, 'source path')
         except ValueError as error:
             return errors + [f'{recipe.path.name}: {error}; source checks not run'], fetched
+        # The compiler-input scan inventories S with rglob, which does not
+        # descend through directory symlinks, while rustc, Cargo and the
+        # existence checks follow them. A manifest-declared entry point reached
+        # through such an alias would be read but never scanned, so the
+        # daemon layout must be free of directory symlinks (the packager emits
+        # no symlinks at all).
+        aliases = directory_symlinks(s_dir)
+        if aliases:
+            errors.append(f'{recipe.path.name}: directory symlinks in the daemon source layout: '
+                          f'{", ".join(aliases)}; the compiler-input scan requires a layout without them')
         refused = []
 
         def located(rel):

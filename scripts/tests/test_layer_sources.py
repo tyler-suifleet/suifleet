@@ -3662,6 +3662,37 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
                 self.addCleanup(shutil.rmtree, report['fetch_dir'])
                 self.assertEqual(report['errors'], [])
 
+    def test_fetch_rejects_directory_symlinks_in_the_daemon_layout(self):
+        # The reviewer's reproduction: a confined directory alias lets the
+        # manifest declare alias/entry.inc, which rglob never yields, so its
+        # absent include_str! input escaped the scan. The layout is refused.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "alias/entry.inc"\n'
+        entry = 'const M: &str = include_str!("message.txt");\nfn main() {}\n'
+        files = {'suifleet-edge/Cargo.toml': manifest, 'suifleet-edge/tools/entry.inc': entry}
+        archive = self.archive.with_name('aliased-entry.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name in files:
+                    text = files.pop(member.name).encode()
+                    member.size, data = len(text), io.BytesIO(text)
+                tar.addfile(member, data)
+            for name, text in files.items():
+                added = tarfile.TarInfo(name)
+                added.size, added.mode = len(text), 0o644
+                tar.addfile(added, io.BytesIO(text.encode()))
+            alias = tarfile.TarInfo('suifleet-edge/alias')
+            alias.type, alias.linkname = tarfile.SYMTYPE, 'tools'
+            tar.addfile(alias)
+        self.archive = archive
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        expected = 'directory symlinks in the daemon source layout: suifleet-edge/alias'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+
     def test_fetch_rejects_path_attributes_in_inline_modules(self):
         # The reviewer's reproduction as a pinned archive: both child.rs files
         # are present, yet rustc needs the one under tools/nested/. The audit
