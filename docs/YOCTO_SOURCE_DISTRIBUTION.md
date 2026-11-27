@@ -397,7 +397,8 @@ check then verifies the resulting `S`:
 - for the codec, the exact five pinned files (each file `do_install` copies
   must be pinned, so it must also be fetched), their digests, provenance
   revision, licenses and Node version, plus manifest schema 1 and manifest
-  file hashes equal to the recipe pins, as `do_verify_codec` requires.
+  file hashes equal to the recipe pins, as `do_verify_codec` requires. Every
+  manifest entry must be an object naming a pinned file.
 
 The JSON report maps each recipe to its PV, crate version, source revision,
 source URLs and SHA-256, license files and crate count, plus the advertised
