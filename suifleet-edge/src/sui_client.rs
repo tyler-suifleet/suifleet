@@ -2406,6 +2406,43 @@ impl SuiClient {
         Ok(found)
     }
 
+    /// Read-only proof that `claim` can never sponsor an enrollment under
+    /// `policy` again, and that it sponsored none before: transaction
+    /// `digest` succeeded, deleted the claim's entry in the policy's claim
+    /// table (the derived field ID binds both the policy and the claim) and
+    /// emitted no enrollment, and the entry is still absent. Only a
+    /// revocation (through any entry point) removes an entry without an
+    /// enrollment event, and it aborts unless the claim was still unused.
+    /// Returns the revocation's checkpoint.
+    #[cfg(target_os = "linux")]
+    pub async fn check_revocation(&self, policy: &str, claim: &str, digest: &str) -> anyhow::Result<u64> {
+        let claim = Address::from_str(claim).map_err(|e| anyhow::anyhow!("invalid claim address {claim}: {e}"))?;
+        let object = self.object(policy).await?;
+        let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
+        self.validate_enrollment_policy(policy, &operator).await?;
+        let field = claim_field_id(&object.fields, &claim)?;
+        let mut request = proto::GetTransactionRequest::default();
+        request.digest = Some(digest.to_owned());
+        request.read_mask = Some(mask(&["digest", "effects.status", "effects.changed_objects", "effects.events_digest", "events.events", "checkpoint"]));
+        let executed = self
+            .read_rpc(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.ledger_client().get_transaction(request).await }
+            })
+            .await
+            .map_err(|e| status(e).context(format!("revocation transaction {digest}")))?
+            .into_inner()
+            .transaction
+            .ok_or_else(|| anyhow::anyhow!("revocation transaction {digest} not found"))?;
+        let checkpoint = revocation_evidence(&executed, digest, &field)
+            .map_err(|e| e.context(format!("transaction {digest} did not revoke claim {claim} from policy {policy}")))?;
+        anyhow::ensure!(
+            self.optional_object(&field).await?.is_none(),
+            "claim {claim} is registered in policy {policy} again; it can still enroll"
+        );
+        Ok(checkpoint)
+    }
+
     #[cfg(target_os = "linux")]
     async fn scan_enrollments(&self, policy: &str, operator: &str, from: u64) -> anyhow::Result<Option<(Enrolled, String)>> {
         let address = self.address();
@@ -2771,6 +2808,40 @@ fn check_call_transaction(
     Ok(())
 }
 
+/// The ID of `claim`'s entry in an enrollment policy's `claims` table
+/// (`Table<address, bool>`), from the policy's rendered fields.
+#[cfg(target_os = "linux")]
+fn claim_field_id(policy: &Value, claim: &Address) -> anyhow::Result<String> {
+    let table = &policy["claims"]["id"];
+    let table = table.as_str().or_else(|| table["id"].as_str()).ok_or_else(|| anyhow::anyhow!("enrollment policy has no claim table"))?;
+    let table = Address::from_str(table).map_err(|e| anyhow::anyhow!("invalid claim table ID {table}: {e}"))?;
+    Ok(table.derive_dynamic_child_id(&TypeTag::Address, claim.as_bytes()).to_string())
+}
+
+/// Checks a transaction's effects for a revocation of the claim whose table
+/// entry is `field`: successful, checkpointed, deleted the entry, and emitted
+/// no enrollment event (an enrollment also deletes it). Events must be
+/// present when the effects commit to any.
+#[cfg(target_os = "linux")]
+fn revocation_evidence(executed: &proto::ExecutedTransaction, digest: &str, field: &str) -> anyhow::Result<u64> {
+    anyhow::ensure!(executed.digest.as_deref() == Some(digest), "the node returned another transaction");
+    execution_digest(executed)?;
+    let checkpoint = executed.checkpoint.ok_or_else(|| anyhow::anyhow!("the transaction is not in a checkpoint yet"))?;
+    let effects = executed.effects.as_ref().ok_or_else(|| anyhow::anyhow!("missing transaction effects"))?;
+    let deleted = proto::changed_object::IdOperation::Deleted as i32;
+    anyhow::ensure!(
+        effects.changed_objects.iter().any(|c| c.id_operation == Some(deleted) && c.object_id.as_deref().is_some_and(|id| same_id(id, field))),
+        "it did not remove the claim from the policy"
+    );
+    let events = executed.events.as_ref().map(|e| e.events.as_slice()).unwrap_or_default();
+    anyhow::ensure!(effects.events_digest.is_none() || !events.is_empty(), "the node returned no events for the transaction");
+    anyhow::ensure!(
+        !events.iter().any(|e| e.event_type.as_deref().is_some_and(|t| t.ends_with("::enrollment::DeviceEnrolled"))),
+        "it enrolled a device"
+    );
+    Ok(checkpoint)
+}
+
 #[derive(Debug)]
 struct FailedExecution;
 impl std::fmt::Display for FailedExecution { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("chain execution failed; no fleet mutation committed") } }
@@ -2852,6 +2923,67 @@ mod tests {
         }
     }
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    fn revocation(field: &str, deleted: bool, event: Option<&str>) -> proto::ExecutedTransaction {
+        let mut executed = proto::ExecutedTransaction::default();
+        executed.digest = Some("D".into());
+        executed.checkpoint = Some(7);
+        let mut effects = proto::TransactionEffects::default();
+        let mut status = proto::ExecutionStatus::default();
+        status.success = Some(true);
+        effects.status = Some(status);
+        let mut changed = proto::ChangedObject::default();
+        changed.object_id = Some(field.into());
+        changed.id_operation = Some(if deleted { proto::changed_object::IdOperation::Deleted } else { proto::changed_object::IdOperation::None } as i32);
+        effects.changed_objects = vec![changed];
+        if let Some(event_type) = event {
+            effects.events_digest = Some("E".into());
+            let mut e = proto::Event::default();
+            e.event_type = Some(event_type.into());
+            let mut events = proto::TransactionEvents::default();
+            events.events = vec![e];
+            executed.events = Some(events);
+        }
+        executed.effects = Some(effects);
+        executed
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn revocation_evidence_binds_the_policy_claim_entry() {
+        let claim = Address::from_str(&format!("0x{}", "c".repeat(64))).unwrap();
+        let other_claim = Address::from_str(&format!("0x{}", "d".repeat(64))).unwrap();
+        let policy = json!({"claims": {"id": format!("0x{}", "a".repeat(64)), "size": "1"}});
+        let other_policy = json!({"claims": {"id": {"id": format!("0x{}", "b".repeat(64))}, "size": "1"}});
+        let field = claim_field_id(&policy, &claim).unwrap();
+        // Another claim of the same policy, and the same claim in another policy.
+        assert_ne!(field, claim_field_id(&policy, &other_claim).unwrap());
+        assert_ne!(field, claim_field_id(&other_policy, &claim).unwrap());
+        assert!(claim_field_id(&json!({"claims": {}}), &claim).is_err());
+
+        assert_eq!(revocation_evidence(&revocation(&field, true, None), "D", &field).unwrap(), 7);
+        assert_eq!(revocation_evidence(&revocation(&field, true, Some("0x1::other::Event")), "D", &field).unwrap(), 7);
+        for (executed, digest, why) in [
+            (revocation(&claim_field_id(&policy, &other_claim).unwrap(), true, None), "D", "another claim"),
+            (revocation(&claim_field_id(&other_policy, &claim).unwrap(), true, None), "D", "another policy"),
+            (revocation(&field, false, None), "D", "entry not deleted"),
+            (revocation(&field, true, Some("0x5::enrollment::DeviceEnrolled")), "D", "an enrollment"),
+            (revocation(&field, true, None), "X", "another digest"),
+        ] {
+            assert!(revocation_evidence(&executed, digest, &field).is_err(), "{why}");
+        }
+        let mut failed = revocation(&field, true, None);
+        failed.effects.as_mut().unwrap().status.as_mut().unwrap().success = Some(false);
+        assert!(revocation_evidence(&failed, "D", &field).is_err());
+        let mut pending = revocation(&field, true, None);
+        pending.checkpoint = None;
+        assert!(revocation_evidence(&pending, "D", &field).is_err());
+        // Effects that commit to events the node did not return.
+        let mut hidden = revocation(&field, true, None);
+        hidden.effects.as_mut().unwrap().events_digest = Some("E".into());
+        assert!(revocation_evidence(&hidden, "D", &field).is_err());
+    }
 
     #[test]
     fn current_contract_event_decodes() {

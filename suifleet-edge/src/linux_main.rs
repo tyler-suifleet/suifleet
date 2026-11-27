@@ -136,6 +136,10 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     if args.len() == 3 && args[1] == "--find-enrollment" {
         return find_enrollment(Path::new(&args[2])).await;
     }
+    #[cfg(target_os = "linux")]
+    if args.len() == 5 && args[1] == "--check-revocation" {
+        return check_revocation(Path::new(&args[2]), &args[3], &args[4]).await;
+    }
     if (args.len() == 4 || args.len() == 5) && args[1] == "--verify-release" {
         let (bundle, trust) = (Path::new(&args[2]), Path::new(&args[3]));
         let verified = match args.get(4) {
@@ -185,7 +189,7 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --find-enrollment ENROLL_TOML | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --find-enrollment ENROLL_TOML | --check-revocation ENROLL_TOML CLAIM DIGEST | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     init_tracing();
     if signer_service {
@@ -917,6 +921,21 @@ async fn find_enrollment(path: &Path) -> anyhow::Result<()> {
             std::process::exit(3);
         }
     }
+}
+
+/// Read-only settlement of an enrollment attempt that printed no receipt:
+/// proves that transaction DIGEST revoked CLAIM from the enroll.toml's
+/// policy before it sponsored any enrollment, and that the claim is still
+/// absent, so an attempt sponsored by it can never commit. Never reads the
+/// claim key or submits anything.
+#[cfg(target_os = "linux")]
+async fn check_revocation(path: &Path, claim: &str, digest: &str) -> anyhow::Result<()> {
+    let (enroll, sui_config, device) = config::EnrollConfig::load(path)?;
+    let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
+    sui.validate_deployment().await?;
+    let checkpoint = sui.check_revocation(&enroll.policy_id, claim, digest).await?;
+    println!("claim {claim} was revoked from policy {} in transaction {digest} (checkpoint {checkpoint}) and cannot enroll", enroll.policy_id);
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
