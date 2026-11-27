@@ -252,6 +252,11 @@ These static checks always run, on every recipe in the layer:
   same-named file such as `files/qemuarm64/suifleet.service` replaces
   `files/suifleet.service` on that machine. The audit does not model
   per-configuration overrides, so any such candidate is rejected.
+  BitBake's local fetcher takes the first candidate that exists, directories
+  included. A directory such as `suifleet-1.0/payload` therefore wins over a
+  later `files/payload`. The audit supports only regular local files, so it
+  rejects a selected directory instead of skipping to the later file, and a
+  directory in an override subdirectory counts as an override candidate.
 - Source-affecting variables take no conditional overrides. These are
   `SRC_URI` (and its flags), `SRCREV*`, `PV`, `PE`, `S`, `LICENSE`,
   `LIC_FILES_CHKSUM`, `FILESEXTRAPATHS`, `CARGO_SRC_DIR`, `CARGO_MANIFEST_PATH`,
