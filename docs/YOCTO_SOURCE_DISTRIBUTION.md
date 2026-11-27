@@ -238,7 +238,9 @@ These static checks always run, on every recipe in the layer:
   `SUFFIX = "URI"` replaces `SRC_URI`. The reader does not model key
   expansion. Overrides such as `RDEPENDS:${PN}` keep a literal variable name
   and are still accepted. The refusal is static, and the fetcher repeats it
-  before anything is downloaded.
+  before anything is downloaded. It names only the file and the variable
+  name; the assigned value, which may carry credentials or a signed URL, is
+  never copied into the report.
 - `conf/layer.conf` may contain only layer registration. BitBake parses it
   into the base configuration that every recipe inherits, so an assignment
   there (for example `SRC_URI:append:pn-suifleet`) changes sources without
