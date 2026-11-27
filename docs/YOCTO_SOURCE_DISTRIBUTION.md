@@ -451,6 +451,13 @@ Files and links are then created through directory descriptors opened with
 each extraction, every symlink under the recipe's unpack directory is resolved
 again and must stay inside it.
 
+A pinned Git source can track symlinks too. After each checkout, and once more
+after every source is assembled, every symlink under the unpack directory is
+resolved and must stay inside it. Links that resolve inside the tree are
+allowed. An escaping link stops the recipe before any manifest, source or
+license byte is read or Cargo runs, so the result never depends on files on
+the review host.
+
 The check then verifies the resulting `S`:
 
 - for every recipe, no runtime identity/state file name anywhere in the fetched
