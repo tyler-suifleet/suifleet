@@ -85,6 +85,10 @@ REF = re.compile(r'\$\{([A-Za-z0-9_\-]+)\}')
 UNPACKDIR_EXPR = re.compile(r"""\$\{@d\.getVar\(['"]UNPACKDIR['"]\)\s+or\s+d\.getVar\(['"]WORKDIR['"]\)\}""")
 # BitBake's anonymous Python forms: python () {, python __anonymous () {, with
 # optional fakeroot and spacing. They run at the end of parsing (ast.finalize).
+# BitBake directives the reader does not model. unset removes a variable or
+# flag (SRC_URI, SRCREV, a checksum), include_all reads the named file from
+# every BBPATH layer, and addfragments/addpylib load further metadata or code.
+UNMODELLED_DIRECTIVES = frozenset({'unset', 'include_all', 'addfragments', 'addpylib'})
 ANONYMOUS_PYTHON = re.compile(r'^(?:fakeroot\s+)?python(?:\s+__anonymous)?\s*\(\s*\)\s*\{$')
 TARBALL = re.compile(r'\.(tar(\.(gz|xz|bz2|zst))?|tgz|tbz2|txz)$')
 # Every suffix BitBake's FetchMethod.unpack runs an unpack command for (tar and
@@ -141,6 +145,9 @@ class Recipe:
         # in-layer classes). It can rewrite SRC_URI and the other pins, and
         # this reader does not execute it, so audit_recipe refuses it.
         self.parse_time = []
+        # Directives this reader does not model (unset, include_all, ...). They
+        # can remove or replace source pins, so audit_recipe refuses them.
+        self.unmodelled = []
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
@@ -218,25 +225,33 @@ class Recipe:
                     if '${' in name or self.layer_class(name):
                         self.parse_time.append(f'{self.rel(path)}: {words[0]} of in-layer or unresolved class {name}')
                 continue
-            if words[0] in ('require', 'include'):
-                # BitBake searches the including file's directory first and then
-                # BBPATH, which reaches other layers. A standalone layer's audited
-                # metadata must therefore come from a file found inside the layer:
-                # an out-of-layer, unresolved or missing target is a finding, and
+            if words[0] in UNMODELLED_DIRECTIVES:
+                self.unmodelled.append(f'{self.rel(path)}: {line}')
+                continue
+            if words[0] in ('require', 'include') and len(words) > 1:
+                # BitBake expands the whole operand and includes every
+                # space-separated file name in it, in order. It searches the
+                # including file's directory first and then BBPATH, which
+                # reaches other layers. A standalone layer's audited metadata
+                # must therefore come from files found inside the layer: an
+                # out-of-layer, unresolved or missing target is a finding, and
                 # its contents are never read.
-                named = self.expand(words[1])
-                target = (path.parent / named).resolve()
-                where = f'{path.resolve().relative_to(self.layer.resolve()).as_posix()}: {words[0]} {words[1]}'
-                if '${' in named:
+                operand = line.split(None, 1)[1]
+                where = f'{self.rel(path)}: {words[0]} {operand}'
+                expanded = self.expand(operand)
+                if '${' in expanded:
                     self.include_errors.append(f'{where} cannot be resolved inside the layer')
-                elif self.layer.resolve() not in target.parents:
-                    self.include_errors.append(f'{where} resolves outside the layer: {target}')
-                elif not target.is_file():
-                    self.include_errors.append(
-                        f'{where} is not a file in the layer; BitBake would search BBPATH outside it'
-                        if words[0] == 'include' else f'{where}: required file missing')
-                else:
-                    self.read(target)
+                    continue
+                for named in expanded.split():
+                    target = (path.parent / named).resolve()
+                    if self.layer.resolve() not in target.parents:
+                        self.include_errors.append(f'{where} resolves outside the layer: {target}')
+                    elif not target.is_file():
+                        self.include_errors.append(
+                            f'{where}: {named} is not a file in the layer; BitBake would search BBPATH outside it'
+                            if words[0] == 'include' else f'{where}: required file missing: {named}')
+                    else:
+                        self.read(target)
                 continue
             match = ASSIGN.match(line)
             if not match:
@@ -495,6 +510,8 @@ def audit_recipe(recipe):
         errors.append(f'{where}: AUTOREV is forbidden')
     errors += override_errors(recipe, where)
     errors += recipe.include_errors
+    errors += [f'{where}: {item} is a directive the audit does not model; it can remove or replace '
+               'source pins and is not supported in audited recipes, includes or appends' for item in recipe.unmodelled]
     errors += [f'{where}: {item} runs after parsing and can change source pins the audit '
                'reads; it is not supported in audited recipes, includes or appends' for item in recipe.parse_time]
     if 'FILESPATH' in recipe.vars:
@@ -867,6 +884,10 @@ def unpack_plan(recipe, unpack):
     if recipe.parse_time:
         # SRC_URI as read here may not be what BitBake fetches after running it.
         raise ValueError(f'metadata that runs after parsing is not supported: {"; ".join(recipe.parse_time)}')
+    if recipe.unmodelled or recipe.include_errors:
+        # SRC_URI as read here may not be what BitBake would fetch.
+        raise ValueError('unmodelled or unresolved metadata is not supported: '
+                         f'{"; ".join(recipe.unmodelled + recipe.include_errors)}')
     plan = []
     for url, params in recipe.sources():
         scheme = url.split('://', 1)[0]

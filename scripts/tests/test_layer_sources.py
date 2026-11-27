@@ -1425,6 +1425,92 @@ class LayerAuditTests(unittest.TestCase):
                                 'python do_anonymous_check() {\n    pass\n}\ndo_install() {\n    true\n}\n')
         self.assertEqual(self.errors(), [])
 
+    def test_every_include_operand_is_read_and_checked(self):
+        # BitBake expands the whole include/require operand and includes every
+        # file name in it; a valid first file must not hide the others.
+        first = self.recipe_dir / 'first.inc'
+        first.write_text('SUMMARY = "first"\n')
+        second = self.recipe_dir / 'second.inc'
+        self.addCleanup(first.unlink)
+        self.addCleanup(second.unlink, missing_ok=True)
+        cases = {
+            'require first.inc missing.inc': 'required file missing: missing.inc',
+            'include first.inc missing.inc': 'missing.inc is not a file in the layer',
+            f'require first.inc {Path(self.tmp.name) / "host.inc"}': 'resolves outside the layer',
+            'require first.inc ${COREBASE}/x.inc': 'cannot be resolved inside the layer',
+        }
+        for line, message in cases.items():
+            with self.subTest(line):
+                self.write_recipe(extra=line)
+                errors = self.errors()
+                self.assertTrue(any(message in e for e in errors), errors)
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any(message in e and 'nothing fetched' in e for e in errors), errors)
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+        # Source metadata in a second file, or in a file named by an expanded
+        # variable, is read like the first.
+        second.write_text('SRC_URI += "https://example.com/unpinned.tar.gz"\n')
+        for line in ('require first.inc second.inc', 'SUIFLEET_INCS = "first.inc second.inc"\ninclude ${SUIFLEET_INCS}'):
+            with self.subTest(line):
+                self.write_recipe(extra=line)
+                errors = self.errors()
+                self.assertTrue(any('lacks a SHA-256 pin: https://example.com/unpinned.tar.gz' in e for e in errors), errors)
+        second.write_text('SUMMARY = "second"\n')
+        self.write_recipe(extra='require first.inc second.inc')
+        self.assertEqual(self.errors(), [])
+
+    def test_unmodelled_directives_are_refused(self):
+        # unset removes a variable or flag BitBake would otherwise use; the
+        # reader does not model it (nor include_all, addfragments, addpylib),
+        # so a recipe using them must fail before anything is fetched.
+        include = self.recipe_dir / 'extra.inc'
+        append = self.recipe_dir / 'suifleet_1.0.bbappend'
+        cases = {
+            'unset variable': ('bb', 'unset SRC_URI'),
+            'unset flag': ('bb', 'unset SRC_URI[sha256sum]'),
+            'unset in include': ('inc', 'unset SRCREV'),
+            'unset in append': ('bbappend', 'unset SRC_URI'),
+            'include_all': ('bb', 'include_all conf/distro/include/x.inc'),
+            'addpylib': ('bb', 'addpylib ${LAYERDIR}/lib suifleet'),
+            'addfragments': ('bb', 'addfragments conf/fragments OE_FRAGMENTS'),
+        }
+        for label, (where, text) in cases.items():
+            with self.subTest(label):
+                include.unlink(missing_ok=True)
+                append.unlink(missing_ok=True)
+                if where == 'bb':
+                    self.write_recipe(extra=text)
+                elif where == 'inc':
+                    include.write_text(text + '\n')
+                    self.write_recipe(extra='require extra.inc')
+                else:
+                    append.write_text(text + '\n')
+                    self.write_recipe()
+                self.assertTrue(any('directive the audit does not model' in e and text in e
+                                    for e in self.errors()), self.errors())
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer,
+                                      [append] if append.exists() else ())
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('unmodelled' in e and 'nothing fetched' in e for e in errors), errors)
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+        include.unlink(missing_ok=True)
+        append.unlink(missing_ok=True)
+        self.write_recipe()
+        self.assertEqual(self.errors(), [])
+
     def test_archives_bitbake_unpacks_in_unmodelled_formats_are_refused(self):
         # BitBake runs unzip (and other extractors) on these names unless
         # unpack=0; the audit must not report the packed file's layout instead.
