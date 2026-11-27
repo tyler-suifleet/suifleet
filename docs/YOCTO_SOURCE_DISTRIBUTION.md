@@ -345,8 +345,10 @@ These static checks always run, on every recipe in the layer:
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
 the lockfile's crates.io registry crates, versions and checksums. It compares
 each entry's registry and effective checksum, as BitBake would fetch and verify
-it, and refuses lockfile sources other than the crates.io index. `--fetch` does
-not download crates. The crate include is
+it. Cargo identifies a package by name, version and source, so every lockfile
+row from a source other than the crates.io index is refused as it is read, even
+when a crates.io row has the same name and version; a repeated crates.io row is
+refused too. `--fetch` does not download crates. The crate include is
 still regenerated with `bitbake -c update_crates suifleet`; this check confirms
 the committed result matches.
 
