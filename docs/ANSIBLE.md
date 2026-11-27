@@ -74,7 +74,9 @@ about a package it has not uploaded, so it reports that restore as a pending
 installation; the preview itself changes nothing. A `systemd-binary` preview
 compares the installed `/usr/bin/suifleet` with what the install enforces, the
 pinned bytes in a regular `root:root` file with mode `0755`, so drifted
-metadata previews as an installation and a restart of both services.) For
+metadata previews as an installation and a restart of both services. A
+directory, or a symlink to one, at `/usr/bin/suifleet` stops the host before
+anything is uploaded, in a preview or a real run.) For
 `systemd-binary`, extract the binary from the verified tarball and pin its own
 SHA-256 (`suifleet_binary_sha256`). Point `suifleet_units_src` at the reviewed
 `suifleet-edge/meta-suifleet/recipes-edge/suifleet/files` directory of the same

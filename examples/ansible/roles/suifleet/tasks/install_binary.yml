@@ -21,6 +21,28 @@
     - {name: suifleet, home: /var/lib/suifleet}
     - {name: suifleet-signer, home: /nonexistent}
 
+# The copy module treats a directory destination (or a symlink to one) as a
+# target directory: it would write the cache file inside it, report success
+# and leave no executable at /usr/bin/suifleet. Refuse that before anything is
+# uploaded, in a preview as well as a real run.
+- name: Check the binary install path
+  ansible.builtin.stat:
+    path: /usr/bin/suifleet
+    follow: true
+    get_checksum: false
+  register: suifleet_binary_path
+  check_mode: false
+
+- name: Refuse a directory at the binary install path
+  ansible.builtin.assert:
+    that:
+      - not (suifleet_binary_path.stat.exists and suifleet_binary_path.stat.isdir)
+    quiet: true
+    fail_msg: >-
+      /usr/bin/suifleet is a directory (or a symlink to one). The binary must be
+      installed as a regular file there; move the directory aside and rerun.
+      Nothing was uploaded or installed.
+
 # The binary is uploaded to a private per-run file and its SHA-256 checked on
 # the host; only then is it renamed to the cache path named by the pinned
 # digest, from which it replaces /usr/bin/suifleet (an atomic rename by the

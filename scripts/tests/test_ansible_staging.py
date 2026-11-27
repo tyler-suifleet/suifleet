@@ -127,6 +127,28 @@ class Staging(unittest.TestCase):
                       "suifleet_binary_installed.stat.mode | default('') == '0755'"):
             self.assertIn(check, pending)
 
+    def test_binary_path_directory_refused_before_upload(self):
+        """A directory (or a symlink to one) at /usr/bin/suifleet stops the host first.
+
+        The copy module would treat it as a target directory, write the cache
+        file inside it and succeed without installing an executable. The guard
+        follows symlinks, runs in check mode too and precedes every upload and
+        install step; scripts/test_ansible.py binary_path_directory runs it on
+        real hosts."""
+        text = (TASKS / "install_binary.yml").read_text()
+        stat = task(text, "Check the binary install path")
+        for line in ("    path: /usr/bin/suifleet\n", "    follow: true\n", "  register: suifleet_binary_path\n",
+                     "  check_mode: false"):
+            self.assertIn(line, stat)
+        self.assertNotIn("  when:", stat)
+        guard = task(text, "Refuse a directory at the binary install path")
+        self.assertIn("      - not (suifleet_binary_path.stat.exists and suifleet_binary_path.stat.isdir)\n", guard)
+        self.assertNotIn("  when:", guard)
+        order = [text.index(f"\n- name: {name}\n") for name in (
+            "Check the binary install path", "Refuse a directory at the binary install path",
+            "Upload, verify and publish the binary", "Install the verified binary")]
+        self.assertEqual(order, sorted(order))
+
     def test_prune_keeps_in_flight_uploads(self):
         text = (TASKS / "prune_staging.yml").read_text()
         published = task(text, "Find staged artifacts of other releases")
