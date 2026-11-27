@@ -355,6 +355,64 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'includes missing file suifleet-edge/tools/absent.rs'):
             packager.plan(self.repo.root, 'HEAD')
 
+    def test_comments_between_include_and_path_tokens_are_seen(self):
+        # The reviewer's reproduction: rustc accepts a comment wherever
+        # whitespace may appear, so `include_str /* .. */ !(..)` and
+        # `#[/* .. */ path = ..]` compile, and their targets must be packaged.
+        self.repo.write('interfaces/message.txt', 'hello\n')
+        self.repo.write('suifleet-edge/tools/child.rs', 'pub fn run() {}\n')
+        self.repo.write('suifleet-edge/tools/unix.rs', 'pub fn run() {}\n')
+        forms = (('const M: &str = include_str /* embedded at build time */ !("../../interfaces/message.txt");\n'
+                  'fn main() {}\n', 'interfaces/message.txt'),
+                 ('const M: &str = include_str! /* a */ ( /* b */ "../../interfaces/message.txt" /* c */ );\n'
+                  'fn main() {}\n', 'interfaces/message.txt'),
+                 ('const M: &str = include_str!(// line comment\n"../../interfaces/message.txt");\nfn main() {}\n',
+                  'interfaces/message.txt'),
+                 ('#[/* reason */ path = "../tools/child.rs"]\nmod child;\nfn main() { child::run() }\n',
+                  'suifleet-edge/tools/child.rs'),
+                 ('# /* a */ [path /* b */ = /* c */ "../tools/child.rs" /* d */]\nmod child;\nfn main() {}\n',
+                  'suifleet-edge/tools/child.rs'),
+                 ('#[cfg_attr(/* a */ unix, /* b */ path = "../tools/unix.rs")]\nmod child;\nfn main() {}\n',
+                  'suifleet-edge/tools/unix.rs'))
+        for index, (source, name) in enumerate(forms):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source)
+                rev = self.repo.commit()
+                output = self.out / f'comment-form-{index}.tar.gz'
+                info = packager.build(self.repo.root, rev, output)
+                self.assertIn(name, info['paths'])
+                with tarfile.open(output) as tar:
+                    self.assertIn(name, tar.getnames())
+        # A comment-looking sequence inside a string is not a comment.
+        self.repo.write('suifleet-edge/src/main.rs', 'const S: &str = "/* not a comment */";\n'
+                        'const M: &str = include_str!("../../interfaces/message.txt");\nfn main() {}\n')
+        self.repo.commit()
+        self.assertIn('interfaces/message.txt', packager.plan(self.repo.root, 'HEAD')['paths'])
+        # An unresolvable form behind a comment is still refused, and so is a
+        # renamed include macro whose calls the scanner could not see.
+        for source in ('include /* a */ !(concat!("../tools/", "child.rs"));\n',
+                       '#[/* a */ path = concat!("../tools/", "child.rs")]\nmod child;\n',
+                       'use std::include_str as embed;\nconst M: &str = embed!("../../interfaces/message.txt");\n',
+                       'use std::{include_bytes /* a */ as embed};\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source + 'fn main() {}\n')
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, r'unsupported include form|unsupported #\[path\]|renaming an include macro'):
+                    packager.plan(self.repo.root, 'HEAD')
+        # Outside the packaged directories a commented `mod` is still an
+        # implicit module, and a commented #[path] still counts as explicit.
+        self.repo.write('suifleet-edge/src/main.rs', 'fn main() {}\n')
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/standalone.rs"\n'
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        self.repo.write('suifleet-edge/tools/standalone.rs', 'mod /* why */ helper;\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'tools/standalone.rs declares module\(s\) helper without #\[path\]'):
+            packager.plan(self.repo.root, 'HEAD')
+        self.repo.write('suifleet-edge/tools/standalone.rs', '#[/* why */ path = "helper.rs"]\nmod helper;\nfn main() {}\n')
+        self.repo.commit()
+        self.assertIn('suifleet-edge/tools/helper.rs', packager.plan(self.repo.root, 'HEAD')['paths'])
+
     def test_code_includes_are_followed_whatever_their_suffix(self):
         # The reviewer's reproduction: include! compiles its target as Rust
         # even when it is not named .rs, so that file's own includes are
@@ -1197,6 +1255,42 @@ class LayerAuditTests(unittest.TestCase):
         complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
         info = packager.build(self.repo.root, rev, complete)
         self.assertIn('suifleet-edge/tools/entry.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
+    def test_fetch_sees_includes_behind_comments(self):
+        # The reviewer's fetched-layout reproduction: a pinned archive whose
+        # src/main.rs uses `include_str /* .. */ !(..)` for a file the archive
+        # lacks must not audit clean.
+        main = ('const M: &str = include_str /* embedded at build time */ !("../../interfaces/message.txt");\n'
+                'fn main() {}\n')
+        archive = self.archive.with_name('commented-include.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name == 'suifleet-edge/src/main.rs':
+                    member.size, data = len(main), io.BytesIO(main.encode())
+                tar.addfile(member, data)
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/src/main.rs references interfaces/message.txt, absent from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        self.assertFalse(report['ok'])
+        # Committed and packaged, the same source audits clean end to end.
+        self.repo.write('suifleet-edge/src/main.rs', main)
+        self.repo.write('interfaces/message.txt', 'hello\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('interfaces/message.txt', info['paths'])
         self.archive = complete
         self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
                           sha=info['sha256'], srcrev=rev)

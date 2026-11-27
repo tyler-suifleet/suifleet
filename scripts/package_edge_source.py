@@ -53,6 +53,9 @@ REQUIRED = ('LICENSE', f'{CRATE}/Cargo.toml', f'{CRATE}/Cargo.lock')
 # Every include macro name, however it is delimited or spaced (`include!(..)`,
 # `include! { .. }`, `std::include_str![..]`).
 INCLUDE_MACRO = re.compile(rb'(?<![A-Za-z0-9_])include(_str|_bytes)?\s*!')
+# `use std::include_str as name;` renames a macro, so calls through the new
+# name would not be seen; refused outside comments and string literals.
+INCLUDE_RENAME = re.compile(rb'(?<![A-Za-z0-9_])include(?:_str|_bytes)?\s+as(?![A-Za-z0-9_\x80-\xff])')
 # The one argument form followed: a single string literal (plain without
 # escapes, or raw) in any macro delimiter, with an optional trailing comma.
 INCLUDE_ARGUMENT = {
@@ -565,35 +568,63 @@ def literal_references(source_path, data):
     """Every file path a Rust source names through an include macro or a path
     attribute, as (path bytes, is_code) pairs. `include!` and #[path] targets
     are Rust code whatever their file name, so their own references must be
-    followed too; `include_str!`/`include_bytes!` targets are data. The scan
-    is lexical (comments and strings included, which only makes it stricter):
-    each include-macro name must be followed by one string literal in any
-    delimiter, otherwise ValueError, so an unhandled form cannot silently drop
-    a build input. Rust's non-ASCII whitespace is refused anywhere in the
-    source, since the patterns would not see through it."""
+    followed too; `include_str!`/`include_bytes!` targets are data.
+
+    Rust allows comments wherever whitespace may appear, including between a
+    macro name and its `!`, inside an attribute and around the literal, so the
+    authoritative scan runs on the source with comments blanked (string
+    literals kept): each include-macro name must be followed by one string
+    literal in any delimiter, otherwise ValueError, so an unhandled form
+    cannot silently drop a build input. The raw text is scanned as well and
+    whatever it resolves is added too (only ever more files, never an error),
+    so references inside comments are still packaged as before. Rust's
+    non-ASCII whitespace is refused anywhere in the source, since the
+    patterns would not see through it."""
     unicode_space = UNICODE_WHITESPACE.search(data)
     if unicode_space:
         point = ord(unicode_space.group().decode())
         line = data.count(b'\n', 0, unicode_space.start()) + 1
         raise ValueError(f'{source_path}:{line}: Unicode whitespace U+{point:04X} is unsupported in Rust sources; '
                          'use ASCII whitespace')
+    code = code_mask(data)
+    blocks = inline_module_blocks(code)
+    references = _scan_references(source_path, code_mask(data, strings=False), code, blocks, strict=True)
+    for reference in _scan_references(source_path, data, code, blocks, strict=False):
+        if reference not in references:
+            references.append(reference)
+    return references
+
+
+def _scan_references(source_path, text, code, blocks, strict):
+    """The literal references of one scan text (see literal_references). With
+    `strict`, an unresolvable form raises ValueError; otherwise it is skipped."""
     references = []
-    for match in INCLUDE_MACRO.finditer(data):
-        rest = data[match.end():].lstrip()
+    rename = INCLUDE_RENAME.search(code) if strict else None
+    if rename:
+        snippet = code[rename.start():rename.start() + 60].split(b'\n')[0].decode(errors='replace')
+        raise ValueError(f'{source_path}: renaming an include macro is unsupported ({snippet!r}); '
+                         'call include!/include_str!/include_bytes! by name')
+    for match in INCLUDE_MACRO.finditer(text):
+        rest = text[match.end():].lstrip()
         argument = INCLUDE_ARGUMENT.get(rest[:1])
-        found = argument.match(data, match.end()) if argument else None
+        found = argument.match(text, match.end()) if argument else None
         if not found:
-            snippet = data[match.start():match.start() + 60].split(b'\n')[0].decode(errors='replace')
+            if not strict:
+                continue
+            snippet = text[match.start():match.start() + 60].split(b'\n')[0].decode(errors='replace')
             raise ValueError(f'{source_path}: unsupported include form {snippet!r}; '
                              'use a single string literal without escapes')
         references.append((_literal(found), match.group(1) is None))
-    code = code_mask(data)
-    blocks = inline_module_blocks(code)
-    for match in ATTRIBUTE.finditer(data):
-        end = _bracketed(data, match.end(), b'[', b']')
+    for match in ATTRIBUTE.finditer(text):
+        end = _bracketed(text, match.end(), b'[', b']')
         if end is None:
             continue
-        paths = _path_attributes(source_path, data[match.end():end - 1])
+        try:
+            paths = _path_attributes(source_path, text[match.end():end - 1])
+        except ValueError:
+            if strict:
+                raise
+            continue
         in_code = code[match.start():match.start() + 1] == b'#'
         if paths and in_code and (any(start < match.start() < stop for start, stop in blocks)
                                   or _annotates_inline_module(code, end)):
@@ -601,6 +632,8 @@ def literal_references(source_path, data):
             # module's directory (name/, or file_stem/name/ in a non-mod.rs
             # file), and a #[path] on an inline module names a directory.
             # Neither is modelled, so refuse rather than package the wrong file.
+            if not strict:
+                continue
             raise ValueError(f'{source_path}: #[path] attribute {paths[0].decode(errors="replace")!r} inside or on '
                              'an inline `mod name { .. }` block is unsupported; declare the #[path] module at file '
                              'level or move it to an out-of-line module file')
@@ -608,14 +641,19 @@ def literal_references(source_path, data):
     return references
 
 
-def code_mask(data):
+def code_mask(data, strings=True):
     """`data` with comments, string/byte/raw-string and char literals replaced
     by spaces, offsets unchanged, so braces and keywords can be matched
-    structurally. Lifetimes and labels are left in place."""
+    structurally. Lifetimes and labels are left in place. With
+    `strings=False` only comments are blanked and literals are kept."""
     out, i, n = bytearray(data), 0, len(data)
 
     def blank(start, stop):
         out[start:stop] = b' ' * (stop - start)
+
+    def literal(start, stop):
+        if strings:
+            blank(start, stop)
 
     def ident(byte):
         return byte.isalnum() or byte == b'_' or (byte and byte[0] >= 0x80)
@@ -642,7 +680,7 @@ def code_mask(data):
             j = i + 1
             while j < n and data[j:j + 1] != b'"':
                 j += 2 if data[j:j + 1] == b'\\' else 1
-            blank(i, min(j + 1, n))
+            literal(i, min(j + 1, n))
             i = j + 1
         elif c == b'r' and not ident(data[i - 1:i] if i else b'') or (
                 c == b'r' and data[i - 1:i] in (b'b', b'c') and not ident(data[i - 2:i - 1] if i > 1 else b'')):
@@ -650,7 +688,7 @@ def code_mask(data):
             if raw:
                 stop = data.find(b'"' + raw.group(1), raw.end())
                 stop = n if stop < 0 else stop + 1 + len(raw.group(1))
-                blank(i, stop)
+                literal(i, stop)
                 i = stop
             else:
                 i += 1
@@ -658,13 +696,13 @@ def code_mask(data):
             if data[i + 1:i + 2] == b'\\':
                 stop = data.find(b"'", i + 3)
                 stop = n if stop < 0 else stop + 1
-                blank(i, stop)
+                literal(i, stop)
                 i = stop
             else:
                 lead = data[i + 1] if i + 1 < n else 0
                 width = 1 if lead < 0x80 else 2 if lead < 0xE0 else 3 if lead < 0xF0 else 4
                 if data[i + 1 + width:i + 2 + width] == b"'":
-                    blank(i, i + 2 + width)
+                    literal(i, i + 2 + width)
                     i += 2 + width
                 else:
                     i += 1  # a lifetime or label
@@ -742,9 +780,11 @@ def scanned_as_code(target, code):
 def implicit_modules(data):
     """Names of out-of-line modules (`mod name;`) not given a literal #[path].
 
-    Comments are not stripped, so a commented-out declaration also counts;
-    that only makes the refusal below stricter."""
-    return [name.decode(errors='replace') for attributes, name in MODULE.findall(data) if not PATH_ATTR.search(attributes)]
+    Comments are blanked first, since Rust allows them wherever whitespace may
+    appear (`mod /* c */ name;`, `#[/* c */ path = ".."]`); string literals
+    are kept, which only makes the refusal below stricter."""
+    text = code_mask(data, strings=False)
+    return [name.decode(errors='replace') for attributes, name in MODULE.findall(text) if not PATH_ATTR.search(attributes)]
 
 
 def loose_sources(manifest, read_manifest, declared, exists, read, sources):
