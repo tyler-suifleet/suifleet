@@ -95,6 +95,11 @@ block early. A file-level `#[path]` after a closed inline block is accepted,
 for example the `#[cfg(test)] #[path = "poll_tests.rs"]` module in
 `src/sui_client.rs`.
 
+Module names may be Unicode identifiers, as in `mod café { ... }`. Rust also
+treats U+0085, U+200E, U+200F, U+2028 and U+2029 as whitespace, which the
+scanner does not model. Any Rust source containing one of those characters is
+refused, even inside a comment or string. Use ASCII whitespace instead.
+
 A missing workspace member, local path dependency, declared target file or include target, a path outside the
 repository, a symlink or submodule, or a runtime identity/state file name
 (`device.key`, `config.toml`, `*.key`, journals, databases and so on) stops the
