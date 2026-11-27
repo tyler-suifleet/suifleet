@@ -107,8 +107,11 @@
           removed and nothing was installed.
 
 # A preview cannot run the install from a cache file it did not upload, so it
-# compares the installed binary with the pin instead: restoring only the cache
-# for the release already installed is not a pending installation.
+# compares the installed binary with what the install task enforces instead:
+# the pinned bytes in a regular file owned by root:root with mode 0755.
+# Restoring only the cache for the release already installed is then not a
+# pending installation, while metadata drift the real copy would correct (and
+# restart both services for) is.
 - name: Check the installed binary for a preview
   ansible.builtin.stat:
     path: /usr/bin/suifleet
@@ -123,7 +126,11 @@
     suifleet_binary_install_pending: >-
       {{ ansible_check_mode and suifleet_binary_staged is changed
          and not (suifleet_binary_installed.stat.exists | default(false)
-                  and suifleet_binary_installed.stat.checksum | default('') == suifleet_binary_sha256) }}
+                  and suifleet_binary_installed.stat.isreg | default(false)
+                  and suifleet_binary_installed.stat.checksum | default('') == suifleet_binary_sha256
+                  and suifleet_binary_installed.stat.pw_name | default('') == 'root'
+                  and suifleet_binary_installed.stat.gr_name | default('') == 'root'
+                  and suifleet_binary_installed.stat.mode | default('') == '0755') }}
 
 - name: Report the pending binary installation
   ansible.builtin.debug:

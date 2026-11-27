@@ -106,6 +106,27 @@ class Staging(unittest.TestCase):
                     self.assertIn("ansible_check_mode and suifleet_binary_staged is changed", pending)
                     self.assertIn("suifleet_binary_installed.stat.checksum | default('') == suifleet_binary_sha256", pending)
 
+    def test_binary_preview_compares_installed_metadata(self):
+        """A cache-miss preview predicts every change the real install copy makes.
+
+        The copy enforces a regular root:root file with mode 0755, and its
+        changed result restarts the signer and daemon. Matching bytes with
+        drifted type, owner, group or mode must therefore still preview as a
+        pending installation; scripts/test_ansible.py cache_miss_metadata_drift
+        runs that on real hosts."""
+        text = (TASKS / "install_binary.yml").read_text()
+        install = task(text, "Install the verified binary")
+        for line in ("    owner: root\n", "    group: root\n", '    mode: "0755"\n'):
+            self.assertIn(line, install)
+        stat = task(text, "Check the installed binary for a preview")
+        self.assertNotIn("follow: true", stat)
+        pending = task(text, "Decide whether a preview would install the binary")
+        for check in ("suifleet_binary_installed.stat.isreg | default(false)",
+                      "suifleet_binary_installed.stat.pw_name | default('') == 'root'",
+                      "suifleet_binary_installed.stat.gr_name | default('') == 'root'",
+                      "suifleet_binary_installed.stat.mode | default('') == '0755'"):
+            self.assertIn(check, pending)
+
     def test_prune_keeps_in_flight_uploads(self):
         text = (TASKS / "prune_staging.yml").read_text()
         published = task(text, "Find staged artifacts of other releases")
