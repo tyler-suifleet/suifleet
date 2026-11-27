@@ -449,6 +449,31 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with tarfile.open(output) as tar:
             self.assertIn('interfaces/child.rs', tar.getnames())
 
+    def test_paths_that_cancel_a_directory_are_refused(self):
+        # The reviewer's reproduction: rustc traverses tools/anchor in
+        # ../tools/anchor/../helper.rs, so the path compiles in the repository
+        # only because that directory exists; the closure packages just
+        # tools/helper.rs, and the extracted archive fails to compile.
+        self.repo.write('suifleet-edge/tools/helper.rs', 'pub fn f() {}\n')
+        self.repo.write('suifleet-edge/tools/anchor/README', 'anchor\n')
+        for source in ('#[path = "../tools/anchor/../helper.rs"]\nmod helper;\nfn main() { helper::f() }\n',
+                       'include!("../tools/anchor/../helper.rs");\nfn main() { f() }\n',
+                       'const M: &str = include_str!("./../tools/anchor/./../helper.rs");\nfn main() {}\n'):
+            with self.subTest(source):
+                self.repo.write('suifleet-edge/src/main.rs', source)
+                rev = self.repo.commit()
+                output = self.out / 'cancelled-directory.tar.gz'
+                with self.assertRaisesRegex(ValueError, r'src/main.rs references a path that cancels a directory'):
+                    packager.build(self.repo.root, rev, output)
+                self.assertFalse(output.exists())
+        # Leading parent references, also after `.`, keep working.
+        self.repo.write('suifleet-edge/src/main.rs', '#[path = "./../tools/helper.rs"]\nmod helper;\n'
+                        'fn main() { helper::f() }\n')
+        rev = self.repo.commit()
+        info = packager.build(self.repo.root, rev, self.out / 'leading-parent.tar.gz')
+        self.assertIn('suifleet-edge/tools/helper.rs', info['paths'])
+        self.assertNotIn('suifleet-edge/tools/anchor/README', info['paths'])
+
     def test_code_includes_are_followed_whatever_their_suffix(self):
         # The reviewer's reproduction: include! compiles its target as Rust
         # even when it is not named .rs, so that file's own includes are
@@ -1365,6 +1390,40 @@ class LayerAuditTests(unittest.TestCase):
                     self.archive = original
                 self.addCleanup(shutil.rmtree, report['fetch_dir'])
                 expected = 'interfaces/helper.rs declares module(s) child without #[path]'
+                self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+                self.assertFalse(report['ok'])
+
+    def test_fetch_refuses_paths_that_cancel_a_directory(self):
+        # The reviewer's fetched-layout reproduction: a pinned archive holding
+        # tools/helper.rs but not tools/anchor must not audit clean for
+        # ../tools/anchor/../helper.rs, and neither may one that has it.
+        files = {'suifleet-edge/src/main.rs': '#[path = "../tools/anchor/../helper.rs"]\nmod helper;\n'
+                 'fn main() { helper::f() }\n',
+                 'suifleet-edge/tools/helper.rs': 'pub fn f() {}\n'}
+        for with_anchor in (False, True):
+            with self.subTest(with_anchor=with_anchor):
+                pending = dict(files, **({'suifleet-edge/tools/anchor/README': 'anchor\n'} if with_anchor else {}))
+                archive = self.archive.with_name(f'cancelled-directory-{with_anchor}.tar.gz')
+                with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+                    for member in source.getmembers():
+                        data = source.extractfile(member) if member.isfile() else None
+                        if member.name in pending:
+                            text = pending.pop(member.name).encode()
+                            member.size, data = len(text), io.BytesIO(text)
+                        tar.addfile(member, data)
+                    for name, text in pending.items():
+                        added = tarfile.TarInfo(name)
+                        added.size, added.mode = len(text), 0o644
+                        tar.addfile(added, io.BytesIO(text.encode()))
+                self.write_recipe(sha=sha256(archive.read_bytes()))
+                original, self.archive = self.archive, archive
+                try:
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, fetch=True)
+                finally:
+                    self.archive = original
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+                expected = 'suifleet-edge/src/main.rs references a path that cancels a directory with ".."'
                 self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
                 self.assertFalse(report['ok'])
 

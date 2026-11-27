@@ -755,6 +755,17 @@ def include_references(source_path, data):
     for raw, code in literal_references(source_path, data):
         if not raw:
             raise ValueError(f'{source_path} references an empty path')
+        # The compiler traverses every directory named in the literal path,
+        # so `dir/../x` needs `dir` to exist even though it is cancelled. The
+        # closure only packages the final target, so such a path would compile
+        # in the repository and fail after extraction; refuse it. Leading `..`
+        # only climbs the source file's own ancestors, which always exist.
+        named = False
+        for part in PurePosixPath(raw.decode()).parts:
+            if part == '..' and named:
+                raise ValueError(f'{source_path} references a path that cancels a directory with "..": {raw.decode()}')
+            if part not in ('.', '..'):
+                named = True
         parts = []
         for part in (base / raw.decode()).parts:
             if part == '..':
