@@ -1405,6 +1405,17 @@ def pin_errors(recipe):
     return errors
 
 
+# The exact pattern do_verify_lock in suifleet_1.0.bb applies to
+# ${S}/${CARGO_SRC_DIR}/Cargo.toml; a test keeps the two literals identical.
+RECIPE_VERSION_PATTERN = r'^\[package\][^\[]*?^version = "([^"]+)"'
+
+
+def recipe_crate_version(manifest):
+    """The crate version as the recipe's do_verify_lock reads it, or None."""
+    match = re.search(RECIPE_VERSION_PATTERN, manifest, re.M | re.S)
+    return match.group(1) if match else None
+
+
 def daemon_errors(recipe, read, exists=None, listing=None):
     """Check coupled daemon pins with `read(relpath)` returning bytes or None.
 
@@ -1433,6 +1444,15 @@ def daemon_errors(recipe, read, exists=None, listing=None):
         version = None
     if version is not None and version != recipe.get('SUIFLEET_CRATE_VERSION'):
         errors.append(f'{recipe.path.name}: Cargo.toml version {version} differs from SUIFLEET_CRATE_VERSION')
+    if version is not None:
+        # do_verify_lock reads the version with RECIPE_VERSION_PATTERN, not a
+        # TOML parser; a valid spelling it cannot read the same way would pass
+        # here and fail the build.
+        recipe_version = recipe_crate_version(manifest.decode())
+        if recipe_version != version:
+            errors.append(f'{recipe.path.name}: {src}/Cargo.toml [package] version {version!r} reads as '
+                          f'{recipe_version!r} with do_verify_lock\'s pattern; write it as a plain '
+                          f'version = "..." line in [package] before any array or inline table')
     try:
         locked, unsupported = lock_packages(lock.decode())
     except (ValueError, UnicodeDecodeError) as error:

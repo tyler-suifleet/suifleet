@@ -11,7 +11,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
+import warnings
 from unittest import mock
 import zipfile
 
@@ -1091,6 +1093,85 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual(entry['sources'][0]['sha256'], self.info['sha256'])
         self.assertEqual(entry['license_files'], {'LICENSE': md5(LICENSE)})
         self.assertEqual((entry['crates'], report['series']), (1, ['scarthgap', 'wrynose']))
+
+    def shipped_verify_lock(self, source, cargo_src_dir, lock_sha):
+        """Run the shipped recipe's do_verify_lock body against `source`/S.
+
+        Returns the bb.fatal message, or None when the task passes."""
+        text = (ROOT / 'suifleet-edge/meta-suifleet/recipes-edge/suifleet/suifleet_1.0.bb').read_text()
+        body = re.search(r'^python do_verify_lock\(\) \{\n(.*?)^\}', text, re.M | re.S).group(1)
+        values = {'S': str(source), 'CARGO_SRC_DIR': cargo_src_dir, 'SUIFLEET_CRATE_VERSION': '0.2.3',
+                  'SUIFLEET_LOCK_SHA256': lock_sha,
+                  'CARGO_LOCK_PATH': str(Path(source, cargo_src_dir, 'Cargo.lock'))}
+
+        class Fatal(Exception):
+            pass
+
+        def fatal(message):
+            raise Fatal(message)
+
+        scope = {'d': mock.Mock(getVar=values.get), 'bb': mock.Mock(fatal=fatal)}
+        try:
+            with warnings.catch_warnings():
+                # The recipe task leaves its files to BitBake's interpreter to close.
+                warnings.simplefilter('ignore', ResourceWarning)
+                exec(textwrap.dedent(body), scope)
+        except Fatal as error:
+            return str(error)
+        return None
+
+    def test_shipped_verify_lock_pattern_is_the_audited_pattern(self):
+        text = (ROOT / 'suifleet-edge/meta-suifleet/recipes-edge/suifleet/suifleet_1.0.bb').read_text()
+        self.assertIn(f"re.search(r'{audit.RECIPE_VERSION_PATTERN}', manifest, re.M | re.S)", text)
+        self.assertIn("os.path.join(d.getVar('S'), d.getVar('CARGO_SRC_DIR'), 'Cargo.toml')", text)
+
+    def test_shipped_verify_lock_reads_the_effective_cargo_src_dir(self):
+        # A relocated crate: do_verify_lock must read the manifest the audit
+        # resolves under CARGO_SRC_DIR, not a hardcoded suifleet-edge path.
+        source = Path(self.tmp.name) / 'relocated'
+        for rel, text in (('crates/edge/Cargo.toml', CARGO_TOML), ('crates/edge/Cargo.lock', CARGO_LOCK)):
+            (source / rel).parent.mkdir(parents=True, exist_ok=True)
+            (source / rel).write_text(text)
+        self.assertIsNone(self.shipped_verify_lock(source, 'crates/edge', sha256(CARGO_LOCK)))
+        self.assertEqual(audit.recipe_crate_version(CARGO_TOML), packager.crate_version(CARGO_TOML))
+
+    def test_manifest_version_spellings_the_recipe_cannot_read_are_refused(self):
+        # Valid TOML that package_edge_source parses but do_verify_lock's regex
+        # does not read identically; the audit must refuse it rather than
+        # certify a layer whose verification task then calls bb.fatal.
+        spellings = {
+            'single quoted': CARGO_TOML.replace('version = "0.2.3"', "version = '0.2.3'", 1),
+            'no spaces': CARGO_TOML.replace('version = "0.2.3"', 'version="0.2.3"', 1),
+            'array before version': CARGO_TOML.replace('version = "0.2.3"',
+                                                       'authors = ["x"]\nversion = "0.2.3"', 1),
+        }
+        for label, manifest in spellings.items():
+            with self.subTest(label):
+                # Both readers against the same manifest: TOML says 0.2.3,
+                # the shipped recipe task fails.
+                self.assertEqual(packager.crate_version(manifest), '0.2.3')
+                source = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                (source / 'suifleet-edge').mkdir()
+                (source / 'suifleet-edge/Cargo.toml').write_text(manifest)
+                (source / 'suifleet-edge/Cargo.lock').write_text(CARGO_LOCK)
+                self.assertIn('crate version differs',
+                              self.shipped_verify_lock(source, 'suifleet-edge', sha256(CARGO_LOCK)) or '')
+                self.repo.write('suifleet-edge/Cargo.toml', manifest)
+                rev = self.repo.commit()
+                archive = Path(self.tmp.name) / f'suifleet-edge-{rev}.tar.gz'
+                info = packager.build(self.repo.root, rev, archive)
+                self.write_recipe(url=f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/'
+                                      f'{archive.name}', sha=info['sha256'], srcrev=rev)
+                errors = self.errors(repo=self.repo.root)
+                self.assertTrue(any("do_verify_lock's pattern" in e for e in errors), errors)
+        # The shipped spelling passes both the audit and the recipe task.
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML)
+        rev = self.repo.commit()
+        archive = Path(self.tmp.name) / f'suifleet-edge-{rev}.tar.gz'
+        info = packager.build(self.repo.root, rev, archive)
+        self.write_recipe(url=f'https://raw.githubusercontent.com/example/meta-suifleet/{"b" * 40}/{archive.name}',
+                          sha=info['sha256'], srcrev=rev)
+        self.assertEqual(self.errors(repo=self.repo.root), [])
 
     def test_cargo_lock_and_manifest_paths_must_be_the_audited_files(self):
         # do_verify_lock opens the effective CARGO_LOCK_PATH, so the audit must

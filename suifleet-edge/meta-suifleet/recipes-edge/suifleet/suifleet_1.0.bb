@@ -54,7 +54,10 @@ python do_verify_lock() {
     lock = open(d.getVar('CARGO_LOCK_PATH'), 'rb').read()
     if hashlib.sha256(lock).hexdigest() != d.getVar('SUIFLEET_LOCK_SHA256'):
         bb.fatal('Cargo.lock differs from the pinned crate graph; regenerate suifleet-crates.inc and its lock checksum')
-    manifest = open(os.path.join(d.getVar('S'), 'suifleet-edge', 'Cargo.toml')).read()
+    # The effective CARGO_SRC_DIR, as scripts/check_layer_sources.py audits it.
+    # The audit also applies this exact pattern (RECIPE_VERSION_PATTERN), so it
+    # refuses a manifest spelling this task could not read.
+    manifest = open(os.path.join(d.getVar('S'), d.getVar('CARGO_SRC_DIR'), 'Cargo.toml')).read()
     match = re.search(r'^\[package\][^\[]*?^version = "([^"]+)"', manifest, re.M | re.S)
     if not match or match.group(1) != d.getVar('SUIFLEET_CRATE_VERSION'):
         bb.fatal('suifleet-edge crate version differs from SUIFLEET_CRATE_VERSION; update it with SRCREV')
