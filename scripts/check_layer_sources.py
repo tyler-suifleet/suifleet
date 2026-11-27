@@ -315,6 +315,18 @@ MUTABLE_URL = (
     (re.compile(r'/releases/latest(/|$)'), 'latest-release redirect'),
     (re.compile(r'^https://(objects|release-assets|github-releases)\.githubusercontent\.com/'), 'expiring release-asset URL'),
 )
+
+
+def policy_url(parsed):
+    """The URL form MUTABLE_URL is matched against. DNS hostnames and URL
+    schemes are case-insensitive and a trailing root dot or explicit port
+    names the same host, so a spelling such as https://GitHub.com./ or
+    https://github.com:443/ must not slip past the patterns. The path stays
+    case-sensitive, as servers treat it."""
+    host = (parsed.hostname or '').rstrip('.')
+    return f'{parsed.scheme.lower()}://{host}{parsed.path}'
+
+
 FORBIDDEN_NAME = re.compile(
     r'(^|/)(device\.key|signer\.key|config\.toml|firmware\.toml|signer\.toml|enrollment(\.[a-z]+)?|'
     r'\.env|\.netrc|id_(rsa|ecdsa|ed25519)|[^/]*\.(pem|p12|pfx|key)|[^/]*journal[^/]*|[^/]*\.sqlite3?|[^/]*\.db)$')
@@ -942,8 +954,9 @@ def audit_recipe(recipe):
                 errors.append(f'{where}: https source lacks a SHA-256 pin: {shown}')
             if parsed.query or parsed.fragment:
                 errors.append(f'{where}: query/fragment (signed or expiring URL) in {shown}')
+            policy = policy_url(parsed)
             for pattern, label in MUTABLE_URL:
-                if pattern.search(url):
+                if pattern.search(policy):
                     errors.append(f'{where}: mutable or expiring source ({label}): {shown}')
             if unmodelled_https_params(params):
                 errors.append(f'{where}: https source parameters the audit does not model: '

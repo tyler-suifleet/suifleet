@@ -1178,6 +1178,42 @@ class LayerAuditTests(unittest.TestCase):
                 self.write_recipe(**kwargs)
                 self.assertTrue(any(message in e for e in self.errors()), self.errors())
 
+    def test_mutable_source_hosts_match_case_insensitively(self):
+        # DNS hostnames and schemes are case-insensitive and a trailing root
+        # dot or the default port names the same host, so each spelling of a
+        # mutable source must be refused exactly like the canonical one.
+        name = self.archive.name
+        mutable = {
+            'GitHub archive of a branch/tag': '{host}/example/suifleet/archive/refs/heads/main.tar.gz',
+            'codeload archive of a branch/tag': '{host}/example/suifleet/tar.gz/refs/heads/main',
+            'raw file at a branch/tag': '{host}/example/m/main/' + name,
+            'expiring release-asset URL': '{host}/x/' + name,
+        }
+        hosts = {
+            'GitHub archive of a branch/tag': 'github.com',
+            'codeload archive of a branch/tag': 'codeload.github.com',
+            'raw file at a branch/tag': 'raw.githubusercontent.com',
+            'expiring release-asset URL': 'objects.githubusercontent.com',
+        }
+        for label, template in mutable.items():
+            host = hosts[label]
+            spellings = (host, host.upper(), host.title(), host + '.', host.upper() + ':443')
+            for spelling in spellings:
+                with self.subTest(label, host=spelling):
+                    self.write_recipe(url='https://' + template.format(host=spelling))
+                    errors = self.errors()
+                    self.assertTrue(any(f'mutable or expiring source ({label})' in e for e in errors), errors)
+
+    def test_commit_pinned_github_archive_with_mixed_case_host_is_not_mutable(self):
+        # Normalizing the host must not turn a commit-pinned archive into a
+        # mutable finding, and the path itself stays case-sensitive.
+        pinned = f'https://GitHub.com/example/suifleet/archive/{"c" * 40}.tar.gz'
+        self.write_recipe(url=pinned)
+        self.assertFalse(any('mutable or expiring' in e for e in self.errors()), self.errors())
+        upper = f'https://GitHub.com/example/suifleet/archive/{"C" * 40}.tar.gz'
+        self.write_recipe(url=upper)
+        self.assertTrue(any('GitHub archive of a branch/tag' in e for e in self.errors()), self.errors())
+
     def test_rejected_credentials_and_signatures_never_reach_the_report(self):
         # The audit rejects credentialed and signed URLs; it must not then copy
         # the secret into the JSON report (stdout, saved reports, CI logs).
