@@ -415,8 +415,14 @@ These static checks always run, on every recipe in the layer:
   fails the audit instead of skipping the checks it would select. These pins on
   any other recipe are refused, because nothing would verify them.
 
-The daemon recipe's `do_verify_lock` opens the effective `CARGO_LOCK_PATH`,
-and Cargo builds from `CARGO_MANIFEST_PATH`. The core class defaults derive
+The daemon recipe's `do_verify_lock` opens the effective `CARGO_LOCK_PATH`
+and reads the crate version from `${S}/${CARGO_SRC_DIR}/Cargo.toml`, and Cargo
+builds from `CARGO_MANIFEST_PATH`. The task reads that version with a regular
+expression, not a TOML parser, so the audit applies the same pattern
+(`RECIPE_VERSION_PATTERN`) and refuses a manifest whose `[package]` version it
+would read differently: for example a single-quoted or unspaced `version`, or
+one that follows an array or inline table. Write it as a plain
+`version = "..."` line; a test keeps the recipe and audit patterns identical. The core class defaults derive
 both from `${S}/${CARGO_SRC_DIR}`, which is the directory the audit reads. If
 the layer assigns `CARGO_LOCK_PATH`, `CARGO_MANIFEST_PATH` or
 `CARGO_LOCK_SRC_DIR` (including through `??=`, `:append` or a referenced
