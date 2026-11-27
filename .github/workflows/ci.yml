@@ -53,7 +53,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Offline enrollment media tests on disposable FAT images
         run: |
-          scripts/ci/apt_install_ubuntu.sh dosfstools
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dosfstools
           sudo env PYTHONDONTWRITEBYTECODE=1 SUIFLEET_TEST_FAT_LOOP=1 \
             /usr/bin/python3 -m unittest discover -s scripts/tests -p test_provision_enrollment_media.py -v
 
@@ -98,7 +99,8 @@ jobs:
 
       - name: Install coordinator sandbox prerequisite
         run: |
-          scripts/ci/apt_install_ubuntu.sh bubblewrap
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
           bwrap --unshare-all --die-with-parent --ro-bind / / -- /usr/bin/true
 
       - name: Offline PR coordinator tests
