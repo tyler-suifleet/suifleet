@@ -1034,6 +1034,78 @@ class Harness:
         self.unchanged(recap, "rerun after restoring the cache")
         return after
 
+    def cache_miss_metadata_drift(self, vault, rollout, previous):
+        """The cache is missing and the installed binary has the pinned bytes but drifted mode.
+
+        The real install copy enforces root:root 0755, and its change restarts
+        the signer and daemon. The preview must predict that installation and
+        both restarts rather than treat matching bytes as converged; the real
+        run corrects the mode, restarts both services and restores the cache.
+        Only systemd-binary hosts are changed; deb hosts stay untouched."""
+        restart_tasks = ("TASK [suifleet : Restart the signing service after code, manifest, signer or socket changes]",
+                         "TASK [suifleet : Restart the daemon after code or configuration changes]")
+        pending = "TASK [suifleet : Report the pending binary installation]"
+        digest = sha256(self.binaries["3"])
+        drifted = [name for name, host in self.hosts.items() if host["profile"] == "systemd-binary"]
+        assert drifted, "no systemd-binary host"
+        fields = ("main_pid", "signer_pid", "invocations", "binary_sha256", "package", "applied", "key_sha256",
+                  "enrollment_sha256")
+        before = {}
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            if name in drifted:
+                assert state["signer_pid"] != "0", (name, "signing service not active before the metadata drift")
+                self.exec(host["container"], "sh", "-c", "rm -f /var/cache/suifleet/suifleet-*.staged && chmod 0700 /usr/bin/suifleet")
+                assert self.exec(host["container"], "stat", "-c", "%U:%G %a", "/usr/bin/suifleet").stdout.split() == ["root:root", "700"], name
+            before[name] = state
+        output, recap = self.ansible("check mode with the cache missing and the binary mode drifted", "site.yml", "--check",
+                                     "--diff", *vault, *rollout)
+        self.preview_skipped_self_check(output, "check mode with the cache missing and the binary mode drifted")
+        for name, host in self.hosts.items():
+            assert recap[name]["failed"] == 0 and recap[name]["unreachable"] == 0, (name, recap[name])
+            state, _ = self.host_state(name)
+            for field in fields:
+                assert state[field] == before[name][field], (name, field, "changed by the metadata-drift preview")
+            if name in drifted:
+                assert self.exec(host["container"], "stat", "-c", "%a", "/usr/bin/suifleet").stdout.strip() == "700", \
+                    (name, "preview corrected the mode")
+                assert not self.exec(host["container"], "ls", "-A", "/var/cache/suifleet").stdout.strip(), (name, "preview wrote the cache")
+                assert self.task_statuses(output, pending, name) == {"changed"}, (name, "preview missed the mode correction")
+                for task in restart_tasks:
+                    assert self.task_statuses(output, task, name) == {"changed"}, (name, task, "preview missed the restart")
+            else:
+                for task in restart_tasks:
+                    assert self.task_statuses(output, task, name) == {"skipping"}, (name, task, "untouched host previewed a restart")
+        print("PASS cache-miss preview with a drifted binary mode predicted the installation and both restarts, changing nothing")
+        output, recap = self.ansible("full rollout with the cache missing and the binary mode drifted", "site.yml", *vault, *rollout)
+        after = {}
+        for name, host in self.hosts.items():
+            state, _ = self.host_state(name)
+            self.assert_converged(name, state)
+            if name in drifted:
+                assert self.exec(host["container"], "stat", "-c", "%U:%G %a", "/usr/bin/suifleet").stdout.split() == ["root:root", "755"], \
+                    (name, "mode not corrected")
+                assert self.task_statuses(output, "TASK [suifleet : Install the verified binary]", name) == {"changed"}, name
+                for task in restart_tasks:
+                    assert self.task_statuses(output, task, name) == {"changed"}, (name, task, "not restarted after the mode correction")
+                for field in ("main_pid", "signer_pid"):
+                    assert state[field] != before[name][field], (name, field, "not restarted after the mode correction")
+                for field in ("binary_sha256", "key_sha256", "enrollment_sha256"):
+                    assert state[field] == before[name][field], (name, field, "changed by the mode correction")
+                staged = self.exec(host["container"], "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout.split()
+                assert staged == [digest, f"suifleet-{digest}.staged"], (name, "cache not restored", staged)
+            else:
+                assert recap[name]["changed"] == 0, (name, "untouched host changed", recap[name])
+                for field in fields:
+                    assert state[field] == before[name][field], (name, field, "untouched host changed")
+            after[name] = state
+        print("PASS real run corrected the binary mode to root:root 0755, restarted signer and daemon and restored the cache;"
+              " deb hosts were unchanged")
+        _, recap = self.ansible("rerun after the metadata correction", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the metadata correction")
+        return after
+
     def same_pin_overlap(self, vault, rollout, previous):
         """Two rollouts with the same pins overlap; the second's controller artifact changes after its preflight.
 
@@ -2674,6 +2746,7 @@ class Harness:
         after = self.drop_in_loaded_by_config_reload(vault, rollout, after)
         after = self.stopped_host_preview(vault, rollout, after)
         after = self.cache_only_restore(vault, rollout)
+        after = self.cache_miss_metadata_drift(vault, rollout, after)
         self.same_pin_overlap(vault, rollout, after)
         self.overlapping_releases(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
