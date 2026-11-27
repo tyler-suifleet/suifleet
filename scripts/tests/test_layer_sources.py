@@ -2596,6 +2596,58 @@ class LayerAuditTests(unittest.TestCase):
             self.assertNotEqual(subprocess.run(['tar', '-tzf', str(mislabelled)], stdout=subprocess.DEVNULL,
                                                stderr=subprocess.DEVNULL).returncode, 0)
 
+    def test_truncated_compressed_streams_fail_the_complete_audit(self):
+        # tarfile stops once it has read the tar end-of-archive blocks, but the
+        # decompressors BitBake runs read to EOF and fail on a stream cut short
+        # (gzip without its CRC/size trailer, bzip2/xz without their stream
+        # footer). A correctly pinned truncated stream must fail the audit.
+        raw = subprocess.check_output(['git', '-C', str(self.repo.root), '-c', 'tar.umask=0002', 'archive',
+                                       '--format=tar', self.rev, '--', *self.info['paths']])
+        packed = {
+            'gz': subprocess.run(['gzip', '-n', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout,
+            'bz2': subprocess.run(['bzip2', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout,
+            'xz': subprocess.run(['xz', '-c'], input=raw, stdout=subprocess.PIPE, check=True).stdout,
+        }
+        # Bytes dropped from the end: gzip's 8-byte trailer; for bzip2 and xz
+        # the end-of-stream footer.
+        cuts = {'gz': 8, 'bz2': 4, 'xz': 12}
+        corrupt_crc = bytearray(packed['gz'])
+        corrupt_crc[-8] ^= 0xFF
+        cases = [(f'source.tar.{kind}', data[:-cuts[kind]], 'truncated') for kind, data in packed.items()]
+        cases += [('source.tar', packed['gz'][:-8], 'truncated gzip named .tar'),
+                  ('source.tar.gz', bytes(corrupt_crc), 'gzip CRC mismatch')]
+
+        def run(name, data):
+            archive = Path(tempfile.mkdtemp(dir=self.tmp.name)) / name
+            archive.write_bytes(data)
+            self.archive = archive
+            self.write_recipe(url=f'{self.url};downloadfilename={name}', sha=sha256(data))
+            self.assertEqual(self.errors(), [])
+            with mock.patch.object(audit, 'download', self.fake_download):
+                report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+            self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+            json.dumps(report)
+            self.assertTrue(report['recipes']['suifleet']['fetched'][0]['verified'])
+            return archive, report
+
+        for kind, data in packed.items():
+            with self.subTest(case=f'complete {kind}'):
+                _, report = run(f'source.tar.{kind}', data)
+                self.assertTrue(report['ok'], report['errors'])
+        for name, data, what in cases:
+            with self.subTest(name=name, case=what):
+                # The truncation leaves every tar member readable by tarfile.
+                with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+                    self.assertTrue(tar.getmembers())
+                archive, report = run(name, data)
+                self.assertFalse(report['ok'])
+                self.assertTrue(any(f'{name} could not be decoded as a tarball' in e and 'through its end' in e
+                                    for e in report['errors']), report['errors'])
+                if shutil.which('tar') and name.endswith('.gz'):
+                    self.assertNotEqual(subprocess.run(['tar', '-xzf', str(archive), '-O'],
+                                                       stdout=subprocess.DEVNULL,
+                                                       stderr=subprocess.DEVNULL).returncode, 0)
+
     def test_fetch_reports_checksum_and_layout_defects(self):
         self.write_recipe(sha='f' * 64)
         with mock.patch.object(audit, 'download', self.fake_download):

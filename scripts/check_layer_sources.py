@@ -73,6 +73,8 @@ checksums and licenses. Parsing here is a source audit, not a BitBake build.
 """
 import argparse
 import ast
+import bz2
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -1477,11 +1479,44 @@ def tar_mode(name):
     raise ValueError(f'{name}: not a tarball name the audit extracts')
 
 
+# Magic numbers tarfile's 'r:*' autodetection recognises, mapped to the
+# compression it would select for a plain .tar.
+COMPRESSION_MAGIC = ((b'\x1f\x8b', 'gz'), (b'BZh', 'bz2'), (b'\xfd7zXZ\x00', 'xz'))
+
+
+def verify_compressed_stream(archive, mode):
+    """Decode the whole compressed stream through its end-of-stream marker.
+
+    tarfile stops reading once it has the members it needs, so a stream cut
+    short after the tar end-of-archive blocks (for example a gzip file missing
+    its CRC/size trailer) still extracts. The decompressors BitBake runs (gzip,
+    bzip2, xz) read to EOF and fail on such a stream, so the audit must too.
+    Raises tarfile.ReadError on any truncation, checksum or format failure."""
+    compression = mode.partition(':')[2]
+    if compression == '*':
+        with open(archive, 'rb') as data:
+            head = data.read(6)
+        compression = next((kind for magic, kind in COMPRESSION_MAGIC if head.startswith(magic)), '')
+    if not compression:
+        return
+    opener = {'gz': gzip.open, 'bz2': bz2.open, 'xz': lambda path: lzma.open(path)}[compression]
+    try:
+        with opener(archive) as stream:
+            while stream.read(1 << 20):
+                pass
+    except (OSError, EOFError, ValueError, *ARCHIVE_DECODE_ERRORS) as error:
+        raise tarfile.ReadError(f'{compression} stream does not decode through its end: '
+                                f'{type(error).__name__}: {error}') from error
+
+
 def safe_extract(archive, destination, name=None):
     """Extract archive as BitBake would unpack a file called name (default:
-    the archive's own name), using the decompression that name selects."""
+    the archive's own name), using the decompression that name selects. The
+    compressed stream must decode completely, as it must for BitBake."""
     destination = Path(destination).resolve()
-    with tarfile.open(archive, tar_mode(name or Path(archive).name)) as tar:
+    mode = tar_mode(name or Path(archive).name)
+    verify_compressed_stream(archive, mode)
+    with tarfile.open(archive, mode) as tar:
         for member in tar.getmembers():
             target = (destination / member.name).resolve()
             if destination not in (target, *target.parents):
