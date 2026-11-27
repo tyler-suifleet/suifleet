@@ -427,6 +427,13 @@ before it uses the value. Every lookup then uses the same names as the source
 layout, including manifest-declared targets without an `.rs` suffix. A value
 that names `S` itself (`.` or `./`) is refused.
 
+The fetched daemon layout must not contain directory symlinks, even ones that
+stay inside the unpack directory. The compiler-input scan lists the layout
+without descending through them, while rustc and Cargo follow them. A
+manifest-declared entry point reached through such an alias would otherwise
+never be scanned for missing `include_str!`/`include_bytes!` inputs. The
+packaged archive contains no symlinks.
+
 `--repo` reads `SRCREV` from a Git checkout. It checks the Cargo.lock digest,
 the crate version, the LICENSE md5 and that `suifleet-crates.inc` lists exactly
 the lockfile's crates.io registry crates, versions and checksums. It compares
