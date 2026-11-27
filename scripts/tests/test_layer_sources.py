@@ -1596,6 +1596,63 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe(extra='python () {\n    pass\n')
         self.assertTrue(any('without a closing brace' in e for e in self.errors()), self.errors())
 
+    def test_only_reviewed_guard_forms_are_accepted(self):
+        # The guard grammar is positive: a receiver, call or statement outside
+        # the reviewed SF-307 forms is refused even when it looks read-only,
+        # and nothing is fetched. Comments and skip messages may differ.
+        fetch = 'bb.fetch2.Fetch(local, d, cache=False, localonly=True)'
+        search = "getattr(ud.method, 'localfile_searchpaths', None) or ud.method.localpaths"
+        node_check = "if d.getVar('TCLIBC') != 'glibc':"
+        variants = {
+            'other fetch receiver': (CODEC_GUARD, 'ud = fetcher.ud[entry]', 'ud = helper.ud[entry]'),
+            'fetch method replaced': (CODEC_GUARD, 'bb.fetch2.Fetch(local', 'bb.fetch2.FetchData(local'),
+            'fetch extra keyword': (CODEC_GUARD, fetch, fetch[:-1] + ', connectivity=True)'),
+            'fetch of other URLs': (CODEC_GUARD, 'Fetch(local, d', 'Fetch(urls, d'),
+            'search on other receiver': (CODEC_GUARD, search, search.replace('ud.method', 'helper.method')),
+            'other method attribute': (CODEC_GUARD, search, search.replace('ud.method.localpaths', 'ud.method.download')),
+            'search with other arguments': (CODEC_GUARD, 'search(ud, d)', 'search(ud, d, True)'),
+            'datastore to other call': (CODEC_GUARD, 'bb.parse.mark_dependency(d, path)', 'bb.utils.mkdirhier(d, path)'),
+            'extra statement in block': (CODEC_GUARD, '            searched = search(ud, d)\n',
+                                         '            searched = search(ud, d)\n            ud.method.urldata_init(ud, d)\n'),
+            'call in condition': (NODE_GUARD, node_check, "if helper(d.getVar('TCLIBC')) != 'glibc':"),
+            'os call in condition': (NODE_GUARD, node_check, "if os.system('true'):"),
+            'non-literal comparison': (NODE_GUARD, node_check, "if d.getVar('TCLIBC') != d.getVar('X'):"),
+            'chained comparison': (NODE_GUARD, node_check, "if 'a' < d.getVar('TCLIBC') < 'z':"),
+            'computed read name': (NODE_GUARD, node_check, "if d.getVar('TC' + 'LIBC') != 'glibc':"),
+            'call in message': (NODE_GUARD, "% d.getVar('HOST_SYS'))", '% helper(d))'),
+            'raise other exception': (NODE_GUARD, 'raise bb.parse.SkipRecipe(', 'raise bb.parse.ParseError('),
+            'statement beside raise': (NODE_GUARD, "        raise bb.parse.SkipRecipe('the official Node.js linux-arm64 binary requires glibc",
+                                       "        bb.warn(d.getVar('TCLIBC'))\n        raise bb.parse.SkipRecipe('x"),
+            'else branch': (NODE_GUARD, "% d.getVar('TCLIBC'))\n}", "% d.getVar('TCLIBC'))\n    else:\n        bb.note('ok')\n}"),
+            'top-level read binding': (NODE_GUARD, '    ' + node_check, "    x = d.getVar('TCLIBC')\n    " + node_check),
+            'top-level log call': (NODE_GUARD, '    ' + node_check, "    bb.note(d.getVar('TCLIBC'))\n    " + node_check),
+            'import alias': (CODEC_GUARD, '    import os\n', '    import os as path\n'),
+            'other import': (CODEC_GUARD, '    import os\n', '    import os, oe\n'),
+            'empty body': ('python () {\n}\n', None, None),
+        }
+        for label, (guard, old, new) in variants.items():
+            with self.subTest(label):
+                if old is not None:
+                    self.assertIn(old, guard)
+                    guard = guard.replace(old, new, 1)
+                self.write_recipe(extra=guard)
+                errors = self.errors()
+                self.assertTrue(any('not a read-only skip guard' in e for e in errors), errors)
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+                self.assertEqual(recipe.guards, [])
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+        # Reworded messages, changed comments and other literal platform
+        # checks remain the reviewed forms.
+        reworded = (CODEC_GUARD.replace('optional Walrus codec inputs not found', 'inputs missing')
+                    .replace('# Renamed from localpaths after BitBake 2.0.', '# Renamed later.')
+                    .replace(node_check.replace('TCLIBC', 'HOST_ARCH').replace('glibc', 'aarch64'),
+                             "if not (d.getVar('HOST_ARCH') in 'aarch64' and d.getVar('MACHINE', True) == 'x'):"))
+        self.write_recipe(extra=NODE_GUARD + reworded)
+        self.assertEqual(self.errors(), [])
+
     def test_inline_python_reached_by_a_guard_read_is_refused(self):
         # A guard's literal reads still expand their values, and BitBake runs
         # inline Python found on the way, directly or through references, so

@@ -31,11 +31,12 @@ Static checks (always):
     SRC_URI after the reader has read it: anonymous Python functions,
     addhandler event handlers and inherit/inherit_defer of an in-layer or
     unexpandable class, in the recipe, its includes and bbappends. The one
-    exception is an anonymous function that statically proves to be a
-    read-only skip guard (only reads the datastore, passes it only to listed
-    read-only BitBake helpers, raises SkipRecipe; see GUARD_*): skipping a
-    recipe changes whether it builds, not its pins. Accepted guards are
-    listed per recipe as skip_guards in the report;
+    exception is an anonymous function built only from the reviewed skip
+    guard forms (a positive grammar: `import os`, platform checks of literal
+    datastore reads raising SkipRecipe and the exact reviewed missing-local-
+    input block; see GUARD_*): skipping a recipe changes whether it builds,
+    not its pins. Accepted guards are listed per recipe as skip_guards in the
+    report;
   * each .bbappend (name_%.bbappend or exact name) is parsed after its recipe
     as one metadata set, as BitBake does, and a bbappend that matches no
     recipe in the layer is rejected;
@@ -103,72 +104,79 @@ INLINE_PYTHON = re.compile(r'\$\{@')
 UNMODELLED_DIRECTIVES = frozenset({'unset', 'include_all', 'addfragments', 'addpylib'})
 ANONYMOUS_PYTHON = re.compile(r'^(?:fakeroot\s+)?python(?:\s+__anonymous)?\s*\(\s*\)\s*\{$')
 # Anonymous Python the audit accepts without running it: a parse-time skip
-# guard (for example a platform or missing-input check that raises
-# bb.parse.SkipRecipe). Skipping a recipe changes whether it is built, never
-# which sources it pins. The guard must provably not write the datastore:
-# * the datastore d is only read, with d.getVar(NAME[, EXPAND]) or
-#   d.getVarFlag(NAME, FLAG[, EXPAND]) and literal arguments, or passed to the
-#   read-only BitBake helpers below; it is never rebound or aliased. d.expand
-#   of an arbitrary string is refused. A read expands its value, which could
-#   run inline Python reached through references; the audit refuses inline
-#   Python anywhere in the recipe, its includes and bbappends (INLINE_PYTHON),
-#   so a guard's reads only reach that metadata and the base layers the build
-#   already trusts;
-# * module access is limited to the bb names and os.path listed here, with
-#   only `import os`; no other import, builtin escape (exec, eval, setattr,
-#   globals, ...), underscore attribute or attribute named d is allowed;
-# * nested functions, lambdas, classes, global/nonlocal, with and del are not.
-# bb.parse.mark_dependency records a parse dependency (__depends), not a pin.
-# A Fetch used here must be localonly, and the only calls that receive d
-# besides these helpers are a local fetch method's localpaths or
-# localfile_searchpaths (the local-file search path, read-only).
+# guard. Skipping a recipe changes whether it is built, never which sources it
+# pins. Rather than trying to prove arbitrary Python read-only, the audit
+# accepts only the reviewed guard forms of the shipped recipes (SF-307's
+# suifleet-node and suifleet-walrus-codec), described by a positive grammar.
+# The body must be a sequence of these statements and nothing else:
+# * `import os`;
+# * a platform skip, `if COND: raise bb.parse.SkipRecipe(MESSAGE)` with no
+#   else, where COND compares a literal datastore read (d.getVar(NAME[,
+#   EXPAND]) or d.getVarFlag(NAME, FLAG[, EXPAND]), see GUARD_D_METHODS) with
+#   a string constant using ==, !=, in or not in, optionally combined with
+#   and/or/not, and MESSAGE is a string constant, optionally `%` one literal
+#   read or a tuple of them;
+# * the reviewed missing-local-input block (GUARD_LOCAL_INPUT): it resolves
+#   SRC_URI's file:// entries with bb.fetch2.Fetch(..., localonly=True), calls
+#   that fetcher's local method's search path, records each candidate with
+#   bb.parse.mark_dependency and skips when an input is missing. It must match
+#   the reviewed statements exactly (AST equality; comments and the skip
+#   message text are not compared), so every receiver and call is fixed.
+# No other statement, call, name, attribute or binding is accepted, so the
+# datastore is only ever read or handed to those fixed BitBake calls. A read
+# expands its value, which could run inline Python reached through references;
+# the audit refuses inline Python anywhere in the recipe, its includes and
+# bbappends (INLINE_PYTHON), so a guard's reads only reach that metadata and
+# the base layers the build already trusts. A new guard form must extend this
+# grammar deliberately, with review.
 # Each read method with its number of literal string arguments.
 GUARD_D_METHODS = {'getVar': 1, 'getVarFlag': 2}
-GUARD_BB = frozenset({'bb.parse.SkipRecipe', 'bb.parse.mark_dependency', 'bb.fetch2.Fetch', 'bb.fatal',
-                      'bb.error', 'bb.warn', 'bb.note', 'bb.debug'})
-GUARD_D_CALLEES = frozenset({'bb.parse.mark_dependency', 'bb.fetch2.Fetch'})
-GUARD_LOCAL_SEARCH = frozenset({'localpaths', 'localfile_searchpaths'})
-GUARD_NAMES_FORBIDDEN = frozenset({'exec', 'eval', 'compile', 'setattr', 'delattr', '__import__', 'globals',
-                                   'locals', 'vars', 'open', 'breakpoint', 'input', 'type', 'object', 'super',
-                                   '__builtins__', 'importlib', 'oe'})
-GUARD_REBIND_FORBIDDEN = frozenset({'d', 'bb', 'os', 'getattr'})
-GUARD_NODES_FORBIDDEN = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.Global,
-                         ast.Nonlocal, ast.With, ast.AsyncWith, ast.Delete, ast.ImportFrom, ast.Await,
-                         ast.Yield, ast.YieldFrom, ast.NamedExpr)
+GUARD_COMPARE_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
+GUARD_LOCAL_INPUT = '''\
+local = [entry for entry in (d.getVar('SRC_URI') or '').split() if entry.startswith('file://')]
+missing = []
+if local:
+    fetcher = bb.fetch2.Fetch(local, d, cache=False, localonly=True)
+    for entry in local:
+        ud = fetcher.ud[entry]
+        search = getattr(ud.method, 'localfile_searchpaths', None) or ud.method.localpaths
+        searched = search(ud, d)
+        for path in searched:
+            bb.parse.mark_dependency(d, path)
+        if not searched or not os.path.exists(searched[-1]):
+            missing.append(entry[len('file://'):].split(';')[0])
+if missing:
+    raise bb.parse.SkipRecipe('' % ', '.join(missing))
+'''
 
 
-def dotted(node):
-    """a.b.c for a Name/Attribute chain, else None."""
-    parts = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        return '.'.join([node.id, *reversed(parts)])
-    return None
+def is_skip_recipe(node):
+    """Whether node is the name bb.parse.SkipRecipe."""
+    return (isinstance(node, ast.Attribute) and node.attr == 'SkipRecipe'
+            and isinstance(node.value, ast.Attribute) and node.value.attr == 'parse'
+            and isinstance(node.value.value, ast.Name) and node.value.value.id == 'bb')
 
 
-def local_search(node):
-    """X.method.localpaths, getattr(X.method, 'localfile_searchpaths', None)
-    or an `or` of those: a local fetch method's read-only search function."""
-    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
-        return all(local_search(value) for value in node.values)
-    if isinstance(node, ast.Attribute):
-        return (node.attr in GUARD_LOCAL_SEARCH and isinstance(node.value, ast.Attribute)
-                and node.value.attr == 'method')
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr'
-            and len(node.args) in (2, 3) and not node.keywords):
-        target, name = node.args[:2]
-        return (isinstance(target, ast.Attribute) and target.attr == 'method' and isinstance(name, ast.Constant)
-                and name.value in GUARD_LOCAL_SEARCH
-                and (len(node.args) == 2 or (isinstance(node.args[2], ast.Constant) and node.args[2].value is None)))
-    return False
+def normalized(statements):
+    """AST dump of statements with each SkipRecipe message constant blanked."""
+    module = ast.Module(body=list(statements), type_ignores=[])
+    for node in ast.walk(module):
+        if isinstance(node, ast.Call) and is_skip_recipe(node.func):
+            for message in ast.walk(node):
+                if isinstance(message, ast.Constant) and isinstance(message.value, str):
+                    message.value = ''
+    return ast.dump(module, annotate_fields=True, include_attributes=False)
 
 
-def literal_read_error(method, call):
-    """None if call is d.METHOD with literal arguments (see GUARD_D_METHODS):
-    the names (and flag) as strings, then optionally expand as a bool, given
-    positionally or as expand=."""
+def literal_read_error(call):
+    """None if call is d.getVar/d.getVarFlag with literal arguments (see
+    GUARD_D_METHODS): the names (and flag) as strings, then optionally expand
+    as a bool, given positionally or as expand=."""
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name) and call.func.value.id == 'd'
+            and call.func.attr in GUARD_D_METHODS):
+        return 'only literal d.getVar/d.getVarFlag reads are allowed'
+    method = call.func.attr
     names = GUARD_D_METHODS[method]
     args, keywords = call.args, call.keywords
     if any(isinstance(a, ast.Starred) for a in args) or any(k.arg != 'expand' for k in keywords):
@@ -183,78 +191,69 @@ def literal_read_error(method, call):
     return None
 
 
+def string_constant(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def skip_condition_error(node):
+    """None if node is a platform-skip condition (see the grammar above)."""
+    if isinstance(node, ast.BoolOp):
+        return next(filter(None, map(skip_condition_error, node.values)), None)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return skip_condition_error(node.operand)
+    if (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], GUARD_COMPARE_OPS)
+            and string_constant(node.comparators[0])):
+        return literal_read_error(node.left)
+    return 'a skip condition must compare a literal datastore read with a string constant'
+
+
+def skip_message_error(node):
+    """None if node is a string constant, optionally % literal read(s)."""
+    if string_constant(node):
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod) and string_constant(node.left):
+        values = node.right.elts if isinstance(node.right, ast.Tuple) else [node.right]
+        return next(filter(None, map(literal_read_error, values)), None)
+    return 'a skip message must be a string constant, optionally formatted with literal datastore reads'
+
+
+def platform_skip_error(statement):
+    """None if statement is `if COND: raise bb.parse.SkipRecipe(MESSAGE)`."""
+    if not (isinstance(statement, ast.If) and not statement.orelse and len(statement.body) == 1):
+        return 'not a reviewed skip-guard statement'
+    raised = statement.body[0]
+    if not (isinstance(raised, ast.Raise) and raised.cause is None and isinstance(raised.exc, ast.Call)
+            and is_skip_recipe(raised.exc.func) and len(raised.exc.args) == 1 and not raised.exc.keywords):
+        return 'a skip condition must only raise bb.parse.SkipRecipe(message)'
+    return skip_condition_error(statement.test) or skip_message_error(raised.exc.args[0])
+
+
 def skip_guard_error(body):
-    """None if the anonymous Python body is a read-only skip guard (see
-    GUARD_* above), else the first reason it is not."""
-    text = textwrap.indent(textwrap.dedent('\n'.join(body) + '\n'), '    ')
+    """None if the anonymous Python body consists only of the reviewed skip
+    guard forms (see the grammar above), else the first reason it does not."""
+    text = textwrap.dedent('\n'.join(body) + '\n')
     try:
-        tree = ast.parse('def __anonymous(d):\n' + text + '    pass\n')
+        statements = ast.parse(text).body
     except SyntaxError as error:
         return f'Python body does not parse ({error.msg})'
-    function = tree.body[0]
-    parents = {}
-    for node in ast.walk(function):
-        for child in ast.iter_child_nodes(node):
-            parents[child] = node
-    nodes = [n for statement in function.body for n in ast.walk(statement)]
-    # Every binding of each local name: a name may receive d only if each of
-    # its bindings is a plain assignment of a local search function.
-    searches = {}
-    for node in nodes:
-        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
-            parent = parents.get(node)
-            searches.setdefault(node.id, []).append(
-                isinstance(parent, ast.Assign) and node in parent.targets and local_search(parent.value))
-    for node in nodes:
-        if isinstance(node, GUARD_NODES_FORBIDDEN):
-            return f'{type(node).__name__} is not allowed'
-        if isinstance(node, ast.Import):
-            if [alias.name for alias in node.names] != ['os'] or node.names[0].asname:
-                return 'only `import os` is allowed'
-        elif isinstance(node, ast.Attribute):
-            if node.attr.startswith('_') or node.attr == 'd':
-                return f'attribute {node.attr} is not allowed'
-        elif isinstance(node, ast.Name):
-            if node.id in GUARD_NAMES_FORBIDDEN:
-                return f'{node.id} is not allowed'
-            if not isinstance(node.ctx, ast.Load) and node.id in GUARD_REBIND_FORBIDDEN:
-                return f'{node.id} must not be rebound'
-            parent = parents.get(node)
-            if node.id == 'getattr' and not (isinstance(parent, ast.Call) and parent.func is node
-                                             and local_search(parent)):
-                return 'getattr is only allowed for a local fetch method search path'
-            if node.id in ('bb', 'os'):
-                # The full dotted name this chain reaches before anything else.
-                top = node
-                while isinstance(parents.get(top), ast.Attribute):
-                    top = parents[top]
-                name = dotted(top)
-                if node.id == 'bb' and name not in GUARD_BB:
-                    return f'{name} is not an allowed BitBake name'
-                if node.id == 'os' and not isinstance(parent, ast.Import) and not (
-                        name.startswith('os.path.') and name.count('.') == 2):
-                    return f'{name} is not allowed (only os.path functions)'
-            if node.id == 'd':
-                if isinstance(parent, ast.Attribute):
-                    call = parents.get(parent)
-                    if not (parent.attr in GUARD_D_METHODS and isinstance(call, ast.Call) and call.func is parent):
-                        return f'd.{parent.attr} is not a read-only datastore call'
-                    reason = literal_read_error(parent.attr, call)
-                    if reason:
-                        return reason
-                elif isinstance(parent, ast.Call) and node in parent.args:
-                    callee = parent.func
-                    name = dotted(callee)
-                    if name in GUARD_D_CALLEES:
-                        if name == 'bb.fetch2.Fetch' and not any(
-                                k.arg == 'localonly' and isinstance(k.value, ast.Constant) and k.value.value is True
-                                for k in parent.keywords):
-                            return 'bb.fetch2.Fetch must be called with localonly=True'
-                    elif not (local_search(callee) or (isinstance(callee, ast.Name)
-                                                       and searches.get(callee.id) and all(searches[callee.id]))):
-                        return f'd is passed to {name or "an expression"}, which may write it'
-                else:
-                    return 'd is used other than as a read-only datastore'
+    local_input = ast.parse(GUARD_LOCAL_INPUT).body
+    template = normalized(local_input)
+    if not statements:
+        return 'empty body is not a skip guard'
+    index = 0
+    while index < len(statements):
+        statement = statements[index]
+        window = statements[index:index + len(local_input)]
+        if (isinstance(statement, ast.Import) and len(statement.names) == 1
+                and statement.names[0].name == 'os' and statement.names[0].asname is None):
+            index += 1
+        elif len(window) == len(local_input) and normalized(window) == template:
+            index += len(local_input)
+        else:
+            reason = platform_skip_error(statement)
+            if reason:
+                return f'line {statement.lineno}: {reason}'
+            index += 1
     return None
 
 
