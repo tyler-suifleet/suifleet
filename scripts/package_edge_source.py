@@ -633,7 +633,9 @@ def loose_sources(manifest, read_manifest, declared, exists, read, sources):
     def packaged_whole(rel):
         return any(rel.startswith(prefix) for prefix in whole)
 
-    pending = [rel for rel in [*declared, 'build.rs'] if rel.endswith('.rs') and exists(rel)]
+    # Declared Cargo targets and the build script are compiler entry points
+    # whatever their suffix, so they are scanned as Rust source too.
+    pending = [rel for rel in [*declared, 'build.rs'] if exists(rel)]
     pending += sorted(rel for rel in sources if rel.endswith('.rs') and packaged_whole(rel))
     seen, followed, errors = set(), set(), []
     while pending:
@@ -682,11 +684,14 @@ def closure(files, read):
 
     for directory in local_crates(manifest, read_manifest):
         add_root(f'{CRATE}/{directory}/')
-    for rel in declared_files(manifest, read_manifest):
+    declared = declared_files(manifest, read_manifest)
+    for rel in declared:
         if f'{CRATE}/{rel}' not in files:
             raise ValueError(f'Cargo.toml declares build file {CRATE}/{rel}, absent at this revision')
         selected.add(f'{CRATE}/{rel}')
-    pending = sorted(p for p in selected if p.endswith('.rs'))
+    # Every .rs file, and every manifest-declared target or build script
+    # whatever its suffix: Cargo hands those to rustc as crate roots.
+    pending = sorted({p for p in selected if p.endswith('.rs')} | {f'{CRATE}/{rel}' for rel in declared})
     scanned = set()
     while pending:
         path = pending.pop()
@@ -699,7 +704,7 @@ def closure(files, read):
             selected.add(target)
             if scanned_as_code(target, code) and target not in scanned:
                 pending.append(target)
-    _, errors = loose_sources(manifest, read_manifest, declared_files(manifest, read_manifest),
+    _, errors = loose_sources(manifest, read_manifest, declared,
                               lambda rel: f'{CRATE}/{rel}' in files, lambda rel: read(f'{CRATE}/{rel}'),
                               [p[len(CRATE) + 1:] for p in files if p.startswith(f'{CRATE}/')])
     if errors:

@@ -397,6 +397,39 @@ class PackageEdgeSourceTests(unittest.TestCase):
         rev = self.repo.commit()
         self.assertIn('suifleet-edge/tools/template.txt', packager.plan(self.repo.root, rev)['paths'])
 
+    def test_declared_targets_are_scanned_whatever_their_suffix(self):
+        # The reviewer's reproduction: Cargo hands a manifest-declared target
+        # to rustc whatever its file name, so its includes are build inputs.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/entry.inc"\n'
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/entry.inc',
+                        'const M: &str = include_str!("message.txt");\ninclude!("helper.inc");\nfn main() { f() }\n')
+        self.repo.write('suifleet-edge/tools/message.txt', 'hello\n')
+        self.repo.write('suifleet-edge/tools/helper.inc', 'fn f() {}\n')
+        rev = self.repo.commit()
+        output = self.out / 'declared-entry.tar.gz'
+        info = packager.build(self.repo.root, rev, output)
+        with tarfile.open(output) as tar:
+            names = tar.getnames()
+        for rel in ('tools/entry.inc', 'tools/message.txt', 'tools/helper.inc'):
+            self.assertIn(f'suifleet-edge/{rel}', info['paths'])
+            self.assertIn(f'suifleet-edge/{rel}', names)
+        # A missing include or an implicit module in such an entry point is refused.
+        self.repo.write('suifleet-edge/tools/entry.inc', 'include_bytes!("absent.bin");\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, 'entry.inc includes missing file suifleet-edge/tools/absent.bin'):
+            packager.plan(self.repo.root, 'HEAD')
+        self.repo.write('suifleet-edge/tools/entry.inc', 'mod helper;\nfn main() {}\n')
+        self.repo.commit()
+        with self.assertRaisesRegex(ValueError, r'tools/entry.inc declares module\(s\) helper without #\[path\]'):
+            packager.plan(self.repo.root, 'HEAD')
+        # A non-.rs build script is a compiler entry point too.
+        self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML.replace('[package]\n', '[package]\nbuild = "tools/build.inc"\n', 1))
+        self.repo.write('suifleet-edge/tools/build.inc', 'const D: &[u8] = include_bytes!("data.bin");\nfn main() {}\n')
+        self.repo.write('suifleet-edge/tools/data.bin', 'x')
+        rev = self.repo.commit()
+        self.assertIn('suifleet-edge/tools/data.bin', packager.plan(self.repo.root, rev)['paths'])
+
     def test_every_toml_spelling_of_workspace_members_is_packaged(self):
         # Each spelling once dropped windows-runtime from the archive: literal
         # strings, then escaped keys and headers that only decode to
@@ -1136,6 +1169,47 @@ class LayerAuditTests(unittest.TestCase):
         complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
         info = packager.build(self.repo.root, rev, complete)
         self.assertIn('suifleet-edge/tools/helper.rs', info['paths'])
+        self.archive = complete
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
+    def test_fetch_scans_declared_targets_whatever_their_suffix(self):
+        # The reviewer's reproduction: a pinned archive whose manifest declares
+        # a non-.rs [[bin]] that includes an absent file must not audit clean.
+        manifest = CARGO_TOML + '\n[[bin]]\nname = "standalone-check"\npath = "tools/entry.inc"\n'
+        entry = 'const M: &str = include_str!("message.txt");\nfn main() {}\n'
+        files = {'suifleet-edge/Cargo.toml': manifest, 'suifleet-edge/tools/entry.inc': entry}
+        archive = self.archive.with_name('declared-entry.tar.gz')
+        with tarfile.open(self.archive) as source, tarfile.open(archive, 'w:gz') as tar:
+            for member in source.getmembers():
+                data = source.extractfile(member) if member.isfile() else None
+                if member.name in files:
+                    text = files.pop(member.name).encode()
+                    member.size, data = len(text), io.BytesIO(text)
+                tar.addfile(member, data)
+            for name, text in files.items():
+                added = tarfile.TarInfo(name)
+                added.size, added.mode = len(text), 0o644
+                tar.addfile(added, io.BytesIO(text.encode()))
+        self.write_recipe(sha=sha256(archive.read_bytes()))
+        self.archive = archive
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        expected = 'suifleet-edge/tools/entry.inc references suifleet-edge/tools/message.txt, absent from the source layout'
+        self.assertTrue(any(expected in e for e in report['errors']), report['errors'])
+        # Committed and packaged, the entry point and its data audit clean.
+        self.repo.write('suifleet-edge/Cargo.toml', manifest)
+        self.repo.write('suifleet-edge/tools/entry.inc', entry)
+        self.repo.write('suifleet-edge/tools/message.txt', 'hello\n')
+        rev = self.repo.commit()
+        complete = self.archive.with_name(f'suifleet-edge-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, complete)
+        self.assertIn('suifleet-edge/tools/message.txt', info['paths'])
         self.archive = complete
         self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
                           sha=info['sha256'], srcrev=rev)

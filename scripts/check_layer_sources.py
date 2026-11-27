@@ -746,9 +746,22 @@ def fetch_recipe(recipe, workdir, cargo=None):
                                                    for p in (s_dir / directory).rglob('*') if p.is_file()])
         packager = load_packager()
         files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if p.is_file()}
-        # Every .rs file is scanned, and so is every include!/#[path] target
-        # whatever its suffix, because Rust compiles it as code.
-        pending, scanned = sorted(p for p in files if p.endswith('.rs')), set()
+        # Every .rs file is scanned, and so is every manifest-declared target
+        # or build script and every include!/#[path] target whatever its
+        # suffix, because Rust compiles each of them as code.
+        roots = {p for p in files if p.endswith('.rs')}
+        src = recipe.get('CARGO_SRC_DIR', 'suifleet-edge')
+        try:
+            manifest = (s_dir / src / 'Cargo.toml').read_bytes().decode()
+
+            def read_manifest(directory):
+                path = s_dir / src / directory / 'Cargo.toml'
+                return path.read_bytes().decode() if path.is_file() else None
+            roots |= {f'{src}/{rel}' for rel in packager.declared_files(manifest, read_manifest)
+                      if f'{src}/{rel}' in files}
+        except (OSError, ValueError, packager.MissingCrate):
+            pass  # daemon_errors above already reports an unreadable manifest or layout
+        pending, scanned = sorted(roots), set()
         while pending:
             rs = pending.pop()
             if rs in scanned:
