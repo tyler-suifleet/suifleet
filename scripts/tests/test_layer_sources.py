@@ -1511,6 +1511,41 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe()
         self.assertEqual(self.errors(), [])
 
+    def test_layer_configuration_cannot_change_recipe_sources(self):
+        # BitBake parses conf/layer.conf into the base configuration every
+        # recipe inherits, so a source change there must be refused before any
+        # download, even though no recipe mentions it.
+        conf = self.layer / 'conf/layer.conf'
+        registration = (Path(audit.__file__).resolve().parents[1]
+                        / 'suifleet-edge/meta-suifleet/conf/layer.conf').read_text()
+        cases = {
+            'package-scoped append': 'SRC_URI:append:pn-suifleet = " file://notice.txt"',
+            'global SRCREV': f'SRCREV = "{"c" * 40}"',
+            'pinned variable': 'SUIFLEET_CRATE_VERSION = "9.9.9"',
+            'include': 'include conf/extra.conf',
+            'inherit': 'INHERIT += "suifleet-core-fixes"',
+            'premirrors': 'PREMIRRORS:prepend = "https://.* https://mirror.example/ "',
+            'inline python': 'BBFILE_PRIORITY_meta-suifleet = "${@6}"',
+            'override on registration name': 'LAYERVERSION_meta-suifleet:pn-suifleet = "2"',
+            'extra BBFILES': 'BBFILES += "${LAYERDIR}/../other/*.bb"',
+            'second collection': 'BBFILE_COLLECTIONS += "other"',
+            'anonymous python': 'python () {\n    d.setVar("SRCREV", "x")\n}',
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                conf.write_text(registration + text + '\n')
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+                self.assertTrue(any(e.startswith('conf/layer.conf:') for e in report['errors']), report['errors'])
+                entry = report['recipes']['suifleet']
+                self.assertEqual((entry['fetched'], entry['fetch_skipped']), (None, 'layer configuration findings'))
+        # The repository's own registration-only layer.conf is accepted.
+        conf.write_text(registration)
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(audit.layer_conf_errors(registration), [])
+
     def test_archives_bitbake_unpacks_in_unmodelled_formats_are_refused(self):
         # BitBake runs unzip (and other extractors) on these names unless
         # unpack=0; the audit must not report the packed file's layout instead.

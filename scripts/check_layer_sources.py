@@ -1043,6 +1043,60 @@ def fetch_recipe(recipe, workdir, cargo=None):
     return errors, fetched
 
 
+# BitBake parses every layer.conf into the base configuration that each recipe
+# inherits, so any other statement in it (an assignment, :append, include,
+# inherit, Python, ...) can change SRC_URI or the pins without appearing in a
+# recipe. Only these layer registration forms, with these exact values, are
+# accepted; the collection name comes from BBFILE_COLLECTIONS.
+LAYER_CONF_FIXED = {
+    ('BBPATH', '.='): (':${LAYERDIR}',),
+    ('BBFILES', '+='): ('${LAYERDIR}/recipes-*/*/*.bb', '${LAYERDIR}/recipes-*/*/*.bbappend'),
+}
+LAYER_CONF_PER_COLLECTION = {
+    'BBFILE_PATTERN': re.compile(r'^\^\$\{LAYERDIR\}/$'),
+    'BBFILE_PRIORITY': re.compile(r'^[0-9]+$'),
+    'LAYERVERSION': re.compile(r'^[0-9]+$'),
+    'LAYERDEPENDS': re.compile(r'^[A-Za-z0-9_\-:.<>= ]*$'),
+    'LAYERRECOMMENDS': re.compile(r'^[A-Za-z0-9_\-:.<>= ]*$'),
+    'LAYERSERIES_COMPAT': re.compile(r'^[a-z ]*$'),
+}
+LAYER_CONF_STATEMENT = re.compile(r'^([A-Za-z0-9_\-]+)\s*(\.=|\+=|=)\s*"([^"]*)"$')
+
+
+def layer_conf_errors(text):
+    """Refuse every layer.conf statement that is not plain layer registration."""
+    statements = [line.strip() for line in text.replace('\\\n', ' ').splitlines()]
+    statements = [line for line in statements if line and not line.startswith('#')]
+    collections = []
+    for line in statements:
+        match = LAYER_CONF_STATEMENT.match(line)
+        if match and match.group(1) == 'BBFILE_COLLECTIONS' and match.group(2) == '+=':
+            collections += match.group(3).split()
+    errors = []
+    for line in statements:
+        match = LAYER_CONF_STATEMENT.match(line)
+        accepted = False
+        if match:
+            name, op, value = match.groups()
+            if (name, op) in LAYER_CONF_FIXED:
+                accepted = value in LAYER_CONF_FIXED[(name, op)]
+            elif name == 'BBFILE_COLLECTIONS':
+                accepted = op == '+=' and len(value.split()) == 1 and re.fullmatch(r'[A-Za-z0-9\-]+', value) is not None
+            elif op == '=' and '${' not in value.replace('${LAYERDIR}', ''):
+                for prefix, pattern in LAYER_CONF_PER_COLLECTION.items():
+                    suffix = name[len(prefix) + 1:] if name.startswith(prefix + '_') else None
+                    # Without a BBFILE_COLLECTIONS line the name stays unchecked
+                    # (as in a minimal fixture); it still cannot be an override.
+                    if suffix and (suffix in collections or not collections) and pattern.match(value):
+                        accepted = True
+        if not accepted:
+            errors.append(f'conf/layer.conf: {line!r} is not a layer registration statement the audit accepts; '
+                          'BitBake applies layer.conf to every recipe, so its effect on sources cannot be audited')
+    if len(collections) > 1:
+        errors.append(f'conf/layer.conf: several BBFILE_COLLECTIONS {collections}; the audit supports one collection')
+    return errors
+
+
 def append_matches(append_name, recipe_name):
     """BitBake's rule: name.bbappend applies to name.bb; '%' matches any suffix."""
     target = append_name[:-len('.bbappend')] + '.bb'
@@ -1057,6 +1111,8 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
     conf = (layer / 'conf' / 'layer.conf').read_text()
     if 'AUTOREV' in conf:
         report['errors'].append('conf/layer.conf: AUTOREV is forbidden')
+    conf_errors = layer_conf_errors(conf)
+    report['errors'] += conf_errors
     series = re.search(r'^LAYERSERIES_COMPAT_\S+\s*=\s*"([^"]*)"', conf, re.M)
     report['series'] = series.group(1).split() if series else []
     recipes, static_errors = {}, {}
@@ -1122,9 +1178,10 @@ def check(layer, repo=None, fetch=False, cargo=None, only=None):
         workdir = Path(tempfile.mkdtemp(prefix='meta-suifleet-fetch-'))
         report['fetch_dir'] = str(workdir)
         for name, recipe in recipes.items():
-            if static_errors[name]:
+            if conf_errors or static_errors[name]:
                 report['recipes'][name]['fetched'] = None
-                report['recipes'][name]['fetch_skipped'] = 'static source findings'
+                report['recipes'][name]['fetch_skipped'] = ('layer configuration findings' if conf_errors
+                                                            else 'static source findings')
                 continue
             try:
                 errors, fetched = fetch_recipe(recipe, workdir, cargo)
