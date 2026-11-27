@@ -1324,6 +1324,80 @@ class Harness:
         _, recap = self.ansible("rerun after the overlapping site.yml rollouts", "site.yml", *vault, *rollout)
         self.unchanged(recap, "rerun after the overlapping site.yml rollouts")
 
+    RESTART_TASK = "TASK [Restart the daemon]"
+
+    def cross_playbook_overlap(self, vault, rollout, previous):
+        """site.yml and restart.yml exclude each other on a host through the rollout lock.
+
+        First, on each host, a site.yml run (the current release) pauses right
+        after its install task, holding the lock, while a rolling restart runs
+        on that host in check mode and for real: each must stop on the lock
+        before restarting anything, and the rollout then restarts nothing.
+        Then a restart.yml run pauses on each host right after restarting the
+        daemon, holding the lock, while a site.yml preview and real run start
+        on that host: each must stop on the lock before any upload, and the
+        restart then completes its health and identity checks and releases
+        the lock. Returns the host states after the restart."""
+        overlap = self.write_overlap_callbacks()
+        caches = {name: self.exec(host["container"], "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout
+                  for name, host in self.hosts.items()}
+        for label, extra in (("check mode", ["--check"]), ("run", [])):
+            for path in overlap.iterdir():
+                path.unlink()
+            output, recap = self.ansible(
+                f"site.yml rollout overlapped after its install by a restart.yml {label}", "site.yml", *vault, *rollout,
+                env=("ANSIBLE_CALLBACK_PLUGINS=/work/callbacks", "ANSIBLE_CALLBACKS_ENABLED=sf304_overlap",
+                     "SF304_OVERLAP_AFTER=" + json.dumps(OVERLAP_INSTALL_NAMES),
+                     "SF304_OVERLAP_PLAYBOOK=/ansible/restart.yml",
+                     "SF304_OVERLAP_ARGS=" + json.dumps(extra)))
+            self.unchanged(recap, f"site.yml rollout overlapped by a restart.yml {label}")
+            for name, host in self.hosts.items():
+                container = host["container"]
+                log = (overlap / f"{name}.log").read_text()
+                assert (overlap / f"{name}.rc").read_text() != "0", (name, label, "the overlapping restart succeeded", log[-4000:])
+                assert ROLLOUT_LOCK_REFUSAL in log, (name, label, "the overlapping restart was not refused by the lock", log[-4000:])
+                assert self.RESTART_TASK not in log, (name, label, "the overlapping restart ran past the lock", log[-4000:])
+                assert self.exec(container, "test", "-e", ROLLOUT_LOCK, check=False).returncode != 0, (name, label, "lock left")
+                state, _ = self.host_state(name)
+                self.assert_converged(name, state)
+                for field in ("binary_sha256", "package", "main_pid", "signer_pid", "key_sha256", "enrollment_sha256"):
+                    assert state[field] == previous[name][field], (name, label, field, "changed by the overlapping restart")
+                assert state["applied"] == previous[name]["applied"], (name, label, "the recorded applied inputs changed")
+            print(f"PASS a restart.yml {label} overlapping a site.yml rollout stopped on the rollout lock before"
+                  " restarting anything; the rollout restarted nothing and released the lock")
+        for label, extra in (("check mode", ["--check", "--diff"]), ("run", [])):
+            for path in overlap.iterdir():
+                path.unlink()
+            before = {name: self.host_state(name)[0] for name in self.hosts}
+            output, recap = self.ansible(
+                f"restart.yml overlapped after its restart by a site.yml {label}", "restart.yml",
+                env=("ANSIBLE_CALLBACK_PLUGINS=/work/callbacks", "ANSIBLE_CALLBACKS_ENABLED=sf304_overlap",
+                     "SF304_OVERLAP_AFTER=" + json.dumps(["Restart the daemon"]),
+                     "SF304_OVERLAP_PLAYBOOK=/ansible/site.yml",
+                     "SF304_OVERLAP_ARGS=" + json.dumps([*extra, *vault, *rollout])))
+            for name, host in self.hosts.items():
+                container = host["container"]
+                log = (overlap / f"{name}.log").read_text()
+                assert (overlap / f"{name}.rc").read_text() != "0", (name, label, "the overlapping rollout succeeded", log[-4000:])
+                assert ROLLOUT_LOCK_REFUSAL in log, (name, label, "the overlapping rollout was not refused by the lock", log[-4000:])
+                for task in (*OVERLAP_INSTALL_TASKS, "TASK [suifleet : Stage the authenticated binary]", SELF_CHECK_TASK):
+                    assert task not in log, (name, label, "the overlapping rollout ran past the lock", task, log[-4000:])
+                assert self.task_statuses(output, "TASK [Refuse a changed identity]", name) == {"ok"}, \
+                    (name, label, "the restart did not complete its identity check")
+                assert self.exec(container, "test", "-e", ROLLOUT_LOCK, check=False).returncode != 0, (name, label, "lock left")
+                assert self.exec(container, "sh", "-c", "cd /var/cache/suifleet && sha256sum *").stdout == caches[name], \
+                    (name, label, "the overlapping rollout changed the cache")
+                state, _ = self.host_state(name)
+                self.assert_converged(name, state)
+                assert state["main_pid"] != before[name]["main_pid"], (name, label, "the daemon was not restarted")
+                for field in ("binary_sha256", "package", "key_sha256", "address", "enrollment_sha256", "applied"):
+                    assert state[field] == previous[name][field], (name, label, field, "changed by the overlapping rollout")
+            print(f"PASS a site.yml {label} overlapping a rolling restart stopped on the rollout lock before any upload;"
+                  " the restart completed its health and identity checks and released the lock")
+        _, recap = self.ansible("rerun after the cross-playbook overlaps", "site.yml", *vault, *rollout)
+        self.unchanged(recap, "rerun after the cross-playbook overlaps")
+        return {name: self.host_state(name)[0] for name in self.hosts}
+
     def sudo_log_control(self):
         """sudo records the standard input of become commands on every host, so the claim checks can see it."""
         marker = uuid.uuid4().hex + uuid.uuid4().hex  # a disposable stand-in for a claim, never a real key
@@ -2875,6 +2949,7 @@ class Harness:
         self.same_pin_overlap(vault, rollout, after)
         self.overlapping_releases(vault, rollout, after)
         self.overlapping_site_rollouts(vault, rollout, after)
+        after = self.cross_playbook_overlap(vault, rollout, after)
         self.manifest_changed_in_transfer(vault, rollout, after)
 
         _, recap = self.ansible("rolling restart preview in check mode", "restart.yml", "--check")
