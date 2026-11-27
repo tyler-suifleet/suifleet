@@ -265,9 +265,11 @@ the next parse in the same build directory, without changing metadata or
 clearing the cache. `scripts/tests/test_yocto_codec_bitbake_cache.py` checks this
 with real BitBake: set `SUIFLEET_BITBAKE_DIRS` to colon-separated BitBake checkouts
 (it is skipped otherwise). Both `suifleet-node` and the codec are also
-skipped, with a reason, for any target other than AArch64 with
-`TCLIBC = "glibc"`. `COMPATIBLE_HOST` alone would accept `aarch64-*-linux-musl`.
-There is no fallback to another libc, architecture or source.
+skipped, with a reason, for any target other than little-endian AArch64
+(`HOST_ARCH = "aarch64"`) with `TCLIBC = "glibc"`. The official Node.js binary is
+little-endian, so big-endian `aarch64_be` targets are refused. `COMPATIBLE_HOST`
+alone would accept `aarch64-*-linux-musl`. There is no fallback to another libc,
+architecture or source.
 `inspect_pi_image.py` also
 requires the codec's provenance revision to equal the daemon's `build-info`.
 `make test-yocto-packaging` covers these rules offline, including

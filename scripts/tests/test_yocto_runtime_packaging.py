@@ -324,7 +324,7 @@ class RecipeTests(unittest.TestCase):
         version = NODE_RECIPES[0].stem.split('_')[1]
         self.assertRegex(text, r'SRC_URI = "https://nodejs\.org/dist/v\$\{PV\}/node-v\$\{PV\}-linux-arm64\.tar\.xz;sha256sum=[0-9a-f]{64}"')
         self.assertEqual(var(CODEC, 'SUIFLEET_CODEC_NODE_VERSION'), version)
-        self.assertIn('COMPATIBLE_HOST = "aarch64.*-linux"', text)
+        self.assertIn('COMPATIBLE_HOST = "aarch64-.*-linux"', text)
         self.assertRegex(text, r'LIC_FILES_CHKSUM = "file://LICENSE;md5=[0-9a-f]{32}"')
         self.assertNotIn('npm', re.findall(r'^FILES:\$\{PN\} = "([^"]*)"', text, re.M)[0])
 
@@ -540,8 +540,26 @@ class OptionalRuntimeParseTests(unittest.TestCase):
         self.assertIsNone(run_anonymous(text))
         for libc in ['musl', 'newlib', 'baremetal']:
             self.assertIn('TCLIBC=%s is unsupported' % libc, run_anonymous(text, TCLIBC=libc))
-        # The architecture limit stays the standard COMPATIBLE_HOST check.
-        self.assertIn('COMPATIBLE_HOST = "aarch64.*-linux"', text)
+
+    # The official binary is ELF64 little-endian AArch64. Scarthgap's
+    # aarch64_be tune yields HOST_ARCH aarch64_be and HOST_SYS
+    # aarch64_be-poky-linux; base.bbclass applies re.match(COMPATIBLE_HOST,
+    # HOST_SYS), so both that check and the guard must reject it.
+    def test_node_is_little_endian_aarch64_only(self):
+        text = NODE_RECIPES[0].read_text()
+        pattern = re.search(r'^COMPATIBLE_HOST = "([^"]*)"', text, re.M).group(1)
+        for host in ['aarch64-poky-linux', 'aarch64-poky-linux-musl', 'aarch64-oe-linux']:
+            self.assertTrue(re.match(pattern, host), host)
+        for host in ['aarch64_be-poky-linux', 'aarch64_be-poky-linux-musl', 'x86_64-poky-linux',
+                     'arm-poky-linux-gnueabi', 'riscv64-poky-linux']:
+            self.assertFalse(re.match(pattern, host), host)
+        self.assertIsNone(run_anonymous(text, HOST_ARCH='aarch64', HOST_SYS='aarch64-poky-linux'))
+        reason = run_anonymous(text, HOST_ARCH='aarch64_be', HOST_SYS='aarch64_be-poky-linux')
+        self.assertIn('little-endian AArch64', reason)
+        self.assertIn('aarch64_be-poky-linux is unsupported', reason)
+        # The codec's exact HOST_ARCH check refuses the same target.
+        self.assertIn('aarch64_be-poky-linux is unsupported',
+                      run_anonymous(CODEC, HOST_ARCH='aarch64_be', HOST_SYS='aarch64_be-poky-linux'))
 
     def test_core_client_does_not_need_the_archive_runtime(self):
         for name in ['DEPENDS', 'RDEPENDS:${PN}']:
