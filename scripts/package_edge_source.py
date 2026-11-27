@@ -437,7 +437,10 @@ def local_crates(manifest, read_manifest):
     raises MissingCrate (a ValueError). A path dependency that leaves the root crate directory
     is refused: the archive layout and fetched-layout check cover only it."""
     found = []
-    pending = [(member, 'workspace member') for member in workspace_members(manifest)]
+    # Cargo accepts spellings such as ./member/ for a literal member; git-tree
+    # lookups, deduplication and archive roots need the canonical path.
+    pending = [(normalize('', member, 'workspace member'), 'workspace member')
+               for member in workspace_members(manifest)]
     pending += [(normalize('', raw), 'path dependency') for raw in path_dependencies(parse_toml(manifest))]
     seen = {''}
     while pending:

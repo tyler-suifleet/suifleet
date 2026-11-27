@@ -252,6 +252,35 @@ class PackageEdgeSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing file suifleet-edge/src/missing.txt'):
             packager.plan(self.repo.root, 'HEAD')
 
+    def test_noncanonical_workspace_member_spellings_are_packaged(self):
+        # Cargo accepts ./member/ for a literal member; the packager once looked
+        # the raw string up in the git tree and refused a valid manifest.
+        base = 'members = ["windows-runtime"]'
+        for spelling in ('members = ["./windows-runtime/"]', 'members = ["windows-runtime/"]',
+                         'members = ["./windows-runtime", "windows-runtime/./"]'):
+            with self.subTest(spelling):
+                self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML.replace(base, spelling))
+                self.repo.commit()
+                info = packager.build(self.repo.root, 'HEAD', self.out / 'member.tar.gz')
+                data = (self.out / 'member.tar.gz').read_bytes()
+                (self.out / 'member.tar.gz').unlink()
+                for path in ('suifleet-edge/windows-runtime/Cargo.toml', 'suifleet-edge/windows-runtime/src/lib.rs'):
+                    self.assertIn(path, info['paths'])
+                self.assertFalse([p for p in info['paths'] if '/./' in p or p.endswith('/') or '//' in p], info['paths'])
+                with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+                    names = tar.getnames()
+                self.assertTrue(any(n.endswith('suifleet-edge/windows-runtime/Cargo.toml') for n in names), names)
+                self.assertTrue(any(n.endswith('suifleet-edge/windows-runtime/src/lib.rs') for n in names), names)
+        # Globs and paths leaving the crate stay refused after normalization.
+        for spelling, error in (('members = ["./windows-*"]', 'unsupported workspace member pattern'),
+                                ('members = ["./x/../../interfaces"]', 'unsupported workspace member pattern'),
+                                ('members = ["/abs/member"]', 'unsupported workspace member pattern')):
+            with self.subTest(spelling):
+                self.repo.write('suifleet-edge/Cargo.toml', CARGO_TOML.replace(base, spelling))
+                self.repo.commit()
+                with self.assertRaisesRegex(ValueError, error):
+                    packager.plan(self.repo.root, 'HEAD')
+
     def test_local_path_dependencies_are_packaged_transitively(self):
         # Cargo builds local path dependencies whether or not workspace.members
         # lists them; an archive without them only fails on the clean host.
