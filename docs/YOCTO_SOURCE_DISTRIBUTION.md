@@ -339,7 +339,11 @@ These static checks always run, on every recipe in the layer:
 - The layer and `export-files.json` contain no runtime identity/state files.
 - The coupled pins agree with each other. `PV` equals `SUIFLEET_CRATE_VERSION`.
   The codec `SUIFLEET_CODEC_SOURCE_REV` equals the daemon `SRCREV`. A commit
-  named in an archive filename equals `SRCREV`.
+  named in an archive filename equals `SRCREV`. When the codec is present, the
+  layer must provide `suifleet-node` with `PV` equal to
+  `SUIFLEET_CODEC_NODE_VERSION` and no `PE`, because the codec `RDEPENDS` on
+  exactly that version. The `suifleet-node` `do_install` must copy exactly
+  `${S}/bin/node` and `${S}/LICENSE`, the files the fetched check verifies.
 - The daemon and codec recipes are found by PN (`suifleet` and
   `suifleet-walrus-codec`), not by the pins being verified. The layer must
   provide the daemon recipe, with a lowercase 64-hex `SUIFLEET_LOCK_SHA256`, a
@@ -398,7 +402,11 @@ check then verifies the resulting `S`:
   must be pinned, so it must also be fetched), their digests, provenance
   revision, licenses and Node version, plus manifest schema 1 and manifest
   file hashes equal to the recipe pins, as `do_verify_codec` requires. Every
-  manifest entry must be an object naming a pinned file.
+  manifest entry must be an object naming a pinned file;
+- for Node, the `bin/node` and `LICENSE` that `do_install` copies, with
+  `bin/node` a 64-bit little-endian AArch64 ELF executable. The archive
+  SHA-256 and license checksum alone would accept an archive without the
+  executable.
 
 The JSON report maps each recipe to its PV, crate version, source revision,
 source URLs and SHA-256, license files and crate count, plus the advertised
