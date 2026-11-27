@@ -228,6 +228,10 @@ These static checks always run, on every recipe in the layer:
   static, and the fetcher repeats it before anything is downloaded. Named task
   functions such as `python do_verify_lock()` are not run during parsing and
   are still accepted, as is inheriting classes from other layers.
+- Directives the reader does not model are refused: `unset` (of a variable or
+  a flag), `include_all`, `addfragments` and `addpylib`. They can remove or
+  replace source pins or load further metadata. The refusal is static, and the
+  fetcher repeats it before anything is downloaded.
 - The reader follows BitBake's ordering. Plain `:append` and `:prepend` apply
   after every assignment, even one that comes later in the file. `??=` is a
   weak default, used only when nothing else assigns the variable; each later
@@ -244,7 +248,10 @@ These static checks always run, on every recipe in the layer:
   with an unexpandable variable, or a target missing from the layer is
   reported and never read. BitBake would otherwise find such a file through
   `BBPATH` in another layer, so a clean audit could depend on metadata that a
-  standalone layer doesn't contain.
+  standalone layer doesn't contain. As in BitBake, the whole operand is
+  expanded and every space-separated file name in it is included in order, so
+  a valid first file doesn't hide a missing, unresolvable or out-of-layer
+  second one. The fetcher refuses to run while any include finding remains.
 - Each matching `.bbappend` (an exact name, or `name_%.bbappend`) is read after
   its recipe as one set of metadata, as BitBake does. So a variable assigned in
   the append affects the recipe's sources. A `.bbappend` that matches no
