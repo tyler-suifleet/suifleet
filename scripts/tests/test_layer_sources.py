@@ -1029,6 +1029,67 @@ class LayerAuditTests(unittest.TestCase):
         self.assertEqual(entry['license_files'], {'LICENSE': md5(LICENSE)})
         self.assertEqual((entry['crates'], report['series']), (1, ['scarthgap', 'wrynose']))
 
+    def test_cargo_lock_and_manifest_paths_must_be_the_audited_files(self):
+        # do_verify_lock opens the effective CARGO_LOCK_PATH, so the audit must
+        # not certify suifleet-edge/Cargo.lock while metadata points BitBake at
+        # another (possibly missing) lockfile or manifest.
+        accepted = {
+            'shipped lock dir': 'CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge"',
+            'explicit lock path': 'CARGO_LOCK_PATH = "${S}/${CARGO_SRC_DIR}/Cargo.lock"',
+            'explicit manifest path': 'CARGO_MANIFEST_PATH = "${S}/suifleet-edge//Cargo.toml"',
+            'weak default': 'CARGO_LOCK_PATH ??= "${S}/suifleet-edge/Cargo.lock"',
+        }
+        for label, extra in accepted.items():
+            with self.subTest(label):
+                self.write_recipe(extra=extra)
+                self.assertEqual(audit.check(self.layer, repo=self.repo.root)['errors'], [])
+        rejected = {
+            'missing lock inside S': ('CARGO_LOCK_PATH = "${S}/suifleet-edge/missing/Cargo.lock"', 'CARGO_LOCK_PATH'),
+            'other lock dir': ('CARGO_LOCK_SRC_DIR = "${S}/other"', 'CARGO_LOCK_SRC_DIR'),
+            'other manifest': ('CARGO_MANIFEST_PATH = "${S}/other/Cargo.toml"', 'CARGO_MANIFEST_PATH'),
+            'outside S': ('CARGO_LOCK_PATH = "/tmp/Cargo.lock"', 'CARGO_LOCK_PATH'),
+            'weak default elsewhere': ('CARGO_LOCK_PATH ??= "${S}/Cargo.lock"', 'CARGO_LOCK_PATH'),
+            'append': ('CARGO_LOCK_PATH = "${S}/suifleet-edge/Cargo.lock"\nCARGO_LOCK_PATH:append = ".alt"',
+                       'CARGO_LOCK_PATH'),
+            'indirect': ('LOCKDIR = "${S}/other"\nCARGO_LOCK_PATH = "${LOCKDIR}/Cargo.lock"', 'CARGO_LOCK_PATH'),
+        }
+        for label, (extra, name) in rejected.items():
+            for fetch in (False, True):
+                with self.subTest(label, fetch=fetch):
+                    self.write_recipe(extra=extra)
+                    with mock.patch.object(audit, 'download', self.fake_download):
+                        report = audit.check(self.layer, repo=self.repo.root, fetch=fetch)
+                    if report.get('fetch_dir'):
+                        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                    self.assertFalse(report['ok'])
+                    self.assertTrue(any(f'{name} ' in e and 'the audit verifies suifleet-edge/Cargo.lock' in e
+                                        for e in report['errors']), report['errors'])
+        # A machine/distro override (directly or through a referenced variable)
+        # could select another lockfile at build time; it is refused outright.
+        overrides = {
+            'CARGO_LOCK_PATH:qemuarm64': 'CARGO_LOCK_PATH:qemuarm64 = "${S}/other/Cargo.lock"',
+            'CARGO_LOCK_SRC_DIR:raspberrypi3': 'CARGO_LOCK_SRC_DIR:raspberrypi3 = "${S}/other"',
+            'CARGO_MANIFEST_PATH:aarch64': 'CARGO_MANIFEST_PATH:aarch64 = "${S}/other/Cargo.toml"',
+            'LOCKDIR:qemuarm64': 'LOCKDIR = "${S}/suifleet-edge"\nLOCKDIR:qemuarm64 = "${S}/other"\n'
+                                 'CARGO_LOCK_PATH = "${LOCKDIR}/Cargo.lock"',
+        }
+        for label, extra in overrides.items():
+            with self.subTest(label):
+                self.write_recipe(extra=extra)
+                errors = self.errors(repo=self.repo.root)
+                self.assertTrue(any(f'conditional override {label}' in e for e in errors), errors)
+        # An append is part of the same metadata and is checked the same way.
+        self.write_recipe()
+        append = self.recipe_dir / 'suifleet_%.bbappend'
+        for text, message in (('CARGO_LOCK_PATH = "${S}/suifleet-edge/missing/Cargo.lock"\n', 'CARGO_LOCK_PATH '),
+                              ('CARGO_LOCK_PATH:qemuarm64 = "${S}/other/Cargo.lock"\n',
+                               'conditional override CARGO_LOCK_PATH:qemuarm64')):
+            with self.subTest(append=text):
+                append.write_text(text)
+                errors = self.errors(repo=self.repo.root)
+                self.assertTrue(any(message in e for e in errors), errors)
+        append.unlink()
+
     def test_mutable_unpinned_and_credentialed_sources_are_rejected(self):
         cases = {
             'AUTOREV': dict(extra='SRCREV_other = "${AUTOREV}"'),

@@ -762,7 +762,8 @@ def runtime_state_errors(layer):
 
 
 SOURCE_ROOTS = ('SRC_URI', 'SRCREV', 'SRCREV_FORMAT', 'PN', 'BPN', 'BP', 'PV', 'PE', 'S', 'LICENSE', 'LIC_FILES_CHKSUM',
-                'FILESEXTRAPATHS', 'FILESPATH', 'CARGO_SRC_DIR', 'UNPACKDIR', 'WORKDIR')
+                'FILESEXTRAPATHS', 'FILESPATH', 'CARGO_SRC_DIR', 'CARGO_MANIFEST_PATH', 'CARGO_LOCK_PATH',
+                'CARGO_LOCK_SRC_DIR', 'UNPACKDIR', 'WORKDIR')
 
 
 def source_variables(recipe):
@@ -1232,12 +1233,38 @@ def node_errors(recipe, s_dir):
     return errors
 
 
+# Variables that choose the Cargo manifest/lock BitBake verifies and builds
+# (oe-core cargo_common and cargo-update-recipe-crates), with the file each must
+# name relative to ${S}/${CARGO_SRC_DIR}. Their class defaults derive from
+# CARGO_SRC_DIR, which daemon_errors audits; an explicit layer assignment must
+# expand to that same file, or do_verify_lock would check a lockfile other than
+# the audited crate graph.
+CARGO_PATHS = {'CARGO_MANIFEST_PATH': 'Cargo.toml', 'CARGO_LOCK_PATH': 'Cargo.lock', 'CARGO_LOCK_SRC_DIR': ''}
+
+
+def cargo_path_errors(recipe, where):
+    errors = []
+    src = recipe.get('CARGO_SRC_DIR', 'suifleet-edge')
+    for name, leaf in CARGO_PATHS.items():
+        if recipe.raw(name) is None:
+            continue
+        expected = PurePosixPath(recipe.expand('${S}'), src, leaf).as_posix() if leaf else \
+            PurePosixPath(recipe.expand('${S}'), src).as_posix()
+        value = recipe.get(name)
+        actual = PurePosixPath(value).as_posix() if value else ''
+        if actual != expected:
+            errors.append(f'{where}: {name} {value!r} is not ${{S}}/{src}{"/" + leaf if leaf else ""}; the audit '
+                          f'verifies {src}/Cargo.lock and Cargo.toml, so the recipe must build and verify those files')
+    return errors
+
+
 def pin_errors(recipe):
     """Require the coupled pins of the daemon and codec recipes, keyed by PN.
 
     Pins set on any other recipe are refused because nothing would verify them."""
     pn, where, errors = recipe.get('PN'), recipe.path.name, []
     if pn == DAEMON_PN:
+        errors += cargo_path_errors(recipe, where)
         for name, pattern in DAEMON_PINS.items():
             value = recipe.get(name)
             if not value:
