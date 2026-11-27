@@ -1370,6 +1370,54 @@ class LayerAuditTests(unittest.TestCase):
                 self.write_recipe(url=url)
                 self.assertFalse(any('authority' in e or 'unparseable' in e for e in self.errors()), self.errors())
 
+    def test_git_source_query_or_fragment_is_refused_redacted_and_never_fetched(self):
+        # BitBake passes a git remote's query through to Git, so a token or
+        # expiring signature there is a source credential like an https one.
+        # The finding must be static (blocking fetching) and redacted.
+        secrets = ('TOKMARK', 'FRAGMARK')
+        git = 'git://github.com/example/suifleet.git'
+        cases = {
+            'git query token': f'{git}?access_token=TOKMARK;protocol=https;nobranch=1',
+            'git fragment': f'{git}#FRAGMARK;protocol=https;nobranch=1',
+            'git query with branch': f'{git}?X-Amz-Signature=TOKMARK;protocol=https;branch=main',
+        }
+        fetched = []
+        for label, url in cases.items():
+            for fetch in (False, True):
+                with self.subTest(label, fetch=fetch):
+                    self.write_recipe(url=url)
+                    with mock.patch.object(audit, 'download', lambda *a, **k: fetched.append(a)), \
+                            mock.patch.object(audit, 'fetch_recipe', lambda *a, **k: fetched.append(a) or ([], [])):
+                        report = audit.check(self.layer, repo=self.repo.root, fetch=fetch)
+                    if fetch:
+                        self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                        self.assertEqual(report['recipes']['suifleet']['fetch_skipped'], 'static source findings')
+                    self.assertFalse(report['ok'])
+                    self.assertTrue(any('query/fragment' in e for e in report['errors']), report['errors'])
+                    serialized = json.dumps(report)
+                    for secret in secrets:
+                        self.assertNotIn(secret, serialized)
+                    self.assertIn('<redacted>', serialized)
+        self.assertEqual(fetched, [])
+        # A direct fetch_recipe caller (no static audit) never runs Git with it.
+        self.write_recipe(url=cases['git query token'])
+        recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer)
+        workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+
+        def no_git(command, *args, **kwargs):
+            if command and command[0] == 'git':
+                raise AssertionError(f'git ran: {command}')
+            return subprocess.run(command, *args, **kwargs)
+        with mock.patch.object(audit.subprocess, 'run', no_git), \
+                mock.patch.object(audit.subprocess, 'check_output', no_git):
+            errors, got = audit.fetch_recipe(recipe, workdir)
+        self.assertFalse(any(item.get('revision') for item in got), got)
+        self.assertTrue(any('query/fragment in git remote; not fetched' in e for e in errors), errors)
+        self.assertNotIn('TOKMARK', json.dumps(errors))
+        # The same source without a query stays free of the finding.
+        self.write_recipe(url=f'{git};protocol=https;nobranch=1')
+        self.assertFalse(any('query/fragment' in e for e in self.errors(repo=self.repo.root)), self.errors())
+
     def test_unparseable_source_url_via_command_line_still_emits_a_json_report(self):
         self.write_recipe(url=f'https://[invalid/{self.archive.name}')
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/check_layer_sources.py'), '--layer', str(self.layer)],

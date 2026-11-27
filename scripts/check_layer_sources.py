@@ -972,6 +972,11 @@ def audit_recipe(recipe):
             errors.append(f'{where}: credentials in source URL {shown}')
         if scheme in ('git', 'gitsm', 'https', 'http', 'ftp') and authority_error(parsed):
             errors.append(f'{where}: source URL has an unfetchable authority ({authority_error(parsed)}): {shown}')
+        # A query or fragment can carry an access token or an expiring
+        # signature for any network fetcher (BitBake passes a git remote's
+        # query through to git), so refuse it before the per-fetcher checks.
+        if scheme in ('git', 'gitsm', 'https', 'http', 'ftp', 'crate') and (parsed.query or parsed.fragment):
+            errors.append(f'{where}: query/fragment (signed or expiring URL) in {shown}')
         if scheme in ('git', 'gitsm'):
             name = params.get('name')
             rev = recipe.get(f'SRCREV_{name}') if name else srcrev
@@ -1003,8 +1008,6 @@ def audit_recipe(recipe):
                 errors.append(f'{where}: source must use https: {shown}')
             if not HEX64.match(sha):
                 errors.append(f'{where}: https source lacks a SHA-256 pin: {shown}')
-            if parsed.query or parsed.fragment:
-                errors.append(f'{where}: query/fragment (signed or expiring URL) in {shown}')
             policy = policy_url(parsed)
             for pattern, label in MUTABLE_URL:
                 if pattern.search(policy):
@@ -2157,6 +2160,11 @@ def fetch_recipe(recipe, workdir, cargo=None, tree=None, required=()):
                 errors.append(f'{recipe.path.name}: {redact_url(url)}: git destination '
                               f'{destination.relative_to(unpack.resolve()).as_posix() or "."} already exists '
                               f'(created by an earlier source); not fetched')
+                continue
+            if '?' in url or '#' in url:
+                # Never hand Git a remote carrying a token or signature, even
+                # when a direct caller skipped the static audit.
+                errors.append(f'{recipe.path.name}: {redact_url(url)}: query/fragment in git remote; not fetched')
                 continue
             remote = git_remote(url)
             env = anonymous_env(Path(workdir))
