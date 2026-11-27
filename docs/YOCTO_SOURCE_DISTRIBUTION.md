@@ -106,6 +106,16 @@ Comments are blanked here too, so `mod /* why */ name;` is still found and
 `#[/* why */ path = ".."] mod name;` still counts as an explicit path. A
 commented-out `mod name;` is ignored.
 
+Checked-in Cargo configuration is not supported. Cargo reads
+`.cargo/config.toml` (or the legacy `.cargo/config`) in the directory it runs
+in and in every ancestor. Such a file can set compile-time `[env]` variables,
+rustflags, patches or source replacement, and `cargo metadata --no-deps`
+doesn't notice it. Any `.cargo` entry in the crate directory, in one of its
+repository ancestors or below it stops the packager, including when it
+reproduces a published file list. The audit reports the same entries: in the
+`--repo` tree at `SRCREV`, in the unpacked `--fetch` layout, and in any
+directory above `S` inside the unpack directory.
+
 A literal include or `#[path]` may start with `..` to climb out of the
 source file's directory, but a `..` after a named directory is refused, as in
 `#[path = "../tools/anchor/../helper.rs"]`. Rust traverses `tools/anchor`
