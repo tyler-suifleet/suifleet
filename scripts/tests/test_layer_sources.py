@@ -3572,6 +3572,63 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
 
+    def test_fetch_and_repo_bind_unpacked_compiler_inputs_to_srcrev(self):
+        # The integration reviewer's reproduction: a stale archive verified
+        # against its own SHA-256, labelled with a newer SRCREV that changes
+        # only Rust code (same lock, license and version), must not audit
+        # clean when --repo and --fetch run together.
+        stale = self.archive
+        self.repo.write('suifleet-edge/src/main.rs', MAIN_RS + '// changed after the archive was built\n')
+        rev = self.repo.commit()
+        self.assertNotEqual(self.repo.git('show', f'{self.rev}:suifleet-edge/src/main.rs'),
+                            self.repo.git('show', f'{rev}:suifleet-edge/src/main.rs'))
+        for rel in ('LICENSE', 'suifleet-edge/Cargo.toml', 'suifleet-edge/Cargo.lock'):
+            self.assertEqual(self.repo.git('show', f'{self.rev}:{rel}'), self.repo.git('show', f'{rev}:{rel}'))
+        renamed = stale.with_name(f'suifleet-edge-{rev}.tar.gz')
+        shutil.copyfile(stale, renamed)
+        self.archive = renamed
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=sha256(renamed.read_bytes()), srcrev=rev)
+        # Each half alone cannot see the mismatch.
+        self.assertEqual(self.errors(repo=self.repo.root), [])
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertFalse(report['ok'])
+        self.assertTrue(any('1 unpacked daemon source files differ from the Git tree at SRCREV' in e
+                            and 'suifleet-edge/src/main.rs' in e for e in report['errors']), report['errors'])
+        # A file the archive carries but SRCREV never committed is refused too.
+        extra = stale.with_name('extra-file.tar.gz')
+        with tarfile.open(stale) as source, tarfile.open(extra, 'w:gz') as tar:
+            for member in source.getmembers():
+                tar.addfile(member, source.extractfile(member) if member.isfile() else None)
+            planted = tarfile.TarInfo('suifleet-edge/src/planted.rs')
+            planted.size, planted.mode = 3, 0o644
+            tar.addfile(planted, io.BytesIO(b'//\n'))
+        self.archive = extra
+        self.write_recipe(sha=sha256(extra.read_bytes()))
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertTrue(any('are absent from the Git tree at SRCREV' in e and 'suifleet-edge/src/planted.rs' in e
+                            for e in report['errors']), report['errors'])
+        # The archive built at the declared revision is clean, including the
+        # broader published file list (windows-runtime is outside the closure).
+        fresh = stale.with_name(f'fresh-{rev}.tar.gz')
+        info = packager.build(self.repo.root, rev, fresh)
+        self.assertIn('suifleet-edge/windows-runtime/Cargo.toml', info['paths'])
+        self.archive = fresh
+        self.write_recipe(url=self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}'),
+                          sha=info['sha256'], srcrev=rev)
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertEqual(report['errors'], [])
+
     def test_fetch_and_repo_report_missing_name_only_test_target(self):
         # cargo metadata --no-deps accepts a layout lacking a name-only
         # [[test]]'s inferred tests/<name>.rs, so the static audit must not.
