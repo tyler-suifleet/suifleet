@@ -169,6 +169,43 @@ class PackageEdgeSourceTests(unittest.TestCase):
         self.repo.commit()
         packager.build(self.repo.root, 'HEAD', self.out / 'clean.tar.gz')
 
+    def test_closure_refuses_checked_in_cargo_configuration(self):
+        # The integration reviewer's reproduction: a checked-in
+        # suifleet-edge/.cargo/config.toml sets a compile-time [env] variable
+        # read by env!. The closure used to omit it, so the packaged layout
+        # passed cargo metadata yet failed to compile. Cargo reads
+        # .cargo/config(.toml) in the crate directory and every ancestor, so
+        # the packager must refuse it instead of silently dropping it.
+        self.repo.write('suifleet-edge/src/main.rs', MAIN_RS + 'const _V: &str = env!("SUIFLEET_FIXTURE");\n')
+        refused = ('suifleet-edge/.cargo/config.toml', 'suifleet-edge/.cargo/config', '.cargo/config.toml',
+                   '.cargo/config', 'suifleet-edge/windows-runtime/.cargo/config.toml')
+        for rel in refused:
+            with self.subTest(rel):
+                self.repo.write(rel, '[env]\nSUIFLEET_FIXTURE = "1"\n')
+                self.repo.commit()
+                output = self.out / 'configured.tar.gz'
+                with self.assertRaisesRegex(ValueError, 'unsupported checked-in Cargo configuration ' + re.escape(rel)):
+                    packager.build(self.repo.root, 'HEAD', output)
+                self.assertFalse(output.exists())
+                # A published file list that omits it is refused too.
+                with self.assertRaisesRegex(ValueError, 'unsupported checked-in Cargo configuration'):
+                    packager.plan(self.repo.root, 'HEAD', ['LICENSE', 'suifleet-edge/Cargo.toml'])
+                self.repo.git('rm', '-q', rel)
+                self.repo.commit()
+        # A relocated crate is checked along its own path; configuration off
+        # the crate's path is not read by Cargo and stays outside the closure.
+        self.repo.write('docs/.cargo/config.toml', '[env]\nSUIFLEET_FIXTURE = "1"\n')
+        self.repo.commit()
+        paths = packager.plan(self.repo.root, 'HEAD')['paths']
+        self.assertFalse(any('.cargo' in p for p in paths), paths)
+        self.assertEqual(packager.cargo_configs(['crates/edge/.cargo/config.toml', 'crates/.cargo/config',
+                                                 'crates/other/.cargo/config', 'suifleet-edge/.cargo/config'],
+                                                'crates/edge'),
+                         ['crates/.cargo/config', 'crates/edge/.cargo/config.toml'])
+        self.assertEqual(packager.cargo_config_candidates('crates/edge'),
+                         ('.cargo/config', '.cargo/config.toml', 'crates/.cargo/config', 'crates/.cargo/config.toml',
+                          'crates/edge/.cargo/config', 'crates/edge/.cargo/config.toml'))
+
     def test_closure_contains_build_inputs_only(self):
         info = packager.plan(self.repo.root, 'HEAD')
         self.assertEqual(info['paths'], [
@@ -3689,6 +3726,70 @@ S = "${{SUIFLEET_UNPACKDIR}}/source"
             report = audit.check(self.layer, repo=self.repo.root, fetch=True)
         self.addCleanup(shutil.rmtree, report['fetch_dir'])
         self.assertEqual(report['errors'], [])
+
+    def test_audit_refuses_cargo_configuration_in_any_mode(self):
+        # The integration reviewer's reproduction for the audit: the
+        # metadata probe does not compile, so a checked-in Cargo configuration
+        # (here a compile-time [env] variable read by env!) must be refused by
+        # the source checks, whether the archive omits or carries it.
+        config = '[env]\nSUIFLEET_FIXTURE = "1"\n'
+        self.repo.write('suifleet-edge/.cargo/config.toml', config)
+        self.repo.write('suifleet-edge/src/main.rs', MAIN_RS + 'const _V: &str = env!("SUIFLEET_FIXTURE");\n')
+        rev = self.repo.commit()
+        url = self.url.replace(f'suifleet-edge-{self.rev}', f'suifleet-edge-{rev}')
+
+        def repack(name, rel=None):
+            # The SRCREV bytes of the original closure (everything but the
+            # configuration), optionally carrying the configuration at `rel`.
+            archive = self.archive.with_name(name)
+            with tarfile.open(archive, 'w:gz') as tar:
+                for path in self.info['paths']:
+                    data = self.repo.git('show', f'{rev}:{path}')
+                    member = tarfile.TarInfo(path)
+                    member.size, member.mode = len(data), 0o644
+                    tar.addfile(member, io.BytesIO(data))
+                if rel:
+                    member = tarfile.TarInfo(rel)
+                    member.size, member.mode = len(config), 0o644
+                    tar.addfile(member, io.BytesIO(config.encode()))
+            return archive
+
+        omitted, carried = repack('config-omitted.tar.gz'), repack('config-carried.tar.gz',
+                                                                     'suifleet-edge/.cargo/config.toml')
+
+        def audit_errors(archive, **kwargs):
+            self.archive = archive
+            self.write_recipe(url=url, sha=sha256(archive.read_bytes()), srcrev=rev)
+            with mock.patch.object(audit, 'download', self.fake_download):
+                report = audit.check(self.layer, **kwargs)
+            if 'fetch_dir' in report:
+                self.addCleanup(shutil.rmtree, report['fetch_dir'])
+            return report['errors']
+
+        layout = 'unsupported Cargo configuration in the source layout: suifleet-edge/.cargo/config.toml'
+        self.assertTrue(any(layout in e for e in audit_errors(omitted, repo=self.repo.root)))
+        self.assertTrue(any(layout in e for e in audit_errors(carried, fetch=True)))
+        for archive in (omitted, carried):
+            with self.subTest(archive.name):
+                errors = audit_errors(archive, repo=self.repo.root, fetch=True)
+                self.assertTrue(any(layout in e for e in errors), errors)
+                self.assertTrue(any('cannot derive the build closure' in e
+                                    and 'unsupported checked-in Cargo configuration' in e for e in errors), errors)
+        # An ancestor of the crate inside S is on Cargo's path too.
+        legacy = repack('config-legacy.tar.gz', '.cargo/config')
+        self.assertTrue(any('unsupported Cargo configuration in the source layout: .cargo/config' in e
+                            for e in audit_errors(legacy, fetch=True)))
+        # So is a directory above S inside the unpack directory, placed by
+        # another fetched source.
+        (self.recipe_dir / 'files/.cargo').mkdir()
+        (self.recipe_dir / 'files/.cargo/config.toml').write_text(config)
+        self.archive = self.archive.with_name(f'suifleet-edge-{self.rev}.tar.gz')
+        self.write_recipe(extra='SRC_URI += "file://.cargo/config.toml"')
+        with mock.patch.object(audit, 'download', self.fake_download):
+            report = audit.check(self.layer, fetch=True)
+        self.addCleanup(shutil.rmtree, report['fetch_dir'])
+        self.assertTrue(any('unsupported Cargo configuration above S in the unpack directory: .cargo' in e
+                            for e in report['errors']), report['errors'])
 
     def test_fetch_and_repo_closure_follows_relocated_cargo_src_dir(self):
         # The source reviewer's reproduction: the whole crate moves to

@@ -1481,6 +1481,17 @@ def daemon_errors(recipe, read, exists=None, listing=None):
         data = read(rel)
         if data is None or hashlib.md5(data).hexdigest() != md5:
             errors.append(f'{recipe.path.name}: license file {rel} does not match md5 {md5}')
+    if exists is not None:
+        # Cargo reads .cargo/config(.toml) from the crate directory and its
+        # ancestors; it can change compile-time [env], flags, patches or
+        # sources while cargo metadata and source binding still pass, so no
+        # checked-in Cargo configuration is accepted on the crate's path.
+        configs = sorted({rel for rel in packager.cargo_config_candidates(src) if exists(rel)}
+                         | set(packager.cargo_configs(listing(src), src)))
+        if configs:
+            errors.append(f'{recipe.path.name}: unsupported Cargo configuration in the source layout: '
+                          f'{", ".join(configs[:3])}; Cargo would read it for {src} but the audit does not '
+                          'model it, so remove it from the daemon source')
     if exists is not None and version is not None:
         def read_manifest(directory):
             path = f'{src}/{directory}/Cargo.toml'
@@ -2172,6 +2183,15 @@ def fetch_recipe(recipe, workdir, cargo=None, tree=None, required=()):
     if not s_dir.is_dir():
         return errors + [f'{recipe.path.name}: S does not exist after unpack: {s_dir.relative_to(unpack)}'], fetched
     if recipe.get('PN') == DAEMON_PN:
+        # Cargo also reads .cargo configuration in ancestors of S inside the
+        # unpack directory (another fetched source could place one there).
+        above = s_dir.relative_to(unpack.resolve()).parts
+        homes = [unpack.resolve().joinpath(*above[:i]) for i in range(len(above))]
+        planted = [(home / '.cargo').relative_to(unpack.resolve()).as_posix() for home in homes
+                   if (home / '.cargo').exists() or (home / '.cargo').is_symlink()]
+        if planted:
+            errors.append(f'{recipe.path.name}: unsupported Cargo configuration above S in the unpack '
+                          f'directory: {", ".join(planted)}; Cargo would read it for the daemon build')
         # Metadata-derived paths (CARGO_SRC_DIR, license files) are confined
         # to the unpack root after resolution before anything is read, listed
         # or handed to Cargo, so the audit never verifies a host-side file.

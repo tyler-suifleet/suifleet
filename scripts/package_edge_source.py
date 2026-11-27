@@ -57,6 +57,42 @@ def required(crate=CRATE, licenses=LICENSES):
     return (*licenses, f'{crate}/Cargo.toml', f'{crate}/Cargo.lock')
 
 
+# Cargo reads .cargo/config.toml (or legacy .cargo/config) from the directory
+# it runs in and from every ancestor; such a file can set [env], [build]
+# rustflags, [patch], [source] replacement and more, none of which `cargo
+# metadata` or the source binding would notice. No checked-in Cargo
+# configuration is supported: any .cargo entry in the crate directory, in one
+# of its repository ancestors or below it is refused, so a build never depends
+# on configuration the archive does not carry or the audit does not see.
+CARGO_CONFIG_NAMES = ('.cargo/config', '.cargo/config.toml')
+
+
+def cargo_config_candidates(crate=CRATE):
+    """The Cargo configuration file paths Cargo would read for a build in the
+    root crate directory `crate`, from the repository root down to `crate`."""
+    parts = PurePosixPath(crate).parts
+    directories = ['/'.join(parts[:i]) for i in range(len(parts) + 1)]
+    return tuple(f'{d}/{name}' if d else name for d in directories for name in CARGO_CONFIG_NAMES)
+
+
+def cargo_configs(paths, crate=CRATE):
+    """Paths in `paths` under a `.cargo` entry in `crate`, one of its
+    ancestors or anywhere below it (a `.cargo` file or symlink counts too)."""
+    parts = PurePosixPath(crate).parts
+    homes = {'/'.join(parts[:i]) for i in range(len(parts) + 1)}
+    found = []
+    for path in paths:
+        segments = PurePosixPath(path).parts
+        for index, segment in enumerate(segments):
+            if segment != '.cargo':
+                continue
+            home = '/'.join(segments[:index])
+            if home in homes or home.startswith(f'{crate}/'):
+                found.append(path)
+                break
+    return sorted(found)
+
+
 # Every include macro name, however it is delimited or spaced (`include!(..)`,
 # `include! { .. }`, `std::include_str![..]`).
 INCLUDE_MACRO = re.compile(rb'(?<![A-Za-z0-9_])include(_str|_bytes)?\s*!')
@@ -926,6 +962,11 @@ def closure(files, read, crate=CRATE, licenses=LICENSES):
     for name in required(crate, licenses):
         if name not in files:
             raise ValueError(f'source revision lacks required {name}')
+    configs = cargo_configs(files, crate)
+    if configs:
+        raise ValueError(f'unsupported checked-in Cargo configuration {", ".join(configs[:3])}: Cargo reads '
+                         f'.cargo/config(.toml) in {crate} and its ancestors, and the source distribution '
+                         'does not carry or audit it; remove it from the source revision')
     manifest = read(f'{crate}/Cargo.toml').decode()
 
     def read_manifest(directory):
