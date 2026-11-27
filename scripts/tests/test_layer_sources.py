@@ -1038,6 +1038,8 @@ class LayerAuditTests(unittest.TestCase):
             'explicit lock path': 'CARGO_LOCK_PATH = "${S}/${CARGO_SRC_DIR}/Cargo.lock"',
             'explicit manifest path': 'CARGO_MANIFEST_PATH = "${S}/suifleet-edge//Cargo.toml"',
             'weak default': 'CARGO_LOCK_PATH ??= "${S}/suifleet-edge/Cargo.lock"',
+            'interior dot': 'CARGO_LOCK_PATH = "${S}/./suifleet-edge//Cargo.lock"',
+            'lock dir trailing slash': 'CARGO_LOCK_SRC_DIR = "${S}/suifleet-edge/"',
         }
         for label, extra in accepted.items():
             with self.subTest(label):
@@ -1052,6 +1054,12 @@ class LayerAuditTests(unittest.TestCase):
             'append': ('CARGO_LOCK_PATH = "${S}/suifleet-edge/Cargo.lock"\nCARGO_LOCK_PATH:append = ".alt"',
                        'CARGO_LOCK_PATH'),
             'indirect': ('LOCKDIR = "${S}/other"\nCARGO_LOCK_PATH = "${LOCKDIR}/Cargo.lock"', 'CARGO_LOCK_PATH'),
+            # open() raises NotADirectoryError for a regular file named with
+            # trailing directory syntax, so these must not normalize to a pass.
+            'lock trailing slash': ('CARGO_LOCK_PATH = "${S}/suifleet-edge/Cargo.lock/"', 'CARGO_LOCK_PATH'),
+            'lock trailing dot': ('CARGO_LOCK_PATH = "${S}/suifleet-edge/Cargo.lock/."', 'CARGO_LOCK_PATH'),
+            'manifest trailing slash': ('CARGO_MANIFEST_PATH = "${S}/suifleet-edge/Cargo.toml/"',
+                                        'CARGO_MANIFEST_PATH'),
         }
         for label, (extra, name) in rejected.items():
             for fetch in (False, True):

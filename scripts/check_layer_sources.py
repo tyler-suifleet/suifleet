@@ -1252,7 +1252,10 @@ def cargo_path_errors(recipe, where):
             PurePosixPath(recipe.expand('${S}'), src).as_posix()
         value = recipe.get(name)
         actual = PurePosixPath(value).as_posix() if value else ''
-        if actual != expected:
+        # PurePosixPath drops a trailing "/" or "/.", but open() in
+        # do_verify_lock then fails on a regular file, so a file-valued
+        # setting must end in its file name exactly.
+        if actual != expected or (leaf and value.rsplit('/', 1)[-1] != leaf):
             errors.append(f'{where}: {name} {value!r} is not ${{S}}/{src}{"/" + leaf if leaf else ""}; the audit '
                           f'verifies {src}/Cargo.lock and Cargo.toml, so the recipe must build and verify those files')
     return errors
