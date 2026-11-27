@@ -130,7 +130,12 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
         return first_boot::run(Path::new(&args[2])).await;
     }
     if args.len() == 3 && args[1] == "--enroll" {
-        return enroll(Path::new(&args[2])).await;
+        return enroll(Path::new(&args[2]), None).await;
+    }
+    #[cfg(target_os = "linux")]
+    if args.len() == 4 && args[1] == "--enroll" {
+        let epoch = args[3].parse::<u64>().map_err(|e| anyhow::anyhow!("invalid expiry epoch {}: {e}", args[3]))?;
+        return enroll(Path::new(&args[2]), Some(epoch)).await;
     }
     #[cfg(target_os = "linux")]
     if args.len() == 3 && args[1] == "--find-enrollment" {
@@ -141,9 +146,14 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
         return claim_registration(Path::new(&args[2]), &args[3]).await;
     }
     #[cfg(target_os = "linux")]
-    if args.len() == 7 && args[1] == "--check-revocation" {
-        let version = args[4].parse::<u64>().map_err(|e| anyhow::anyhow!("invalid registration version {}: {e}", args[4]))?;
-        return check_revocation(Path::new(&args[2]), &args[3], version, &args[5], &args[6]).await;
+    if args.len() == 3 && args[1] == "--enrollment-window" {
+        return enrollment_window(Path::new(&args[2])).await;
+    }
+    #[cfg(target_os = "linux")]
+    if args.len() == 5 && args[1] == "--check-expired" {
+        let epoch = args[3].parse::<u64>().map_err(|e| anyhow::anyhow!("invalid expiry epoch {}: {e}", args[3]))?;
+        let checkpoint = args[4].parse::<u64>().map_err(|e| anyhow::anyhow!("invalid checkpoint {}: {e}", args[4]))?;
+        return check_expired(Path::new(&args[2]), epoch, checkpoint).await;
     }
     if (args.len() == 4 || args.len() == 5) && args[1] == "--verify-release" {
         let (bundle, trust) = (Path::new(&args[2]), Path::new(&args[3]));
@@ -194,7 +204,7 @@ async fn run(args: Vec<String>, portable_socket: Option<PathBuf>) -> anyhow::Res
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --find-enrollment ENROLL_TOML | --claim-registration ENROLL_TOML CLAIM | --check-revocation ENROLL_TOML CLAIM VERSION ENTRY_DIGEST DIGEST | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML [EXPIRY_EPOCH] | --find-enrollment ENROLL_TOML | --claim-registration ENROLL_TOML CLAIM | --enrollment-window ENROLL_TOML | --check-expired ENROLL_TOML EPOCH CHECKPOINT | --first-boot-enroll CONFIG_DIR | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     init_tracing();
     if signer_service {
@@ -862,7 +872,11 @@ fn self_check(path: &Path) -> anyhow::Result<()> {
 
 /// Enroll this device under an operator's enrollment policy (SF-021) and
 /// print the IDs its daemon configuration needs.
-async fn enroll(path: &Path) -> anyhow::Result<()> {
+/// Enrolls this device's key with the claim. With an expiry epoch (from
+/// --enrollment-window), the signed transaction is valid only through that
+/// epoch: validators refuse it afterwards, so an attempt whose outcome was
+/// lost is settled once the epoch has ended (--check-expired).
+async fn enroll(path: &Path, expires_after: Option<u64>) -> anyhow::Result<()> {
     let (enroll, sui_config, device) = config::EnrollConfig::load(path)?;
     let claim = identity::Ed25519File(identity::load(&enroll.claim_key_path)?);
     let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
@@ -878,6 +892,7 @@ async fn enroll(path: &Path) -> anyhow::Result<()> {
             &arch,
             &claim,
             enroll.managed.as_ref(),
+            expires_after,
         )
         .await?;
     print_receipt(&enrolled);
@@ -944,20 +959,39 @@ async fn claim_registration(path: &Path, claim: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Read-only settlement of an enrollment attempt that printed no receipt:
-/// proves that transaction DIGEST revoked the registration of CLAIM recorded
-/// before the attempt (VERSION and ENTRY_DIGEST, from --claim-registration)
-/// from the enroll.toml's policy without an enrollment, that the claim is
-/// still absent, and that this key has not enrolled under the policy since,
-/// so the attempt has not committed and cannot while the claim stays
-/// unregistered. Never reads the claim key or submits anything.
+/// Read-only: prints "EPOCH CHECKPOINT", the node's current epoch and
+/// checkpoint. Recorded before an enrollment attempt, the epoch is the
+/// attempt's expiry (--enroll ENROLL_TOML EPOCH) and the checkpoint precedes
+/// any checkpoint the attempt can commit in. Never reads the claim key or
+/// submits anything.
 #[cfg(target_os = "linux")]
-async fn check_revocation(path: &Path, claim: &str, version: u64, entry_digest: &str, digest: &str) -> anyhow::Result<()> {
+async fn enrollment_window(path: &Path) -> anyhow::Result<()> {
+    let (_, sui_config, device) = config::EnrollConfig::load(path)?;
+    let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
+    sui.validate_deployment().await?;
+    let (epoch, checkpoint) = sui.enrollment_window().await?;
+    println!("{epoch} {checkpoint}");
+    Ok(())
+}
+
+/// Read-only settlement of an enrollment attempt that printed no receipt,
+/// signed to expire after EPOCH and started after CHECKPOINT (both from
+/// --enrollment-window): proves that EPOCH has ended, so validators refuse
+/// the attempt from now on, and that the node's history from CHECKPOINT on
+/// holds no enrollment of this key under the enroll.toml's policy, so it
+/// did not commit before. Fails when that history is not retained. Never
+/// reads the claim key or submits anything.
+#[cfg(target_os = "linux")]
+async fn check_expired(path: &Path, epoch: u64, checkpoint: u64) -> anyhow::Result<()> {
     let (enroll, sui_config, device) = config::EnrollConfig::load(path)?;
     let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
     sui.validate_deployment().await?;
-    let checkpoint = sui.check_revocation(&enroll.policy_id, claim, version, entry_digest, digest).await?;
-    println!("claim {claim} was revoked from policy {} in transaction {digest} (checkpoint {checkpoint}) and cannot enroll", enroll.policy_id);
+    let now = sui.check_expired(&enroll.policy_id, epoch, checkpoint).await?;
+    println!(
+        "the enrollment attempt expired with epoch {epoch} (the chain is in epoch {now}) and did not enroll {} under policy {}",
+        sui.address(),
+        enroll.policy_id
+    );
     Ok(())
 }
 

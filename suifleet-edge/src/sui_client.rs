@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::{str::FromStr, time::Duration};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
-use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
+use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TransactionExpiration, TypeTag};
 
 /// Largest gas budget the device will sign for one status report or gas
 /// draw (0.05 SUI).
@@ -2414,8 +2414,9 @@ impl SuiClient {
     /// object version and digest of the claim's entry in the policy's claim
     /// table. Each registration creates the entry anew, at a higher version
     /// with its own digest, so the pair identifies this registration, and an
-    /// enrollment or revocation consumes it exactly once. Recorded before an
-    /// enrollment attempt, it binds a later revocation to that attempt.
+    /// enrollment or revocation consumes it exactly once. Read before an
+    /// enrollment attempt, it refuses an unregistered claim before anything
+    /// is signed; it settles nothing (see [`Self::check_expired`]).
     #[cfg(target_os = "linux")]
     pub async fn claim_registration(&self, policy: &str, claim: &str) -> anyhow::Result<(u64, String)> {
         let claim = Address::from_str(claim).map_err(|e| anyhow::anyhow!("invalid claim address {claim}: {e}"))?;
@@ -2432,59 +2433,48 @@ impl SuiClient {
         Ok((version, digest))
     }
 
-    /// Read-only proof that the enrollment attempt sponsored by `claim` at
-    /// its recorded registration (`version` and `entry_digest`, read by
-    /// [`Self::claim_registration`] before the attempt) has not committed,
-    /// and cannot while the claim stays unregistered:
-    /// - transaction `digest` succeeded, is checkpointed, and deleted exactly
-    ///   that registration (the entry ID, which binds the policy and claim,
-    ///   and its input version and digest) without an enrollment event. A
-    ///   registration is consumed once, so the attempt did not consume it,
-    ///   and a revocation of an earlier or later registration of the same
-    ///   claim does not match;
-    /// - the claim is not registered now;
-    /// - the node's history since the revocation holds no enrollment of this
-    ///   key under the policy, so the attempt did not commit through a later
-    ///   registration either (it fails when that history is not retained).
-    ///
-    /// Returns the revocation's checkpoint.
+    /// The node's current epoch and checkpoint (read-only). Read before an
+    /// enrollment attempt: the epoch is its expiry ([`Self::enroll`]) and
+    /// every checkpoint the attempt can commit in follows the checkpoint.
     #[cfg(target_os = "linux")]
-    pub async fn check_revocation(&self, policy: &str, claim: &str, version: u64, entry_digest: &str, digest: &str) -> anyhow::Result<u64> {
-        let claim = Address::from_str(claim).map_err(|e| anyhow::anyhow!("invalid claim address {claim}: {e}"))?;
-        anyhow::ensure!(is_digest(entry_digest), "invalid claim registration digest {entry_digest}");
+    pub async fn enrollment_window(&self) -> anyhow::Result<(u64, u64)> {
+        let info = self.service_info().await.map_err(status)?.into_inner();
+        Ok((
+            info.epoch.ok_or_else(|| anyhow::anyhow!("the node reported no epoch"))?,
+            info.checkpoint_height.ok_or_else(|| anyhow::anyhow!("the node reported no checkpoint"))?,
+        ))
+    }
+
+    /// Read-only proof that an enrollment attempt signed to expire after
+    /// `epoch`, and started after `checkpoint` (both read by
+    /// [`Self::enrollment_window`] before the attempt), has not committed
+    /// and never can:
+    /// - the node's latest checkpoint is in a later epoch, so `epoch` has
+    ///   ended and validators refuse the attempt (`Epoch` expiration) from
+    ///   now on, whatever happens to its claim;
+    /// - the node's history from `checkpoint` to that later checkpoint, which
+    ///   covers every checkpoint of `epoch`, holds no enrollment of this key
+    ///   under `policy`. It fails when that history is not retained.
+    ///
+    /// Returns the current epoch.
+    #[cfg(target_os = "linux")]
+    pub async fn check_expired(&self, policy: &str, epoch: u64, checkpoint: u64) -> anyhow::Result<u64> {
         let object = self.object(policy).await?;
         let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
         self.validate_enrollment_policy(policy, &operator).await?;
-        let (_, field) = claim_field_id(&object.fields, &claim)?;
-        let mut request = proto::GetTransactionRequest::default();
-        request.digest = Some(digest.to_owned());
-        request.read_mask = Some(mask(&["digest", "effects.status", "effects.changed_objects", "effects.events_digest", "events.events", "checkpoint"]));
-        let executed = self
-            .read_rpc(|mut rpc| {
-                let request = request.clone();
-                async move { rpc.ledger_client().get_transaction(request).await }
-            })
-            .await
-            .map_err(|e| status(e).context(format!("revocation transaction {digest}")))?
-            .into_inner()
-            .transaction
-            .ok_or_else(|| anyhow::anyhow!("revocation transaction {digest} not found"))?;
-        let checkpoint = revocation_evidence(&executed, digest, &field, version, entry_digest).map_err(|e| {
-            e.context(format!("transaction {digest} did not revoke the attempt's registration of claim {claim} in policy {policy}"))
-        })?;
-        anyhow::ensure!(
-            self.optional_object(&field).await?.is_none(),
-            "claim {claim} is registered in policy {policy} again; it can still enroll"
-        );
-        let later = self
+        let (now, _) = self.enrollment_window().await?;
+        expired(epoch, now)?;
+        // previous_enrollment reads the tip again: at or after the one read
+        // above, so the scan covers the end of `epoch`.
+        let found = self
             .previous_enrollment(policy, &operator, checkpoint)
             .await
-            .map_err(|e| e.context(format!("cannot read this key's enrollments since the revocation (checkpoint {checkpoint})")))?;
+            .map_err(|e| e.context(format!("cannot read this key's enrollments since checkpoint {checkpoint}")))?;
         anyhow::ensure!(
-            later.is_none(),
-            "this key enrolled under policy {policy} after the revocation; restore the record with --find-enrollment"
+            found.is_none(),
+            "this key enrolled under policy {policy} after checkpoint {checkpoint}; restore the record with --find-enrollment"
         );
-        Ok(checkpoint)
+        Ok(now)
     }
 
     #[cfg(target_os = "linux")]
@@ -2579,6 +2569,12 @@ impl SuiClient {
     /// transaction sent by the device and sponsored by the claim key, which
     /// pays its gas. Checked against the exact intended call before either
     /// key signs; success and the created objects come from the effects.
+    ///
+    /// With `expires_after`, the signed transaction carries the expiration
+    /// `Epoch(expires_after)`: validators refuse it in any later epoch, so an
+    /// attempt whose outcome was lost cannot commit once that epoch has ended
+    /// (see [`Self::check_expired`]). It is refused before signing when the
+    /// node is already past that epoch.
     pub async fn enroll(
         &self,
         policy: &str,
@@ -2586,6 +2582,7 @@ impl SuiClient {
         arch: &str,
         claim: &dyn identity::TxSigner,
         managed: Option<&crate::config::ManagedEnrollment>,
+        expires_after: Option<u64>,
     ) -> anyhow::Result<Enrolled> {
         let package = Address::from_str(&self.config.package_id)?;
         let sender = Address::from_str(&self.address())?;
@@ -2620,7 +2617,12 @@ impl SuiClient {
             function,
             args,
         };
-        let transaction = self
+        if let Some(epoch) = expires_after {
+            let info = self.service_info().await.map_err(status)?.into_inner();
+            let now = info.epoch.ok_or_else(|| anyhow::anyhow!("the node reported no epoch"))?;
+            anyhow::ensure!(now <= epoch, "the enrollment window expired with epoch {epoch} (the chain is in epoch {now}); nothing was signed");
+        }
+        let mut transaction = self
             .build_rpc(|| {
                 let mut builder = sui_transaction_builder::TransactionBuilder::new();
                 let mut arguments = Vec::new();
@@ -2645,7 +2647,12 @@ impl SuiClient {
                 Ok(builder)
             })
             .await?;
+        // The builder simulates without an expiration; the signed bytes carry it.
+        if let Some(epoch) = expires_after {
+            transaction.expiration = TransactionExpiration::Epoch(epoch);
+        }
         check_call_transaction(&transaction, &call, package, sender, sponsor)?;
+        check_expiration(&transaction, expires_after)?;
         anyhow::ensure!(
             transaction.gas_payment.budget <= MAX_ENROLL_BUDGET,
             "enrollment gas exceeds ceiling"
@@ -2881,35 +2888,26 @@ fn is_digest(text: &str) -> bool {
     (32..=44).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_alphanumeric() && !b"0OIl".contains(&b))
 }
 
-/// Checks a transaction's effects for a revocation of one registration of
-/// the claim whose table entry is `field`: successful, checkpointed, deleted
-/// the entry at exactly input `version` and `entry_digest`, and emitted no
-/// enrollment event (an enrollment also deletes it). Events must be present
-/// when the effects commit to any.
+/// The signed enrollment carries exactly the requested expiration.
+fn check_expiration(transaction: &Transaction, expires_after: Option<u64>) -> anyhow::Result<()> {
+    let expected = expires_after.map_or(TransactionExpiration::None, TransactionExpiration::Epoch);
+    anyhow::ensure!(
+        transaction.expiration == expected,
+        "the enrollment transaction has expiration {:?}, not {expected:?}",
+        transaction.expiration
+    );
+    Ok(())
+}
+
+/// An attempt that expires after `epoch` can no longer commit once the chain
+/// is in a later epoch.
 #[cfg(target_os = "linux")]
-fn revocation_evidence(executed: &proto::ExecutedTransaction, digest: &str, field: &str, version: u64, entry_digest: &str) -> anyhow::Result<u64> {
-    anyhow::ensure!(executed.digest.as_deref() == Some(digest), "the node returned another transaction");
-    execution_digest(executed)?;
-    let checkpoint = executed.checkpoint.ok_or_else(|| anyhow::anyhow!("the transaction is not in a checkpoint yet"))?;
-    let effects = executed.effects.as_ref().ok_or_else(|| anyhow::anyhow!("missing transaction effects"))?;
-    let deleted = proto::changed_object::IdOperation::Deleted as i32;
-    let entry = effects
-        .changed_objects
-        .iter()
-        .find(|c| c.id_operation == Some(deleted) && c.object_id.as_deref().is_some_and(|id| same_id(id, field)))
-        .ok_or_else(|| anyhow::anyhow!("it did not remove the claim from the policy"))?;
+fn expired(epoch: u64, now: u64) -> anyhow::Result<()> {
     anyhow::ensure!(
-        entry.input_version == Some(version) && entry.input_digest.as_deref() == Some(entry_digest),
-        "it removed another registration of the claim (version {:?}, not the attempt's {version})",
-        entry.input_version
+        now > epoch,
+        "the enrollment attempt is valid through epoch {epoch} and the chain is in epoch {now}; it can still commit. Run again after epoch {epoch} has ended"
     );
-    let events = executed.events.as_ref().map(|e| e.events.as_slice()).unwrap_or_default();
-    anyhow::ensure!(effects.events_digest.is_none() || !events.is_empty(), "the node returned no events for the transaction");
-    anyhow::ensure!(
-        !events.iter().any(|e| e.event_type.as_deref().is_some_and(|t| t.ends_with("::enrollment::DeviceEnrolled"))),
-        "it enrolled a device"
-    );
-    Ok(checkpoint)
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -2995,93 +2993,41 @@ mod tests {
     use super::*;
 
     #[cfg(target_os = "linux")]
-    const ENTRY: &str = "4BKqvjVWUYiRY9LeqjtM2TxfoMAoHhXL7yuyhKWGGH2K";
-
-    #[cfg(target_os = "linux")]
-    fn revocation(field: &str, deleted: bool, event: Option<&str>) -> proto::ExecutedTransaction {
-        let mut executed = proto::ExecutedTransaction::default();
-        executed.digest = Some("D".into());
-        executed.checkpoint = Some(7);
-        let mut effects = proto::TransactionEffects::default();
-        let mut status = proto::ExecutionStatus::default();
-        status.success = Some(true);
-        effects.status = Some(status);
-        let mut changed = proto::ChangedObject::default();
-        changed.object_id = Some(field.into());
-        changed.input_version = Some(12);
-        changed.input_digest = Some(ENTRY.into());
-        changed.id_operation = Some(if deleted { proto::changed_object::IdOperation::Deleted } else { proto::changed_object::IdOperation::None } as i32);
-        effects.changed_objects = vec![changed];
-        if let Some(event_type) = event {
-            effects.events_digest = Some("E".into());
-            let mut e = proto::Event::default();
-            e.event_type = Some(event_type.into());
-            let mut events = proto::TransactionEvents::default();
-            events.events = vec![e];
-            executed.events = Some(events);
-        }
-        executed.effects = Some(effects);
-        executed
-    }
-
-    #[cfg(target_os = "linux")]
     #[test]
-    fn revocation_evidence_binds_the_policy_claim_entry() {
-        let claim = Address::from_str(&format!("0x{}", "c".repeat(64))).unwrap();
-        let other_claim = Address::from_str(&format!("0x{}", "d".repeat(64))).unwrap();
-        let policy = json!({"claims": {"id": format!("0x{}", "a".repeat(64)), "size": "1"}});
-        let other_policy = json!({"claims": {"id": {"id": format!("0x{}", "b".repeat(64))}, "size": "1"}});
-        let (table, field) = claim_field_id(&policy, &claim).unwrap();
-        assert_eq!(table, format!("0x{}", "a".repeat(64)));
-        // Another claim of the same policy, and the same claim in another policy.
-        assert_ne!(field, claim_field_id(&policy, &other_claim).unwrap().1);
-        assert_ne!(field, claim_field_id(&other_policy, &claim).unwrap().1);
-        assert!(claim_field_id(&json!({"claims": {}}), &claim).is_err());
-
-        assert_eq!(revocation_evidence(&revocation(&field, true, None), "D", &field, 12, ENTRY).unwrap(), 7);
-        assert_eq!(revocation_evidence(&revocation(&field, true, Some("0x1::other::Event")), "D", &field, 12, ENTRY).unwrap(), 7);
-        for (executed, digest, why) in [
-            (revocation(&claim_field_id(&policy, &other_claim).unwrap().1, true, None), "D", "another claim"),
-            (revocation(&claim_field_id(&other_policy, &claim).unwrap().1, true, None), "D", "another policy"),
-            (revocation(&field, false, None), "D", "entry not deleted"),
-            (revocation(&field, true, Some("0x5::enrollment::DeviceEnrolled")), "D", "an enrollment"),
-            (revocation(&field, true, None), "X", "another digest"),
-        ] {
-            assert!(revocation_evidence(&executed, digest, &field, 12, ENTRY).is_err(), "{why}");
-        }
-        let mut failed = revocation(&field, true, None);
-        failed.effects.as_mut().unwrap().status.as_mut().unwrap().success = Some(false);
-        assert!(revocation_evidence(&failed, "D", &field, 12, ENTRY).is_err());
-        let mut pending = revocation(&field, true, None);
-        pending.checkpoint = None;
-        assert!(revocation_evidence(&pending, "D", &field, 12, ENTRY).is_err());
-        // Effects that commit to events the node did not return.
-        let mut hidden = revocation(&field, true, None);
-        hidden.effects.as_mut().unwrap().events_digest = Some("E".into());
-        assert!(revocation_evidence(&hidden, "D", &field, 12, ENTRY).is_err());
-    }
-
-    /// A revocation of the same claim's entry, but of another registration
-    /// (before the claim was registered again for the attempt, or after the
-    /// attempt consumed the recorded one and the claim was registered again),
-    /// is not evidence about the attempt.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn revocation_evidence_rejects_another_registration_of_the_claim() {
-        let claim = Address::from_str(&format!("0x{}", "c".repeat(64))).unwrap();
-        let policy = json!({"claims": {"id": format!("0x{}", "a".repeat(64)), "size": "1"}});
-        let (_, field) = claim_field_id(&policy, &claim).unwrap();
-        let other = "8LvTVHvvMKzd6dbX5hKkT5rC8HVWq3ofC7v3JHQZn2bW";
-        // Recorded registration 12/ENTRY; the revocation removed an earlier one.
-        assert!(revocation_evidence(&revocation(&field, true, None), "D", &field, 15, ENTRY).is_err(), "stale version");
-        assert!(revocation_evidence(&revocation(&field, true, None), "D", &field, 12, other).is_err(), "other digest");
-        assert!(revocation_evidence(&revocation(&field, true, None), "D", &field, 9, ENTRY).is_err(), "earlier version");
-        let mut unversioned = revocation(&field, true, None);
-        unversioned.effects.as_mut().unwrap().changed_objects[0].input_version = None;
-        unversioned.effects.as_mut().unwrap().changed_objects[0].input_digest = None;
-        assert!(revocation_evidence(&unversioned, "D", &field, 12, ENTRY).is_err(), "no input state");
-        assert!(is_digest(ENTRY) && is_digest(other));
+    fn an_attempt_expires_only_after_its_epoch_ends() {
+        assert!(expired(4, 4).is_err(), "still in the attempt's epoch");
+        assert!(expired(4, 3).is_err(), "a lagging node");
+        assert!(expired(4, 5).is_ok());
+        assert!(expired(0, u64::MAX).is_ok());
+        assert!(is_digest("4BKqvjVWUYiRY9LeqjtM2TxfoMAoHhXL7yuyhKWGGH2K"));
         assert!(!is_digest("") && !is_digest("0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl") && !is_digest(&"a".repeat(45)));
+    }
+
+    /// The signed enrollment must carry exactly the requested expiration: an
+    /// attempt recorded as expiring after an epoch but signed without one
+    /// (or with a later one) could commit after its settlement.
+    #[test]
+    fn enrollment_expiration_is_checked_before_signing() {
+        let mut tx = Transaction {
+            kind: sui_sdk_types::TransactionKind::ProgrammableTransaction(sui_sdk_types::ProgrammableTransaction {
+                inputs: vec![],
+                commands: vec![],
+            }),
+            sender: Address::ZERO,
+            gas_payment: sui_sdk_types::GasPayment { objects: vec![], owner: Address::ZERO, price: 1, budget: 1 },
+            expiration: TransactionExpiration::None,
+        };
+        assert!(check_expiration(&tx, None).is_ok());
+        assert!(check_expiration(&tx, Some(7)).is_err(), "no expiration");
+        tx.expiration = TransactionExpiration::Epoch(8);
+        assert!(check_expiration(&tx, Some(7)).is_err(), "a later epoch");
+        assert!(check_expiration(&tx, None).is_err(), "unrequested expiration");
+        tx.expiration = TransactionExpiration::Epoch(7);
+        assert!(check_expiration(&tx, Some(7)).is_ok());
+        // The expiration is part of the signed bytes.
+        let expiring = bcs::to_bytes(&tx).unwrap();
+        tx.expiration = TransactionExpiration::None;
+        assert_ne!(expiring, bcs::to_bytes(&tx).unwrap());
     }
 
     #[cfg(target_os = "linux")]
