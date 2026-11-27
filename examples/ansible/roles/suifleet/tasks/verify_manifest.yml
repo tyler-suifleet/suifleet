@@ -1,0 +1,20 @@
+---
+# Checks that a manifest copied to the host has the bytes preflight.yml hashed
+# on the controller (suifleet_manifest), so the CLI and daemon never use another
+# deployment.json than the one bound to the batch. Input: staged (host path).
+- name: Read the staged manifest
+  ansible.builtin.stat:
+    path: "{{ staged }}"
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_staged_manifest
+
+- name: Refuse a staged manifest that differs from suifleet_manifest_src
+  ansible.builtin.assert:
+    that:
+      - suifleet_staged_manifest.stat.exists
+      - suifleet_staged_manifest.stat.checksum == suifleet_manifest.stat.checksum
+    quiet: true
+    fail_msg: >-
+      {{ staged }} on {{ inventory_hostname }} differs from the controller's
+      {{ suifleet_manifest_src }} (SHA-256 {{ suifleet_manifest.stat.checksum }}).

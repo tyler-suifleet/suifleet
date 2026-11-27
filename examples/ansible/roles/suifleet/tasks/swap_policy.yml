@@ -1,0 +1,45 @@
+---
+# The claim's plaintext copies live on tmpfs, and the processes that handle
+# it (the module, cat, runuser, suifleet --enroll) hold it in memory. tmpfs
+# pages and process memory can both be swapped out, so a tmpfs alone does
+# not keep the claim off persistent storage. Before any claim is read, the
+# host must have no active swap at all: every entry in /proc/swaps refuses
+# the claim. zram and dm-crypt swap are refused too, because /proc/swaps
+# names an entry only by the path it was opened through, which does not
+# identify the device (a disk node can be named /dev/zram0), so device
+# attributes found by that name cannot be bound to the swap actually in use.
+# Hibernation writes memory to swap, so it is covered by the same rule. The
+# swap list is used only once it is shown to come from the kernel's procfs;
+# a substituted view (a file or FUSE view over /proc/swaps) is refused as
+# unverifiable. files/swap_policy.sh prints "SWAP unsafe <device>" per
+# entry, then exactly one VERDICT line.
+- name: Read the host's active swap devices
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "{{ lookup('ansible.builtin.file', 'swap_policy.sh') }}"
+  register: suifleet_swap
+  changed_when: false
+  check_mode: false
+
+- name: Refuse claims on a host that can swap them to disk
+  ansible.builtin.assert:
+    that: suifleet_swap.stdout_lines | last | default('') == 'VERDICT ok'
+    quiet: true
+    fail_msg: >-
+      {% if suifleet_swap.stdout_lines | last | default('') == 'VERDICT unverifiable' %}
+      {{ inventory_hostname }}'s active swap cannot be verified, so the claim
+      (tmpfs pages or process memory) could be swapped to persistent storage:
+      {{ suifleet_swap.stdout_lines | select('match', '^UNVERIFIABLE ') | map('regex_replace', '^UNVERIFIABLE ', '') | join('; ') }}.
+      Enroll from a session that sees the kernel's /proc
+      (docs/ANSIBLE.md#claim-storage).
+      {% else %}
+      {{ inventory_hostname }} has active swap that can write the claim
+      (tmpfs pages or process memory) to persistent storage, or whose
+      device cannot be verified:
+      {{ suifleet_swap.stdout_lines | select('match', '^SWAP unsafe ') | map('regex_replace', '^SWAP unsafe ', '') | join(', ')
+      or 'its swap configuration (/proc/swaps) could not be read' }}.
+      Enroll with all swap off (swapoff -a, including zram and encrypted
+      swap), then restore swap (docs/ANSIBLE.md#claim-storage).
+      {% endif %}
