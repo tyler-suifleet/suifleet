@@ -1979,6 +1979,91 @@ class LayerAuditTests(unittest.TestCase):
                           + 'SUIFLEET_UNPACKDIR = "${@d.getVar(\'UNPACKDIR\') or d.getVar(\'WORKDIR\')}"\n')
         self.assertEqual(self.errors(), [])
 
+    def recipe(self):
+        return audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer, [])
+
+    def test_continuations_join_physical_lines_as_bitbake_does(self):
+        # BitBake (BBHandler.feeder, ConfHandler.handle) strips each physical
+        # line's trailing whitespace, drops a final backslash and concatenates
+        # the next line with its indentation, inserting nothing. An unspaced
+        # continuation is therefore one token, never two sources.
+        for name in ('first', 'second', 'firstsecond'):
+            (self.recipe_dir / 'files' / name).write_text(name)
+        sources = lambda: [url for url, _ in self.recipe().sources() if url.startswith('file://')]
+        self.write_recipe(extra='SRC_URI:append = " file://first\\\nfile://second"\n')
+        self.assertIn('file://firstfile://second', sources())
+        self.assertNotIn('file://second', sources())
+        errors = self.errors()
+        self.assertTrue(any('firstfile://second' in e for e in errors), errors)
+        # The concatenated token is fetched when it names a layer file.
+        self.write_recipe(extra='SRC_URI:append = " file://first\\\nsecond"\n')
+        self.assertIn('file://firstsecond', sources())
+        self.assertEqual(self.errors(), [])
+        # Indentation and whitespace before the backslash are kept, and
+        # whitespace after it is stripped, so these lines still continue.
+        for label, extra in {
+            'indented': 'SRC_URI:append = " file://first \\\n    file://second"\n',
+            'tab': 'SRC_URI:append = " file://first\\\n\tfile://second"\n',
+            'trailing whitespace': 'SRC_URI:append = " file://first \\  \t\n    file://second"\n',
+        }.items():
+            with self.subTest(label):
+                self.write_recipe(extra=extra)
+                self.assertEqual(sources()[-2:], ['file://first', 'file://second'])
+                self.assertEqual(self.errors(), [])
+        for name in ('first', 'second', 'firstsecond'):
+            (self.recipe_dir / 'files' / name).unlink()
+
+    def test_continued_include_operands_and_pins_are_concatenated(self):
+        include = self.recipe_dir / 'first.inc'
+        include.write_text('SUIFLEET_FROM_INCLUDE = "yes"\n')
+        self.addCleanup(include.unlink)
+        self.write_recipe(extra='require fir\\\nst.inc\n')
+        self.assertEqual(self.recipe().get('SUIFLEET_FROM_INCLUDE'), 'yes')
+        self.assertEqual(self.errors(), [])
+        self.write_recipe(extra='require fir \\\nst.inc\n')
+        errors = self.errors()
+        self.assertTrue(any('required file missing: fir' in e for e in errors), errors)
+        # A pin split without a space is the whole pin; with one it is not.
+        self.write_recipe(extra=f'SRCREV = "{self.rev[:20]}\\\n{self.rev[20:]}"\n')
+        self.assertEqual(self.recipe().get('SRCREV'), self.rev)
+        self.assertEqual(self.errors(), [])
+        self.write_recipe(extra=f'SRCREV = "{self.rev[:20]} \\\n{self.rev[20:]}"\n')
+        self.assertEqual(self.recipe().get('SRCREV'), f'{self.rev[:20]} {self.rev[20:]}')
+
+    def test_function_bodies_are_raw_and_every_anonymous_form_is_found(self):
+        # BitBake keeps function body lines raw: a body line ending in a
+        # backslash does not swallow the closing brace or later statements.
+        missing = 'SRC_URI:append = " file://not-in-layer"\n'
+        self.write_recipe(extra='do_install() {\n    install -d \\\n}\n' + missing)
+        self.assertIn('file://not-in-layer', [url for url, _ in self.recipe().sources()])
+        errors = self.errors()
+        self.assertTrue(any('not-in-layer' in e for e in errors), errors)
+        # A function without a name or named __anonymous is anonymous Python
+        # whether or not it is marked python (ast.MethodNode).
+        body = '    d.appendVar("SRC_URI", " file://not-in-layer")\n}\n'
+        for header in ('() {', '__anonymous () {', 'python fakeroot () {', 'fakeroot python(){'):
+            with self.subTest(header):
+                self.write_recipe(extra=header + '\n' + body)
+                errors = self.errors()
+                self.assertTrue(any('anonymous Python function' in e for e in errors), errors)
+        # Python def bodies are kept raw too and are not read as assignments.
+        self.write_recipe(extra='def helper(d):\n    SRCREV = "x" \\\n        "y"\n    return SRCREV\n')
+        self.assertEqual(self.recipe().get('SRCREV'), self.rev)
+        self.assertEqual(self.errors(), [])
+
+    def test_continuations_bitbake_refuses_are_reported(self):
+        for label, extra in {
+            'comment into code': '# note \\\nSRC_URI:append = " file://not-in-layer"\n',
+            'code into comment': 'SRC_URI:append = " \\\n# file://not-in-layer"\n',
+            'end of file': 'SUMMARY = "x \\',
+        }.items():
+            with self.subTest(label):
+                self.write_recipe(extra=extra)
+                errors = self.errors()
+                self.assertTrue(any('BitBake refuses to parse' in e for e in errors), errors)
+                with self.assertRaisesRegex(ValueError, 'refuses to parse'):
+                    audit.unpack_plan(self.recipe(), Path(self.tmp.name) / 'unpack')
+
     def test_every_include_operand_is_read_and_checked(self):
         # BitBake expands the whole include/require operand and includes every
         # file name in it; a valid first file must not hide the others.

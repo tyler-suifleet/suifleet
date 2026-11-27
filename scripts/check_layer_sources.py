@@ -22,6 +22,10 @@ Static checks (always):
   * flags (for example SRC_URI[name.sha256sum]) follow the same =, :=, ?=,
     +=, =+, .= and =. semantics; ??= on a flag is rejected on source-affecting
     variables because its meaning differs between supported BitBake releases;
+  * logical lines are joined as BitBake joins them (bitbake_lines): trailing
+    whitespace is stripped, a final backslash concatenates the next line with
+    nothing inserted, function bodies stay raw, and continuations BitBake
+    refuses to parse are reported;
   * double- and single-quoted assignments are read; an assignment-shaped line
     the reader cannot interpret is reported when it names a source-affecting
     variable, never silently skipped;
@@ -104,7 +108,15 @@ INLINE_PYTHON = re.compile(r'\$\{@')
 # flag (SRC_URI, SRCREV, a checksum), include_all reads the named file from
 # every BBPATH layer, and addfragments/addpylib load further metadata or code.
 UNMODELLED_DIRECTIVES = frozenset({'unset', 'include_all', 'addfragments', 'addpylib'})
-ANONYMOUS_PYTHON = re.compile(r'^(?:fakeroot\s+)?python(?:\s+__anonymous)?\s*\(\s*\)\s*\{$')
+# BitBake's function start (BBHandler.__func_start_regexp__): a function with
+# no name, or named __anonymous, is anonymous Python whether or not it is
+# marked python (ast.MethodNode).
+FUNC_START = re.compile(r"(((?P<py>python(?=(\s|\()))|(?P<fr>fakeroot(?=\s)))\s*)*"
+                        r"(?P<func>[\w\.\-\+\{\}\$:]+)?\s*\(\s*\)\s*{$")
+# BitBake's def header and the lines it keeps in that Python function
+# (BBHandler.__def_regexp__ and __python_func_regexp__).
+PY_DEF = re.compile(r"def\s+(\w+).*:")
+PY_DEF_BODY = re.compile(r"(\s+.*)|(^$)|(^#)")
 # Anonymous Python the audit accepts without running it: a parse-time skip
 # guard. Skipping a recipe changes whether it is built, never which sources it
 # pins. Rather than trying to prove arbitrary Python read-only, the audit
@@ -297,6 +309,62 @@ def load_packager():
     return module
 
 
+def bitbake_lines(text, functions=True):
+    """Yield (number, kind, line) for text as BitBake's parser feeds it.
+
+    Each physical line loses its trailing whitespace. Outside function bodies a
+    line ending in a backslash continues: BitBake drops the backslash and
+    concatenates the next line, keeping that line's indentation and inserting
+    nothing (BBHandler.feeder and ConfHandler.handle), so "a\\" followed by
+    "b" is the single token "ab". Lines inside a shell or Python function and a
+    def are kept raw, without continuation. number is the first physical line.
+    kind is 'statement', 'start' (function header), 'body', 'end', 'def',
+    'mixed-comment' (BitBake refuses a continuation that mixes comment and
+    code) or 'unterminated' (a continuation at end of file, which BitBake
+    refuses as unparsed).
+    """
+    physical = text.split('\n')
+    if physical and physical[-1] == '':
+        physical.pop()
+    infunc = inpython = False
+    residue, first = [], None
+    for number, raw in enumerate(physical, 1):
+        s = raw.rstrip()
+        if infunc:
+            infunc = s != '}'
+            yield number, 'body' if infunc else 'end', s
+            continue
+        if inpython:
+            if PY_DEF_BODY.match(s):
+                yield number, 'def', s
+                continue
+            inpython = False
+        if not residue:
+            first = number
+        lead = residue[0][:1] if residue else None
+        if residue and ((s[:1] == '#') != (lead == '#')):
+            yield first, 'mixed-comment', ''
+            residue = []
+            continue
+        if s.endswith('\\'):
+            residue.append(s[:-1])
+            continue
+        s = ''.join(residue) + s
+        residue = []
+        if not s or s[0] == '#':
+            continue
+        if functions and FUNC_START.match(s):
+            infunc = True
+            yield first, 'start', s
+        elif functions and PY_DEF.match(s):
+            inpython = True
+            yield first, 'def', s
+        else:
+            yield first, 'statement', s
+    if residue:
+        yield first, 'unterminated', ''
+
+
 class Recipe:
     """A deliberately small BitBake reader: assignments, flags and require."""
 
@@ -325,6 +393,8 @@ class Recipe:
         # Directives this reader does not model (unset, include_all, ...). They
         # can remove or replace source pins, so audit_recipe refuses them.
         self.unmodelled = []
+        # Line structure BitBake refuses to parse (see bitbake_lines).
+        self.malformed = []
         # Assignments whose variable name contains a ${...} reference. BitBake
         # expands such keys when it finalizes the datastore (SRC_${X} can
         # become SRC_URI and replace it), which this reader does not model, so
@@ -406,31 +476,37 @@ class Recipe:
     def _read(self, path):
         text = path.read_text()
         self.text += text
-        # Each logical line (continuations joined, as BitBake reads them),
-        # numbered by its first physical line; values are never reported.
+        # Inline Python is refused wherever BitBake could see it: in each
+        # logical line as BitBake joins it, and (conservatively) in every
+        # physical line with its continuations removed, including function
+        # bodies, which BitBake keeps raw. Values are never reported.
         number = 1
         for logical in re.split(r'(?<!\\)\n', text):
             if INLINE_PYTHON.search(UNPACKDIR_EXPR.sub('', logical.replace('\\\n', ''))):
                 self.inline_python.append(f'{self.rel(path)}:{number}')
             number += logical.count('\n') + 1
-        lines, block, anonymous = [], False, None
-        for line in text.replace('\\\n', ' ').splitlines():
-            stripped = line.strip()
-            if block:
-                block = stripped != '}'
+        lines, anonymous = [], None
+        for number, kind, line in bitbake_lines(text):
+            if (INLINE_PYTHON.search(UNPACKDIR_EXPR.sub('', line))
+                    and f'{self.rel(path)}:{number}' not in self.inline_python):
+                self.inline_python.append(f'{self.rel(path)}:{number}')
+            if kind == 'start':
+                match = FUNC_START.match(line)
+                if (match.group('func') or '__anonymous') == '__anonymous':
+                    anonymous = (line.rstrip('{').strip(), [])
+            elif kind == 'body':
                 if anonymous is not None:
-                    if block:
-                        anonymous[1].append(line)
-                    else:
-                        self.anonymous_python(path, *anonymous)
-                        anonymous = None
-                continue
-            if stripped.endswith('{') and ('()' in stripped or stripped.startswith('python')):
-                if ANONYMOUS_PYTHON.match(stripped):
-                    anonymous = (stripped.rstrip('{').strip(), [])
-                block = True
-                continue
-            lines.append(stripped)
+                    anonymous[1].append(line)
+            elif kind == 'end':
+                if anonymous is not None:
+                    self.anonymous_python(path, *anonymous)
+                    anonymous = None
+            elif kind == 'statement':
+                lines.append(line.strip())
+            elif kind == 'mixed-comment':
+                self.malformed.append(f'{self.rel(path)}:{number}: a continuation mixing a comment and code')
+            elif kind == 'unterminated':
+                self.malformed.append(f'{self.rel(path)}:{number}: a continuation at end of file')
         if anonymous is not None:
             # An unterminated function: BitBake would not parse it either.
             self.parse_time.append(f'{self.rel(path)}: anonymous Python function ({anonymous[0]}) '
@@ -774,6 +850,8 @@ def audit_recipe(recipe):
     errors += [f'{where}: {item} assigns a variable whose name BitBake expands (key expansion); it can '
                'replace source pins and is not supported in audited recipes, includes or appends'
                for item in recipe.expanded_keys]
+    errors += [f'{where}: {item} is metadata BitBake refuses to parse; the audit cannot describe its sources'
+               for item in recipe.malformed]
     errors += [f'{where}: {item} runs after parsing and can change source pins the audit '
                'reads; it is not supported in audited recipes, includes or appends' for item in recipe.parse_time]
     errors += [f'{where}: {item} uses inline Python (${{@...}}), which BitBake runs whenever the value is '
@@ -1449,6 +1527,8 @@ def unpack_plan(recipe, unpack):
     if recipe.parse_time:
         # SRC_URI as read here may not be what BitBake fetches after running it.
         raise ValueError(f'metadata that runs after parsing is not supported: {"; ".join(recipe.parse_time)}')
+    if recipe.malformed:
+        raise ValueError(f'metadata BitBake refuses to parse: {"; ".join(recipe.malformed)}')
     if recipe.unmodelled or recipe.include_errors or recipe.expanded_keys or recipe.inline_python:
         # SRC_URI as read here may not be what BitBake would fetch.
         inline = [f'{item} inline Python' for item in recipe.inline_python]
@@ -1633,7 +1713,7 @@ LAYER_CONF_STATEMENT = re.compile(r'^([A-Za-z0-9_\-]+)\s*(\.=|\+=|=)\s*"([^"]*)"
 
 def layer_conf_errors(text):
     """Refuse every layer.conf statement that is not plain layer registration."""
-    statements = [line.strip() for line in text.replace('\\\n', ' ').splitlines()]
+    statements = [line.strip() for _, kind, line in bitbake_lines(text, functions=False) if kind == 'statement']
     statements = [line for line in statements if line and not line.startswith('#')]
     collections = []
     for line in statements:
@@ -1672,7 +1752,7 @@ def layer_registration_errors(text, recipes, appends):
     registration BitBake would not parse them, so a clean report would describe
     files a standalone build never uses.
     """
-    statements = [line.strip() for line in text.replace('\\\n', ' ').splitlines()]
+    statements = [line.strip() for _, kind, line in bitbake_lines(text, functions=False) if kind == 'statement']
     registered = set()
     for line in statements:
         match = LAYER_CONF_STATEMENT.match(line)
