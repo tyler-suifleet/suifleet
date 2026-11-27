@@ -192,7 +192,11 @@ These static checks always run, on every recipe in the layer:
   for `.tar.bz2` and `.tbz2`, xz for `.tar.xz` and `.txz`. A plain `.tar` is
   autodetected, as GNU `tar x -f` does. A pinned tarball that does not decode
   in the format its name claims (for example an uncompressed tar or Zstandard
-  data saved as `.tar.gz`) is reported as a finding, not a traceback. With `unpack=0` it is
+  data saved as `.tar.gz`) is reported as a finding, not a traceback. The
+  compressed stream must also decode through its end, as `gzip`, `bzip2` and
+  `xz` require: a stream truncated after the tar members (such as a gzip file
+  missing its CRC/size trailer) or one with a bad checksum is a finding even
+  though its members can be read. With `unpack=0` it is
   copied as a loose file, as BitBake copies it. The local name must be a plain file name and, like the URL, must not
   name a commit other than `SRCREV`. BitBake uses `downloadfilename` literally
   (only the URL path is percent-decoded), so a `downloadfilename` containing a
