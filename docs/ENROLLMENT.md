@@ -36,6 +36,12 @@ suifleet --enroll /etc/suifleet/enroll.toml
 # {"digest": …, "device_address": …, "device_object_id": …, "device_cap_id": …, "owner_cap_id": …}
 ```
 
+If that output was lost, `suifleet --find-enrollment /etc/suifleet/enroll.toml`
+prints the same receipt from the chain without reading the claim or submitting
+anything (exit status 3: no enrollment by this key in the node's retained
+history, which does not prove that a pending attempt cannot still commit). See
+[Ansible recovery](ANSIBLE.md#recovery).
+
 **The enrollment transaction** has two signers:
 - **Sender: the device key.** The signature proves the device holds the key that becomes its trusted identity.
 - **Gas sponsor: the claim key.** It proves possession of the claim and pays the gas.

@@ -1,0 +1,113 @@
+---
+# The package is uploaded to a private per-run file and its SHA-256 checked on
+# the host; only then is it renamed to the cache path named by the pinned
+# digest, which apt installs. A file already at that path is reused only after
+# the same check. So the cache path only ever holds verified bytes of that
+# digest, even when overlapping rollouts upload the same or another release,
+# or a controller's artifact changes after its preflight check.
+- name: Create the private staging directory
+  ansible.builtin.file:
+    path: /var/cache/suifleet
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Choose the release-specific staging path
+  ansible.builtin.set_fact:
+    suifleet_deb_staging: "/var/cache/suifleet/suifleet_{{ suifleet_deb_arch }}-{{ suifleet_deb_sha256 }}.deb"
+
+- name: Check for an already verified staged package
+  ansible.builtin.stat:
+    path: "{{ suifleet_deb_staging }}"
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: suifleet_deb_cached
+  check_mode: false
+
+- name: Upload, verify and publish the package
+  when: not (suifleet_deb_cached.stat.exists and suifleet_deb_cached.stat.checksum == suifleet_deb_sha256)
+  block:
+    - name: Choose this run's private upload path
+      ansible.builtin.set_fact:
+        suifleet_deb_incoming: >-
+          /var/cache/suifleet/incoming-{{ suifleet_deb_sha256 }}-{{ lookup('ansible.builtin.password', '/dev/null',
+          chars=['ascii_lowercase', 'digits'], length=24) }}.part
+
+    - name: Stage the authenticated package
+      ansible.builtin.copy:
+        src: "{{ suifleet_deb_src }}"
+        dest: "{{ suifleet_deb_incoming }}"
+        owner: root
+        group: root
+        mode: "0600"
+      register: suifleet_deb_staged
+
+    # In check mode nothing was uploaded; the controller-side digest was
+    # already verified in preflight.
+    - name: Check the staged package on the host
+      ansible.builtin.stat:
+        path: "{{ suifleet_deb_incoming }}"
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: suifleet_deb_remote
+      when: not ansible_check_mode
+
+    - name: Refuse a staged package that differs from the pinned SHA-256
+      ansible.builtin.assert:
+        that:
+          - suifleet_deb_remote.stat.exists
+          - suifleet_deb_remote.stat.checksum == suifleet_deb_sha256
+        quiet: true
+        fail_msg: The staged package on the host does not match the pinned SHA-256.
+      when: not ansible_check_mode
+
+    # rename(2) within the directory: the shared name only ever holds bytes
+    # some run verified against this same digest.
+    - name: Publish the verified package under its digest-named path
+      ansible.builtin.command:
+        argv: [mv, -f, --, "{{ suifleet_deb_incoming }}", "{{ suifleet_deb_staging }}"]
+      changed_when: true
+      when: not ansible_check_mode
+  rescue:
+    - name: Remove this run's unverified upload
+      ansible.builtin.file:
+        path: "{{ suifleet_deb_incoming }}"
+        state: absent
+      when: suifleet_deb_incoming is defined
+
+    - name: Stop after an unverified package
+      ansible.builtin.fail:
+        msg: >-
+          Staging the package failed, or the bytes uploaded to the host did not
+          match the pinned SHA-256 {{ suifleet_deb_sha256 }}. This run's upload was
+          removed and nothing was installed.
+
+- name: Report the pending package installation
+  ansible.builtin.debug:
+    msg: Would install or upgrade the staged package.
+  changed_when: true
+  when: ansible_check_mode and suifleet_deb_staged is changed
+
+# The package starts nothing and stops running units before an upgrade
+# (docs/DEBIAN_PACKAGING.md); the service tasks start them again afterwards.
+- name: Install or upgrade the package
+  ansible.builtin.apt:
+    deb: "{{ suifleet_deb_staging }}"
+  register: suifleet_package
+  when: not (ansible_check_mode and suifleet_deb_staged is changed)
+
+- name: Remove other releases' staged artifacts
+  ansible.builtin.import_tasks: prune_staging.yml
+  vars:
+    suifleet_staging_keep: "{{ suifleet_deb_staging }}"
+
+# A real run counts only apt's own result: uploading the cache file for the
+# package already installed restarts nothing. A preview cannot ask apt about a
+# package it did not upload, so a pending upload is reported as a pending
+# installation (and its restarts); that preview changes nothing.
+- name: Record whether the client code changed
+  ansible.builtin.set_fact:
+    suifleet_code_changed: >-
+      {{ (ansible_check_mode and suifleet_deb_staged is changed)
+         or suifleet_package is changed }}

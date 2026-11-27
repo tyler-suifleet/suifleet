@@ -1,0 +1,215 @@
+---
+# Writes the claim (suifleet_claim_file on the controller, plain or Vault)
+# to {{ suifleet_enroll_staging }}/claim.key, owned by suifleet_claim_owner,
+# in a staging directory owned by root.
+# enroll.yml checks that the staging directory is on tmpfs and erases it
+# afterwards, also when enrollment fails. tmpfs pages and process memory can
+# be swapped out, so swap_policy.yml refuses hosts with any active swap
+# before the claim is read, and crash_policy.yml
+# refuses hosts that could store a crash dump of a process holding it.
+#
+# The claim must not touch persistent storage. Ansible's copy module
+# would transfer the decrypted file through the remote temporary
+# directory (and decrypt Vault files into the controller's local
+# temporary directory). Instead the controller reads the claim into
+# memory (the file lookup decrypts Vault in memory) and passes it as
+# the command module's stdin. With pipelining the module and its
+# arguments reach the host on the SSH stream, never in a file.
+#
+# The claim must also never pass through privilege escalation: sudo (or
+# another become method) can record a command's standard input, and with
+# pipelining that input is the whole module, claim included (sudoers
+# `Defaults log_input` writes it to persistent I/O logs). So the claim
+# travels without become, as the SSH account, into a private directory
+# on a memory-backed filesystem. A root task then moves it to the
+# staging directory; that task's module carries only paths.
+#
+# The ansible_become connection variable (inventory, group_vars, host_vars)
+# overrides the become task keyword, so these tasks also set it to false
+# as a task variable, which outranks inventory. Extra vars
+# (-e ansible_become=true) outrank task variables. The controller checks
+# the effective value first, before anything reaches the host.
+#
+# The host-side probe below then requires positive evidence that the
+# claim's module runs pipelined and unescalated: it must read the
+# complete process chain from the module interpreter up to the SSH
+# session (sshd), every process in it must run as the module's own user,
+# and no command line may carry Ansible's become wrapper. Anything it
+# cannot read (hidepid, an exited parent, a chain that ends without an SSH
+# session) refuses the claim rather than passing.
+- name: Refuse to send the claim with privilege escalation enabled
+  ansible.builtin.assert:
+    that: not (ansible_become | default(false) | bool)
+    quiet: true
+    fail_msg: >-
+      Privilege escalation is enabled for the claim transfer to
+      {{ inventory_hostname }}, which can record the claim in persistent
+      logs (sudoers log_input). Do not pass ansible_become as an extra
+      variable (-e); the role enables become for its other tasks itself.
+  vars:
+    ansible_become: false
+
+- name: Check that modules reach the host pipelined and unescalated
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      # Prints "ANCESTOR <command line>" for the module interpreter (first)
+      # and each ancestor up to the SSH session, then exactly one VERDICT
+      # line: ok, incomplete, escalated or identity. Every Ansible become
+      # plugin wraps the module in "echo BECOME-SUCCESS-…", and sudo, su
+      # or doas run with another user ID than the module's caller.
+      - >-
+        v() { printf 'VERDICT %s\n' "$1"; exit 0; };
+        me=$(sed -n 's/^Uid:[[:space:]]*//p' /proc/self/status) && [ -n "$me" ] || v incomplete;
+        p=$PPID; n=0;
+        while :; do
+        c=$(tr '\0' ' ' < "/proc/$p/cmdline") && [ -n "$c" ] || v incomplete;
+        s=$(cat "/proc/$p/status") || v incomplete;
+        printf 'ANCESTOR %s\n' "$c";
+        case $c in *BECOME-SUCCESS-*) v escalated;; esac;
+        u=$(printf '%s\n' "$s" | sed -n 's/^Uid:[[:space:]]*//p');
+        [ "$u" = "$me" ] || v identity;
+        case $c in sshd*) v ok;; esac;
+        p=$(printf '%s\n' "$s" | sed -n 's/^PPid:[[:space:]]*//p');
+        case $p in ''|*[!0-9]*) v incomplete;; esac;
+        n=$((n + 1));
+        [ "$p" -gt 1 ] && [ "$n" -lt 32 ] || v incomplete;
+        done
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_module_parent
+  changed_when: false
+  failed_when: suifleet_module_parent.rc != 0
+  check_mode: false
+
+- name: Refuse to send the claim through privilege escalation
+  ansible.builtin.assert:
+    that: suifleet_module_parent.stdout_lines | last | default('') not in ['VERDICT escalated', 'VERDICT identity']
+    quiet: true
+    fail_msg: >-
+      The claim transfer to {{ inventory_hostname }} would run through
+      privilege escalation or another user's process, which can record the
+      claim in persistent logs (sudoers log_input). Do not pass
+      ansible_become as an extra variable (-e) and do not wrap
+      ansible_python_interpreter in sudo, su or doas.
+
+- name: Refuse to send the claim without a verified transport
+  ansible.builtin.assert:
+    that:
+      - suifleet_module_parent.stdout_lines | last | default('') == 'VERDICT ok'
+      - suifleet_module_parent.stdout_lines[:1] | select('match', '^ANCESTOR ') | list | length == 1
+    quiet: true
+    fail_msg: >-
+      Could not verify that the claim transfer to {{ inventory_hostname }}
+      runs unescalated inside an SSH session: the module's process chain up
+      to sshd was not fully readable (for example /proc mounted with
+      hidepid, or a connection that is not SSH). The claim is not sent.
+
+- name: Refuse to send the claim without pipelining
+  ansible.builtin.assert:
+    that: suifleet_module_parent.stdout_lines[:1] | select('search', 'AnsiballZ_') | list | length == 0
+    quiet: true
+    fail_msg: >-
+      Ansible wrote its module to a file on {{ inventory_hostname }}, so
+      the claim would reach persistent storage. Enable SSH pipelining
+      (examples/ansible/ansible.cfg) and leave ANSIBLE_KEEP_REMOTE_FILES unset.
+
+- name: Read the claim transfer filesystem type
+  ansible.builtin.command:
+    argv: [stat, -f, -c, "%T", "{{ suifleet_claim_transfer_dir }}"]
+  become: false
+  vars:
+    ansible_become: false
+  register: suifleet_transfer_fs
+  changed_when: false
+  check_mode: false
+
+- name: Require a memory-backed claim transfer directory
+  ansible.builtin.assert:
+    that: suifleet_transfer_fs.stdout == 'tmpfs'
+    quiet: true
+    fail_msg: "{{ suifleet_claim_transfer_dir }} must be a tmpfs writable by the SSH account so the claim never reaches persistent storage on the host."
+
+- name: Refuse claims on a host that can swap them to disk
+  ansible.builtin.import_tasks: swap_policy.yml
+
+- name: Refuse claims on a host that can store a crash dump of them
+  ansible.builtin.import_tasks: crash_policy.yml
+
+- name: Erase a claim left by an interrupted run
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: absent
+
+# Root owns the staging directory; the key holder can enter and read it but
+# not create, rename or replace its entries. enroll.yml stages enroll.toml and
+# deployment.json there as root-owned read-only files, so the inputs the CLI
+# opens are the ones root verified. Only claim.key belongs to the key holder
+# (mode 0600, created empty by root and filled by the key holder below).
+- name: Create the root-owned staging directory
+  ansible.builtin.file:
+    path: "{{ suifleet_enroll_staging }}"
+    state: directory
+    owner: root
+    group: "{{ suifleet_claim_group }}"
+    mode: "0750"
+
+- name: Transfer and stage the claim
+  block:
+    - name: Send the single-use claim key without privilege escalation
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - ulimit -c 0 && umask 077 && d=$(mktemp -d "$1/suifleet-claim.XXXXXXXXXX") && printf '%s\n' "$d" && cat > "$d/claim.key"
+          - sh
+          - "{{ suifleet_claim_transfer_dir }}"
+        stdin: "{{ lookup('ansible.builtin.file', suifleet_claim_file) }}"
+      become: false
+      vars:
+        ansible_become: false
+      register: suifleet_claim_transfer
+      no_log: true
+      diff: false
+
+    - name: Check the claim transfer directory
+      ansible.builtin.assert:
+        that: suifleet_claim_transfer.stdout is match('^' ~ (suifleet_claim_transfer_dir | regex_escape) ~ '/suifleet-claim[.][A-Za-z0-9]{10}$')
+        quiet: true
+        fail_msg: The claim transfer did not report its private directory.
+
+    # Root reads the transferred file and the current key holder writes
+    # it; the claim moves through a pipe inside this command, never
+    # through sudo's standard input. Root first creates the empty file,
+    # owned by the key holder with mode 0600, in the root-owned directory
+    # (which the key holder cannot write).
+    - name: Stage the single-use claim key in memory-backed storage
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - >-
+            set -eu; src="$1/claim.key";
+            test -f "$src" && test ! -L "$src";
+            test ! -e "$3" && test ! -L "$3";
+            install -o "$2" -g "$4" -m 0600 /dev/null "$3";
+            runuser -u "$2" -- sh -c 'ulimit -c 0 && umask 077 && cat > "$1"' sh "$3" < "$src"
+          - sh
+          - "{{ suifleet_claim_transfer.stdout }}"
+          - "{{ suifleet_claim_owner }}"
+          - "{{ suifleet_enroll_staging }}/claim.key"
+          - "{{ suifleet_claim_group }}"
+      diff: false
+  always:
+    - name: Erase the claim transfer directory
+      ansible.builtin.file:
+        path: "{{ suifleet_claim_transfer.stdout }}"
+        state: absent
+      become: false
+      vars:
+        ansible_become: false
+      when:
+        - suifleet_claim_transfer.stdout is defined
+        - suifleet_claim_transfer.stdout is match('^' ~ (suifleet_claim_transfer_dir | regex_escape) ~ '/suifleet-claim[.][A-Za-z0-9]{10}$')
