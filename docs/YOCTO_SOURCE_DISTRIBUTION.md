@@ -348,7 +348,11 @@ each entry's registry and effective checksum, as BitBake would fetch and verify
 it. Cargo identifies a package by name, version and source, so every lockfile
 row from a source other than the crates.io index is refused as it is read, even
 when a crates.io row has the same name and version; a repeated crates.io row is
-refused too. `--fetch` does not download crates. The crate include is
+refused too. The whole lockfile is parsed as TOML with the packager's strict
+reader, so a row's fields are read whatever their spacing, quoting or string
+style. Syntax outside that reader, a `package` that is not an array of
+`[[package]]` tables and a non-string name, version, source or checksum are
+refused rather than skipped. `--fetch` does not download crates. The crate include is
 still regenerated with `bitbake -c update_crates suifleet`; this check confirms
 the committed result matches.
 
