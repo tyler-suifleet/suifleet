@@ -1156,8 +1156,12 @@ def codec_errors(recipe, s_dir):
         errors.append(f'{recipe.path.name}: codec manifest has no "files" object for do_verify_codec')
     else:
         for name, entry in sorted(files.items()):
-            sha = entry.get('sha256') if isinstance(entry, dict) else None
-            if pins.get(name) != sha:
+            # do_verify_codec calls entry.get('sha256'), so a non-object entry
+            # fails the build; an unpinned name compares None with None there.
+            if not isinstance(entry, dict):
+                errors.append(f'{recipe.path.name}: codec manifest entry for {name} is not an object, '
+                              'which do_verify_codec requires')
+            elif name not in pins or entry.get('sha256') != pins[name]:
                 errors.append(f'{recipe.path.name}: codec manifest and recipe disagree on {name}')
     if provenance.get('source_revision') != recipe.get('SUIFLEET_CODEC_SOURCE_REV'):
         errors.append(f'{recipe.path.name}: codec provenance revision {provenance.get("source_revision")} differs from SUIFLEET_CODEC_SOURCE_REV')

@@ -2945,7 +2945,18 @@ class CodecFetchedLayoutTests(unittest.TestCase):
         errors = self.build(manifest_files={'other.js': {'sha256': 'f' * 64}})
         self.assertTrue(any('disagree on other.js' in e for e in errors), errors)
         errors = self.build(manifest_files={'walrus_wasm_bg.wasm': 'not-an-object'})
-        self.assertTrue(any('disagree on walrus_wasm_bg.wasm' in e for e in errors), errors)
+        self.assertTrue(any('entry for walrus_wasm_bg.wasm is not an object' in e for e in errors), errors)
+
+    def test_unpinned_manifest_entries_are_refused_whatever_their_value(self):
+        # An unpinned name has no pin to compare, so a missing hash must not
+        # match it; a non-object entry would crash do_verify_codec.
+        for value in (None, 'not-an-object', [], 7, {}, {'sha256': None}):
+            with self.subTest(value=value):
+                errors = self.build(manifest_files={'other.js': value})
+                self.assertTrue(any('other.js' in e for e in errors), errors)
+                errors = [e for e in errors if 'other.js' in e]
+                expected = 'disagree on other.js' if isinstance(value, dict) else 'entry for other.js is not an object'
+                self.assertTrue(any(expected in e for e in errors), errors)
 
     def test_manifest_without_files_object_is_refused(self):
         for files in ([], 'x'):
