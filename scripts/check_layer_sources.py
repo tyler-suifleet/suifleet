@@ -148,6 +148,12 @@ class Recipe:
         # Directives this reader does not model (unset, include_all, ...). They
         # can remove or replace source pins, so audit_recipe refuses them.
         self.unmodelled = []
+        # Assignments whose variable name contains a ${...} reference. BitBake
+        # expands such keys when it finalizes the datastore (SRC_${X} can
+        # become SRC_URI and replace it), which this reader does not model, so
+        # audit_recipe refuses them. Overrides such as RDEPENDS:${PN} keep a
+        # literal variable name and are not affected.
+        self.expanded_keys = []
         self.text = ''
         # BitBake semantics: ??= is a weak default used only when nothing else
         # assigns the variable, and :append/:prepend apply at expansion time,
@@ -254,8 +260,11 @@ class Recipe:
                         self.read(target)
                 continue
             match = ASSIGN.match(line)
+            loose = match or ASSIGN_LIKE.match(line)
+            if loose and '${' in loose.group(1).partition(':')[0]:
+                self.expanded_keys.append(f'{self.rel(path)}: {line}')
+                continue
             if not match:
-                loose = ASSIGN_LIKE.match(line)
                 if loose:
                     self.unparsed.append((loose.group(1).partition(':')[0], path.name))
                 continue
@@ -512,6 +521,9 @@ def audit_recipe(recipe):
     errors += recipe.include_errors
     errors += [f'{where}: {item} is a directive the audit does not model; it can remove or replace '
                'source pins and is not supported in audited recipes, includes or appends' for item in recipe.unmodelled]
+    errors += [f'{where}: {item} assigns a variable whose name BitBake expands (key expansion); it can '
+               'replace source pins and is not supported in audited recipes, includes or appends'
+               for item in recipe.expanded_keys]
     errors += [f'{where}: {item} runs after parsing and can change source pins the audit '
                'reads; it is not supported in audited recipes, includes or appends' for item in recipe.parse_time]
     if 'FILESPATH' in recipe.vars:
@@ -884,10 +896,10 @@ def unpack_plan(recipe, unpack):
     if recipe.parse_time:
         # SRC_URI as read here may not be what BitBake fetches after running it.
         raise ValueError(f'metadata that runs after parsing is not supported: {"; ".join(recipe.parse_time)}')
-    if recipe.unmodelled or recipe.include_errors:
+    if recipe.unmodelled or recipe.include_errors or recipe.expanded_keys:
         # SRC_URI as read here may not be what BitBake would fetch.
         raise ValueError('unmodelled or unresolved metadata is not supported: '
-                         f'{"; ".join(recipe.unmodelled + recipe.include_errors)}')
+                         f'{"; ".join(recipe.unmodelled + recipe.expanded_keys + recipe.include_errors)}')
     plan = []
     for url, params in recipe.sources():
         scheme = url.split('://', 1)[0]

@@ -1514,6 +1514,57 @@ class LayerAuditTests(unittest.TestCase):
         self.write_recipe()
         self.assertEqual(self.errors(), [])
 
+    def test_assignments_with_expanded_variable_names_are_refused(self):
+        # BitBake expands variable references in assignment keys when it
+        # finalizes the datastore: SRC_${SOURCE_SUFFIX} becomes SRC_URI and
+        # replaces the audited value. The reader does not model key expansion,
+        # so any such assignment must fail before anything is fetched.
+        include = self.recipe_dir / 'extra.inc'
+        append = self.recipe_dir / 'suifleet_1.0.bbappend'
+        expanded = 'SOURCE_SUFFIX = "URI"\nSRC_${SOURCE_SUFFIX} = "file://missing-notice"'
+        cases = {
+            'reviewer case': ('bb', expanded),
+            'whole name': ('bb', 'NAME = "SRCREV"\n${NAME} = "0000000000000000000000000000000000000000"'),
+            'append operator': ('bb', 'SUFFIX = "URI"\nSRC_${SUFFIX} += "file://notice"'),
+            'flag': ('bb', 'SUFFIX = "URI"\nSRC_${SUFFIX}[sha256sum] = "00"'),
+            'override on expanded name': ('bb', 'SUFFIX = "URI"\nSRC_${SUFFIX}:append = " file://notice"'),
+            'exported': ('bb', 'SUFFIX = "URI"\nexport SRC_${SUFFIX} = "file://notice"'),
+            'unquoted': ('bb', 'SUFFIX = "URI"\nSRC_${SUFFIX} = file://notice'),
+            'in include': ('inc', expanded),
+            'in append': ('bbappend', expanded),
+        }
+        for label, (where, text) in cases.items():
+            with self.subTest(label):
+                include.unlink(missing_ok=True)
+                append.unlink(missing_ok=True)
+                if where == 'bb':
+                    self.write_recipe(extra=text)
+                elif where == 'inc':
+                    include.write_text(text + '\n')
+                    self.write_recipe(extra='require extra.inc')
+                else:
+                    append.write_text(text + '\n')
+                    self.write_recipe()
+                self.assertTrue(any('key expansion' in e for e in self.errors()), self.errors())
+                recipe = audit.Recipe(self.recipe_dir / 'suifleet_1.0.bb', self.layer,
+                                      [append] if append.exists() else ())
+                workdir = Path(tempfile.mkdtemp(dir=self.tmp.name))
+                with mock.patch.object(audit, 'download', side_effect=AssertionError('downloaded')):
+                    errors, fetched = audit.fetch_recipe(recipe, workdir)
+                self.assertEqual(fetched, [])
+                self.assertTrue(any('unmodelled' in e and 'nothing fetched' in e for e in errors), errors)
+                with mock.patch.object(audit, 'download', self.fake_download):
+                    report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+                self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+                self.assertFalse(report['ok'])
+        include.unlink(missing_ok=True)
+        append.unlink(missing_ok=True)
+        # Package-scoped overrides keep a literal variable name and stay accepted.
+        self.write_recipe(extra='RDEPENDS:${PN} += "bash"\nFILES:${PN} += "/opt/x"')
+        self.assertEqual(self.errors(), [])
+        self.write_recipe()
+        self.assertEqual(self.errors(), [])
+
     def test_layer_configuration_cannot_change_recipe_sources(self):
         # BitBake parses conf/layer.conf into the base configuration every
         # recipe inherits, so a source change there must be refused before any
