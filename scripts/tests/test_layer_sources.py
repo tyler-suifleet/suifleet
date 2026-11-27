@@ -1648,6 +1648,64 @@ class LayerAuditTests(unittest.TestCase):
         self.assertTrue(report['ok'])
         self.assertEqual([f['verified'] for f in report['recipes']['suifleet']['fetched'] if 'revision' in f], [True])
 
+    def test_full_mode_binds_a_clean_git_checkout_without_its_admin_files(self):
+        # The daemon's S is the audit-created Git checkout. Its .git directory
+        # (HEAD, config, FETCH_HEAD, objects) was written by the audit, not the
+        # pinned commit, so --repo --fetch must accept the clean exact-revision
+        # checkout, yet still bind every genuine source input to SRCREV.
+        url = 'git://github.com/example/suifleet.git;protocol=https;nobranch=1;destsuffix=source'
+
+        def report_for(srcrev, plant=None):
+            self.write_recipe(url=url, srcrev=srcrev, extra=f'SRCREV_edge = "{srcrev}"')
+            real_admin = audit.git_admin_files
+
+            def admin_then_plant(checkout):
+                # Stands in for a later source changing the tree once the
+                # checkout and its admin files are recorded.
+                recorded = real_admin(checkout)
+                if plant:
+                    plant(Path(checkout))
+                return recorded
+            with mock.patch.object(audit, 'git_remote', return_value=f'file://{self.repo.root}'), \
+                    mock.patch.object(audit, 'git_admin_files', side_effect=admin_then_plant):
+                report = audit.check(self.layer, repo=self.repo.root, fetch=True)
+            self.addCleanup(shutil.rmtree, report['fetch_dir'], True)
+            return report
+
+        report = report_for(self.rev)
+        self.assertEqual(report['errors'], [])
+        self.assertTrue(report['ok'])
+        self.assertEqual([f['verified'] for f in report['recipes']['suifleet']['fetched'] if 'revision' in f], [True])
+        checkout = Path(report['fetch_dir']).resolve() / 'suifleet/source'
+        self.assertTrue((checkout / '.git/HEAD').is_file())
+
+        def mismatched(dst):
+            (dst / 'suifleet-edge/src/extra.rs').write_text('pub const X: u8 = 1;\n')
+
+        def missing(dst):
+            (dst / 'suifleet-edge/src/data/blob.bin').unlink()
+
+        def untracked(dst):
+            (dst / 'suifleet-edge/src/planted.rs').write_text('fn planted() {}\n')
+
+        def in_admin(dst):
+            # Files placed in, or rewritten inside, the admin directory after
+            # the checkout are still inventoried and bound.
+            (dst / '.git/planted.rs').write_text('fn planted() {}\n')
+
+        def rewritten_admin(dst):
+            (dst / '.git/HEAD').write_text('not the audit checkout\n')
+        cases = {'mismatched': (mismatched, 'differ from the Git tree'),
+                 'missing': (missing, 'omit 1 build-closure path(s)'),
+                 'untracked': (untracked, 'are absent from the Git tree'),
+                 'added to .git': (in_admin, 'are absent from the Git tree'),
+                 'rewritten .git file': (rewritten_admin, 'are absent from the Git tree')}
+        for name, (plant, message) in cases.items():
+            with self.subTest(name):
+                report = report_for(self.rev, plant)
+                self.assertFalse(report['ok'])
+                self.assertTrue(any(message in e for e in report['errors']), report['errors'])
+
     def test_git_never_runs_in_metadata_planted_by_an_earlier_archive(self):
         # An earlier pinned archive in the shared unpack tree can carry
         # git/.git/config. Git would honour that repository-local config

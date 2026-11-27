@@ -2114,8 +2114,28 @@ def tree_binding_errors(recipe, s_dir, files, tree, required=()):
     return errors
 
 
+def git_admin_files(checkout):
+    """Map each file of the audit-created `.git` directory to its SHA-256.
+
+    Git refuses to check out a tracked `.git` path, so everything under it was
+    written by the audit's own init/fetch/checkout, not by the pinned commit."""
+    return {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in (Path(checkout) / '.git').rglob('*') if path.is_file() and not path.is_symlink()}
+
+
 def fetch_recipe(recipe, workdir, cargo=None, tree=None, required=()):
     errors, fetched = [], []
+    # Git administrative files the audit itself created, recorded right after
+    # each checkout is moved into place. Only these exact, unchanged files are
+    # left out of the committed-source inventory: anything a later source adds
+    # to or rewrites inside a `.git` directory is still inventoried and bound.
+    admin = {}
+
+    def source_file(path):
+        if not path.is_file():
+            return False
+        recorded = admin.get(str(path))
+        return recorded is None or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != recorded
     downloads = Path(workdir).resolve() / 'downloads'
     try:
         unpack = unpack_root(workdir, recipe.get('PN'))
@@ -2185,6 +2205,7 @@ def fetch_recipe(recipe, workdir, cargo=None, tree=None, required=()):
                     raise ValueError(f'git destination {destination.relative_to(unpack.resolve()).as_posix()} '
                                      f'changed before the checkout was moved into place')
                 os.rename(private, destination)
+                admin.update(git_admin_files(destination))
             except (OSError, ValueError) as error:
                 return errors + [f'{recipe.path.name}: {redact_url(url)}: {error}'], fetched
             fetched.append({'url': redact_url(url), 'revision': actual, 'branch': params.get('branch') if params.get('nobranch') != '1' else None,
@@ -2290,10 +2311,10 @@ def fetch_recipe(recipe, workdir, cargo=None, tree=None, required=()):
         errors += daemon_errors(recipe, read, exists,
                                 lambda directory: [p.relative_to(s_dir).as_posix()
                                                    for p in source_path(unpack, s_dir, directory, 'source path').rglob('*')
-                                                   if p.is_file()])
+                                                   if source_file(p)])
         errors += sorted(set(refused))
         packager = load_packager()
-        files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if p.is_file()}
+        files = {p.relative_to(s_dir).as_posix(): ('100644', 'blob', None) for p in s_dir.rglob('*') if source_file(p)}
         if tree is not None and not aliases:
             errors += tree_binding_errors(recipe, s_dir, files, tree, required)
         # Every .rs file is scanned, and so is every manifest-declared target
