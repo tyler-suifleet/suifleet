@@ -23,7 +23,8 @@ Generic consumers bring their own distro and BSP and can opt into `INHERIT += "s
 fixes. See [standalone validation](YOCTO_STANDALONE_VALIDATION.md) for prior
 per-source evidence and [SF-295](https://github.com/tyler-suifleet/suifleet/issues/820)
 for public release validation. [SF-312](https://github.com/tyler-suifleet/suifleet/issues/838)
-tracks human submission and indexing in the OpenEmbedded Layer Index.
+tracks human submission and indexing. See the [Layer Index readiness report
+and submission fields](YOCTO_LAYER_INDEX.md).
 
 ## Pinned build inputs
 

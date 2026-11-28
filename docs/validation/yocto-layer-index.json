@@ -1,0 +1,54 @@
+{
+  "repository": "https://github.com/tyler-suifleet/meta-suifleet.git",
+  "maintainer": "Tyler Bush <tyler.jonathan.bush@gmail.com>",
+  "submission": {
+    "submitted_url": null,
+    "indexed_urls": {},
+    "pending": "SF-295 publication owner completes human Layer Index verification after final gates; external moderation and recipe processing follow.",
+    "state": "preparation"
+  },
+  "pending_final_inputs": {
+    "SF-306": "https://github.com/tyler-suifleet/suifleet/issues/832",
+    "SF-307": "https://github.com/tyler-suifleet/suifleet/issues/833",
+    "SF-311": "https://github.com/tyler-suifleet/suifleet/issues/836"
+  },
+  "series": {
+    "scarthgap": {
+      "candidate": true,
+      "revision": "c78e6297691b38da87989a7ec279734a6669e379",
+      "layer_check": "PASS at published revision on 2026-11-27 (BitBake 2.8.1, 8 tests, 2 skips, 1 upstream patch-status unexpected success)",
+      "standalone_build": "Three-recipe build passed (4506 tasks, 4413 reused)",
+      "receipt": "https://github.com/tyler-suifleet/suifleet/issues/820#issuecomment-7169878579",
+      "layer_check_revision": "c78e6297691b38da87989a7ec279734a6669e379",
+      "layer_check_receipt": "https://github.com/tyler-suifleet/suifleet/pull/1087"
+    },
+    "wrynose": {
+      "candidate": true,
+      "revision": "c78e6297691b38da87989a7ec279734a6669e379",
+      "layer_check": "PASS at published revision (9 tests, 2 skips)",
+      "standalone_build": "Compile, package QA and IPK write passed; default queue stopped during generic QEMU kernel rebuild",
+      "receipt": "https://github.com/tyler-suifleet/suifleet/issues/820#issuecomment-7169878579",
+      "layer_check_revision": "c78e6297691b38da87989a7ec279734a6669e379"
+    },
+    "kirkstone": {
+      "candidate": false,
+      "revision": "c78e6297691b38da87989a7ec279734a6669e379",
+      "layer_check": "PASS at published revision (7 tests, 2 skips)",
+      "standalone_build": "Compile, package QA and IPK write passed; default queue stopped during generic QEMU kernel rebuild",
+      "receipt": "https://github.com/tyler-suifleet/suifleet/issues/820#issuecomment-7169878579",
+      "layer_check_revision": "c78e6297691b38da87989a7ec279734a6669e379"
+    }
+  },
+  "source_archives": [
+    {
+      "url": "https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/b86509a1768aed3025ef68562735e70d1f1fa5ae/suifleet-edge-b9bb2ef6210624d732ab2de2075ea1826e5300c1.tar.gz",
+      "sha256": "4627f17b24b18de1eeb6d8254496ecadebf53540459fa76b16739e9fd6df5f30",
+      "anonymous_download_verified": "2026-11-27"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/tyler-suifleet/meta-suifleet/b86509a1768aed3025ef68562735e70d1f1fa5ae/suifleet-walrus-codec-b9bb2ef6210624d732ab2de2075ea1826e5300c1.tar.gz",
+      "sha256": "fae67d9cd6a6c501b4afa62c06d8ac7b85d395a7cadbc771d96ee063966bbd9b",
+      "anonymous_download_verified": "2026-11-27"
+    }
+  ]
+}
