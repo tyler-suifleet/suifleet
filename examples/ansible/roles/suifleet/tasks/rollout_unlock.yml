@@ -1,0 +1,13 @@
+---
+# Release the rollout lock taken by rollout_lock.yml, only if this run holds it.
+- name: Release the host's rollout lock
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - test "$(cat "$1/owner")" = "$2" && rm -rf "$1"
+      - sh
+      - "{{ suifleet_rollout_lock }}"
+      - "{{ suifleet_rollout_lock_token }}"
+  changed_when: false
+  when: suifleet_rollout_locked | default(false) | bool

@@ -1,0 +1,52 @@
+---
+# Take the host's rollout lock, or stop. Shared by the role (site.yml) and the
+# rolling restart (restart.yml): one play at a time changes a host's SuiFleet
+# installation, configuration or services. The caller releases the lock with
+# rollout_unlock.yml in an `always` block. mkdir creates the lock atomically,
+# holding this run's token; only this run removes it. It lives on /run
+# (tmpfs), so a reboot clears a lock that a killed run left behind. Check mode
+# only looks for it once, at this point: a preview stops if another play holds
+# the lock, but a real play that starts after this check is not excluded, and
+# the preview can then read inputs that play is changing.
+- name: Start without the host's rollout lock
+  ansible.builtin.set_fact:
+    suifleet_rollout_locked: false
+    suifleet_rollout_lock_token: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=32) }}"
+
+# The lock is transient: taking and releasing it is not a change to the host.
+- name: Take the host's rollout lock
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - umask 077; mkdir "$1" || exit 3; printf '%s\n' "$2" > "$1/owner" || { rm -rf "$1"; exit 1; }
+      - sh
+      - "{{ suifleet_rollout_lock }}"
+      - "{{ suifleet_rollout_lock_token }}"
+  register: suifleet_rollout_lock_taken
+  changed_when: false
+  failed_when: suifleet_rollout_lock_taken.rc not in [0, 3]
+  when: not ansible_check_mode
+
+- name: Record that this run holds the rollout lock
+  ansible.builtin.set_fact:
+    suifleet_rollout_locked: "{{ suifleet_rollout_lock_taken.rc == 0 }}"
+  when: not ansible_check_mode
+
+- name: Look for another run's rollout lock
+  ansible.builtin.stat:
+    path: "{{ suifleet_rollout_lock }}"
+    get_checksum: false
+  register: suifleet_rollout_lock_seen
+  when: ansible_check_mode
+
+- name: Stop while another run holds the rollout lock
+  ansible.builtin.assert:
+    that: suifleet_rollout_locked | bool or (ansible_check_mode and not suifleet_rollout_lock_seen.stat.exists)
+    quiet: true
+    fail_msg: >-
+      {{ inventory_hostname }} has the rollout lock {{ suifleet_rollout_lock }}:
+      another play (site.yml or restart.yml) is changing it, or a play stopped
+      while changing it. This run changed nothing. Wait for the other play,
+      then run again. If none is running (no ansible-playbook targets the
+      host), remove the lock as root and run again (docs/ANSIBLE.md#recovery).

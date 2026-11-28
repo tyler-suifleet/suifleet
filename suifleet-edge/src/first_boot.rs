@@ -424,6 +424,7 @@ socket = "/run/suifleet-signer/sign.sock"
                     std::env::consts::ARCH,
                     claim,
                     trust.managed.as_ref(),
+                    None,
                 )
                 .await
                 .context(Failure("submission-unconfirmed"))?;

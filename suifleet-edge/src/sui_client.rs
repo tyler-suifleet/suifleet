@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::{str::FromStr, time::Duration};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
-use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TypeTag};
+use sui_sdk_types::{Address, Argument, Command, Digest, Input, StructTag, Transaction, TransactionExpiration, TypeTag};
 
 /// Largest gas budget the device will sign for one status report or gas
 /// draw (0.05 SUI).
@@ -955,9 +955,14 @@ impl SuiClient {
     }
 
     pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Object>> {
+        Ok(self.optional_object_ref(id).await?.map(|(object, _, _)| object))
+    }
+
+    /// An object with the version and digest of the state that was read.
+    async fn optional_object_ref(&self, id: &str) -> anyhow::Result<Option<(Object, u64, String)>> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
-        request.read_mask = Some(mask(&["owner", "object_type", "json", "version"]));
+        request.read_mask = Some(mask(&["owner", "object_type", "json", "version", "digest"]));
         let object = match self
             .read_rpc(|mut rpc| {
                 let request = request.clone();
@@ -976,14 +981,9 @@ impl SuiClient {
             }
         }
         .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
-        self.observe(
-            id,
-            Some(
-                object
-                    .version
-                    .ok_or_else(|| anyhow::anyhow!("object {id} has no version"))?,
-            ),
-        );
+        let version = object.version.ok_or_else(|| anyhow::anyhow!("object {id} has no version"))?;
+        self.observe(id, Some(version));
+        let digest = object.digest.clone().unwrap_or_default();
         let owner = match object.owner.as_ref() {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
                 Owner::Address(o.address.clone().unwrap_or_default())
@@ -997,11 +997,15 @@ impl SuiClient {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Immutable as i32) => Owner::Immutable,
             _ => Owner::Other,
         };
-        Ok(Some(Object {
-            object_type: object.object_type.unwrap_or_default(),
-            owner,
-            fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
-        }))
+        Ok(Some((
+            Object {
+                object_type: object.object_type.unwrap_or_default(),
+                owner,
+                fields: object.json.as_deref().map(to_json).unwrap_or(Value::Null),
+            },
+            version,
+            digest,
+        )))
     }
     pub async fn object(&self, id: &str) -> anyhow::Result<Object> {
         self.optional_object(id)
@@ -2383,11 +2387,112 @@ impl SuiClient {
         let info = self.service_info().await.map_err(status)?.into_inner();
         let tip = info.checkpoint_height.ok_or_else(|| anyhow::anyhow!("missing enrollment checkpoint"))?;
         anyhow::ensure!(from <= tip, "enrollment history starts after the node tip");
+        self.enrollments_through(policy, operator, from, tip).await
+    }
+
+    /// This key's enrollment under `policy` in checkpoints `from..=through`.
+    /// The scan must end on the checkpoint bound itself: a node (or a
+    /// fallback/load-balanced backend) whose ledger or event index has not
+    /// reached `through` fails the scan rather than report a shorter range.
+    #[cfg(target_os = "linux")]
+    async fn enrollments_through(&self, policy: &str, operator: &str, from: u64, through: u64) -> anyhow::Result<Option<(Enrolled, String)>> {
+        anyhow::ensure!(from <= through, "enrollment history starts after checkpoint {through}");
         self.ensure_retained(Some(from)).await?;
-        self.set_event_limit(Some(tip.checked_add(1).ok_or_else(|| anyhow::anyhow!("invalid enrollment checkpoint"))?));
+        self.set_event_limit(Some(through.checked_add(1).ok_or_else(|| anyhow::anyhow!("invalid enrollment checkpoint"))?));
         let result = self.scan_enrollments(policy, operator, from).await;
         self.set_event_limit(None);
         result
+    }
+
+    /// Look up this key's enrollment under a policy, without a claim (read-only).
+    /// Scans the node's retained history: a result is authoritative, an absence
+    /// is not (the history may be pruned, or an attempt may still commit).
+    #[cfg(target_os = "linux")]
+    pub async fn find_enrollment(&self, policy: &str) -> anyhow::Result<Option<(Enrolled, String)>> {
+        let object = self.object(policy).await?;
+        let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
+        self.validate_enrollment_policy(policy, &operator).await?;
+        let info = self.service_info().await.map_err(status)?.into_inner();
+        let found = self.previous_enrollment(policy, &operator, info.lowest_available_checkpoint.unwrap_or(0)).await?;
+        if let Some((enrolled, _)) = &found {
+            self.validate_cap(&enrolled.device_cap_id, &enrolled.device_object_id).await?;
+        }
+        Ok(found)
+    }
+
+    /// The current registration of `claim` under `policy` (read-only): the
+    /// object version and digest of the claim's entry in the policy's claim
+    /// table. Each registration creates the entry anew, at a higher version
+    /// with its own digest, so the pair identifies this registration, and an
+    /// enrollment or revocation consumes it exactly once. Read before an
+    /// enrollment attempt, it refuses an unregistered claim before anything
+    /// is signed; it settles nothing (see [`Self::check_expired`]).
+    #[cfg(target_os = "linux")]
+    pub async fn claim_registration(&self, policy: &str, claim: &str) -> anyhow::Result<(u64, String)> {
+        let claim = Address::from_str(claim).map_err(|e| anyhow::anyhow!("invalid claim address {claim}: {e}"))?;
+        let object = self.object(policy).await?;
+        let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
+        self.validate_enrollment_policy(policy, &operator).await?;
+        let (table, field) = claim_field_id(&object.fields, &claim)?;
+        let (entry, version, digest) = self
+            .optional_object_ref(&field)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("claim {claim} is not registered under enrollment policy {policy}"))?;
+        check_claim_entry(&entry, &table, &claim)?;
+        anyhow::ensure!(is_digest(&digest), "claim entry {field} has no valid digest");
+        Ok((version, digest))
+    }
+
+    /// The node's current epoch and checkpoint (read-only). Read before an
+    /// enrollment attempt: the epoch is its expiry ([`Self::enroll`]) and
+    /// every checkpoint the attempt can commit in follows the checkpoint.
+    #[cfg(target_os = "linux")]
+    pub async fn enrollment_window(&self) -> anyhow::Result<(u64, u64)> {
+        let info = self.service_info().await.map_err(status)?.into_inner();
+        Ok((
+            info.epoch.ok_or_else(|| anyhow::anyhow!("the node reported no epoch"))?,
+            info.checkpoint_height.ok_or_else(|| anyhow::anyhow!("the node reported no checkpoint"))?,
+        ))
+    }
+
+    /// Read-only proof that an enrollment attempt signed to expire after
+    /// `epoch`, and started after `checkpoint` (both read by
+    /// [`Self::enrollment_window`] before the attempt), has not committed
+    /// and never can:
+    /// - the node's latest checkpoint is in a later epoch, so `epoch` has
+    ///   ended and validators refuse the attempt (`Epoch` expiration) from
+    ///   now on, whatever happens to its claim;
+    /// - the node's history from `checkpoint` to that later checkpoint, which
+    ///   covers every checkpoint of `epoch`, holds no enrollment of this key
+    ///   under `policy`. It fails when that history is not retained.
+    ///
+    /// Returns the current epoch.
+    #[cfg(target_os = "linux")]
+    pub async fn check_expired(&self, policy: &str, epoch: u64, checkpoint: u64) -> anyhow::Result<u64> {
+        let object = self.object(policy).await?;
+        let operator = object.fields["operator"].as_str().unwrap_or_default().to_owned();
+        self.validate_enrollment_policy(policy, &operator).await?;
+        self.unenrolled_through_expiry(policy, &operator, epoch, checkpoint).await
+    }
+
+    /// The core of [`Self::check_expired`], after the policy is validated.
+    /// The checkpoint reported together with the later epoch is in that
+    /// later epoch, so every checkpoint of `epoch` is at or before it: it is
+    /// the scan's fence. The scan never takes its end from another tip read,
+    /// which a lagging backend could report below the fence.
+    #[cfg(target_os = "linux")]
+    async fn unenrolled_through_expiry(&self, policy: &str, operator: &str, epoch: u64, checkpoint: u64) -> anyhow::Result<u64> {
+        let (now, fence) = self.enrollment_window().await?;
+        expired(epoch, now)?;
+        let found = self
+            .enrollments_through(policy, operator, checkpoint, fence)
+            .await
+            .map_err(|e| e.context(format!("cannot read this key's enrollments from checkpoint {checkpoint} through {fence}")))?;
+        anyhow::ensure!(
+            found.is_none(),
+            "this key enrolled under policy {policy} after checkpoint {checkpoint}; restore the record with --find-enrollment"
+        );
+        Ok(now)
     }
 
     #[cfg(target_os = "linux")]
@@ -2482,6 +2587,12 @@ impl SuiClient {
     /// transaction sent by the device and sponsored by the claim key, which
     /// pays its gas. Checked against the exact intended call before either
     /// key signs; success and the created objects come from the effects.
+    ///
+    /// With `expires_after`, the signed transaction carries the expiration
+    /// `Epoch(expires_after)`: validators refuse it in any later epoch, so an
+    /// attempt whose outcome was lost cannot commit once that epoch has ended
+    /// (see [`Self::check_expired`]). It is refused before signing when the
+    /// node is already past that epoch.
     pub async fn enroll(
         &self,
         policy: &str,
@@ -2489,6 +2600,7 @@ impl SuiClient {
         arch: &str,
         claim: &dyn identity::TxSigner,
         managed: Option<&crate::config::ManagedEnrollment>,
+        expires_after: Option<u64>,
     ) -> anyhow::Result<Enrolled> {
         let package = Address::from_str(&self.config.package_id)?;
         let sender = Address::from_str(&self.address())?;
@@ -2523,7 +2635,12 @@ impl SuiClient {
             function,
             args,
         };
-        let transaction = self
+        if let Some(epoch) = expires_after {
+            let info = self.service_info().await.map_err(status)?.into_inner();
+            let now = info.epoch.ok_or_else(|| anyhow::anyhow!("the node reported no epoch"))?;
+            anyhow::ensure!(now <= epoch, "the enrollment window expired with epoch {epoch} (the chain is in epoch {now}); nothing was signed");
+        }
+        let mut transaction = self
             .build_rpc(|| {
                 let mut builder = sui_transaction_builder::TransactionBuilder::new();
                 let mut arguments = Vec::new();
@@ -2548,7 +2665,12 @@ impl SuiClient {
                 Ok(builder)
             })
             .await?;
+        // The builder simulates without an expiration; the signed bytes carry it.
+        if let Some(epoch) = expires_after {
+            transaction.expiration = TransactionExpiration::Epoch(epoch);
+        }
         check_call_transaction(&transaction, &call, package, sender, sponsor)?;
+        check_expiration(&transaction, expires_after)?;
         anyhow::ensure!(
             transaction.gas_payment.budget <= MAX_ENROLL_BUDGET,
             "enrollment gas exceeds ceiling"
@@ -2755,6 +2877,57 @@ fn check_call_transaction(
     Ok(())
 }
 
+/// The ID of `claim`'s entry in an enrollment policy's `claims` table
+/// (`Table<address, bool>`), from the policy's rendered fields.
+#[cfg(target_os = "linux")]
+fn claim_field_id(policy: &Value, claim: &Address) -> anyhow::Result<(String, String)> {
+    let table = &policy["claims"]["id"];
+    let table = table.as_str().or_else(|| table["id"].as_str()).ok_or_else(|| anyhow::anyhow!("enrollment policy has no claim table"))?;
+    let table = Address::from_str(table).map_err(|e| anyhow::anyhow!("invalid claim table ID {table}: {e}"))?;
+    Ok((table.to_string(), table.derive_dynamic_child_id(&TypeTag::Address, claim.as_bytes()).to_string()))
+}
+
+/// A claim table entry: `Field<address, bool>` for `claim`, owned by `table`.
+#[cfg(target_os = "linux")]
+fn check_claim_entry(entry: &Object, table: &str, claim: &Address) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        same_type(&entry.object_type, "0x2::dynamic_field::Field<address,bool>")
+            && matches!(&entry.owner, Owner::Object(owner) if same_id(owner, table))
+            && same_id(entry.fields["name"].as_str().unwrap_or_default(), &claim.to_string())
+            && entry.fields["value"] == Value::Bool(true),
+        "claim {claim} is not registered under the enrollment policy"
+    );
+    Ok(())
+}
+
+/// A base58 object or transaction digest as the node renders it.
+#[cfg(target_os = "linux")]
+fn is_digest(text: &str) -> bool {
+    (32..=44).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_alphanumeric() && !b"0OIl".contains(&b))
+}
+
+/// The signed enrollment carries exactly the requested expiration.
+fn check_expiration(transaction: &Transaction, expires_after: Option<u64>) -> anyhow::Result<()> {
+    let expected = expires_after.map_or(TransactionExpiration::None, TransactionExpiration::Epoch);
+    anyhow::ensure!(
+        transaction.expiration == expected,
+        "the enrollment transaction has expiration {:?}, not {expected:?}",
+        transaction.expiration
+    );
+    Ok(())
+}
+
+/// An attempt that expires after `epoch` can no longer commit once the chain
+/// is in a later epoch.
+#[cfg(target_os = "linux")]
+fn expired(epoch: u64, now: u64) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        now > epoch,
+        "the enrollment attempt is valid through epoch {epoch} and the chain is in epoch {now}; it can still commit. Run again after epoch {epoch} has ended"
+    );
+    Ok(())
+}
+
 #[derive(Debug)]
 struct FailedExecution;
 impl std::fmt::Display for FailedExecution { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("chain execution failed; no fleet mutation committed") } }
@@ -2836,6 +3009,66 @@ mod tests {
         }
     }
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_attempt_expires_only_after_its_epoch_ends() {
+        assert!(expired(4, 4).is_err(), "still in the attempt's epoch");
+        assert!(expired(4, 3).is_err(), "a lagging node");
+        assert!(expired(4, 5).is_ok());
+        assert!(expired(0, u64::MAX).is_ok());
+        assert!(is_digest("4BKqvjVWUYiRY9LeqjtM2TxfoMAoHhXL7yuyhKWGGH2K"));
+        assert!(!is_digest("") && !is_digest("0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl") && !is_digest(&"a".repeat(45)));
+    }
+
+    /// The signed enrollment must carry exactly the requested expiration: an
+    /// attempt recorded as expiring after an epoch but signed without one
+    /// (or with a later one) could commit after its settlement.
+    #[test]
+    fn enrollment_expiration_is_checked_before_signing() {
+        let mut tx = Transaction {
+            kind: sui_sdk_types::TransactionKind::ProgrammableTransaction(sui_sdk_types::ProgrammableTransaction {
+                inputs: vec![],
+                commands: vec![],
+            }),
+            sender: Address::ZERO,
+            gas_payment: sui_sdk_types::GasPayment { objects: vec![], owner: Address::ZERO, price: 1, budget: 1 },
+            expiration: TransactionExpiration::None,
+        };
+        assert!(check_expiration(&tx, None).is_ok());
+        assert!(check_expiration(&tx, Some(7)).is_err(), "no expiration");
+        tx.expiration = TransactionExpiration::Epoch(8);
+        assert!(check_expiration(&tx, Some(7)).is_err(), "a later epoch");
+        assert!(check_expiration(&tx, None).is_err(), "unrequested expiration");
+        tx.expiration = TransactionExpiration::Epoch(7);
+        assert!(check_expiration(&tx, Some(7)).is_ok());
+        // The expiration is part of the signed bytes.
+        let expiring = bcs::to_bytes(&tx).unwrap();
+        tx.expiration = TransactionExpiration::None;
+        assert_ne!(expiring, bcs::to_bytes(&tx).unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn claim_entry_requires_the_claim_field_of_the_table() {
+        let claim = Address::from_str(&format!("0x{}", "c".repeat(64))).unwrap();
+        let table = format!("0x{}", "a".repeat(64));
+        let entry = |ty: &str, owner: Owner, name: String, value: Value| Object {
+            object_type: ty.into(),
+            owner,
+            fields: json!({"name": name, "value": value}),
+        };
+        let ty = "0x2::dynamic_field::Field<address,bool>";
+        assert!(check_claim_entry(&entry(ty, Owner::Object(table.clone()), claim.to_string(), Value::Bool(true)), &table, &claim).is_ok());
+        for (bad, why) in [
+            (entry("0x2::dynamic_field::Field<address,u64>", Owner::Object(table.clone()), claim.to_string(), Value::Bool(true)), "type"),
+            (entry(ty, Owner::Object(format!("0x{}", "b".repeat(64))), claim.to_string(), Value::Bool(true)), "owner"),
+            (entry(ty, Owner::Object(table.clone()), format!("0x{}", "d".repeat(64)), Value::Bool(true)), "name"),
+            (entry(ty, Owner::Object(table.clone()), claim.to_string(), Value::Bool(false)), "value"),
+        ] {
+            assert!(check_claim_entry(&bad, &table, &claim).is_err(), "{why}");
+        }
+    }
 
     #[test]
     fn current_contract_event_decodes() {
