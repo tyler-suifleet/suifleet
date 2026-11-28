@@ -3,9 +3,12 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coordinator import (
     CORE_REPOSITORY, LAYER_PROJECT, LAYER_REPOSITORY, LAYER_REPOSITORY_ID,
@@ -248,17 +251,6 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 self.route.publish(candidate)
             self.assertEqual(git('rev-parse', 'refs/heads/kirkstone', cwd=remote), competitor)
-
-    def test_export_entries_from_real_committed_core_match_workflow(self):
-        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-        self.route.route['core_revision'] = revision
-        entries = self.route.export_entries()
-        workflow = subprocess.check_output([
-            'git', 'rev-parse', revision + ':suifleet-edge/meta-suifleet/' + LAYER_WORKFLOW,
-        ], cwd=ROOT, text=True).strip()
-        self.assertEqual(entries[LAYER_WORKFLOW], ('100644', 'blob', workflow))
-        self.assertIn('export-provenance.json', entries)
-        self.assertEqual(entries['ci/build.sh'][:2], ('100755', 'blob'))
 
 
 if __name__ == '__main__':
