@@ -694,6 +694,17 @@ def feedback(pr):
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+def job_feedback(pr, kind):
+    if kind == 'fix':
+        if pr.get('_ci_repair'):
+            return repair_feedback(pr)
+        if pr.get('_batch_failure') and not (pr.get('_batch_conflict') or pr.get('_batch_review_failure')):
+            # A handoff comment leaves the pinned candidate and failed checks unchanged.
+            incident = ['batch-check-repair', pr['headRefOid'], pr['baseRefOid'], pr['_batch_failure']]
+            return hashlib.sha256(json.dumps(incident, sort_keys=True).encode()).hexdigest()
+    return feedback(pr)
+
+
 def gate(pr, owner, review, *, included=False):
     if not included and pr.get('baseIncluded') is not True: return 'owner must integrate current base and rerun checks'
     ready_state = pr['state'] in ('OPEN', 'CLOSED') if included else pr['state'] == 'OPEN'
@@ -944,7 +955,7 @@ class Store:
             if active or count >= limit or quarantine_count >= 3 or (pause and pause[0] > time.time()):
                 self.db.execute('COMMIT'); return None
             ci_repair = kind == 'fix' and bool(pr.get('_ci_repair'))
-            fingerprint = repair_feedback(pr) if ci_repair else feedback(pr)
+            fingerprint = job_feedback(pr, kind)
             if ci_repair and self.ci_repair_blocker(project, pr):
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],fingerprint)).fetchone()
@@ -1843,7 +1854,7 @@ class Coordinator:
             return
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
         if not self.authentication_ready(family):return
-        fingerprint = repair_feedback(pr) if kind == 'fix' and pr.get('_ci_repair') else feedback(pr)
+        fingerprint = job_feedback(pr, kind)
         directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{fingerprint[:12]}"
         if recovery is not None:
             directory = Path(recovery['directory'])
