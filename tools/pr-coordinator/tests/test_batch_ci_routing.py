@@ -12,6 +12,35 @@ from test_coordinator import c
 
 
 class HeldCI(unittest.TestCase):
+    def test_candidate_check_repair_is_stable_across_handoff_comments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, project, pr, owner = repairs.CIRepairs().setup(directory)
+            failure = dict(candidate_pr=42, candidate_head='candidate-a',
+                           candidate_base=pr['baseRefOid'], checks=c.failed_checks(pr))
+            original = {**pr, '_batch_failure': failure, '_review_mode': 'source'}
+
+            def reserve(snapshot):
+                fingerprint = c.job_feedback(snapshot, 'fix')
+                return engine.store.reserve(project['id'], snapshot, owner['agent'], 'fix',
+                                            Path(directory) / fingerprint)
+
+            first = reserve(original)
+            self.assertIsNotNone(first)
+            engine.store.db.execute("UPDATE jobs SET status='done' WHERE id=?", (first,))
+            handoff = {**original, 'comments': [{'id': 'handoff', 'body': 'Source unchanged'}]}
+            self.assertNotEqual(c.job_feedback(original, 'review'), c.job_feedback(handoff, 'review'))
+            self.assertIsNone(reserve(handoff))
+            for updated in (
+                {**handoff, 'headRefOid': 'source-b'},
+                {**handoff, 'baseRefOid': 'base-b'},
+                {**handoff, '_batch_failure': {**failure, 'candidate_head': 'candidate-b'}},
+                {**handoff, '_batch_failure': {**failure, 'checks': [{'name': 'another failed check'}]}},
+            ):
+                with self.subTest(updated=updated):
+                    job = reserve(updated)
+                    self.assertIsNotNone(job)
+                    engine.store.db.execute("UPDATE jobs SET status='done' WHERE id=?", (job,))
+
     def test_nonmember_source_failure_observed_and_reserved_once(self):
         with tempfile.TemporaryDirectory() as directory:
             engine, project, pr, owner = repairs.CIRepairs().setup(directory)

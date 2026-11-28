@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from test_batch_integration import Fixture
 from batch_integration import SharedAcceptanceRepair, canonical
-from coordinator import feedback, source_feedback
+from coordinator import job_feedback, source_feedback
 
 CHECK=dict(name='testnet/package-upgrade',workflowName='Automatic testnet',classification='funding',
            conclusion='FAILURE',detailsUrl='https://github.com/owner/repo/actions/runs/1')
@@ -34,7 +34,7 @@ class SharedRepairs(unittest.TestCase):
         def launch(project,pr,owner,kind):
             f.launched.append((copy.deepcopy(pr),copy.deepcopy(owner),kind))
             f.db.execute('INSERT INTO jobs(project,pr,kind,status,head,feedback) VALUES(?,?,?,?,?,?)',
-                         ('test',pr['number'],kind,'running',pr['headRefOid'],feedback(pr)))
+                         ('test',pr['number'],kind,'running',pr['headRefOid'],job_feedback(pr,kind)))
         f.launched=[];f.launch=launch
         return f,SharedAcceptanceRepair(f),batch
 
@@ -110,6 +110,9 @@ class SharedRepairs(unittest.TestCase):
         pr,owner,kind=f.launched[0]
         self.assertEqual((owner['key'],kind),('T-1','fix'))
         self.assertEqual(pr['_batch_failure']['candidate_head'],b['head'])
+        job = f.db.execute("SELECT id FROM jobs WHERE kind='fix'").fetchone()[0]
+        self.assertEqual(result['job'], job)
+        self.assertEqual(f.db.execute('SELECT job FROM shared_acceptance_repairs').fetchone()[0], job)
         self.assertEqual(r.tick(f.project)['state'],'owner_busy')
         self.assertEqual(len(f.launched),1)
         f.db.execute("UPDATE jobs SET status='done'")
