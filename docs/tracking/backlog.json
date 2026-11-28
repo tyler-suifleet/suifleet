@@ -5917,6 +5917,24 @@
         "Preparation tooling, metadata checks and submission artifacts can be implemented and reviewed independently; final submission readiness explicitly retains SF-306, SF-307 and SF-311 evidence and exact public-revision verification."
       ],
       "validation": "Run the scoped clean-host OE fetch/parse/build/package/runtime checks and record exact versions/results. Distinguish parsing from task execution, old userspace from an old kernel, repository publication from index listing, and simulated boot from hardware acceptance."
+    },
+    {
+      "key": "SF-338",
+      "title": "Eliminate the gateway test fixture port allocation race",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src/client_gateway.rs"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-338 -->\nThe combined candidate #1132 for #853 failed in `client_gateway::tests::mqtt_proxy_authenticates_authorizes_and_ends_revoked_sessions` with EADDRINUSE in CI run 46081813219. The gateway fixture is inherited unchanged from main. Repeated repairs on SF-304 cannot resolve this shared issue.\n\nBind ephemeral TCP and UDP listeners once and retain ownership through gateway startup in the tests. Keep production listener configuration, TLS identity and startup failure behavior intact. Run the locked gateway tests and document the evidence on the repair PR. Leave exact-head source and candidate acceptance gates intact.\n",
+      "acceptance": [
+        "Gateway tests keep possession of their ephemeral sockets through startup."
+      ],
+      "validation": "Run locked gateway tests and git diff --check."
     }
   ]
 }
