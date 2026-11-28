@@ -144,6 +144,24 @@ pub async fn start(authority: Arc<Authority>) -> anyhow::Result<tokio::task::Joi
     let settings = authority.settings.clone();
     let mqtt_listen: SocketAddr = settings.mqtt_listen.parse()?;
     let https_listen: SocketAddr = settings.https_listen.parse()?;
+    let mqtt = TcpListener::bind(mqtt_listen).await.map_err(|e| anyhow::anyhow!("cannot listen on {mqtt_listen}: {e}"))?;
+    let https = TcpListener::bind(https_listen).await.map_err(|e| anyhow::anyhow!("cannot listen on {https_listen}: {e}"))?;
+    let udp = match &settings.udp_discovery {
+        Some(address) => Some(UdpSocket::bind(address).await.map_err(|e| anyhow::anyhow!("cannot listen on UDP {address}: {e}"))?),
+        None => None,
+    };
+    serve(authority, mqtt, https, udp)
+}
+
+fn serve(
+    authority: Arc<Authority>,
+    mqtt: TcpListener,
+    https: TcpListener,
+    udp: Option<UdpSocket>,
+) -> anyhow::Result<tokio::task::JoinHandle<()>> {
+    let settings = authority.settings.clone();
+    let mqtt_listen = mqtt.local_addr()?;
+    let https_listen = https.local_addr()?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut roots = rustls::RootCertStore::empty();
     roots.add(authority.ca_der().clone())?;
@@ -169,12 +187,6 @@ pub async fn start(authority: Arc<Authority>) -> anyhow::Result<tokio::task::Joi
         https_listen,
         addresses: RwLock::new(addresses),
     });
-    let mqtt = TcpListener::bind(mqtt_listen).await.map_err(|e| anyhow::anyhow!("cannot listen on {mqtt_listen}: {e}"))?;
-    let https = TcpListener::bind(https_listen).await.map_err(|e| anyhow::anyhow!("cannot listen on {https_listen}: {e}"))?;
-    let udp = match &settings.udp_discovery {
-        Some(address) => Some(UdpSocket::bind(address).await.map_err(|e| anyhow::anyhow!("cannot listen on UDP {address}: {e}"))?),
-        None => None,
-    };
     info!(mqtt = %mqtt_listen, https = %https_listen, ca = authority.ca_sha256(), "Client-device gateway listening");
     let connections = Arc::new(Semaphore::new(settings.max_connections));
     Ok(tokio::spawn(async move {
@@ -595,10 +607,6 @@ mod tests {
         dir
     }
 
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-    }
-
     struct Fixture {
         dir: std::path::PathBuf,
         authority: Arc<Authority>,
@@ -611,7 +619,10 @@ mod tests {
     async fn fixture() -> Fixture {
         let dir = temp();
         let broker = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (mqtt, https) = (free_port(), free_port());
+        let mqtt_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let https_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mqtt = mqtt_listener.local_addr().unwrap().port();
+        let https = https_listener.local_addr().unwrap().port();
         let mut built = authority(&dir, GROUPS, now_ms());
         built.settings.broker = broker.local_addr().unwrap().to_string();
         built.settings.mqtt_listen = format!("127.0.0.1:{mqtt}");
@@ -619,7 +630,7 @@ mod tests {
         built.settings.broker_username = Some("gateway".into());
         built.settings.min_rotation_interval_seconds = 0;
         let authority = Arc::new(built);
-        let gateway = start(authority.clone()).await.unwrap();
+        let gateway = serve(authority.clone(), mqtt_listener, https_listener, None).unwrap();
         Fixture { dir, authority, mqtt, https, broker, _gateway: gateway }
     }
 
@@ -844,13 +855,16 @@ mod tests {
     #[tokio::test]
     async fn udp_hints_never_amplify() {
         let dir = temp();
-        let port = free_port();
+        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mqtt = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let https = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = udp.local_addr().unwrap().port();
         let mut built = authority(&dir, GROUPS, now_ms());
-        built.settings.udp_discovery = Some(format!("127.0.0.1:{port}"));
-        built.settings.mqtt_listen = format!("127.0.0.1:{}", free_port());
-        built.settings.https_listen = format!("127.0.0.1:{}", free_port());
+        built.settings.udp_discovery = Some(udp.local_addr().unwrap().to_string());
+        built.settings.mqtt_listen = mqtt.local_addr().unwrap().to_string();
+        built.settings.https_listen = https.local_addr().unwrap().to_string();
         let authority = Arc::new(built);
-        let _gateway = start(authority.clone()).await.unwrap();
+        let _gateway = serve(authority.clone(), mqtt, https, Some(udp)).unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let mut reply = vec![0u8; 2048];
         // Too short or wrong magic: silence.
