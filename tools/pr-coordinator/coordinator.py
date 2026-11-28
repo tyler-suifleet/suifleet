@@ -13,6 +13,7 @@ import random
 from pathlib import Path
 import sqlite3
 import sys
+import tarfile
 import subprocess
 import time
 import tempfile
@@ -27,6 +28,50 @@ CI_HANDOFF = ('Do NOT wait for, watch or poll hosted CI (no sleep/watch loops, m
               'dispatches CI repair if a check fails.')
 FAMILIES = {'Codex', 'Claude'}
 LANES = ('source', 'completion', 'ci', 'integration')
+
+
+LAYER_REPOSITORY = 'tyler-suifleet/meta-suifleet'
+LAYER_REPOSITORY_ID = 1470691778
+LAYER_PROJECT = 'meta-suifleet-publication'
+LAYER_SERIES = ('kirkstone', 'scarthgap', 'wrynose')
+LAYER_REFS = ('main', *LAYER_SERIES)
+LAYER_WORKFLOW = '.github/workflows/layer.yml'
+LAYER_WORKFLOW_BLOB = 'fca7261c7a90b65c2fa0d71cc7850b0bf381ce75'
+CORE_REPOSITORY = 'tyler-suifleet/suifleet'
+TYLER_IDENTITY = 'Tyler Bush', 'tyler.jonathan.bush@gmail.com'
+
+
+def layer_project(project):
+    return (project.get('id') == LAYER_PROJECT or 'layer_publication' in project
+            or project.get('repository', '').casefold() == LAYER_REPOSITORY)
+
+
+def validate_layer_config(config):
+    routes = [project for project in config['projects'] if layer_project(project)]
+    if len(routes) > 1:
+        raise ValueError('standalone publication requires one coordinator route')
+    for project in routes:
+        route = project.get('layer_publication')
+        if (project.get('id') != LAYER_PROJECT or project.get('repository') != LAYER_REPOSITORY
+                or not isinstance(route, dict) or project.get('integration_batch', {}).get('enabled')
+                or project.get('local_infrastructure', {}).get('enabled')
+                or project.get('testnet_authorization') or project.get('shared_acceptance_repair')
+                or not project.get('review_github_account')
+                or project['review_github_account'].casefold() == project['github_account'].casefold()):
+            raise ValueError('standalone publication requires the dedicated independent review route')
+        if (not re.fullmatch(r'SF-[0-9]+', route.get('core_ticket', ''))
+                or not re.fullmatch(r'[0-9a-f]{40}', route.get('core_revision', ''))
+                or not route.get('core_root') or not route.get('token_file')
+                or not route.get('pr_author')
+                or route['pr_author'].casefold() == project['review_github_account'].casefold()
+                or any(type(route.get(k)) is not int or route[k] <= 0 for k in ('core_pr', 'app_id'))
+                or not isinstance(route.get('pulls'), dict) or not route['pulls']
+                or any(ref not in LAYER_REFS or type(number) is not int or number <= 0
+                       for ref, number in route['pulls'].items())
+                or len(set(route['pulls'].values())) != len(route['pulls'])):
+            raise ValueError('standalone publication requires pinned core ownership, app and PRs')
+    if any(slot.get('project') == LAYER_PROJECT for slot in config.get('implementation_slots', [])):
+        raise ValueError('standalone implementation dispatch is disabled')
 
 
 def shared_github_snapshot(args, env, invoke):
@@ -174,6 +219,8 @@ def check_evidence(pr):
 
 
 def checks_blocker(pr):
+    if '_layer_publication' in pr and not pr['_layer_publication']['series_run']:
+        return 'exact standalone series CI is missing or unsuccessful'
     if pr.get('_review_mode') == 'included':
         evidence = pr.get('_included_evidence') or {}
         if (evidence.get('source') != pr.get('headRefOid')
@@ -687,6 +734,8 @@ def feedback(pr):
                for r in pr['reviews'] if pr.get('_receipts',{}).get(r['id']) != publication_hash(r)]
     payload = [pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, pr['threads'], pr.get('_acceptance_policy',{}),
                check_evidence(pr) if checks_blocker(pr) is None else ['source-review-awaiting-checks']]
+    if pr.get('_layer_publication'):
+        payload.append(pr['_layer_publication'])
     if pr.get('_included_source'):
         payload.append([pr['_included_source'], pr.get('body', ''), pr.get('_included_evidence')])
     if pr.get('_integration_batch'):
@@ -1431,10 +1480,226 @@ class HostedRunnerRecovery:
             return dict(state='retry_submitted', run=run_id, job=job_id, attempt=used + 1)
 
 
+class LayerPublication:
+    """Promote the exact reviewed export through the sole coordinator lane."""
+
+    def __init__(self, coordinator, project):
+        self.coordinator, self.project = coordinator, project
+        self.route = project['layer_publication']
+        self.repo = f'repos/{LAYER_REPOSITORY}'
+
+    def read(self, path):
+        return json.loads(self.coordinator.gh(self.project, ['api', path]))
+
+    def identity(self):
+        root = Path(self.project['root']).resolve(strict=True)
+        top = run(['git', 'rev-parse', '--show-toplevel'], cwd=root).strip()
+        common = run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=root).strip()
+        if Path(top) != root or Path(common) != root / '.git':
+            raise RuntimeError('standalone checkout must be the canonical clone')
+        url = f'https://github.com/{LAYER_REPOSITORY}.git'
+        for options in ([], ['--push']):
+            if run(['git', 'remote', 'get-url', '--all', *options, 'origin'], cwd=root).splitlines() != [url]:
+                raise RuntimeError('standalone origin identity changed')
+        repo = self.read(self.repo)
+        if (repo['id'], repo['full_name'], repo['default_branch'], repo['private'], repo['archived']) != (
+                LAYER_REPOSITORY_ID, LAYER_REPOSITORY, 'main', False, False):
+            raise RuntimeError('standalone GitHub repository identity changed')
+
+    def protections(self):
+        for ref in LAYER_REFS:
+            rules = self.read(f'{self.repo}/rules/branches/{ref}')
+            updates = [r for r in rules if r['type'] == 'update' and r['ruleset_source_type'] == 'Repository']
+            if len(updates) != 1:
+                raise RuntimeError(f'{ref} lacks a dedicated active update restriction')
+            ruleset = self.read(f"{self.repo}/rulesets/{int(updates[0]['ruleset_id'])}")
+            guard_ids = {r['ruleset_id'] for r in rules
+                         if r['type'] in ('creation', 'deletion', 'non_fast_forward')}
+            guard_ids = {i for i in guard_ids if self.read(f'{self.repo}/rulesets/{int(i)}')['bypass_actors'] == []}
+            guards = {r['type'] for r in rules if r['ruleset_id'] in guard_ids}
+            if (ruleset['enforcement'] != 'active' or ruleset['target'] != 'branch'
+                    or ruleset['bypass_actors'] != [
+                        dict(actor_id=self.route['app_id'], actor_type='Integration', bypass_mode='always')]
+                    or updates[0].get('parameters', {}).get('update_allows_fetch_and_merge') is not False
+                    or not {'creation', 'deletion', 'non_fast_forward'} <= guards):
+                raise RuntimeError(f'{ref} is not protected for sole coordinator publication')
+
+    def core_owner(self):
+        route = self.route
+        registry = json.loads(run(['ticket', 'projects']))
+        if any(row['project_id'] == LAYER_PROJECT or
+               row['repository'].casefold() == LAYER_REPOSITORY for row in registry):
+            raise RuntimeError('standalone publication namespace collides with a ticket project')
+        core_root = str(Path(route['core_root']).resolve(strict=True))
+        if not any(row['project_id'] == 'suifleet' and row['repository'] == CORE_REPOSITORY
+                   and row['root'] == core_root for row in registry):
+            raise RuntimeError('core canonical ticket repository is unverified')
+        owner = json.loads(run(['ticket', '--project', 'suifleet', 'show', route['core_ticket']]))
+        issue = owner.get('remote', {}).get('url', '')
+        if (owner.get('key') != route['core_ticket'] or owner.get('project') != 'suifleet'
+                or owner.get('canonical_root') != core_root or owner.get('status') != 'done'
+                or owner.get('publish_pending') is not False or owner.get('expired') is not False
+                or owner.get('agent') not in FAMILIES
+                or not re.fullmatch(r'https://github.com/' + CORE_REPOSITORY + r'/issues/[1-9][0-9]*', issue)):
+            raise RuntimeError('reviewed core export ownership is unverified')
+        source = self.read(f"repos/{CORE_REPOSITORY}/pulls/{route['core_pr']}")
+        closing = r'(?im)^\s*closes\s+(?:' + re.escape(issue) + r'|#' + issue.rsplit('/', 1)[1] + r')(?=[.\s]|$)'
+        if (source['merged'] is not True or source['base']['ref'] != 'main'
+                or source['base']['repo']['full_name'] != CORE_REPOSITORY
+                or source['head']['repo']['full_name'] != CORE_REPOSITORY
+                or source['head']['ref'] != owner['branch'] or source['merge_commit_sha'] != route['core_revision']
+                or not re.search(closing, source['body'] or '')):
+            raise RuntimeError('core revision lacks the pinned merged export PR')
+        # Adapt the completed claim for the review gate without mutating it.
+        return {**owner, 'status': 'review', 'spec': {
+            'description': 'Verify the exact standalone export of the merged core PR.',
+            'acceptance': ['Independent export review and exact-head validation of every supported series.'],
+        }}
+
+    def export_entries(self):
+        revision, root = self.route['core_revision'], self.route['core_root']
+        env = {**os.environ, 'GIT_NO_REPLACE_OBJECTS': '1'}
+        exporter = run(['git', 'show', revision + ':scripts/export_yocto_layer.py'], cwd=root, env=env)
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / 'layer.tar.gz'
+            script = Path(directory) / 'export_yocto_layer.py'
+            script.write_text(exporter)
+            run([sys.executable, str(script), '--repo', root, '--revision', revision,
+                 '--output', str(archive)], cwd=root, env=env)
+            with tarfile.open(archive) as stream:
+                entries = {}
+                for member in stream:
+                    data = stream.extractfile(member).read()
+                    blob = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+                    entries[member.name.removeprefix('meta-suifleet/')] = (f'100{member.mode:o}', 'blob', blob)
+                return entries
+
+    def candidate(self, ref, number, entries):
+        pr = self.coordinator.pr(self.project, number)
+        source = self.read(f'{self.repo}/pulls/{number}')
+        head, base, branch = pr['headRefOid'], pr['baseRefOid'], pr['headRefName']
+        if (not all(re.fullmatch(r'[0-9a-f]{40}', sha) for sha in (head, base))
+                or pr['baseRefName'] != ref or pr['isCrossRepository'] is not False
+                or source['user']['login'] != self.route['pr_author']
+                or source['head']['repo']['id'] != LAYER_REPOSITORY_ID
+                or source['base']['repo']['id'] != LAYER_REPOSITORY_ID
+                or source['head']['sha'] != head or source['head']['ref'] != branch
+                or source['base']['ref'] != ref
+                or not re.fullmatch(r'publication/[a-z0-9][a-z0-9-]*', branch)):
+            raise RuntimeError('standalone publication PR identity changed')
+        commit = self.coordinator.immutable_read(self.project, f'{self.repo}/git/commits/{head}')
+        if ([parent['sha'] for parent in commit['parents']] != [base]
+                or any((commit[k]['name'], commit[k]['email']) != TYLER_IDENTITY for k in ('author', 'committer'))
+                or 'co-authored-by:' in commit['message'].lower()):
+            raise RuntimeError('publication requires one user-authored commit on the exact current base')
+        tree = self.coordinator.immutable_read(self.project, f'{self.repo}/git/trees/{head}?recursive=1')
+        actual = {item['path']: (item['mode'], item['type'], item['sha'])
+                  for item in tree['tree'] if item['type'] != 'tree'}
+        if (tree['truncated'] or actual != entries
+                or actual.get(LAYER_WORKFLOW) != ('100644', 'blob', LAYER_WORKFLOW_BLOB)):
+            raise RuntimeError('standalone candidate differs from the reviewed core export')
+        pr['_layer_publication'] = {
+            'core_revision': self.route['core_revision'], 'core_ticket': self.route['core_ticket'],
+            'core_pr': self.route['core_pr'], 'app_id': self.route['app_id'], 'ref': ref,
+            'series_run': self.series_run(pr),
+        }
+        return pr
+
+    def series_run(self, pr):
+        head = pr['headRefOid']
+        runs = self.read(f'{self.repo}/actions/runs?event=pull_request&head_sha={head}&per_page=100')
+        if runs['total_count'] > 100:
+            raise RuntimeError('standalone workflow run inventory is incomplete')
+        matches = [r for r in runs['workflow_runs'] if r['path'].partition('@')[0] == LAYER_WORKFLOW
+                   and r['event'] == 'pull_request' and r['head_sha'] == head
+                   and r['head_repository']['id'] == LAYER_REPOSITORY_ID
+                   and any(p['number'] == pr['number'] and p['base']['ref'] == pr['baseRefName']
+                           and p['base']['sha'] == pr['baseRefOid'] and p['head']['sha'] == head
+                           for p in r['pull_requests'])]
+        if not matches:
+            return None
+        latest = max(matches, key=lambda r: r['id'])
+        if (latest['status'], latest['conclusion']) != ('completed', 'success'):
+            return None
+        attempt = self.read(f"{self.repo}/actions/runs/{latest['id']}/attempts/{latest['run_attempt']}/jobs?per_page=100")
+        names = [job['name'] for job in attempt['jobs'] if job['run_id'] == latest['id']
+                 and job['head_sha'] == head and (job['status'], job['conclusion']) == ('completed', 'success')]
+        if attempt['total_count'] != len(LAYER_SERIES) or sorted(names) != [f'Layer and packages ({s})' for s in LAYER_SERIES]:
+            return None
+        return {'id': latest['id'], 'attempt': latest['run_attempt']}
+
+    def publish(self, pr):
+        # The credential is private and only the app may bypass the update rule.
+        import stat
+
+        descriptor = os.open(self.route['token_file'], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor) as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise RuntimeError('standalone publication credential file must be private')
+            token = stream.read(1024).strip()
+        if not re.fullmatch(r'ghs_[A-Za-z0-9_]+', token):
+            raise RuntimeError('standalone publication requires an installation token')
+        ref = 'refs/heads/' + pr['baseRefName']
+        head, base = pr['headRefOid'], pr['baseRefOid']
+        root = self.project['root']
+        pull_ref = f"refs/pull/{pr['number']}/head"
+        if run(['git', 'ls-remote', 'origin', pull_ref], cwd=root).strip() != f'{head}\t{pull_ref}':
+            raise RuntimeError('publication PR head moved before push')
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('GIT_TRACE', 'GIT_CURL_VERBOSE'))}
+        env.update(LAYER_APP_TOKEN=token, GIT_TERMINAL_PROMPT='0')
+        helper = '!f() { test "$1" != get || printf "username=x-access-token\npassword=%s\n" "$LAYER_APP_TOKEN"; }; f'
+        # The lease enforces the exact reviewed parent, even on a reset to an
+        # older ancestor. The update itself is strictly a fast-forward.
+        run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'http.followRedirects=false',
+             '-c', 'credential.helper=', '-c', 'credential.helper=' + helper,
+             'push', f'--force-with-lease={ref}:{base}', 'origin', f'{head}:{ref}'], cwd=root, env=env, timeout=60)
+        print(json.dumps(dict(project=LAYER_PROJECT, pr=pr['number'], published_ref=ref,
+                              head=head, series_run=pr['_layer_publication']['series_run'])), flush=True)
+
+    def tick(self, execute):
+        self.identity()
+        self.protections()
+        owner = self.core_owner()
+        entries = self.export_entries()
+        if execute:
+            self.coordinator.collect(self.project, [])
+        for ref, number in self.route['pulls'].items():
+            try:
+                if self.read(f'{self.repo}/pulls/{number}')['state'] != 'open':
+                    continue
+                if self.advance(ref, number, owner, entries, execute):
+                    return
+            except (RuntimeError, subprocess.SubprocessError, OSError, KeyError, TypeError, ValueError) as error:
+                print(f'{LAYER_PROJECT} PR#{number}: deferred ({type(error).__name__})', flush=True)
+                if not execute:
+                    raise
+
+    def advance(self, ref, number, owner, entries, execute):
+        pr = self.candidate(ref, number, entries)
+        review = self.coordinator.store.review(self.project['id'], number)
+        blocker = gate(pr, owner, review)
+        print(json.dumps(dict(project=LAYER_PROJECT, pr=number, merge_blocker=blocker)), flush=True)
+        if not execute or pr['state'] != 'OPEN' or pr['isDraft'] or pr['mergeable'] != 'MERGEABLE' or checks_blocker(pr):
+            return False
+        if blocker is None:
+            self.identity()
+            self.protections()
+            fresh_owner = self.core_owner()
+            fresh = self.candidate(ref, number, entries)
+            if gate(fresh, fresh_owner, review) is None:
+                self.publish(fresh)
+                return True
+        elif not review or review['feedback'] != feedback(pr):
+            self.coordinator.launch(self.project, pr, owner, 'review')
+        return False
+
+
 class Coordinator:
     def __init__(self, config, state):
         if set(config['workers']) != FAMILIES or any(not isinstance(c,list) or not c or not all(isinstance(v,str) for v in c) for c in config['workers'].values()):
             raise ValueError('workers must be argv lists for Codex and Claude')
+        validate_layer_config(config)
         self.config, self.state = config, state
         for project in config['projects']:
             network_authorization(project)
@@ -1938,8 +2203,12 @@ class Coordinator:
             prompt = self.prompt(project, pr, owner, kind, family, directory, result_path)
             command = self.config['workers'][family]
             # argv configuration, never shell interpolation of PR text.
-            token = run(['gh','auth','token','--hostname','github.com','--user',project['github_account']]).strip()
-            env = {**os.environ, 'PR_COORDINATOR_ACTIVE':'1','GH_TOKEN':token}
+            env = {**os.environ, 'PR_COORDINATOR_ACTIVE': '1'}
+            if layer_project(project):
+                for name in ('GH_TOKEN', 'GITHUB_TOKEN', 'LAYER_APP_TOKEN'):
+                    env.pop(name, None)
+            else:
+                env['GH_TOKEN'] = run(['gh','auth','token','--hostname','github.com','--user',project['github_account']]).strip()
             if kind == 'fix': env['PR_COORDINATOR_CLAIM_TOKEN'] = owner['token']
             (directory/'command.json').write_text(json.dumps(command))
             (directory/'prompt.txt').write_text(prompt)
@@ -2383,6 +2652,15 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 if row['kind'] == 'review':
                     snapshot_path = Path(row['directory'])/'snapshot.json'
                     snapshot = json.loads(snapshot_path.read_text()) if snapshot_path.exists() else {}
+                    if layer_project(project):
+                        publication = LayerPublication(self, project)
+                        publication.identity()
+                        publication.protections()
+                        publication.core_owner()
+                        ref = pr['baseRefName']
+                        if publication.route['pulls'].get(ref) != row['pr']:
+                            raise RuntimeError('publication review PR is no longer routed')
+                        pr = publication.candidate(ref, row['pr'], publication.export_entries())
                     identity = snapshot.get('_included_source')
                     if identity:
                         # Reconstruct only the pinned acceptance context, after
@@ -2401,7 +2679,12 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         pr = self.batches.included_snapshot(project, pr, snapshot['baseRefOid'], identity)
                         if checks_blocker(pr) is not None:
                             raise RuntimeError('included acceptance publication evidence unavailable')
-                if row['kind'] == 'review' and pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']:
+                matches = pr['headRefOid'] == row['head'] and feedback(pr) == row['feedback']
+                if layer_project(project) and not matches:
+                    self.store.db.execute("UPDATE jobs SET status='failed',error='stale publication review' WHERE id=?", (row['id'],))
+                    self.cleanup(project, Path(row['directory'])/'checkout')
+                    continue
+                if row['kind'] == 'review' and matches:
                     body = review_result_body(row, result)
                     if not row['comment_id']:
                         posted = json.loads(self.gh(project,['api',f"repos/{project['repository']}/issues/{row['pr']}/comments",'--method','POST','-f',f'body={body}']))
@@ -2575,6 +2858,10 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 print(f"{project['id']} CI PR#{row['number']}: deferred ({type(error).__name__})", flush=True)
 
     def tick_project(self, project, execute):
+        if layer_project(project):
+            if self.lane != 'all':
+                raise RuntimeError('standalone publication requires the sole coordinator lane')
+            return LayerPublication(self, project).tick(execute)
         self.advanced_batches = set()
         if execute and self.lane == 'ci':
             return self.tick_ci(project)
@@ -3004,6 +3291,7 @@ def main():
     parser.add_argument('--parent-pid', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
+    validate_layer_config(config)
     args.state.mkdir(parents=True,exist_ok=True)
     if args.lane:
         if not args.execute or not args.watch or not args.parent_pid or not args.project_id:

@@ -19,7 +19,7 @@ import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
                          failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes, uninspectable_reason,
-                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF, annotate_job_timeouts, annotate_preparation_failure, preparation_job_logs)
+                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF, annotate_job_timeouts, annotate_preparation_failure, preparation_job_logs, validate_layer_config)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
 COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -117,6 +117,7 @@ def dependency_wait(result, key):
 
 class Dispatcher:
     def __init__(self, config, state):
+        validate_layer_config(config)
         self.config, self.state = config, Path(state)
         for project in config['projects']:
             network_authorization(project)

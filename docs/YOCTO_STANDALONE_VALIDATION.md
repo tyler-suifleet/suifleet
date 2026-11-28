@@ -375,3 +375,95 @@ submission remains deferred.
 
 Hosted exact-head/base CI, normal automatic testnet gates and independent review
 are pending coordinator acceptance, not claimed by these local results.
+
+## Reviewed standalone publication route (SF-340)
+
+The standalone release procedure starts with the committed export described in
+[the layer release guide](../suifleet-edge/meta-suifleet/RELEASE.md).
+The coordinator's dedicated `meta-suifleet-publication` route promotes that
+exact export to `main`, `kirkstone`, `scarthgap` and `wrynose` through
+same-repository PRs. One published Done core ticket and its same-repository
+merged core PR establish the source revision and implementation family.
+Publication records remain on the standalone PRs. The core ticket keeps its
+existing ownership and completion. [SF-340](https://github.com/tyler-suifleet/suifleet/issues/1142)
+
+After normal SF-340 review and merge, install the verified merged coordinator
+and dispatcher through [runtime activation](PR_COORDINATION.md). The route is
+absent from the default configuration. To activate it under publication
+authorization, the operator must do the following.
+
+1. Verify the canonical core checkout in `ticket projects`. Use a separate
+   canonical standalone Git clone whose sole fetch and push origin is
+   `https://github.com/tyler-suifleet/meta-suifleet.git` and verify the public
+   repository's numeric ID `1470691778`. Reserve the route namespace below
+   for publication. It must be absent from the ticket registry and from
+   `implementation_slots`. Future standalone-only implementation dispatch
+   requires its own verified registration and review routing.
+2. On all four refs, verify an active repository branch ruleset with
+   **Restrict updates**, with upstream fetch-and-merge disabled and the
+   dedicated publication GitHub App as its sole always-bypass actor. Keep
+   branch creation, deletion and non-fast-forward restrictions in an active
+   ruleset with no bypass actors. The coordinator checks the effective rules
+   before review and again before publication. Use a GitHub App installation
+   limited to this repository with the permissions needed to push the export,
+   including workflow files. Keep the app key outside the runner and the
+   reviewer environments. Provide the short-lived installation token through an
+   operator-owned mode-0600 file only for the publication window. The
+   coordinator passes it only to the guarded Git push. Run this route only on
+   the trusted coordinator host with custody of the credential and runtime
+   configuration. PR CI receives read-only access.
+3. For each target, use a fresh standalone worktree at the current target tip.
+   Export the pinned core merge revision to a new archive and replace the
+   standalone tree with its layer-root contents, including provenance and file
+   modes. Review the resulting diff before staging. This route is for a full
+   shared export. Hold and reconcile any series-only deltas before proposing
+   promotion. Commit once with Tyler Bush as author and committer. Push only
+   a branch named `publication/<lowercase-slug>` and open a ready PR against
+   the corresponding target. Link the existing core issue and merged source PR
+   in the PR body. Correct or replace a stale candidate through the same
+   publication owner. The route leaves repairs to that owner.
+4. In the existing coordinator configuration, add one project entry like the
+   following, using verified values in place of placeholders. Add series PR
+   numbers when they are ready. The GitHub reviewer must have review access and
+   use a different account from the project account and the PR author.
+
+   ```json
+   {
+     "id": "meta-suifleet-publication",
+     "repository": "tyler-suifleet/meta-suifleet",
+     "root": "/absolute/canonical/meta-suifleet",
+     "github_account": "tyler-suifleet",
+     "review_github_account": "therealtime",
+     "layer_publication": {
+       "core_root": "/absolute/canonical/suifleet",
+       "core_ticket": "SF-340",
+       "core_pr": 1,
+       "core_revision": "<full merged core SHA>",
+       "app_id": 1,
+       "pr_author": "tyler-suifleet",
+       "token_file": "/absolute/private/runtime/token",
+       "pulls": {"main": 1, "kirkstone": 2, "scarthgap": 3, "wrynose": 4}
+     }
+   }
+   ```
+
+5. The coordinator verifies the exact standalone tree against the committed
+   export, then requires success for all three matrix jobs in the latest
+   matching standalone PR workflow attempt. CI checks out the exact PR head.
+   The independent model review binds the head, current target base, workflow
+   attempt and feedback. The sole coordinator lane rechecks those gates and
+   fast-forwards the protected ref to the tested commit with an exact-base
+   lease. A changed base, workflow, workflow attempt, export or feedback
+   requires fresh evidence. A rerun must complete before review resumes.
+6. Verify anonymously that each public ref resolves to the recorded tested
+   commit. Record the ref, standalone head, core revision, hosted workflow
+   attempt URL, independent review and export provenance in the existing
+   publication handoff. Keep Layer Index readiness and human submission in
+   [SF-312](https://github.com/tyler-suifleet/suifleet/issues/838).
+
+The offline implementation checks exercise repository and namespace identity,
+published core ownership, all four protected refs, complete export contents,
+exact-series workflow identity and the independent review and leased-push
+gates. Runtime installation, verified live rulesets and app credentials,
+the first hosted standalone runs, ref promotion and anonymous verification
+are pending publication acceptance.
