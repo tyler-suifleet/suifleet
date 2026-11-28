@@ -2565,9 +2565,9 @@ class SharedAcceptanceRepair:
         self.record(project,episode,key,head,batch['base'],None,'launch_pending','shared cost repair reserved before launch')
         try:
             self.c.launch(project,snapshot,owner,'fix')
-            from coordinator import feedback
+            from coordinator import job_feedback
             row=self.db.execute("SELECT id,status FROM jobs WHERE project=? AND pr=? AND kind='fix' AND head=? AND feedback=?",
-                                (project['id'],pr['number'],head,feedback(snapshot))).fetchone()
+                                (project['id'],pr['number'],head,job_feedback(snapshot,'fix'))).fetchone()
             return self.record(project,episode,key,head,batch['base'],row[0] if row else None,
                                ('repair_owned' if row[1] in ('reserved','running') else 'repair_retained') if row else 'held',
                                'one shared-owner repair; victim branches unchanged')
