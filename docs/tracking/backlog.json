@@ -5935,6 +5935,24 @@
         "Gateway tests keep possession of their ephemeral sockets through startup."
       ],
       "validation": "Run locked gateway tests and git diff --check."
+    },
+    {
+      "key": "SF-341",
+      "title": "Fix standalone publication tests in merged runtime activation",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "<!-- suifleet-tracking:SF-341 -->\nSF-340 merged through #1144 at 02b9a116, but the merged-only runtime validator fails and leaves the coordinator on 0804fea1. In the exact disposable validation layout, test_layer_publication fails to import coordinator in isolation, and its full-export test assumes the Git metadata and exporter omitted from that layout.\n\nMake the offline publication suite run in the supported activation layout and retain a verified real-export check in full Git checkouts. Test the stripped and full layouts. Preserve the installer and approval gates. Merge and install only through the existing coordinator and reviewed activation route.\n",
+      "acceptance": [
+        "Run the offline suite in the merged-only activation snapshot and retain the full checkout export check."
+      ],
+      "validation": "Run activation-layout and full-checkout publication tests."
     }
   ]
 }

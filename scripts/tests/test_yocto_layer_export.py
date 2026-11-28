@@ -2,9 +2,11 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'export_yocto_layer.py'
 spec = importlib.util.spec_from_file_location('layer_export', SCRIPT)
@@ -65,6 +67,19 @@ class LayerExportTests(unittest.TestCase):
         names = json.loads((layer/'export-files.json').read_text())
         self.assertEqual(set(names), {str(p.relative_to(layer)) for p in layer.rglob('*') if p.is_file()})
         self.assertFalse(any(n.endswith('.bbappend') or n.startswith('recipes-core/') for n in names))
+
+
+    def test_publication_reads_the_real_committed_export(self):
+        root = SCRIPT.parents[1]
+        with patch.object(sys, 'path', [str(root / 'tools/pr-coordinator'), *sys.path]):
+            from coordinator import LAYER_WORKFLOW, LAYER_WORKFLOW_BLOB, LayerPublication
+
+        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        project = {'layer_publication': {'core_revision': revision, 'core_root': str(root)}}
+        entries = LayerPublication(None, project).export_entries()
+        self.assertEqual(entries[LAYER_WORKFLOW], ('100644', 'blob', LAYER_WORKFLOW_BLOB))
+        self.assertIn('export-provenance.json', entries)
+        self.assertEqual(entries['ci/build.sh'][:2], ('100755', 'blob'))
 
 
 if __name__ == '__main__':
