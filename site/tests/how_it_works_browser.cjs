@@ -35,72 +35,17 @@ const {chromium} = require(process.env.SUIFLEET_PLAYWRIGHT_MODULE || '../../dapp
     for (const [width,height] of [[1440,900],[1280,720],[390,844],[375,667],[320,568],[844,390],[640,360],[568,320]]) {
       const page = await browser.newPage({viewport:{width,height}}), errors = [];
       page.on('pageerror', e => errors.push(e.message));
-      await page.goto(origin + '/how-it-works/#overview', {waitUntil:'networkidle'});
-      await page.waitForFunction(() => document.body.classList.contains('guide-ready'));
+      await page.goto(origin + '/how-it-works/', {waitUntil:'networkidle'});
       await page.evaluate(() => document.fonts.ready);
-      const expected = await page.locator('.guide-stage').evaluateAll(stages => Object.fromEntries(stages.flatMap(stage => [...stage.querySelectorAll('[data-guide-instruction]')].map((item,i) => [`${stage.id}/${i}`, item.textContent.trim().replace(/\s+/g,' ')]))));
-      if (shots) await page.screenshot({path:path.join(shots, `how-${width}x${height}.png`)});
-      const gathered = new Map(); let count = 0;
-      while (!(await page.locator('[data-guide-complete]').isVisible())) {
-        const value = await page.evaluate(() => {
-          const stage = [...document.querySelectorAll('.guide-stage')].find(s => !s.hidden);
-          const copy = stage.querySelector('.guide-copy');
-          const rect = document.querySelector('.guide-controls').getBoundingClientRect();
-          return {key:`${stage.id}/${stage.dataset.instruction}`, text:copy.textContent.trim(), part:Number(stage.dataset.part),
-            page:[document.documentElement.scrollWidth,document.documentElement.scrollHeight],
-            fits:copy.clientHeight>0 && copy.scrollHeight<=copy.clientHeight && copy.scrollWidth<=copy.clientWidth,
-            controls:[rect.top,rect.bottom], media:[...document.querySelectorAll("[data-how-section]")].filter(e=>!e.hidden).map(e=>({section:e.dataset.howSection,visible:e.getBoundingClientRect().height>0,videos:[...e.querySelectorAll("video")].filter(v=>v.getClientRects().length).length}))};
-        });
-        assert.ok(value.page[0]<=width && value.page[1]<=height, `document overflow ${width}x${height}: ${JSON.stringify(value)}`);
-        assert.deepEqual(value.media,[{section:value.key.split('/')[0],visible:true,videos:1}], 'every section needs a visible matching video');
-        assert.ok(value.fits, `clipped explanation ${width}x${height}: ${JSON.stringify(value)}`);
-        assert.ok(value.controls[0]>=0 && value.controls[1]<=height, 'navigation outside viewport');
-        if (value.part===0) gathered.set(value.key, []);
-        gathered.get(value.key).push(value.text);
-        const forward = page.locator('.guide-stage:not([hidden]) [data-guide-forward]');
-        await (await forward.isDisabled() ? page.locator('[data-guide-next]') : forward).click();
-        assert.ok(++count<500, 'navigation did not terminate');
-      }
-      assert.equal(gathered.size, Object.keys(expected).length);
-      for (const [key,text] of Object.entries(expected)) assert.equal(gathered.get(key).join(' '), text, `lost text ${key}`);
-      await page.getByLabel('Overview section').selectOption('first-update');
-      await page.locator('#first-update').waitFor();
-      await page.goBack();
-      await page.locator('[data-guide-complete]').waitFor();
-      await page.getByLabel('Overview section').selectOption('big-picture');
-      await page.getByText('Read the complete narration', {exact:true}).click();
-      assert.equal(await page.locator('.overview-transcript li:visible').count(),9);
-      assert.ok(await page.evaluate(() => document.documentElement.scrollHeight<=innerHeight), 'transcript expands document');
-      await page.getByText('Read the complete narration', {exact:true}).click();
-      if (width===390 || width===1440) {
-        const video = page.locator('#overview video:visible');
-        assert.equal(await video.count(), 1);
-        assert.equal(await video.evaluate(v => v.paused), true);
-        assert.equal(await video.locator('track').evaluate(t => t.default),false);
-        await video.evaluate(async v => { v.muted=true; try { await v.play(); } catch (error) { if(error.name!=='AbortError' || !v.src.startsWith('blob:')) throw error; } });
-        await page.waitForFunction(() => [...document.querySelectorAll('#overview video')].some(v => getComputedStyle(v).display!=='none' && v.currentTime>.2));
-        await video.evaluate(v => {v.textTracks[0].mode='showing';v.pause();});
-        assert.equal(await video.evaluate(v => v.textTracks[0].mode),'showing');
-      }
-      if (width===390 || width===1440) {
-        for (const [section,duration] of [['first-update',12],['update-flow',60],['your-platform',12],['behind-console',24]]) {
-          await page.getByLabel('Overview section').selectOption(section);
-          const player=page.locator(`[data-how-section="${section}"] video`);
-          await player.evaluate(async v=>{v.muted=true;v.preload='auto';v.load();try{await v.play()}catch(e){if(e.name!=='AbortError')throw e}});
-          await page.waitForFunction(id=>{const v=document.querySelector(`[data-how-section="${id}"] video`);return v.currentTime>.2},section);
-          assert.ok(Math.abs(await player.evaluate(v=>v.duration)-duration)<.15);
-          await player.evaluate(v=>{v.textTracks[0].mode='hidden'});
-          await page.waitForFunction(id=>document.querySelector(`[data-how-section="${id}"] video`).textTracks[0].cues?.length>0,section);
-          assert.equal(await player.evaluate(v=>v.videoWidth),1280);
-          await page.getByLabel('Overview section').selectOption('big-picture');
-          assert.equal(await player.evaluate(v=>v.paused),true,'inactive clip must pause');
-        }
-        console.log(`PASS four narrated section clips: actual playback, duration, captions and inactive pause at ${width}px`);
-      }
-      await page.mouse.wheel(0,800);
-      assert.equal(await page.evaluate(() => scrollY),0);
-      assert.deepEqual(errors, []);
-      console.log(`PASS How it works ${width}x${height}: all ${gathered.size} explanations reachable, ${count} pages, no document/text overflow`);
+      assert.equal(await page.locator('video:visible').count(),1,'one full overview video');
+      assert.equal(await page.locator('.guide-stage,[data-guide-select],.overview-caption,figcaption').count(),0,'no sections or video metadata');
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1&&document.documentElement.scrollWidth<=innerWidth),'overview must fit viewport');
+      const video=page.locator('video:visible');
+      assert.ok(await video.evaluate(v=>{const r=v.getBoundingClientRect();return r.height>=80&&r.bottom<=innerHeight}),'video stays visible');
+      assert.equal(await video.locator('track[default]').count(),0,'captions remain optional');
+      if(shots)await page.screenshot({path:path.join(shots,`how-${width}x${height}.png`)});
+      assert.deepEqual(errors,[]);
+      console.log(`PASS single-video overview ${width}x${height}: one visible movie, no sections, no overflow`);
       await page.close();
     }
   } finally { await browser?.close(); await new Promise(r => server.close(r)); }

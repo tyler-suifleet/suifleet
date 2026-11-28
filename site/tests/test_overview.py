@@ -26,10 +26,10 @@ class OverviewTest(unittest.TestCase):
     if tag=='video':self.videos.append(dict(attrs))
     if tag=='track':self.tracks.append(dict(attrs))
   markup=build.overview_player();p=Parser();p.feed(markup)
-  self.assertEqual(len(p.videos),2);self.assertEqual(len(p.tracks),2)
+  self.assertEqual(len(p.videos),1);self.assertEqual(len(p.tracks),1)
   for video in p.videos:self.assertIn('controls',video);self.assertIn('playsinline',video);self.assertNotIn('autoplay',video);self.assertEqual(video['preload'],'none')
   for track in p.tracks:self.assertEqual(track['kind'],'captions');self.assertEqual(track['srclang'],'en');self.assertNotIn('default',track)
-  self.assertIn('Read the complete narration',markup);self.assertIn('Illustrative animation',markup)
+  self.assertIn('Read the complete narration',markup);self.assertNotIn('class="overview-caption"',markup)
 
  def test_altered_editorial_plate_is_rejected(self):
   manifest=build.overview_manifest();manifest['assets_sha256']['site/motion-sample/art/editorial-scene.png']='0'*64

@@ -1,7 +1,7 @@
 <div class="guide-player" data-guide-player>
   <header class="guide-toolbar">
-    <div><p class="eyebrow">Product walkthrough</p><h1>Product guide</h1><a class="guide-overview-link" href="/how-it-works/#overview">New? Watch how it works first →</a></div>
-    <label class="guide-stage-picker">Jump to stage<select aria-label="Guide stage" data-guide-select disabled>{{guide_options}}</select></label>
+    <div><p class="eyebrow">Your first device update</p><h1>Get Started</h1><a class="guide-overview-link" href="/how-it-works/">New? Watch how it works first →</a></div>
+    <select hidden aria-label="Guide stage" data-guide-select disabled>{{guide_options}}</select>
   </header>
   <div class="guide-progress"><progress aria-label="Guide progress" max="{{guide_count}}" value="0" data-guide-progress></progress><span data-guide-status role="status" aria-live="polite">First device: sign in → capacity → budget → register → publish → deploy. Batch enrollment and staged rollout are optional; configure private access before confidential publishing.</span></div>
   <div class="guide-screen" id="guide-screen">{{guide_steps}}
@@ -12,6 +12,6 @@
       <p class="guide-caption">Installing a device? See the <a href="{{docs_url}}install/">installation guide</a>.</p>
     </section>
   </div>
-  <footer class="guide-controls"><button type="button" data-guide-back disabled>← Back</button><span class="guide-safety">Step-by-step guidance · Optional captions</span><button type="button" class="primary" data-guide-next disabled>Next →</button></footer>
+  <footer class="guide-controls"><button type="button" data-guide-back disabled>← Back</button><button type="button" class="primary" data-guide-next disabled>Next →</button></footer>
   <noscript><p>This guided view needs JavaScript for stage navigation. <a href="{{docs_url}}">Open the documentation</a>.</p></noscript>
 </div>
